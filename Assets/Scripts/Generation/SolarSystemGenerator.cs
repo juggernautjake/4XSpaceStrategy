@@ -15,18 +15,14 @@ public class SolarSystemGenerator : MonoBehaviour
 
         int bodyCount = Random.Range(minBodies, maxBodies + 1);
 
-        for (int i = 0; i < bodyCount; i++) //Generates Planets based on the random range in line above
+        for (int i = 0; i < bodyCount; i++)
         {
             float orbitPercent = (float)i / (bodyCount - 1);
-
-            CelestialBodyType type =
-                RollBodyByDistance(orbitPercent, currentStarType);
+            CelestialBodyType type = RollBodyByDistance(orbitPercent, currentStarType);
 
             CelestialBody body = new(type);
-
-            body.surfaceSize = RollSurfaceSize(type);
+            body.surfaceSize = RollSurfaceSize(type, currentStarType); // Fixed
             body.surface = PlanetTerrainGenerator.GenerateSurface(body);
-
             ResourceGenerator.GenerateResources(body);
 
             int moonCount = 0;
@@ -95,35 +91,39 @@ public class SolarSystemGenerator : MonoBehaviour
         return StarType.O;
     }
 
-    int RollSurfaceSize(CelestialBodyType type)
+    // In RollSurfaceSize
+    int RollSurfaceSize(CelestialBodyType type, StarType starType)
     {
         switch (type)
         {
             case CelestialBodyType.GasGiant:
-                return Random.Range(16, 22); // Large
+                return Random.Range(16, 24); // Large gas giants
             case CelestialBodyType.IcePlanet:
+                return Random.Range(9, 16);
             case CelestialBodyType.OceanPlanet:
+                return Random.Range(10, 18); // Larger water worlds
             case CelestialBodyType.RockyPlanet:
-                return Random.Range(8, 15); // Medium
+                return Random.Range(8, 15);
             case CelestialBodyType.VolcanicPlanet:
                 return Random.Range(9, 14);
             case CelestialBodyType.BarrenPlanet:
-                return Random.Range(7, 12);
+                return Random.Range(7, 13);
             case CelestialBodyType.Moon:
-                return Random.Range(4, 8); // Small
-            case CelestialBodyType.Asteroid:
-                return Random.Range(2, 5);
+                return Random.Range(4, 9);
             default:
                 return 10;
         }
     }
 
-    float GetOrbitSpeedMultiplier(CelestialBodyType type)
+    // New method for variety
+    public float GetOrbitSpeed(CelestialBodyType type, float radius)
     {
-        if (type == CelestialBodyType.GasGiant) return 0.6f; // Slower
-        if (type == CelestialBodyType.Moon) return 2.5f; // Faster moons
-        return 1f;
+        float baseSpeed = 30f / radius; // Kepler-like (farther = slower)
+        if (type == CelestialBodyType.GasGiant) baseSpeed *= 0.7f;
+        if (type == CelestialBodyType.Moon) baseSpeed *= 3f; // Faster relative to parent
+        return baseSpeed;
     }
+
 
     CelestialBodyType RollBodyType()
     {

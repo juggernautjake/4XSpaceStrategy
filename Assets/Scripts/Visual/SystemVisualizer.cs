@@ -3,6 +3,8 @@ using System.Collections.Generic;
 
 public class SystemVisualizer : MonoBehaviour
 {
+    public SolarSystemGenerator solarSystemGenerator; // Assign in Inspector on the GameManager object
+
     [Header("Prefabs")]
     public GameObject planetPrefab;
     public GameObject starPrefab;
@@ -61,7 +63,7 @@ public class SystemVisualizer : MonoBehaviour
             orbitController.parentBody = starObj.transform;
 
             orbitController.orbitRadius = currentRadius;
-            orbitController.orbitSpeed = 25f / Mathf.Max(1f, currentRadius * 0.35f);
+            orbitController.orbitSpeed = solarSystemGenerator.GetOrbitSpeed(bodyData.type, currentRadius);
 
             Debug.Log($"Assigned parentBody = Star for {visual.name}");
 

@@ -3,10 +3,10 @@ using UnityEngine;
 public class GameManager : MonoBehaviour
 {
     [Header("Generation")]
-    public SolarSystemGenerator systemGenerator;
+    public SolarSystemGenerator solarSystemGenerator;
 
     [Header("Visualization")]
-    public SystemVisualizer systemVisualizer;   // <-- Add this line
+    public SystemVisualizer systemVisualizer;
 
     [Header("Scene Setup")]
     public Transform systemParent;
@@ -18,33 +18,33 @@ public class GameManager : MonoBehaviour
 
     public void GenerateStartingSystem()
     {
-        if (systemGenerator == null)
+        if (solarSystemGenerator == null)
         {
-            Debug.LogError("Assign SolarSystemGenerator!");
+            Debug.LogError("Assign SolarSystemGenerator in Inspector!");
             return;
         }
 
         Debug.Log("=== Generating New Solar System ===");
 
-        var bodies = systemGenerator.GenerateSystem();
+        var bodies = solarSystemGenerator.GenerateSystem();  // Use solarSystemGenerator
 
         Debug.Log($"Successfully generated {bodies.Count} celestial bodies!");
 
-        // Log details
+        // Log details...
         for (int i = 0; i < bodies.Count; i++)
         {
             var body = bodies[i];
             Debug.Log($"Body {i + 1}: {body.type} | Size: {body.surfaceSize} | Moons: {body.moons.Count}");
         }
 
-        // === NEW: Visualize the system ===
         if (systemVisualizer != null)
         {
-            systemVisualizer.VisualizeSystem(bodies, systemGenerator.currentStarType);
+            systemVisualizer.solarSystemGenerator = solarSystemGenerator;
+            systemVisualizer.VisualizeSystem(bodies, solarSystemGenerator.currentStarType);
         }
         else
         {
-            Debug.LogWarning("SystemVisualizer not assigned in GameManager!");
+            Debug.LogWarning("SystemVisualizer not assigned!");
         }
     }
 }

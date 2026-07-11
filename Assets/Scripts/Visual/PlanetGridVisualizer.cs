@@ -16,15 +16,31 @@ public class PlanetGridVisualizer : MonoBehaviour
         ClearGrid();
         BuildGrid();
 
-        // Scale the grid window
+        // Dynamic sizing for the grid container
         if (gridWindow != null)
         {
             RectTransform gridRect = gridWindow.GetComponent<RectTransform>();
             if (gridRect != null)
             {
-                float scaleFactor = Mathf.Min(1f, 600f / (surface.width * 20f));
-                gridRect.localScale = Vector3.one * scaleFactor;
-                Debug.Log($"Scaled grid window for size {surface.width}x{surface.height}");
+                GridLayoutGroup gridLayout = GetComponent<GridLayoutGroup>();
+                if (gridLayout != null)
+                {
+                    // Calculate exact size needed with minimal padding
+                    float horizontalPadding = 20f; // Reduced
+                    float verticalPadding = 20f;   // Reduced
+
+                    float totalWidth = surface.width * tileSize +
+                                      gridLayout.spacing.x * (surface.width - 1) +
+                                      horizontalPadding;
+
+                    float totalHeight = surface.height * tileSize +
+                                       gridLayout.spacing.y * (surface.height - 1) +
+                                       verticalPadding;
+
+                    gridRect.sizeDelta = new Vector2(totalWidth, totalHeight);
+
+                    Debug.Log($"Set GridWindow size to {totalWidth:F0}x{totalHeight:F0} for {surface.width}x{surface.height} grid");
+                }
             }
         }
     }
