@@ -1,4 +1,5 @@
-using UnityEngine;
+﻿using UnityEngine;
+using System.Collections;
 
 [RequireComponent(typeof(LineRenderer))]
 public class OrbitController : MonoBehaviour
@@ -19,8 +20,7 @@ public class OrbitController : MonoBehaviour
 
     private void Awake()
     {
-        if (lineRenderer == null)
-            lineRenderer = GetComponent<LineRenderer>();
+        lineRenderer = GetComponent<LineRenderer>();
     }
 
     public void Setup(Transform parent, float radius, float speed)
@@ -31,7 +31,7 @@ public class OrbitController : MonoBehaviour
 
         if (parentBody == null)
         {
-            Debug.LogWarning("Setup called with null parent!");
+            Debug.LogWarning($"Setup: null parent on {gameObject.name}");
             return;
         }
 
@@ -39,26 +39,61 @@ public class OrbitController : MonoBehaviour
         CreateOrbitRing();
         UpdatePosition();
 
-        Debug.Log($"Setup complete for {gameObject.name}");
+        Debug.Log($"Setup OK for {gameObject.name} | Parent: {parentBody.name} | R:{orbitRadius:F1} S:{orbitSpeed:F1}");
     }
 
-    private void InitializeOrbit()
+    private void CreateOrbitRing()
     {
-        currentAngle = Random.Range(0f, 360f);
-        CreateOrbitRing();
-        UpdatePosition();
+        if (ringTransform != null) Destroy(ringTransform.gameObject);
+
+        GameObject ringObj = new GameObject(gameObject.name + "_OrbitRing");
+        ringTransform = ringObj.transform;
+        ringTransform.SetParent(parentBody); // ← Child of planet (stable!)
+        ringTransform.localPosition = Vector3.zero;
+
+        LineRenderer ringLR = ringObj.AddComponent<LineRenderer>();
+        ringLR.loop = true;
+        ringLR.positionCount = segments;
+        ringLR.startWidth = lineWidth;
+        ringLR.endWidth = lineWidth;
+        ringLR.useWorldSpace = false; // Local space now
+        ringLR.material = new Material(Shader.Find("Sprites/Default"));
+        ringLR.startColor = ringColor;
+        ringLR.endColor = ringColor;
+
+        DrawRing(ringLR);
+        Debug.Log($"[CreateOrbitRing] Ring created as child of {parentBody.name} for {gameObject.name}");
+    }
+
+    private void DrawRing(LineRenderer ringLR)
+    {
+        if (ringLR == null) return;
+
+        for (int i = 0; i < segments; i++)
+        {
+            float angle = i * Mathf.PI * 2f / segments;
+            Vector3 localPos = new Vector3(
+                Mathf.Cos(angle) * orbitRadius,
+                0f,
+                Mathf.Sin(angle) * orbitRadius
+            );
+            ringLR.SetPosition(i, localPos);
+        }
     }
 
     private void Update()
     {
         if (parentBody == null) return;
 
-        currentAngle += orbitSpeed * Time.deltaTime;
+        float angularSpeed = orbitSpeed / Mathf.Max(1f, orbitRadius);
+        currentAngle += angularSpeed * Time.deltaTime;
         UpdatePosition();
     }
 
-    private void UpdatePosition()
+    public void UpdatePosition()
     {
+        if (parentBody == null) return;
+
         float rad = currentAngle * Mathf.Deg2Rad;
         Vector3 offset = new Vector3(
             Mathf.Cos(rad) * orbitRadius,
@@ -68,54 +103,46 @@ public class OrbitController : MonoBehaviour
         transform.position = parentBody.position + offset;
     }
 
-    private void CreateOrbitRing()
-    {
-        GameObject ringObj = new GameObject(gameObject.name + "_OrbitRing");
-        ringTransform = ringObj.transform;
-        ringTransform.SetParent(parentBody); // Parent to star/planet
-        ringTransform.localPosition = Vector3.zero;
-
-        LineRenderer ringLR = ringObj.AddComponent<LineRenderer>();
-        ringLR.loop = true;
-        ringLR.positionCount = segments;
-        ringLR.startWidth = lineWidth;
-        ringLR.endWidth = lineWidth;
-        ringLR.useWorldSpace = false;
-        ringLR.material = new Material(Shader.Find("Sprites/Default"));
-        ringLR.startColor = ringColor;
-        ringLR.endColor = ringColor;
-
-        for (int i = 0; i < segments; i++)
-        {
-            float angle = i * Mathf.PI * 2f / segments;
-            Vector3 pos = new Vector3(
-                Mathf.Cos(angle) * orbitRadius,
-                0f,
-                Mathf.Sin(angle) * orbitRadius
-            );
-            ringLR.SetPosition(i, pos);
-        }
-    }
-
     public void SetRadius(float newRadius)
     {
-        orbitRadius = newRadius;
+        float old = orbitRadius;
+        orbitRadius = Mathf.Max(1f, newRadius);
+        Debug.Log($"[SetRadius] {old:F1} → {orbitRadius:F1} on {gameObject.name}");
+
         if (ringTransform != null)
         {
             LineRenderer lr = ringTransform.GetComponent<LineRenderer>();
-            if (lr != null)
-            {
-                for (int i = 0; i < segments; i++)
-                {
-                    float angle = i * Mathf.PI * 2f / segments;
-                    Vector3 pos = new Vector3(
-                        Mathf.Cos(angle) * newRadius,
-                        0f,
-                        Mathf.Sin(angle) * newRadius
-                    );
-                    lr.SetPosition(i, pos);
-                }
-            }
+            if (lr != null) DrawRing(lr);
+        }
+
+        // Force immediate position update
+        UpdatePosition();
+    }
+
+    public void SetSpeed(float newSpeed)
+    {
+        orbitSpeed = newSpeed;
+        Debug.Log($"[SetSpeed] Changed to {newSpeed:F1} on {gameObject.name}");
+    }
+
+    public void RestoreParent(Transform parent)
+    {
+        parentBody = parent;
+        if (ringTransform != null) ringTransform.SetParent(parent);
+        Debug.Log($"Restored parent for {gameObject.name}");
+    }
+
+    private void OnDestroy()
+    {
+        if (ringTransform != null) Destroy(ringTransform.gameObject);
+    }
+
+    public void ForceRingRedraw()
+    {
+        if (ringTransform != null)
+        {
+            LineRenderer lr = ringTransform.GetComponent<LineRenderer>();
+            if (lr != null) DrawRing(lr);
         }
     }
 }

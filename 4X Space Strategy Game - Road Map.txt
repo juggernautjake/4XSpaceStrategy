@@ -1,59 +1,74 @@
-4X Space Strategy Game
-1. Core System Generation
+4X Space Strategy Game Roadmap (Updated July 2026)
+Core Foundation (Current Progress – Very Solid)
 
-Procedural star types (O, B, A, F, G, K, M)
-Distance-based planet placement (habitable zone logic later)
-Planet type variation (Volcanic, Rocky, Ocean, Ice, Gas Giant, Barren, etc.)
-Realistic size scaling (Gas Giants larger)
-Moon spawning with correct orbits and rings
-Asteroid belts (future)
-Multi-star systems (binary/trinary with barycenter)
+Solar System Generation
+Random star + planets with varied types (Gas Giant, Volcanic, Ice, Ocean, Rocky, Barren, etc.)
+Realistic-ish orbital mechanics with speed scaling (Kepler-like)
+Moons with their own orbits around planets
+Visual blue orbit rings that follow hosts
+Clickable bodies with Planet UI + surface grid
 
-2. Visuals & Camera
+Visualization & Camera
+3D system view with colored bodies
+Smooth camera panning (WASD) + elevation change (mouse wheel)
+Basic raycast selection + debug tools
 
-Orbit lines for all bodies
-Colored planets based on type
-Top-down camera with WASD pan and smooth height "zoom"
-Toggleable visuals (orbits, habitable zones, labels)
+UI System
+Planet info panel (bottom left)
+Draggable/resizable Planet Grid Window with rectangular surface
+Sandbox Editor Panel (size, radius, speed sliders, Apply Changes)
+Terrain Editor Panel for testing biome generation
 
-3. Interaction & UI
 
-Click to select celestial bodies
-Planet info panel (bottom left) with type, size, distance
-Draggable planet surface grid window
-Close with X, ESC, or click outside
-Runtime orbit radius tuner for testing
+Major Features In Progress / Recently Added
 
-4. Economy & Planets
+Sandbox Mode (High Priority – Almost Done)
+Real-time editing of selected body (planet/moon)
+Radius slider (moons now jump + rings should resize)
+Size slider (stable scaling)
+Speed slider
+Parent/child relationships preserved for moons
+Debug logging for tracing issues
 
-Grid-based surface with biomes/tiles
-Buildings on grid (size like 1x1, 2x2)
-Labor resource from population
-Resource deposits
+Planet Surface System
+Rectangular grids (map-like view)
+Improved noise-based biome generation (mountains, volcanoes, magma fields, etc.)
+Seamless horizontal scrolling (in progress)
+Terrain Editor with sliders for regeneration testing
 
-5. Ships & Fleets
 
-Civilian (mining, cargo) and Military ships
-Ship designer (hull, modules, drag-drop)
-Fleet command with flagships and groups (Star Ruler 2 style)
-Shipping lanes and trade routes
+Planned / Suggested Features (Organized by Priority)
+1. Core Gameplay Loop
 
-6. Tech & Progression
+Galaxy generation (multiple star systems)
+Empire management (resources, research, ships)
+Basic economy & resource deposits on planets
+Turn-based or real-time strategy layer
 
-Visible tech tree (nodes with prerequisites)
-Secret techs unlocked by achievements/specialization
-Terraforming and settlement techs (domes, floating cities, etc.)
+2. Combat & Control (Your Original Vision)
 
-7. Advanced / Stretch
+Tactical ship-to-ship battles with direct control option
+Planetary invasion with FPS / RTS unit control (infantry, tanks, mechs, air)
+Pause/slow time during battles
+Co-op empire control (multiple players voting on auto-resolve vs manual)
 
-Sandbox system editor (save/load custom systems)
-Anomalous/rare systems for discovery
-Co-op empire control
-Direct battle control (ships, ground units)
-Real-inspired star systems (Alpha Centauri, etc.)
+3. Polish & Quality of Life
 
-8. Performance & Polish
+Better camera controls (smooth zoom, orbit mode)
+Save/Load systems (including custom sandbox systems as anomalies)
+Improved UI scaling and drag-and-drop windows
+Escape menu with settings, keybinds, multiplayer options
 
-Late-game optimization (ECS/DOTS later if needed)
-Toggleable visuals
-Save/Load systems
+4. Advanced Generation & Variety
+
+Multi-star systems (binary, trinary) with barycenter orbits
+Anomalous / rare systems (sandbox → save as anomaly)
+Better biome blending and seamless planetary maps
+Procedural names, resources, special features
+
+5. Long-Term 4X Elements
+
+Ship design & fleet management
+Diplomacy, events, story
+Tech tree
+Late-game performance optimizations (critical for Stellaris-like scale)

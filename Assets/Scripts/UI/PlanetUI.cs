@@ -92,6 +92,9 @@ public class PlanetUI : MonoBehaviour
         justOpened = true;
 
         Debug.Log("Info Panel and Grid Window opened.");
+
+        if (SandboxEditorPanel.Instance != null)
+            SandboxEditorPanel.Instance.ShowForBody(body);
     }
 
     public void CloseGridOnly()
@@ -112,6 +115,9 @@ public class PlanetUI : MonoBehaviour
         // Hide the Terrain Editor when closing the planet UI
         if (TerrainEditorPanel.Instance != null)
             TerrainEditorPanel.Instance.Hide();
+
+        if (SandboxEditorPanel.Instance != null)
+            SandboxEditorPanel.Instance.Hide();
 
         Debug.Log("All Planet UI Closed");
     }

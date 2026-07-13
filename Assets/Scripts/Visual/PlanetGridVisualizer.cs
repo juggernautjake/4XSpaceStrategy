@@ -25,24 +25,20 @@ public class PlanetGridVisualizer : MonoBehaviour
                 GridLayoutGroup gridLayout = GetComponent<GridLayoutGroup>();
                 if (gridLayout != null)
                 {
-                    // Calculate exact size needed with minimal padding
-                    float horizontalPadding = 20f; // Reduced
-                    float verticalPadding = 20f;   // Reduced
-
+                    float horizontalPadding = 20f;
+                    float verticalPadding = 20f;
                     float totalWidth = surface.width * tileSize +
                                       gridLayout.spacing.x * (surface.width - 1) +
                                       horizontalPadding;
-
                     float totalHeight = surface.height * tileSize +
                                        gridLayout.spacing.y * (surface.height - 1) +
                                        verticalPadding;
-
                     gridRect.sizeDelta = new Vector2(totalWidth, totalHeight);
-
                     Debug.Log($"Set GridWindow size to {totalWidth:F0}x{totalHeight:F0} for {surface.width}x{surface.height} grid");
                 }
             }
         }
+
     }
 
     void BuildGrid()
@@ -102,6 +98,8 @@ public class PlanetGridVisualizer : MonoBehaviour
             case TerrainType.Desert: return new Color(1f, 0.9f, 0.5f);
             case TerrainType.Crater: return new Color(0.5f, 0.5f, 0.5f);
         }
-        return Color.magenta;
+        return type == TerrainType.MagmaField
+    ? new Color(1f, 0.4f, 0.1f)
+    : Color.magenta;
     }
 }

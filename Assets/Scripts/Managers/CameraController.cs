@@ -1,13 +1,17 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 public class CameraController : MonoBehaviour
 {
-    public float panSpeed = 30f;
-    public float heightSpeed = 5f;           // Decreased for better feel
-    public float minHeight = 8f;
-    public float maxHeight = 80f;
+    [Header("Movement")]
+    public float panSpeed = 30f;           // WASD panning speed
+    public float heightSpeed = 80f;        // Mouse wheel height change speed
 
-    private float targetHeight;               // NEW for smooth movement
+    [Header("Limits")]
+    public float minHeight = 8f;           // Closest to the system
+    public float maxHeight = 120f;         // Farthest view
+
+    private float targetHeight;            // For smooth movement
 
     private void Start()
     {
@@ -16,26 +20,44 @@ public class CameraController : MonoBehaviour
 
     private void Update()
     {
-        // WASD Pan
+        // Prevent camera movement when hovering UI
+        if (EventSystem.current.IsPointerOverGameObject())
+            return;
+        HandlePanning();
+        HandleHeightChange();
+        SmoothHeightMovement();
+        KeepCameraAngle();
+    }
+
+    private void HandlePanning()
+    {
         float h = Input.GetAxis("Horizontal");
         float v = Input.GetAxis("Vertical");
+
         Vector3 move = new Vector3(h, 0, v) * panSpeed * Time.deltaTime;
         transform.Translate(move, Space.World);
+    }
 
-        // Mouse Wheel - Smooth Height
+    private void HandleHeightChange()
+    {
         float scroll = Input.GetAxis("Mouse ScrollWheel");
         if (scroll != 0)
         {
-            targetHeight += scroll * heightSpeed * -25f;
+            targetHeight += scroll * heightSpeed * -25f; // Negative for natural feel
             targetHeight = Mathf.Clamp(targetHeight, minHeight, maxHeight);
         }
+    }
 
-        // Smoothly move toward target height
+    private void SmoothHeightMovement()
+    {
         Vector3 pos = transform.position;
-        pos.y = Mathf.Lerp(pos.y, targetHeight, 8f * Time.deltaTime); // Smooth factor
+        pos.y = Mathf.Lerp(pos.y, targetHeight, 10f * Time.deltaTime); // Smoothness
         transform.position = pos;
+    }
 
-        // Optional: Keep camera tilted down
+    private void KeepCameraAngle()
+    {
+        // Keep a nice 55 degree top-down angle
         transform.rotation = Quaternion.Euler(55f, transform.eulerAngles.y, 0);
     }
 }

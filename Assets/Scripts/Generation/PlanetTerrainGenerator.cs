@@ -126,7 +126,6 @@ public static class PlanetTerrainGenerator
         {
             for (int y = 0; y < height; y++)
             {
-                // Use the slider values instead of hardcoded ones
                 TerrainType type = GenerateTerrainByNoiseWithParams(
                     body.type, x, y, width, height, seed,
                     noiseScale, elevationStrength, moistureStrength, heatStrength, ridgeStrength
@@ -136,7 +135,7 @@ public static class PlanetTerrainGenerator
             }
         }
 
-        Debug.Log("Generated terrain with custom parameters");
+        Debug.Log("Generated terrain with custom parameters from editor");
         return surface;
     }
 
@@ -152,11 +151,10 @@ public static class PlanetTerrainGenerator
         float heat = Mathf.PerlinNoise((x + 200) * noiseScale * 0.8f + seedOffset * 1.2f, (y + 200) * noiseScale * 0.8f + seedOffset) * heatStr;
         float ridges = Mathf.PerlinNoise((x + 300) * noiseScale * 2f + seedOffset, (y + 300) * noiseScale * 2f + seedOffset) * ridgeStr;
 
-        // === Gas Giants ===
+        // Use the same strict logic as the main method
         if (planetType == CelestialBodyType.GasGiant)
             return TerrainType.Barren;
 
-        // === Volcanic Planets ===
         if (planetType == CelestialBodyType.VolcanicPlanet)
         {
             float volcanicHeat = heat + Mathf.PerlinNoise((x + 500) * 0.22f, (y + 500) * 0.22f) * 0.65f;
@@ -174,7 +172,6 @@ public static class PlanetTerrainGenerator
             return TerrainType.Barren;
         }
 
-        // === Normal planets - Strict rules ===
         float normalHeat = heat + Mathf.PerlinNoise((x + 500) * 0.2f, (y + 500) * 0.2f) * 0.4f;
 
         if (normalHeat > 0.93f && Random.value < 0.08f)
@@ -183,11 +180,9 @@ public static class PlanetTerrainGenerator
         if (normalHeat > 0.85f && Random.value < 0.12f)
             return TerrainType.MagmaField;
 
-        // Mountains
         if (ridges > 0.82f && planetType != CelestialBodyType.OceanPlanet)
             return TerrainType.Mountains;
 
-        // Ice Planets
         if (planetType == CelestialBodyType.IcePlanet)
         {
             if (elevation < 0.3f) return TerrainType.Barren;
@@ -195,30 +190,19 @@ public static class PlanetTerrainGenerator
             return TerrainType.Ice;
         }
 
-        // Ocean Planets
         if (planetType == CelestialBodyType.OceanPlanet)
         {
             if (elevation > 0.7f) return TerrainType.Island;
             return TerrainType.Ocean;
         }
 
-        // Rocky Planets
         if (planetType == CelestialBodyType.RockyPlanet)
         {
             if (ridges > 0.75f) return TerrainType.Mountains;
             if (moisture > 0.6f) return TerrainType.Forest;
-
-            // Very rare magma/volcano on rocky worlds
-            if (normalHeat > 0.92f && Random.value < 0.05f)
-                return TerrainType.Volcano;
-
-            if (normalHeat > 0.84f && Random.value < 0.08f)
-                return TerrainType.MagmaField;
-
             return TerrainType.Plains;
         }
 
-        // Moons & Asteroids
         if (planetType == CelestialBodyType.Moon || planetType == CelestialBodyType.Asteroid)
         {
             if (Random.value < 0.22f) return TerrainType.Crater;
