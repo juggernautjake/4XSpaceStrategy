@@ -1193,6 +1193,24 @@ public class PlanetViewWindow : MonoBehaviour
         var t = UIFactory.WrapText(parent, "", UITheme.SmallSize, UITheme.Text);
         live.Text(t, () => $"<color=#9FB4C8>{label}:</color> {value()}");
     }
+
+    // A progress bar bound to live values. Same shape as InspectorWindow's, but this window is a
+    // separate class — it can't borrow that one, and the health bars in the infrastructure list need it.
+    Image Bar(Transform parent, System.Func<(float t, string text, Color color)> eval)
+    {
+        var holder = UIFactory.NewUI(parent, "Bar");
+        UIFactory.AddLayout(holder, 14);
+        var track = UIFactory.Panel(holder.transform, "Track", UITheme.TrackBg);
+        UIFactory.Stretch(track.rectTransform);
+        var fill = UIFactory.Panel(track.transform, "Fill", UITheme.Good);
+        var frt = fill.rectTransform;
+        frt.anchorMin = new Vector2(0, 0); frt.anchorMax = new Vector2(0, 1);
+        frt.offsetMin = Vector2.zero; frt.offsetMax = Vector2.zero;
+        var label = UIFactory.Text(holder.transform, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Center);
+        UIFactory.Stretch(label.rectTransform);
+        live.Bar(fill, eval, label);
+        return fill;
+    }
 }
 
 // Turns clicks on the map into grid placements. Hover is POLLED by the window each frame rather than
