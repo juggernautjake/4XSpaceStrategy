@@ -126,7 +126,13 @@ public class BodyDTO
     public List<ResourceDTO> resources = new List<ResourceDTO>();
     public List<OreCellDTO> ores = new List<OreCellDTO>();
     public List<POIDTO> pois = new List<POIDTO>();
-    public List<BodyDTO> moons = new List<BodyDTO>();
+    // Moons are stored FLAT in SystemDTO.bodies and linked back by this id (-1 = a top-level planet).
+    //
+    // They used to nest as a List<BodyDTO> inside BodyDTO. Unity's JsonUtility walks the TYPE graph, so
+    // a class containing a list of ITSELF recurses forever and trips its hard depth limit of 10 —
+    // "Serialization depth limit 10 exceeded at 'BodyDTO.buildings'" on every single save and load.
+    // A flat list with a parent id has no recursive type, so the limit is never reached.
+    public int parentId = -1;
 }
 
 [System.Serializable]

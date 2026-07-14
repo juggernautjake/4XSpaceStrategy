@@ -72,7 +72,18 @@ public static class GameStateSerializer
             isHome = sys.isHome
         };
         foreach (var s in sys.stars) sd.starTypes.Add((int)s.type);
-        foreach (var b in sys.bodies) sd.bodies.Add(ToDTO(b));
+        // Flat: planets first, then their moons tagged with parentId. See BodyDTO.parentId for why.
+        foreach (var b in sys.bodies)
+        {
+            sd.bodies.Add(ToDTO(b));
+            if (b.moons != null)
+                foreach (var m in b.moons)
+                {
+                    var md = ToDTO(m);
+                    md.parentId = b.id;
+                    sd.bodies.Add(md);
+                }
+        }
         return sd;
     }
 
@@ -124,7 +135,6 @@ public static class GameStateSerializer
                 kind = p.kind, researchDuration = p.researchDuration, reportText = p.reportText
             });
 
-        foreach (var m in b.moons) dto.moons.Add(ToDTO(m));
         return dto;
     }
 
@@ -164,7 +174,26 @@ public static class GameStateSerializer
                 sys.combinedStar = StarDatabase.Combine(sys.stars);
             }
 
-            foreach (var bd in sd.bodies) sys.bodies.Add(FromDTO(bd, null));
+            // Bodies are stored FLAT (see BodyDTO.parentId). Rebuild them all, then hang the moons off
+            // their planets. Two passes, because a moon can appear before its parent in the list.
+            var built = new Dictionary<int, CelestialBody>();
+            foreach (var bd in sd.bodies)
+            {
+                var nb = FromDTO(bd, null);
+                built[bd.id] = nb;
+                if (bd.parentId < 0) sys.bodies.Add(nb);   // top-level planet
+            }
+            foreach (var bd in sd.bodies)
+            {
+                if (bd.parentId < 0) continue;
+                if (!built.TryGetValue(bd.id, out var moon)) continue;
+                if (!built.TryGetValue(bd.parentId, out var parent)) { sys.bodies.Add(moon); continue; }
+                moon.parentBody = parent;
+                parent.moons.Add(moon);
+            }
+
+            // Older saves nested moons inside their planet; those come back already linked by FromDTO,
+            // so nothing more to do for them.
             foreach (var b in sys.AllBodies()) { b.hostStar = sys.combinedStar; b.system = sys; }
 
             galaxy.systems.Add(sys);
@@ -289,7 +318,6 @@ public static class GameStateSerializer
                 reportText = p.reportText
             });
 
-        foreach (var m in dto.moons) b.moons.Add(FromDTO(m, b));
         return b;
     }
 }

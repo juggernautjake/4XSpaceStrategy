@@ -22,6 +22,19 @@ public static class SurfaceBuildManager
         return null;
     }
 
+    public static int CountOf(CelestialBody b, SurfaceBuildingType t)
+    {
+        int n = 0;
+        foreach (var p in On(b)) if (p.Type == t) n++;
+        return n;
+    }
+
+    public static PlacedBuilding FirstOf(CelestialBody b, SurfaceBuildingType t)
+    {
+        foreach (var p in On(b)) if (p.Type == t) return p;
+        return null;
+    }
+
     /// Every cell currently covered by a structure.
     public static HashSet<Vector2Int> Occupied(CelestialBody b)
     {
@@ -54,6 +67,21 @@ public static class SurfaceBuildManager
         if (b == null) { why = "no world"; return false; }
         if (b.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
         if (!b.Surveyed) { why = "survey this world first"; return false; }
+
+        // One capitol, one shipyard per world — you upgrade what you have rather than stacking more.
+        if (info.uniquePerWorld && CountOf(b, t) > 0)
+        { why = $"this world already has a {info.name.ToLower()}"; return false; }
+
+        // A Planet Capitol isn't built from scratch: it's what a Colony Ship Base becomes. Placing one
+        // directly would leave the grounded ship sitting next to it with nothing to do.
+        if (t == SurfaceBuildingType.PlanetCapitol)
+        { why = "upgrade this world's Colony Ship Base into a capitol instead"; return false; }
+        if (t == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode)
+        { why = "a colony ship becomes this when it settles a world"; return false; }
+
+        // A world's shipyard already exists (the capital's birthright yard, say) — don't allow a second.
+        if (t == SurfaceBuildingType.SurfaceShipyard && b.shipyardLevel >= 1)
+        { why = "this world already has a shipyard — upgrade its tier from the Production tab"; return false; }
 
         var occupied = Occupied(b);
         foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, rotation))
@@ -98,8 +126,115 @@ public static class SurfaceBuildManager
         foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, rotation))
             if (InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = true;
 
+        // A surface shipyard IS the world's shipyard: placing it gives the world tier 1, which is what
+        // adds its build power to the empire pool and lets the Production tab upgrade it from there.
+        if (t == SurfaceBuildingType.SurfaceShipyard)
+        {
+            b.shipyardLevel = Mathf.Max(1, b.shipyardLevel);
+            UnitManager.Instance?.NotifyBuildChanged();
+        }
+
         SimpleAudio.Instance?.PlayClick();
         return true;
+    }
+
+    /// Place a structure with no cost and no checks. Used when the game itself puts something down —
+    /// a colony ship grounding itself as the new colony's base.
+    public static bool ForcePlace(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation)
+    {
+        if (b?.surface == null) return false;
+        var occupied = Occupied(b);
+        var info = SurfaceBuildingDatabase.Get(t);
+        foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, rotation))
+        {
+            if (!CellBuildable(b, info, c.x, c.y, out _)) return false;
+            if (occupied.Contains(c)) return false;
+        }
+
+        if (b.placedBuildings == null) b.placedBuildings = new List<PlacedBuilding>();
+        b.placedBuildings.Add(new PlacedBuilding
+        { type = (int)t, x = x, y = y, rotation = rotation, efficiency = EfficiencyAt(b, t, x, y, rotation) });
+        foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, rotation))
+            if (InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = true;
+        return true;
+    }
+
+    /// Find somewhere a footprint fits, scanning outward from the middle of the map. Used to ground a
+    /// colony ship somewhere sensible without asking the player to place it.
+    public static bool FindSpot(CelestialBody b, SurfaceBuildingType t, out int fx, out int fy)
+    {
+        fx = fy = -1;
+        if (b?.surface == null) return false;
+        var info = SurfaceBuildingDatabase.Get(t);
+        var occupied = Occupied(b);
+        int w = b.surface.width, h = b.surface.height;
+
+        // Spiral-ish: try the centre first so a colony grows outward from its landing site.
+        int cx = w / 2, cy = h / 2;
+        for (int r = 0; r < Mathf.Max(w, h); r++)
+            for (int dy = -r; dy <= r; dy++)
+                for (int dx = -r; dx <= r; dx++)
+                {
+                    if (Mathf.Abs(dx) != r && Mathf.Abs(dy) != r) continue;   // ring only
+                    int x = cx + dx, y = cy + dy;
+                    bool ok = true;
+                    foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, 0))
+                    {
+                        if (!CellBuildable(b, info, c.x, c.y, out _) || occupied.Contains(c)) { ok = false; break; }
+                    }
+                    if (ok) { fx = x; fy = y; return true; }
+                }
+        return false;
+    }
+
+    // ---- Upgrades ----
+    // A Colony Ship Base becomes a Planet Capitol in place: same footprint, so it never has to find
+    // room, and the colony visibly graduates from "a parked ship" to "a seat of government".
+    public static bool CanUpgrade(CelestialBody b, PlacedBuilding p, out string why)
+    {
+        why = null;
+        if (p == null || !p.Info.upgradesTo.HasValue) { why = "nothing to upgrade into"; return false; }
+        int m = ColonyManager.DiscCost(p.Info.upgradeMetal), e = ColonyManager.DiscCost(p.Info.upgradeEnergy);
+        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = $"need {m} metal, {e} energy"; return false; }
+        return true;
+    }
+
+    public static bool Upgrade(CelestialBody b, PlacedBuilding p)
+    {
+        if (!CanUpgrade(b, p, out _)) return false;
+        var info = p.Info;
+        int m = ColonyManager.DiscCost(info.upgradeMetal), e = ColonyManager.DiscCost(info.upgradeEnergy);
+        if (!GameMode.DevMode && !PlayerEconomy.Spend(m, e)) return false;
+
+        var to = info.upgradesTo.Value;
+        p.type = (int)to;
+        p.efficiency = EfficiencyAt(b, to, p.x, p.y, p.rotation);
+        SimpleAudio.Instance?.PlayNotify(NotifKind.Discovery);
+        NotificationManager.Instance?.Push($"{SurfaceBuildingDatabase.Get(to).name} completed on {b.name}",
+            SurfaceBuildingDatabase.Get(to).description, null, NotifKind.Discovery);
+        return true;
+    }
+
+    // ---- Adjacency ----
+    // A power plant next to a Power Distribution hub runs better. This is checked LIVE rather than baked
+    // into efficiency, so building a hub later rewards the plants already standing around it.
+    public static float AdjacencyBonus(CelestialBody b, PlacedBuilding p)
+    {
+        if (p == null || p.Info.energyPerSec <= 0f) return 0f;
+
+        var mine = new HashSet<Vector2Int>(SurfaceBuildingDatabase.Footprint(p));
+        float best = 0f;
+        foreach (var other in On(b))
+        {
+            if (other == p || other.Info.adjacencyPowerBonus <= 0f) continue;
+            foreach (var c in SurfaceBuildingDatabase.Footprint(other))
+            {
+                if (mine.Contains(new Vector2Int(c.x + 1, c.y)) || mine.Contains(new Vector2Int(c.x - 1, c.y)) ||
+                    mine.Contains(new Vector2Int(c.x, c.y + 1)) || mine.Contains(new Vector2Int(c.x, c.y - 1)))
+                { best = Mathf.Max(best, other.Info.adjacencyPowerBonus); break; }
+            }
+        }
+        return best;
     }
 
     /// Demolish a structure and refund most of its cost — the materials are still standing there.
@@ -110,6 +245,13 @@ public static class SurfaceBuildManager
 
         foreach (var c in SurfaceBuildingDatabase.Footprint(p))
             if (InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = false;
+
+        // Tearing down the world's shipyard takes its build power out of the pool with it.
+        if (p.Type == SurfaceBuildingType.SurfaceShipyard && CountOf(b, SurfaceBuildingType.SurfaceShipyard) == 0)
+        {
+            b.shipyardLevel = 0;
+            UnitManager.Instance?.NotifyBuildChanged();
+        }
 
         if (!GameMode.DevMode)
         {
@@ -132,7 +274,10 @@ public static class SurfaceBuildManager
             var info = p.Info;
             float eff = Mathf.Clamp01(p.efficiency);
             if (info.metalPerSec > 0f) PlayerEconomy.Add(ResourceType.Metal, info.metalPerSec * eff * TechEffects.OreYieldMult * dt);
-            if (info.energyPerSec > 0f) PlayerEconomy.Add(ResourceType.Energy, info.energyPerSec * eff * dt);
+            // Power plants get their Power Distribution bonus applied live, so a hub built later still
+            // rewards the generators already sitting around it.
+            if (info.energyPerSec > 0f)
+                PlayerEconomy.Add(ResourceType.Energy, info.energyPerSec * eff * (1f + AdjacencyBonus(b, p)) * dt);
             if (info.waterPerSec > 0f) PlayerEconomy.Add(ResourceType.Water, info.waterPerSec * eff * dt);
         }
     }

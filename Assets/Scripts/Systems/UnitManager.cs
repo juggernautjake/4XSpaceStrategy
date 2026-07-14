@@ -967,6 +967,12 @@ public class UnitManager : MonoBehaviour
 
         RevealBodyVisual(b);
 
+        // The ship doesn't just evaporate: it lands and BECOMES the colony's first seat of government.
+        // The grounded hull is a real structure on the surface grid, and stays the world's capitol
+        // until you can afford to build a proper one around it.
+        if (SurfaceBuildManager.FindSpot(b, SurfaceBuildingType.ColonyShipBase, out int bx, out int by))
+            SurfaceBuildManager.ForcePlace(b, SurfaceBuildingType.ColonyShipBase, bx, by, 0);
+
         // Consume the colony ship — it becomes the city.
         if (b.units != null) b.units.Remove(u);
         units.Remove(u);

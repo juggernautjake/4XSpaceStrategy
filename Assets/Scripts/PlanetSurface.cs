@@ -11,6 +11,7 @@ public class PlanetSurface
         width = w;
         height = h;
         tiles = new TerrainTile[width, height];
-        Debug.Log($"Created rectangular surface {width}x{height}");
+        // No log here: generating a galaxy builds a surface for every planet AND every moon, twice over,
+        // which buried the console in dozens of identical lines on every new game.
     }
 }
