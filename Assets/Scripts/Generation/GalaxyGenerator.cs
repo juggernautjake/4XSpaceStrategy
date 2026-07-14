@@ -174,7 +174,7 @@ public static class GalaxyGenerator
             foreach (var b in sys.AllBodies())
             {
                 if (b.habitabilityLocked) { b.terraformability = Habitability.Terraformability(b.hostStar, species, b); continue; }
-                b.isHabitable = Habitability.InZone(b.hostStar, species, b.distanceFromStar);
+                b.isHabitable = Habitability.IsHabitable(b.hostStar, species, b.type, b.distanceFromStar);
                 b.habitability = Habitability.Rate(b.hostStar, species, b.type, b.distanceFromStar);
                 b.terraformability = Habitability.Terraformability(b.hostStar, species, b);
             }

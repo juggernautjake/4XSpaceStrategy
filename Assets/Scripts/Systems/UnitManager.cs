@@ -32,6 +32,9 @@ public class UnitManager : MonoBehaviour
     const float SpeedScale = 6f;
     const float HostileStaySeconds = 45f;   // limited stay on <80% worlds before forced return
 
+    // XP is earned by COMPLETING tasks (not by idling). Travel gives a little; missions give more.
+    const float XpTravel = 8f, XpSample = 5f, XpSurvey = 30f, XpResearch = 45f, XpColonize = 60f;
+
     public static void Create()
     {
         if (Instance != null) return;
@@ -237,8 +240,7 @@ public class UnitManager : MonoBehaviour
         for (int i = 0; i < units.Count; i++)
         {
             var u = units[i];
-            u.serviceTime += dt;
-            u.AddExperience(dt * 0.2f);   // slow seniority gain just for serving
+            u.serviceTime += dt;   // record only; XP now comes from completing tasks, not idling
 
             switch (u.status)
             {
@@ -432,7 +434,7 @@ public class UnitManager : MonoBehaviour
         if (dest.units == null) dest.units = new List<Unit>();
         dest.units.Add(u);
         u.worldsExplored++;
-        u.AddExperience(15f);
+        u.AddExperience(XpTravel);           // a little XP for completing a journey
         dest.visited = true;                 // arrival reveals the low-res mini map
 
         // Go idle; the order queue (or the class default via AutoAct) decides what to do here.
@@ -457,7 +459,6 @@ public class UnitManager : MonoBehaviour
         float hostility = Mathf.Lerp(1f, 2.2f, Mathf.Clamp01((100f - b.habitability) / 100f));    // less habitable = slower
         float bonus = u.type == UnitType.Scout ? 1.7f : 1f;                                       // scouts survey faster
         b.explorationProgress = Mathf.Clamp01(b.explorationProgress + 0.05f * bonus / (sizeFactor * hostility) * dt);
-        u.AddExperience(dt * 0.7f);
 
         // Collect an ore SAMPLE at each survey milestone (discovered + carried; not researched here).
         if (Crossed(before, b.explorationProgress, 0.25f) || Crossed(before, b.explorationProgress, 0.5f) ||
@@ -465,12 +466,13 @@ public class UnitManager : MonoBehaviour
         {
             foreach (var ore in OreGenerator.OresOnBody(b))
             {
-                if (!ResearchManager.IsDiscovered(ore)) { ResearchManager.Discover(ore); u.samples.Add((int)ore); break; }
+                if (!ResearchManager.IsDiscovered(ore)) { ResearchManager.Discover(ore); u.samples.Add((int)ore); u.AddExperience(XpSample); break; }
             }
         }
 
         if (b.explorationProgress >= 1f)
         {
+            u.AddExperience(XpSurvey);
             SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
             NotificationManager.Instance?.Push($"{b.name} surveyed",
                 $"Detailed map and points of interest revealed." +
@@ -506,10 +508,10 @@ public class UnitManager : MonoBehaviour
         float sizeFactor = Mathf.Max(0.5f, b.surfaceSize / 8f);
         u.researchTimer += (u.EffectiveResearch + 1) * 0.02f / sizeFactor * dt;
         b.researchProgress = Mathf.Clamp01(u.researchTimer);
-        u.AddExperience(dt * 1.2f);
 
         if (u.researchTimer >= 1f)
         {
+            u.AddExperience(XpResearch);
             DoDeepResearch(u, b);
             u.researchTimer = 0f;
             b.researchProgress = 1f;
@@ -577,14 +579,13 @@ public class UnitManager : MonoBehaviour
             b.claimProgress = Mathf.Min(b.claimProgress, 0.24f);
         }
 
-        u.AddExperience(dt * 0.8f);
-
         if (b.claimProgress >= 1f)
         {
             b.owner = FactionManager.Player;
             b.claimingFaction = null;
             b.claimProgress = 1f;
             foreach (var m in b.moons) m.owner = FactionManager.Player;
+            u.AddExperience(XpColonize);
             FinishAction(u, OrderKind.Colonize, b);
             SimpleAudio.Instance?.PlayNotify(NotifKind.Victory);
             NotificationManager.Instance?.Push($"{b.name} claimed!",

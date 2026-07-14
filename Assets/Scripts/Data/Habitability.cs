@@ -31,6 +31,15 @@ public static class Habitability
         return distanceFromStar >= inner && distanceFromStar <= outer;
     }
 
+    // Minimum body-type affinity for a world to count as naturally "habitable" (green ring). Below
+    // this, the world is the wrong KIND of place for the species even if the starlight is right.
+    public const float HabitableAffinity = 0.55f;
+
+    // "Habitable" = in the species' orbital band AND a body type the species can actually live on. This
+    // is what the green habitable ring means, so it no longer flags worlds a species couldn't settle.
+    public static bool IsHabitable(StarData star, Species species, CelestialBodyType type, float distanceFromStar)
+        => InZone(star, species, distanceFromStar) && species != null && species.Affinity(type) >= HabitableAffinity;
+
     // 0..100 for the given species.
     public static float Rate(StarData star, Species species, CelestialBodyType type, float distanceFromStar)
     {
