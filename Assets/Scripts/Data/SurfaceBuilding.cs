@@ -12,7 +12,9 @@ public enum SurfaceBuildingType
     // Industry
     StorageDepot, PowerDistribution,
     // Military
-    SurfaceShipyard
+    SurfaceShipyard,
+    // Harvesting
+    HydroPlant
 }
 
 // What a structure is FOR. The build menu groups by this, so a long catalogue stays navigable and you
@@ -51,6 +53,20 @@ public class SurfaceBuildingInfo
     // The survey index that decides how well this building performs where you put it. None = the
     // building doesn't care about terrain (a habitat is a habitat anywhere).
     public SurfaceIndexKind index = SurfaceIndexKind.None;
+
+    // ---- Siting requirements ----
+    // The hard floor on `index` below which this thing cannot be built AT ALL — a geothermal plant on
+    // cold rock isn't inefficient, it's pointless. This is an ABSOLUTE threshold, deliberately: a
+    // frozen world genuinely may not have a single viable geothermal site, and pretending otherwise by
+    // grading on a curve would be a lie. The "best 10% here" highlight is separate and relative, so you
+    // can always see where a world's best sites ARE even when none of them qualify.
+    public float minIndex = 0f;
+
+    // Must sit on (or off) water. Hydro plants need it; nothing else may touch it.
+    public bool requiresWater = false;
+
+    /// Why this class needs the ground it needs — shown on the card so a refusal is never a mystery.
+    public string siteRequirement;
 
     public int costMetal, costEnergy;
     public float buildTime;
@@ -186,13 +202,13 @@ public static class SurfaceBuildingDatabase
         // I-tetromino — a long array of panels.
         _all[(int)SurfaceBuildingType.SolarArray] = new SurfaceBuildingInfo(SurfaceBuildingType.SolarArray, SurfaceBuildingCategory.Harvesting, "Solar Array",
             "A run of panels. Wants dry, cloudless, open ground — savanna and desert are ideal. Check the Weather Index.",
-            S(0, 0, 1, 0, 2, 0, 3, 0), SurfaceIndexKind.Weather, 55, 20, 12f, new Color(0.95f, 0.90f, 0.45f))
+            S(0, 0, 1, 0, 2, 0, 3, 0), SurfaceIndexKind.Solar, 55, 20, 12f, new Color(0.95f, 0.90f, 0.45f))
         { energyPerSec = 1.5f };
 
         // T-tetromino.
         _all[(int)SurfaceBuildingType.WindFarm] = new SurfaceBuildingInfo(SurfaceBuildingType.WindFarm, SurfaceBuildingCategory.Harvesting, "Wind Farm",
             "Turbines. Wants exposure — ridgelines, coasts and open steppe. Check the Weather Index.",
-            S(0, 0, 1, 0, 2, 0, 1, 1), SurfaceIndexKind.Weather, 50, 25, 12f, new Color(0.70f, 0.90f, 1.00f))
+            S(0, 0, 1, 0, 2, 0, 1, 1), SurfaceIndexKind.Wind, 50, 25, 12f, new Color(0.70f, 0.90f, 1.00f))
         { energyPerSec = 1.3f };
 
         // S-tetromino — awkward on purpose; it's the piece that forces you to plan.
@@ -255,6 +271,42 @@ public static class SurfaceBuildingDatabase
             "Refines ore on site. Best next to the rock it's processing — it reads the Mineral Index too.",
             S(1, 0, 2, 0, 0, 1, 1, 1), SurfaceIndexKind.Mineral, 95, 60, 22f, new Color(0.80f, 0.65f, 0.35f))
         { metalPerSec = 1.2f };
+
+        // Hydro — the one thing that WANTS water, and needs relief to drop it through.
+        var hydro = new SurfaceBuildingInfo(SurfaceBuildingType.HydroPlant, SurfaceBuildingCategory.Harvesting,
+            "Hydro Plant",
+            "A dam and turbine hall. Needs flowing water with somewhere to fall — a river or a coast WITH relief. A flat open sea has no head to work with and won't do.",
+            S(0, 0, 1, 0, 2, 0, 2, 1), SurfaceIndexKind.Water, 80, 35, 18f, new Color(0.35f, 0.75f, 1.00f));
+        hydro.energyPerSec = 2.1f;
+        _all[(int)SurfaceBuildingType.HydroPlant] = hydro;
+
+        // ---- Siting requirements ----
+        // The floor below which a site is not merely poor but POINTLESS. Absolute, not graded on a
+        // curve: a world genuinely may have no viable geothermal site, and the honest answer is to say
+        // so. The "best here" highlight is relative and separate, so you can always see where a world's
+        // best sites are even when none of them clear the bar.
+        Require(SurfaceBuildingType.GeothermalPlant, 0.35f,
+            "Needs real heat in the crust — a volcano, magma field or geyser field. Cold rock yields nothing at all.");
+        Require(SurfaceBuildingType.Farm, 0.22f,
+            "Needs ground that is warm, wet and flat enough to plough. Rock, ice and desert cannot be farmed.");
+        Require(SurfaceBuildingType.Mine, 0.18f,
+            "Needs rock with something in it. Deep soil and open water have no seams to work.");
+        Require(SurfaceBuildingType.Refinery, 0.15f,
+            "Wants to sit on the ore it processes.");
+        Require(SurfaceBuildingType.SolarArray, 0.25f,
+            "Needs clear, well-lit ground. Permanent cloud or a distant, dim star make panels worthless.");
+        Require(SurfaceBuildingType.WindFarm, 0.25f,
+            "Needs exposure — ridgelines, coasts, open steppe. Sheltered forest and canyon floors are still.");
+        Require(SurfaceBuildingType.HydroPlant, 0.3f,
+            "Needs flowing water and relief for it to fall through.");
+    }
+
+    static void Require(SurfaceBuildingType t, float minIndex, string why)
+    {
+        var info = _all[(int)t];
+        if (info == null) return;
+        info.minIndex = minIndex;
+        info.siteRequirement = why;
     }
 
     // ---- Geometry ----

@@ -175,9 +175,46 @@ public class PlanetViewWindow : MonoBehaviour
     void RefreshMapTexture()
     {
         if (body == null) return;
-        mapImage.texture = SurfaceTextureRenderer.Build(body);
+        mapImage.texture = Pastel(SurfaceTextureRenderer.Build(body));
         titleText.text = $"Planet View — {body.name}";
         ApplyMapSize();
+    }
+
+    // Terrain is rendered PASTEL: every biome keeps its own hue, so tundra still reads as tundra and
+    // desert as desert — but the saturation is pulled down and the lightness up, so nothing on the map
+    // competes with the fully-saturated, fully-opaque structures sitting on top of it.
+    //
+    // Done by desaturating the PIXELS rather than by fading the image with alpha. Alpha would drop the
+    // whole map toward the dark panel behind it, which crushes the differences BETWEEN terrain types —
+    // exactly the information the map exists to convey. Pastel keeps the hue relationships intact and
+    // only gives up intensity.
+    Texture2D pastelTex; int pastelFor = -1;
+
+    Texture2D Pastel(Texture2D src)
+    {
+        if (src == null) return null;
+        if (pastelTex != null && pastelFor == body.id &&
+            pastelTex.width == src.width && pastelTex.height == src.height) return pastelTex;
+
+        if (pastelTex != null) Destroy(pastelTex);
+        pastelTex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false)
+        { filterMode = src.filterMode, wrapMode = TextureWrapMode.Clamp };
+
+        var px = src.GetPixels();
+        for (int i = 0; i < px.Length; i++)
+        {
+            var c = px[i];
+            // Toward its own grey (keeps hue, drops saturation), then toward white (raises lightness).
+            float grey = c.r * 0.299f + c.g * 0.587f + c.b * 0.114f;
+            c = Color.Lerp(c, new Color(grey, grey, grey), 0.30f);
+            c = Color.Lerp(c, Color.white, 0.28f);
+            c.a = px[i].a;
+            px[i] = c;
+        }
+        pastelTex.SetPixels(px);
+        pastelTex.Apply();
+        pastelFor = body.id;
+        return pastelTex;
     }
 
     // Size the map from MapMetrics, exactly like the detailed viewer does, instead of stretching the
@@ -188,10 +225,14 @@ public class PlanetViewWindow : MonoBehaviour
     // and matched the detailed viewer on none of them. Deriving width/height from tile count x
     // DetailTile means one grid cell is ALWAYS 42px — the same cell, at the same size, as the detailed
     // map — so a building footprint lands exactly on the tiles you can see.
+    // Scroll-to-zoom over the map. 1 = one grid cell is exactly a detailed-map tile (42px).
+    float mapZoom = 1f;
+    const float MapZoomMin = 0.35f, MapZoomMax = 3f;
+
     void ApplyMapSize()
     {
         if (body?.surface == null) return;
-        float tile = MapMetrics.DetailTile(body.surfaceSize);
+        float tile = MapMetrics.DetailTile(body.surfaceSize) * mapZoom;
         float w = body.surface.width * tile;
         float h = body.surface.height * tile;
 
@@ -227,6 +268,7 @@ public class PlanetViewWindow : MonoBehaviour
 
         live.Tick();
         PollHover();
+        PollMapZoom();
 
         // The selection marker is rebuilt only when the SELECTION changes — not on the signature, since
         // clicking a building must move the ring instantly without tearing down the whole side panel.
@@ -270,17 +312,35 @@ public class PlanetViewWindow : MonoBehaviour
                 else
                 {
                     var info = SurfaceBuildingDatabase.Get(selected.Value);
-                    string eff = "";
-                    if (hoverCell.x >= 0 && info.index != SurfaceIndexKind.None)
+                    var sb = new System.Text.StringBuilder();
+                    sb.Append($"<b>{info.name}</b> · rot {rotation * 90}° <size=10><color=#9FB4C8>(R / right-click rotates · Esc cancels)</color></size>");
+
+                    if (hoverCell.x >= 0)
                     {
-                        float e = SurfaceBuildManager.EfficiencyAt(body, selected.Value, hoverCell.x, hoverCell.y, rotation);
-                        string hex = ColorUtility.ToHtmlStringRGB(SurfaceBuildManager.EfficiencyColor(e));
-                        eff = $"   {SurfaceIndex.Name(info.index)} here: <color=#{hex}><b>{e * 100f:F0}% — {SurfaceBuildManager.EfficiencyLabel(e)}</b></color>";
+                        // PREDICTED YIELD at whatever the cursor is over — the honest number, so hovering
+                        // a hot spot visibly out-earns hovering cold rock, on every world.
+                        sb.Append($"\n<color=#9FB4C8>({hoverCell.x},{hoverCell.y})</color> ");
+                        sb.Append($"<b>{SurfaceBuildManager.PredictedYield(body, selected.Value, hoverCell.x, hoverCell.y, rotation)}</b>");
+
+                        if (info.index != SurfaceIndexKind.None)
+                        {
+                            float e = SurfaceBuildManager.EfficiencyAt(body, selected.Value, hoverCell.x, hoverCell.y, rotation);
+                            string hex = ColorUtility.ToHtmlStringRGB(SurfaceBuildManager.EfficiencyColor(e));
+                            // Absolute AND relative: what it yields, and how that ranks on THIS world —
+                            // because on a poor world the best available site is still worth knowing.
+                            float pct = SurfaceIndex.Percentile(body, info.index, hoverCell.x, hoverCell.y);
+                            sb.Append($"\n{SurfaceIndex.Name(info.index)} <color=#{hex}><b>{e * 100f:F0}% ({SurfaceBuildManager.EfficiencyLabel(e)})</b></color>");
+                            sb.Append($" <size=10><color=#9FB4C8>· better than {pct * 100f:F0}% of this world</color></size>");
+                        }
+
+                        sb.Append(hoverValid
+                            ? "   <color=#4DFF6E>Left-click to build</color>"
+                            : $"   <color=#FF6659>{HoverWhy()}</color>");
                     }
-                    string valid = hoverCell.x < 0 ? "" :
-                        hoverValid ? "   <color=#4DFF6E>Left-click to build</color>"
-                                   : $"   <color=#FF6659>{HoverWhy()}</color>";
-                    statusText.text = $"<b>{info.name}</b> · rotation {rotation * 90}°  <color=#9FB4C8>(right-click or R to rotate · Esc cancels)</color>{eff}{valid}";
+                    else if (!string.IsNullOrEmpty(info.siteRequirement))
+                        sb.Append($"\n<color=#C9A94D>{info.siteRequirement}</color>");
+
+                    statusText.text = sb.ToString();
                 }
                 break;
             case Tab.Survey:
@@ -703,10 +763,7 @@ public class PlanetViewWindow : MonoBehaviour
         Note("Each overlay paints the grid with where a kind of building actually belongs. Survey a world to read its minerals; a deep survey by a research ship unlocks the rest.");
 
         AddIndexToggle(SurfaceIndexKind.None, "None (plain terrain)");
-        AddIndexToggle(SurfaceIndexKind.Mineral, null);
-        AddIndexToggle(SurfaceIndexKind.Heat, null);
-        AddIndexToggle(SurfaceIndexKind.Fertile, null);
-        AddIndexToggle(SurfaceIndexKind.Weather, null);
+        foreach (var k in SurfaceIndex.All) AddIndexToggle(k, null);
 
         // Read the exact numbers under the cursor — the overlay shows you the region, this confirms it.
         Header("UNDER THE CURSOR");
@@ -766,28 +823,100 @@ public class PlanetViewWindow : MonoBehaviour
     // ---- Overlay texture ----
     // One point-filtered texture the size of the grid, stretched over the map. A cell per texel means
     // the overlay lines up with the build grid exactly and costs nothing to redraw.
+    // The best fraction of a world highlighted when you pick a building up. Relative to THIS world, so
+    // a frozen planet still shows you its ten hottest tiles — you just also get told they're poor.
+    const float BestSitesFraction = 0.10f;
+
     void RefreshOverlay()
     {
-        bool show = tab == Tab.Survey && activeIndex != SurfaceIndexKind.None
-                    && body.surface != null && SurfaceIndex.Unlocked(body, activeIndex);
+        // Two different overlays share one texture:
+        //  BUILD  — holding a structure highlights the best 10% of sites for it on this world.
+        //  SURVEY — the raw index ramp.
+        var kind = SurfaceIndexKind.None;
+        bool bestSites = false;
+
+        if (tab == Tab.Build && selected.HasValue)
+        {
+            var info = SurfaceBuildingDatabase.Get(selected.Value);
+            if (info.index != SurfaceIndexKind.None && SurfaceIndex.Unlocked(body, info.index))
+            { kind = info.index; bestSites = true; }
+        }
+        else if (tab == Tab.Survey && SurfaceIndex.Unlocked(body, activeIndex))
+        {
+            kind = activeIndex;
+        }
+
+        bool show = kind != SurfaceIndexKind.None && body.surface != null;
         overlayImage.gameObject.SetActive(show);
         if (!show) return;
 
+        if (bestSites) { RefreshBestSitesOverlay(kind); return; }
+
         int w = body.surface.width, h = body.surface.height;
-        if (overlayTex == null || overlayTex.width != w || overlayTex.height != h)
-        {
-            if (overlayTex != null) Destroy(overlayTex);
-            overlayTex = new Texture2D(w, h, TextureFormat.RGBA32, false)
-            { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
-        }
+        EnsureOverlayTex(w, h);
 
         var px = new Color[w * h];
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
-                px[y * w + x] = SurfaceIndex.Ramp(activeIndex, SurfaceIndex.Get(body, activeIndex, x, y));
+                px[y * w + x] = SurfaceIndex.Ramp(kind, SurfaceIndex.Get(body, kind, x, y));
         overlayTex.SetPixels(px);
         overlayTex.Apply();
         overlayImage.texture = overlayTex;
+    }
+
+    // "Where should this go?" — paints THIS WORLD'S best sites for the held structure.
+    //
+    // Deliberately relative (a percentile of this planet's own distribution) rather than an absolute
+    // threshold: on a cold world every geothermal site is poor, and an absolute cutoff would highlight
+    // nothing and tell you nothing. You always get to see where the best ground IS. Whether it's any
+    // good is a separate question the hover readout answers honestly, and tiles that can't meet the
+    // building's hard requirement are marked as refusals rather than sites.
+    void RefreshBestSitesOverlay(SurfaceIndexKind kind)
+    {
+        int w = body.surface.width, h = body.surface.height;
+        EnsureOverlayTex(w, h);
+
+        var info = SurfaceBuildingDatabase.Get(selected.Value);
+        float cut = SurfaceIndex.TopFractionThreshold(body, kind, BestSitesFraction);
+
+        var px = new Color[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                float v = SurfaceIndex.Get(body, kind, x, y);
+                bool buildable = info.minIndex <= 0f || v >= info.minIndex;
+                Color c;
+
+                if (v >= cut && buildable)
+                {
+                    // The prize: this world's best ground for this thing. Hot pink-red, unmissable.
+                    c = new Color(1f, 0.15f, 0.35f, 0.85f);
+                }
+                else if (v >= cut)
+                {
+                    // Best available, but still below the hard floor — this world can't support one.
+                    c = new Color(0.55f, 0.1f, 0.15f, 0.5f);
+                }
+                else
+                {
+                    // Everything else, dimly ramped so you can still read the gradient toward the good bits.
+                    c = SurfaceIndex.Ramp(kind, v);
+                    c.a *= 0.35f;
+                }
+                px[y * w + x] = c;
+            }
+
+        overlayTex.SetPixels(px);
+        overlayTex.Apply();
+        overlayImage.texture = overlayTex;
+    }
+
+    void EnsureOverlayTex(int w, int h)
+    {
+        if (overlayTex != null && overlayTex.width == w && overlayTex.height == h) return;
+        if (overlayTex != null) Destroy(overlayTex);
+        overlayTex = new Texture2D(w, h, TextureFormat.RGBA32, false)
+        { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
     }
 
     // ---- Structures on the map ----
@@ -799,12 +928,21 @@ public class PlanetViewWindow : MonoBehaviour
         foreach (var p in SurfaceBuildManager.On(body))
         {
             var info = p.Info;
-            // FULLY OPAQUE. These were drawn at 92% alpha, which let the terrain bleed through and made
-            // a structure hard to pick out at a glance against busy ground — the whole point of the
-            // tile is to say "something is here", so it hides what's under it completely.
-            var c = info.color; c.a = 1f;
+            // FULLY OPAQUE and pushed to full saturation. The terrain under it is deliberately pastel
+            // (see Pastel), so a structure is the one vivid thing on the map — what you built should
+            // never be something you have to hunt for.
+            var c = Vivid(info.color);
             foreach (var cell in SurfaceBuildingDatabase.Footprint(p)) AddCellQuad(pieceLayer, cell.x, cell.y, c);
         }
+    }
+
+    // Push a colour away from grey — the opposite of what Pastel does to the terrain, so the two can
+    // never be confused for one another.
+    static Color Vivid(Color c)
+    {
+        float grey = c.r * 0.299f + c.g * 0.587f + c.b * 0.114f;
+        var v = Color.LerpUnclamped(new Color(grey, grey, grey), c, 1.35f);
+        return new Color(Mathf.Clamp01(v.r), Mathf.Clamp01(v.g), Mathf.Clamp01(v.b), 1f);
     }
 
     // ---- Selection marker ----
@@ -963,6 +1101,26 @@ public class PlanetViewWindow : MonoBehaviour
         x = Mathf.Clamp(Mathf.FloorToInt(u * body.surface.width), 0, body.surface.width - 1);
         y = Mathf.Clamp(Mathf.FloorToInt(v * body.surface.height), 0, body.surface.height - 1);
         return true;
+    }
+
+    // Scroll over the map to zoom it. Proportional, like the world camera, so one notch feels the same
+    // at every scale. Only when the cursor is actually over the map, so scrolling the side panel still
+    // scrolls the side panel.
+    void PollMapZoom()
+    {
+        if (body?.surface == null || mapRT == null) return;
+        float scroll = Input.GetAxis("Mouse ScrollWheel");
+        if (Mathf.Approximately(scroll, 0f)) return;
+        if (!RectTransformUtility.RectangleContainsScreenPoint(gridHolder, Input.mousePosition, null)) return;
+
+        float next = Mathf.Clamp(mapZoom * Mathf.Exp(scroll * 4f), MapZoomMin, MapZoomMax);
+        if (Mathf.Approximately(next, mapZoom)) return;
+        mapZoom = next;
+
+        ApplyMapSize();
+        // The markers and pieces are anchored in the map's normalised space, so they follow the resize
+        // for free — but the ring's size is in pixels, so it has to be rebuilt at the new scale.
+        DrawSelectionMarker();
     }
 
     // Polled every frame. Cheap, and independent of which input module is installed.

@@ -22,6 +22,16 @@ public static class PlanetTerrainGenerator
         public float shade;      // 0..1 per-pixel brightness jitter
         public float elevation;  // 0..1
         public bool water;
+
+        // The rest of the field the biome was CLASSIFIED from. Exposed so gameplay (SurfaceIndex) can
+        // read the same numbers the terrain was made of, instead of inventing a parallel noise field
+        // that happens to disagree with what the map shows. This is what makes an ocean reliably cooler
+        // than a desert on the same world: they aren't two guesses, they're one temperature value —
+        // the ocean is an ocean BECAUSE of it.
+        public float temperature;  // 0..1, scaled by the planet's own heat (distance from its star)
+        public float moisture;     // 0..1
+        public float ridge;        // 0..1 — broken, mountainous ground
+        public float latitude;     // 0 equator .. 1 pole
     }
 
     // ---- Low-res grid (used by the classic tile viewer and gameplay) ----
@@ -85,7 +95,12 @@ public static class PlanetTerrainGenerator
 
         TerrainType t = Classify(body.type, elevation, moisture, temperature, ridge, lat);
 
-        return new Sample { terrain = t, shade = fine, elevation = elevation, water = IsWater(t) };
+        return new Sample
+        {
+            terrain = t, shade = fine, elevation = elevation, water = IsWater(t),
+            temperature = temperature, moisture = Mathf.Clamp01(moisture),
+            ridge = Mathf.Clamp01(ridge), latitude = lat
+        };
     }
 
     public static bool IsWater(TerrainType t)

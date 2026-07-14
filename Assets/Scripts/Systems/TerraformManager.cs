@@ -250,6 +250,10 @@ public class TerraformManager : MonoBehaviour
         // The surface is derived from the body type, so it has to be rebuilt — deterministically, from
         // the same terrain seed, so the world keeps its identity (same continents, new climate).
         b.surface = PlanetTerrainGenerator.GenerateSurface(b);
+        // The survey indexes are derived from the terrain field and their per-world distributions are
+        // cached. Remodelling a world changes that field, so the cache now describes the planet this
+        // used to be — drop it or the overlays lie.
+        SurfaceIndex.InvalidateStats(b);
         OreGenerator.Populate(b);
 
         RescoreType(b);
