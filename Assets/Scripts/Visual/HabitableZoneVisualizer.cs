@@ -28,6 +28,12 @@ public class HabitableZoneVisualizer : MonoBehaviour
     // Rebuild the band for the CURRENT species' shifted zone, preserving visibility.
     public void Refresh() => Rebuild(visible);
 
+    // Point the zone at a different system (e.g. when the player clicks another star).
+    public void Retarget(StarData starData, Transform starT, List<CelestialBody> systemBodies)
+    {
+        Build(starData, starT, systemBodies);
+    }
+
     void Rebuild(bool keepVisible)
     {
         ClearRings();

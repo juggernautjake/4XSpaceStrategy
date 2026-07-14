@@ -59,7 +59,9 @@ public class ObjectLabelManager : MonoBehaviour
         target = b.visualObject.transform;
         worldRadius = Mathf.Max(0.3f, target.lossyScale.x * 0.5f);
         nameT.text = b.name;
-        catT.text = Prettify(b.type.ToString()) + (b.isHabitable ? "  (Habitable)" : "");
+        string ownerHex = "#" + ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(b.owner));
+        catT.text = Prettify(b.type.ToString()) + (b.isHabitable ? "  (Habitable)" : "")
+                  + $"  <color={ownerHex}>[{FactionManager.OwnerName(b.owner)}]</color>";
         SetActive(true);
         UpdateHab();
     }

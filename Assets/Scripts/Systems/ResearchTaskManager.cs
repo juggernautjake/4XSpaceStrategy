@@ -44,7 +44,8 @@ public class ResearchTaskManager : MonoBehaviour
     public void StartResearch(CelestialBody body, PointOfInterest poi)
     {
         if (body == null || poi == null || !poi.IsResearchable || IsResearching(poi)) return;
-        active.Add(new ResearchTask { body = body, poi = poi, duration = Mathf.Max(3f, poi.researchDuration) });
+        float duration = Mathf.Max(3f, poi.researchDuration) * GameConfig.ResearchTimeMult; // difficulty
+        active.Add(new ResearchTask { body = body, poi = poi, duration = duration });
     }
 
     void Update()

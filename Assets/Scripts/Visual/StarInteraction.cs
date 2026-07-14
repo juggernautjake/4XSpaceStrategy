@@ -1,10 +1,12 @@
 using UnityEngine;
 
-// Click the star / cluster / black hole to open its info panel, zoom onto it, and float its labels.
+// Click a star / cluster / black hole to focus its system, open its info panel, zoom onto it, move
+// the habitable-zone rings to it, and float its labels.
 [RequireComponent(typeof(Collider))]
 public class StarInteraction : MonoBehaviour
 {
     public StarData star;
+    public StarSystemData system;
 
     void OnMouseDown()
     {
@@ -13,13 +15,19 @@ public class StarInteraction : MonoBehaviour
             return;
 
         SimpleAudio.Instance?.PlaySelect();
+
+        if (system != null)
+        {
+            GameManager.Instance?.SetFocus(system);
+            if (SystemContext.Zone != null)
+                SystemContext.Zone.Retarget(system.combinedStar, system.pivot, system.bodies);
+        }
+
         if (StarInfoPanel.Instance != null) StarInfoPanel.Instance.Show(star);
 
-        string name = Name();
-        string category = Category();
         if (CameraController.Instance != null)
             CameraController.Instance.FocusAndZoom(transform, transform.lossyScale.x, CameraController.Instance.IsFollowing);
-        ObjectLabelManager.Instance?.ShowForStar(transform, transform.lossyScale.x * 0.5f, name, category);
+        ObjectLabelManager.Instance?.ShowForStar(transform, transform.lossyScale.x * 0.5f, Name(), Category());
     }
 
     string Name()
@@ -31,10 +39,12 @@ public class StarInteraction : MonoBehaviour
 
     string Category()
     {
-        if (star == null) return "Star";
-        if (star.isBlackHole) return "Black Hole";
-        if (star.starCount >= 3) return "Ternary star system";
-        if (star.starCount == 2) return "Binary star system";
-        return $"{star.type}-type star";
+        string sys = system != null ? $"{system.name} · {FactionManager.OwnerLabel(system.owner)}" : "";
+        string kind = star == null ? "Star"
+            : star.isBlackHole ? "Black Hole"
+            : star.starCount >= 3 ? "Ternary system"
+            : star.starCount == 2 ? "Binary system"
+            : $"{star.type}-type star";
+        return string.IsNullOrEmpty(sys) ? kind : $"{kind}  ({sys})";
     }
 }

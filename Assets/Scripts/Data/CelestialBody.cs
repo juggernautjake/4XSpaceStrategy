@@ -30,10 +30,17 @@ public class CelestialBody
     public float spinSpeed = 0f;        // axial rotation, degrees per second
     public bool showRing = true;
 
-    // --- Habitability (relative to the current star) ---
+    // --- Habitability (relative to this body's host star) ---
     public float distanceFromStar = 0f; // absolute distance from the star, in orbit units
     public float habitability = 0f;     // 0..100
     public bool isHabitable = false;    // true if physically inside the Goldilocks zone
+    public bool habitabilityLocked = false; // home world's difficulty-set rating won't be recomputed
+
+    // --- Ownership ---
+    public Faction owner;               // null == unclaimed
+
+    [System.NonSerialized] public StarData hostStar;          // the star this body belongs to
+    [System.NonSerialized] public StarSystemData system;      // the system this body belongs to
 
     [System.NonSerialized]
     public GameObject visualObject;

@@ -14,21 +14,32 @@ public class GameManager : MonoBehaviour
     [Header("Scene Setup")]
     public Transform systemParent;
 
-    public bool isEditMode = false;   // Toggle this to enter/exit sandbox mode
+    public bool isEditMode = false;
 
-    public List<CelestialBody> CurrentBodies { get; private set; } = new List<CelestialBody>();
-    public StarData CurrentStar { get; private set; }
-    public List<StarData> Stars { get; private set; } = new List<StarData>();
-    public bool IsBlackHole { get; private set; }
+    public Galaxy Galaxy { get; private set; }
+    public StarSystemData FocusedSystem { get; private set; }
+
+    static readonly List<CelestialBody> _empty = new List<CelestialBody>();
+
+    // Back-compat views onto the currently-focused system.
+    public List<CelestialBody> CurrentBodies => FocusedSystem != null ? FocusedSystem.bodies : _empty;
+    public StarData CurrentStar => FocusedSystem != null ? FocusedSystem.combinedStar : null;
+    public List<StarData> Stars => FocusedSystem != null ? FocusedSystem.stars : new List<StarData>();
+    public bool IsBlackHole => FocusedSystem != null && FocusedSystem.isBlackHole;
 
     void Awake() { Instance = this; }
 
     void Start()
     {
-        GenerateStartingSystem();
+        // Launch into the main menu instead of auto-generating a galaxy.
+        if (StartMenu.Instance != null) StartMenu.Instance.Open();
+        else GenerateStartingSystem();
     }
 
-    public void GenerateStartingSystem()
+    // Default new game — a small galaxy (fallback / used by the R debug key).
+    public void GenerateStartingSystem() => GenerateGalaxy(5, 4);
+
+    public void GenerateGalaxy(int systemCount, int avgPlanets)
     {
         if (solarSystemGenerator == null)
         {
@@ -37,43 +48,26 @@ public class GameManager : MonoBehaviour
         }
 
         ResearchManager.NewGame();
+        Galaxy = GalaxyGenerator.Generate(solarSystemGenerator, systemCount, avgPlanets, SpeciesManager.Current);
+        FocusedSystem = Galaxy.Home;
 
-        CurrentBodies = solarSystemGenerator.GenerateSystem();
-        CurrentStar = solarSystemGenerator.currentStar;
-        Stars = solarSystemGenerator.stars;
-        IsBlackHole = solarSystemGenerator.isBlackHole;
-
-        Debug.Log($"Generated {CurrentBodies.Count} bodies; centre = {(IsBlackHole ? "BLACK HOLE" : Stars.Count + "-star " + CurrentStar.type)} " +
-                  $"(HZ: {(CurrentStar.hasHabitableZone ? $"{CurrentStar.hzInner:F1}-{CurrentStar.hzOuter:F1}" : "none")}).");
-
+        Debug.Log($"Generated galaxy: {Galaxy.systems.Count} systems; home = {(Galaxy.Home != null ? Galaxy.Home.name : "?")}.");
         Visualize();
     }
 
-    // Used by the save system to display a loaded system.
-    public void LoadSystem(List<CelestialBody> bodies, StarData star, List<StarData> stars, bool isBlackHole)
+    public void LoadGalaxy(Galaxy g)
     {
-        CurrentBodies = bodies;
-        CurrentStar = star;
-        Stars = (stars != null && stars.Count > 0) ? stars : new List<StarData> { star };
-        IsBlackHole = isBlackHole;
-        if (solarSystemGenerator != null)
-        {
-            solarSystemGenerator.currentStar = star;
-            solarSystemGenerator.currentStarType = star.type;
-            solarSystemGenerator.stars = Stars;
-            solarSystemGenerator.isBlackHole = isBlackHole;
-        }
+        Galaxy = g;
+        FocusedSystem = g.Home;
         Visualize();
     }
+
+    public void SetFocus(StarSystemData sys) { if (sys != null) FocusedSystem = sys; }
 
     void Visualize()
     {
-        if (systemVisualizer == null)
-        {
-            Debug.LogWarning("SystemVisualizer not assigned!");
-            return;
-        }
+        if (systemVisualizer == null) { Debug.LogWarning("SystemVisualizer not assigned!"); return; }
         systemVisualizer.solarSystemGenerator = solarSystemGenerator;
-        systemVisualizer.VisualizeSystem(CurrentBodies, CurrentStar, Stars, IsBlackHole);
+        systemVisualizer.VisualizeGalaxy(Galaxy);
     }
 }

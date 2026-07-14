@@ -1,7 +1,8 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 // Bulk surface resources (Metal / Energy / Water) per body. Now covers every body type so
-// nothing generates empty.
+// nothing generates empty. Amounts scale with the difficulty resource multiplier.
 public static class ResourceGenerator
 {
     public static void GenerateResources(CelestialBody body)
@@ -44,6 +45,13 @@ public static class ResourceGenerator
                 body.resources.Add(ResourceType.Metal, Random.Range(5, 20));
                 body.resources.Add(ResourceType.Water, Random.Range(0, 15));
                 break;
+        }
+
+        float mult = GameConfig.ResourceMult;
+        if (mult != 1f)
+        {
+            var keys = new List<ResourceType>(body.resources.resources.Keys);
+            foreach (var k in keys) body.resources.resources[k] *= mult;
         }
     }
 }

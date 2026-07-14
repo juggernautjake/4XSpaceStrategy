@@ -22,7 +22,7 @@ public static class ResearchManager
     {
         discovered.Clear();
         researched.Clear();
-        ResearchPoints = StartingPoints;
+        ResearchPoints = GameConfig.StartingResearchPoints;   // difficulty-scaled
         OnChanged?.Invoke();
     }
 

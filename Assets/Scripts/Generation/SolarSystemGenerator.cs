@@ -26,10 +26,10 @@ public class SolarSystemGenerator : MonoBehaviour
 
         RollStarSystem();
 
-        // Always produce a reasonably populated system (ignore a too-low Inspector minBodies).
-        int lo = Mathf.Max(3, minBodies);
+        // Body count honours minBodies/maxBodies (the galaxy generator sets these from "avg planets").
+        int lo = Mathf.Max(1, minBodies);
         int hi = Mathf.Max(lo, maxBodies);
-        int bodyCount = Mathf.Clamp(Random.Range(lo, hi + 1), 3, 8);
+        int bodyCount = Mathf.Clamp(Random.Range(lo, hi + 1), 1, 10);
         string systemName = NamePrefixes[Random.Range(0, NamePrefixes.Length)];
 
         float currentRadius = Random.Range(7f, 10f);

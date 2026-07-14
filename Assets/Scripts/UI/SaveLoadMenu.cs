@@ -117,6 +117,9 @@ public class SaveLoadMenu : MonoBehaviour
         SimpleAudio.Instance?.PlayLoad();
         status.text = $"Loaded '{name}'.";
         root.SetActive(false);
+        StartMenu.Instance?.Close();     // in case we loaded from the main menu
+        EscapeMenu.Instance?.Close();
+        TimeControl.Resume();
     }
 
     void DoDelete(string name)
