@@ -242,8 +242,20 @@ public partial class InspectorWindow
         {
             int t = Colony.PopTarget(b);
             float f = t > 0 ? b.population / (float)t : 0f;
-            return (f, $"Population {b.population}/{t}", UITheme.Accent);
+            // Colour by pressure, not by fill: green while there's room, amber when it's tight, red once
+            // the world is over its ceiling. The bar is the fastest read on the page and it should say
+            // "this is a problem" without being counted.
+            var c = f >= 1f ? UITheme.Bad : f > 0.9f ? UITheme.Warn : UITheme.Accent;
+            return (f, $"Population {b.population}/{t}", c);
         });
+
+        // ---- The three ceilings ----
+        // Shown SEPARATELY, because "capacity" is a min() of three very different problems and the
+        // number alone doesn't tell you which one you have. Land wants terraforming, housing wants
+        // building, food wants farms — and the answer is whichever of these is smallest.
+        Stat(card, "Land supports", () => Population.Format(Carrying.LandCap(b)));
+        Stat(card, "Housing for", () => Population.Format(Carrying.HousingCap(b)));
+        Stat(card, "Food", () => Carrying.FoodLine(b));
 
         // Satisfaction, with the full reasoning shown rather than a bare number — an unhappy colony
         // should always tell you exactly what it is unhappy about.

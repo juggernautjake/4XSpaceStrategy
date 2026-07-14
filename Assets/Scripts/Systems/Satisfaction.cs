@@ -41,16 +41,46 @@ public static class Satisfaction
         // Counts farms from BOTH systems (see ColonyFacilities): this used to read only the abstract
         // buildings list, so a world covered in surface farms still counted as having no food — its
         // people went hungry on paper while standing in a wheat field.
+        // Weighed against the number of MOUTHS, not just the number of farms. This used to score purely
+        // on how many farms existed, so a single farm made a world of a billion people as content as a
+        // world of a million — the colony could never outgrow its agriculture, and a farm was a box you
+        // ticked once. Now the same farm is a comfortable surplus at first and a famine later, which is
+        // what makes a world something you keep developing rather than something you finish.
         int foodN = ColonyFacilities.FoodSources(b);
-        float foodLvl = ColonyFacilities.FoodLevel(b);
-        list.Add(new SatisfactionFactor
+        float ratio = Carrying.FoodRatio(b);
+
+        if (foodN <= 0 && b.population > 0)
         {
-            label = "Food supply",
-            delta = foodN <= 0 ? -14f : Mathf.Lerp(4f, 16f, foodLvl),
-            detail = foodN <= 0 ? "No farms anywhere — the colony lives on imported rations"
-                   : foodN == 1 ? "One farm — the colony is fed, but only just"
-                   : $"{foodN} farms — a comfortable surplus"
-        });
+            list.Add(new SatisfactionFactor
+            {
+                label = "Food supply",
+                delta = -18f,
+                detail = "No farms anywhere — the colony lives on imported rations"
+            });
+        }
+        else if (ratio < 1f)
+        {
+            // Steep, and it can bury every other bonus on the world. Starving people do not care how
+            // good the research outpost is.
+            float shortfall = Carrying.Famine(b);
+            list.Add(new SatisfactionFactor
+            {
+                label = ratio < 0.6f ? "Famine" : "Food shortage",
+                delta = -Mathf.Lerp(6f, 46f, shortfall),
+                detail = Carrying.FoodLine(b)
+            });
+        }
+        else
+        {
+            // A surplus is worth something, but with diminishing returns: the tenth farm doesn't make
+            // anyone happier than the fifth, it just means you can keep growing.
+            list.Add(new SatisfactionFactor
+            {
+                label = "Food supply",
+                delta = Mathf.Lerp(3f, 16f, Mathf.Clamp01(Mathf.InverseLerp(1f, 2f, ratio))),
+                detail = Carrying.FoodLine(b)
+            });
+        }
 
         // ---- Power ----
         // Any generator counts: the abstract plant, or a solar array, wind farm, geothermal plant or
@@ -67,17 +97,26 @@ public static class Satisfaction
         });
 
         // ---- Crowding ----
-        // A colony pressed against its population ceiling is a colony with a housing crisis.
+        // A colony pressed against its ceiling is a colony in crisis — and it names WHICH ceiling, so
+        // the complaint tells you what to build. Overcrowding gets worse than merely full: a world past
+        // its limit is genuinely miserable, which is the pressure that makes you expand.
         int target = Colony.PopTarget(b);
         float crowd = target > 0 ? b.population / (float)target : 0f;
-        float crowdDelta = crowd > 0.9f ? -Mathf.Lerp(0f, 18f, Mathf.Clamp01((crowd - 0.9f) / 0.4f)) : 0f;
-        if (crowdDelta < 0f)
+        if (crowd > 0.9f)
+        {
+            Carrying.Limit(b, out PopLimit bound);
+            // Past 100% the penalty keeps climbing rather than flattening — that's the difference
+            // between "full" and "overpopulated".
+            float over = Mathf.Clamp01((crowd - 0.9f) / 0.4f);
+            float pain = Mathf.Lerp(0f, 20f, over) + Mathf.Max(0f, crowd - 1f) * 30f;
             list.Add(new SatisfactionFactor
             {
-                label = "Crowding",
-                delta = crowdDelta,
-                detail = $"{Population.Short(b.population)} of {Population.Short(target)} — housing is running out"
+                label = crowd > 1f ? "Overpopulated" : "Crowding",
+                delta = -Mathf.Min(40f, pain),
+                detail = $"{Population.Short(b.population)} of {Population.Short(target)} — " +
+                         (Carrying.Advice(bound) ?? "the world is full")
             });
+        }
 
         // ---- Amenities: somewhere to work, and something to work on ----
         // Counts surface industry (mines, factories, refineries, the spaceport, the shipyard) as well as
