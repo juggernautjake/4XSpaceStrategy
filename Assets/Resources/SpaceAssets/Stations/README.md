@@ -10,6 +10,10 @@ Current mapping:
 |---|---|---|
 | Every station (`UnitInfo.isStation`) | `SpaceAssets/Stations/LP Space Station` | orbits its host body + axial spin |
 | Colony Ship | `SpaceAssets/Ships/LP Colony Ship` | faces its course, idle bob |
+| Research Ship / Mk II / Mk III / Science Vessel | `SpaceAssets/Ships/LP Science Ship` | faces its course, idle bob |
+
+The whole research line shares one hull, scaled up per tier (0.22 → 0.34), so a Mk III visibly reads
+as a more serious ship than a Mk I without needing four models.
 
 ## Everything here is optional
 

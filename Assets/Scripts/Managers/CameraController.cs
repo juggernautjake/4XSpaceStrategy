@@ -22,6 +22,13 @@ public class CameraController : MonoBehaviour
     // which is what lets you pull all the way back to the whole map.
     const float MinFarClip = 1200f;
 
+    // The fixed top-down angle the view is locked to, in degrees below horizontal. Was hardcoded as a
+    // bare 55f in four places, including the framing maths that decides how far out you can see.
+    public const float Pitch = 55f;
+
+    // Extra room around the galaxy when framing it, so the outermost systems aren't on the screen edge.
+    const float FrameMargin = 1.15f;
+
     private void Awake() { Instance = this; cam = GetComponent<Camera>(); }
 
     private void Start()
@@ -45,17 +52,26 @@ public class CameraController : MonoBehaviour
         return r;
     }
 
-    // The height needed to frame a disc of this radius, given the camera's pitch and vertical FOV.
-    // Includes generous margin so the outermost systems aren't sitting on the screen edge.
+    // The height needed to frame a disc of this radius on screen.
+    //
+    // Worked from the actual geometry rather than a fudge factor. The camera looks down at Pitch, and
+    // the vertical FOV spreads +/- fov/2 around that, so on the ground the view runs from
+    //   near edge = h / tan(Pitch + fov/2)   to   far edge = h / tan(Pitch - fov/2)
+    // and the usable DEPTH is the difference. Depth is what binds here — the view is far wider than it
+    // is deep at this pitch — so solve depth >= 2*radius and add a margin.
     public float HeightToFrame(float radius)
     {
         if (cam == null) cam = GetComponent<Camera>();
         float fov = cam != null ? cam.fieldOfView : 60f;
-        float halfFovRad = fov * 0.5f * Mathf.Deg2Rad;
-        // Rough but reliable: the ground half-extent visible scales with height / tan(halfFov), adjusted
-        // for the fixed 55° pitch which stretches the view along the forward axis.
-        float needed = (radius * 1.35f) / Mathf.Max(0.05f, Mathf.Tan(halfFovRad));
-        return Mathf.Clamp(needed * Mathf.Sin(55f * Mathf.Deg2Rad), 50f, maxHeight);
+        float half = fov * 0.5f;
+
+        float topAng = Mathf.Max(2f, Pitch - half) * Mathf.Deg2Rad;      // shallower ray -> reaches furthest
+        float botAng = Mathf.Min(88f, Pitch + half) * Mathf.Deg2Rad;     // steeper ray -> lands closest
+        float depthPerHeight = (1f / Mathf.Tan(topAng)) - (1f / Mathf.Tan(botAng));
+        if (depthPerHeight <= 0.01f) return Mathf.Clamp(radius * 1.5f, 50f, maxHeight);
+
+        float needed = (radius * 2f * FrameMargin) / depthPerHeight;
+        return Mathf.Clamp(needed, 50f, maxHeight);
     }
 
     /// Pull all the way back so the entire generated galaxy is on screen at once.
@@ -88,7 +104,7 @@ public class CameraController : MonoBehaviour
         float h = Mathf.Max(transform.position.y, targetHeight);
         // The ground is reached at h/sin(pitch); everything beyond that still has to be drawn, so give
         // the far plane the slant range plus the galaxy's own extent plus headroom.
-        float slant = h / Mathf.Sin(55f * Mathf.Deg2Rad);
+        float slant = h / Mathf.Sin(Pitch * Mathf.Deg2Rad);
         cam.farClipPlane = Mathf.Max(MinFarClip, slant + GalaxyRadius() * 2.5f + 1000f);
         // Near plane has to grow with distance or z-fighting sets in at galaxy scale.
         cam.nearClipPlane = Mathf.Clamp(h * 0.002f, 0.03f, 5f);
@@ -215,16 +231,7 @@ public class CameraController : MonoBehaviour
         if (scroll == 0) return;
 
         float factor = Mathf.Exp(-scroll * 6f);      // scroll up -> factor < 1 -> closer
-        targetHeight = Mathf.Clamp(targetHeight * factor, minHeight, ZoomCeiling());
-    }
-
-    // The furthest you can pull back: far enough to frame the whole generated galaxy with margin, and
-    // no further (staring at empty space isn't useful). Falls back to the inspector limit pre-galaxy.
-    private float ZoomCeiling()
-    {
-        float radius = GalaxyRadius();
-        if (radius <= 0f) return Mathf.Min(maxHeight, 1600f);
-        return Mathf.Min(maxHeight, HeightToFrame(radius) * 1.15f);
+        targetHeight = Mathf.Clamp(targetHeight * factor, minHeight, maxHeight);
     }
 
     private void SmoothHeightMovement()
@@ -237,6 +244,6 @@ public class CameraController : MonoBehaviour
     private void KeepCameraAngle()
     {
         // Keep a nice 55 degree top-down angle
-        transform.rotation = Quaternion.Euler(55f, transform.eulerAngles.y, 0);
+        transform.rotation = Quaternion.Euler(Pitch, transform.eulerAngles.y, 0);
     }
 }
