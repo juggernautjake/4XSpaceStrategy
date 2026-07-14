@@ -285,7 +285,7 @@ public class UnitInfoPanel : MonoBehaviour
             var lbl = UIFactory.Text(rowGo.transform, $"{tag} {o.Describe()}", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
             var le = lbl.gameObject.AddComponent<LayoutElement>(); le.flexibleWidth = 1;
 
-            var rm = UIFactory.Button(rowGo.transform, "✕", () => UnitManager.Instance?.RemoveOrder(current, idx), 22);
+            var rm = UIFactory.Button(rowGo.transform, "X", () => UnitManager.Instance?.RemoveOrder(current, idx), 22);
             var rmle = rm.GetComponent<LayoutElement>(); if (rmle != null) { rmle.minWidth = 26; rmle.preferredWidth = 26; }
         }
     }

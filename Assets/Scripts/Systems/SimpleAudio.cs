@@ -26,10 +26,11 @@ public class SimpleAudio : MonoBehaviour
 
     public float MasterVolume { get; private set; } = 0.8f;
     public float EffectsVolume { get; private set; } = 0.9f;   // UI clicks/selection/notifications
-    public float AmbientVolume { get; private set; } = 0.8f;   // hum + distant chatter
+    public float HumVolume { get; private set; } = 1.0f;       // the deep, constant space drone (its own knob)
+    public float AmbientVolume { get; private set; } = 0.6f;   // occasional chirps / distant space chatter
     public bool Muted { get; private set; } = false;
 
-    const float HumBase = 0.75f;   // hum's own mix level before the ambient slider scales it (louder, comforting bed)
+    const float HumBase = 0.75f;   // hum's own mix level before the hum slider scales it (louder, comforting bed)
 
     float lastTick;
     float lastHover;
@@ -162,9 +163,11 @@ public class SimpleAudio : MonoBehaviour
 
     // ---- Volume control ----
     // Master scales everything (via AudioListener). Effects scales the clean UI/selection/alert
-    // one-shots. Ambient scales the hum + distant chatter. Mute overrides all.
+    // one-shots. Hum scales the deep constant drone; Ambient scales the occasional chirps/chatter —
+    // two separate knobs so you can turn the hum up and the random noises down. Mute overrides all.
     public void SetVolume(float v) { MasterVolume = Mathf.Clamp01(v); ApplyVolume(); }
     public void SetEffectsVolume(float v) { EffectsVolume = Mathf.Clamp01(v); ApplyVolume(); }
+    public void SetHumVolume(float v) { HumVolume = Mathf.Clamp01(v); ApplyVolume(); }
     public void SetAmbientVolume(float v) { AmbientVolume = Mathf.Clamp01(v); ApplyVolume(); }
     public void ToggleMute() { Muted = !Muted; ApplyVolume(); }
     public void SetMuted(bool m) { Muted = m; ApplyVolume(); }
@@ -172,7 +175,7 @@ public class SimpleAudio : MonoBehaviour
     {
         AudioListener.volume = Muted ? 0f : MasterVolume;
         if (sfx != null) sfx.volume = EffectsVolume;
-        if (hum != null) hum.volume = HumBase * AmbientVolume;
+        if (hum != null) hum.volume = HumBase * HumVolume;
         if (ambient != null) ambient.volume = AmbientVolume;
     }
 
@@ -333,6 +336,7 @@ public class SimpleAudio : MonoBehaviour
             }
             d[i] = (s / norm) * 0.75f;
         }
-        var c = AudioClip.Create("hum", n, 1, sr, true); c.SetData(d, 0); return c;
+        // stream:false — we fill the whole buffer up front with SetData (streamed clips reject SetData).
+        var c = AudioClip.Create("hum", n, 1, sr, false); c.SetData(d, 0); return c;
     }
 }
