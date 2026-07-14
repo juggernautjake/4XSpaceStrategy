@@ -135,16 +135,23 @@ public class OrbitController : MonoBehaviour
             ownerRing.transform.position = transform.position;
     }
 
-    // Predicts where this body will be `futureSeconds` from now (used for fleet intercept preview).
+    // Predicts where this body will be `futureSeconds` from now (used for fleet intercept). Accounts
+    // for a MOVING parent too (a moon orbits a planet that is itself orbiting), by recursively
+    // predicting the parent's future position rather than using its current one.
     public Vector3 PredictWorldPosition(float futureSeconds)
     {
         if (parentBody == null) return transform.position;
+
+        Vector3 parentFuture = parentBody.position;
+        var parentOrbit = parentBody.GetComponent<OrbitController>();
+        if (parentOrbit != null) parentFuture = parentOrbit.PredictWorldPosition(futureSeconds);
+
         float futureAngle = currentAngle + direction * orbitSpeed * futureSeconds;
         float a = orbitRadius, b = SemiMinor(orbitRadius, eccentricity);
         float rad = futureAngle * Mathf.Deg2Rad;
         Vector3 local = new Vector3(Mathf.Cos(rad) * a, 0f, Mathf.Sin(rad) * b);
         Quaternion tilt = Quaternion.Euler(inclination, 0f, 0f);
-        return parentBody.position + tilt * local + Vector3.up * verticalOffset;
+        return parentFuture + tilt * local + Vector3.up * verticalOffset;
     }
 
     // ---- Live setters (used by the orbit control panel for real-time editing) ----

@@ -90,9 +90,9 @@ public static class UIFactory
             close.onClick.AddListener(() => rootGO.SetActive(false));
         }
 
-        // Content area
+        // Content area — generous horizontal inset so nothing hugs (or hides under) the frame.
         var content = NewUI(rt, "Content").GetComponent<RectTransform>();
-        Stretch(content, 10, 10, 40, 10);
+        Stretch(content, 18, 18, 42, 16);
 
         // Resize grip (bottom-right corner) — drag to resize the window.
         var grip = Panel(rt, "ResizeGrip", new Color(UITheme.Accent.r, UITheme.Accent.g, UITheme.Accent.b, 0.55f));
@@ -113,7 +113,7 @@ public static class UIFactory
     {
         var v = container.gameObject.AddComponent<VerticalLayoutGroup>();
         v.spacing = spacing;
-        v.padding = padding ?? new RectOffset(4, 4, 4, 4);
+        v.padding = padding ?? new RectOffset(14, 14, 10, 10);
         v.childControlWidth = true; v.childControlHeight = true;
         v.childForceExpandWidth = true; v.childForceExpandHeight = false;
         return v;
@@ -135,9 +135,12 @@ public static class UIFactory
     public static TMP_Text Label(Transform parent, string content, int size, Color color, float height = 22f)
     {
         var t = Text(parent, content, size, color);
+        StretchHorizontally(t);
+        t.margin = new Vector4(4, 1, 4, 1);   // small inner text inset so it never touches the edge
         // Content-driven height (with a floor) so multi-line labels never clip inside layout groups.
         var le = t.gameObject.AddComponent<LayoutElement>();
         le.minHeight = height;
+        le.flexibleWidth = 1;                 // encourage the layout group to give it the full width
         return t;
     }
 
@@ -146,10 +149,23 @@ public static class UIFactory
     public static TMP_Text WrapText(Transform parent, string content, int size, Color color)
     {
         var t = Text(parent, content, size, color);
+        StretchHorizontally(t);
+        t.margin = new Vector4(4, 1, 4, 1);
         var le = t.gameObject.AddComponent<LayoutElement>();
         le.minHeight = size + 4;             // at least one line
+        le.flexibleWidth = 1;
         // No preferredHeight: the VerticalLayoutGroup will query TMP's own preferred height.
         return t;
+    }
+
+    // Anchor a text element to fill its parent's width so it can't end up center-anchored and clipped.
+    static void StretchHorizontally(TMP_Text t)
+    {
+        var rt = t.rectTransform;
+        rt.anchorMin = new Vector2(0, rt.anchorMin.y);
+        rt.anchorMax = new Vector2(1, rt.anchorMax.y);
+        rt.offsetMin = new Vector2(0, rt.offsetMin.y);
+        rt.offsetMax = new Vector2(0, rt.offsetMax.y);
     }
 
     public static LayoutElement AddLayout(GameObject go, float preferredHeight, float minHeight = -1)
@@ -218,13 +234,15 @@ public static class UIFactory
         AddLayout(group, height);
 
         var caption = Text(group.transform, label, UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.TopLeft);
+        caption.margin = new Vector4(2, 0, 4, 0);
         var caprt = caption.rectTransform;
-        caprt.anchorMin = new Vector2(0, 1); caprt.anchorMax = new Vector2(0.7f, 1);
+        caprt.anchorMin = new Vector2(0, 1); caprt.anchorMax = new Vector2(0.82f, 1);
         caprt.pivot = new Vector2(0, 1); caprt.sizeDelta = new Vector2(0, 16); caprt.anchoredPosition = Vector2.zero;
 
         var readout = Text(group.transform, value.ToString(valueFormat), UITheme.SmallSize, UITheme.Accent, TextAlignmentOptions.TopRight);
+        readout.margin = new Vector4(0, 0, 2, 0);
         var readrt = readout.rectTransform;
-        readrt.anchorMin = new Vector2(0.7f, 1); readrt.anchorMax = new Vector2(1, 1);
+        readrt.anchorMin = new Vector2(0.82f, 1); readrt.anchorMax = new Vector2(1, 1);
         readrt.pivot = new Vector2(1, 1); readrt.sizeDelta = new Vector2(0, 16); readrt.anchoredPosition = Vector2.zero;
 
         var slider = Slider(group.transform, min, max, value, v =>
@@ -330,7 +348,7 @@ public static class UIFactory
         var fitter = content.gameObject.AddComponent<ContentSizeFitter>();
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         var vlg = content.gameObject.AddComponent<VerticalLayoutGroup>();
-        vlg.spacing = 6; vlg.padding = new RectOffset(6, 6, 6, 6);
+        vlg.spacing = 6; vlg.padding = new RectOffset(14, 14, 10, 10);
         vlg.childControlWidth = true; vlg.childControlHeight = true;
         vlg.childForceExpandWidth = true; vlg.childForceExpandHeight = false;
 
