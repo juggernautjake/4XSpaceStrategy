@@ -11,6 +11,8 @@ public class SaveGame
     public string savedAtIso;
     public string summary;          // short human description for the load list
     public int starType;
+    public List<int> starTypes = new List<int>();  // full cluster (1-3 suns)
+    public bool isBlackHole;
     public int speciesIndex = 0;
     public float timeScale = 1f;
     public List<BodyDTO> bodies = new List<BodyDTO>();
@@ -32,6 +34,7 @@ public class BodyDTO
     public int surfaceSize;
     public float terrainSeed;
     public float continentFrequency;
+    public float tScale = 1f, tElev = 1f, tMoist = 1f, tHeat = 1f, tRidge = 1f; // terrain params
 
     public float orbitRadius, orbitSpeed, orbitPhase;
     public int orbitDirection;
@@ -73,6 +76,9 @@ public class POIDTO
     public int relatedOre;
     public string revealTitle;
     public string revealText;
+    public string kind;
+    public float researchDuration;
+    public string reportText;
 }
 
 [System.Serializable]

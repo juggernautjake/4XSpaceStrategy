@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 // Physical description of a star, derived from its spectral class.
@@ -7,9 +8,13 @@ public class StarData
     public StarType type;
     public float temperatureK;     // surface temperature (heat)
     public float luminosity;       // relative to a G-type star (= 1.0)
+    public float mass = 1f;        // solar masses (drives orbital speeds)
     public float lightIntensity;   // suggested Unity Light intensity
     public Color color;            // visible colour of the star
     public float visualScale;      // relative render size
+    public bool isBlackHole;       // rare central black hole
+
+    public int starCount = 1;      // 1 = single, 2 = binary, 3 = trinary (combined view)
 
     public bool hasHabitableZone;  // O/B giants burn too hot/short for a stable zone
     public float hzInner;          // inner edge, in game orbit units
@@ -61,6 +66,56 @@ public static class StarDatabase
         // Blue giants (O/B) are too hot and short-lived to hold a stable Goldilocks zone.
         s.hasHabitableZone = (type != StarType.O && type != StarType.B);
 
+        s.mass = OrbitalMechanics.StarMass(type);
         return s;
+    }
+
+    // A rare central black hole: massive, dark, no habitable zone, faint accretion glow.
+    public static StarData BlackHole()
+    {
+        return new StarData
+        {
+            type = StarType.O, isBlackHole = true, starCount = 1,
+            temperatureK = 0f, luminosity = 0f, mass = 14f,
+            color = new Color(0.05f, 0.02f, 0.08f), visualScale = 2.0f,
+            lightIntensity = 0.5f, hasHabitableZone = false, hzInner = 0f, hzOuter = 0f
+        };
+    }
+
+    // Combine a cluster (binary/ternary) into one StarData for lighting, orbits and the habitable zone.
+    public static StarData Combine(List<StarData> stars)
+    {
+        if (stars == null || stars.Count == 0) return Get(StarType.G);
+        if (stars.Count == 1) return stars[0];
+
+        float lum = 0f, mass = 0f;
+        Color col = Color.black;
+        float scale = 0f;
+        StarData bright = stars[0];
+        foreach (var s in stars)
+        {
+            lum += s.luminosity;
+            mass += s.mass;
+            col += s.color * Mathf.Max(0.1f, s.luminosity);
+            scale = Mathf.Max(scale, s.visualScale);
+            if (s.luminosity > bright.luminosity) bright = s;
+        }
+
+        var c = new StarData
+        {
+            type = bright.type,
+            starCount = stars.Count,
+            luminosity = lum,
+            mass = mass,
+            temperatureK = bright.temperatureK,
+            visualScale = scale,
+            color = col / Mathf.Max(0.1f, lum),
+            lightIntensity = Mathf.Clamp(0.6f + Mathf.Sqrt(lum) * 0.25f, 0.6f, 3.5f),
+            hasHabitableZone = true
+        };
+        float sqrtL = Mathf.Sqrt(lum);
+        c.hzInner = 0.95f * sqrtL * AU;
+        c.hzOuter = 1.37f * sqrtL * AU;
+        return c;
     }
 }

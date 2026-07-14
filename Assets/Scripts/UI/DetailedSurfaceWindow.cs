@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
@@ -5,8 +6,9 @@ using UnityEngine.EventSystems;
 using TMPro;
 
 // The expanded, high-detail surface map. Shows the same continents as the low-res grid (both sample
-// the same noise field) but far more finely, plus points of interest. Hovering the map shows the
-// terrain under the cursor; hovering a POI shows its details; clicking a mystery explores it.
+// the same field/params) but far more finely, plus points of interest. Hovering the map shows terrain
+// under the cursor; hovering a POI shows its details; RIGHT-clicking a mystery/resource opens a menu
+// to Research it, which runs a timed job shown by the progress bar at the bottom.
 public class DetailedSurfaceWindow : MonoBehaviour
 {
     public static DetailedSurfaceWindow Instance;
@@ -18,6 +20,10 @@ public class DetailedSurfaceWindow : MonoBehaviour
     RectTransform mapRT;
     RectTransform markerLayer;
     CelestialBody body;
+
+    GameObject progressRoot;
+    Image progressFill;
+    TMP_Text progressLabel;
 
     const float MapW = 660f, MapH = 330f;
 
@@ -32,7 +38,7 @@ public class DetailedSurfaceWindow : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Detailed Surface", new Vector2(MapW + 40, MapH + 130), out root, out titleText);
+        var content = UIFactory.Window(parent, "Detailed Surface", new Vector2(MapW + 40, MapH + 156), out root, out titleText);
         rootRT = root.GetComponent<RectTransform>();
         rootRT.anchoredPosition = new Vector2(60, 0);
 
@@ -43,29 +49,49 @@ public class DetailedSurfaceWindow : MonoBehaviour
         mapRT.pivot = new Vector2(0.5f, 1f);
         mapRT.sizeDelta = new Vector2(MapW, MapH);
         mapRT.anchoredPosition = new Vector2(0, -4);
-        var mapOutline = mapGO.AddComponent<Outline>();
-        mapOutline.effectColor = UITheme.AccentDim;
+        mapGO.AddComponent<Outline>().effectColor = UITheme.AccentDim;
 
         markerLayer = UIFactory.NewUI(mapGO.transform, "Markers").GetComponent<RectTransform>();
         UIFactory.Stretch(markerLayer);
-        markerLayer.GetComponent<RectTransform>();
 
         var probe = mapGO.AddComponent<MapHoverProbe>();
         probe.Init(this, mapRT);
 
-        // Legend
         var legend = UIFactory.Text(content, LegendText(), UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.TopLeft);
         var lrt = legend.rectTransform;
         lrt.anchorMin = new Vector2(0, 0); lrt.anchorMax = new Vector2(1, 0);
-        lrt.pivot = new Vector2(0.5f, 0); lrt.sizeDelta = new Vector2(0, 74); lrt.anchoredPosition = new Vector2(0, 4);
+        lrt.pivot = new Vector2(0.5f, 0); lrt.sizeDelta = new Vector2(0, 96); lrt.anchoredPosition = new Vector2(0, 30);
+
+        BuildProgressBar(content);
 
         root.SetActive(false);
     }
 
+    void BuildProgressBar(RectTransform content)
+    {
+        progressRoot = UIFactory.NewUI(content, "Progress");
+        var prt = progressRoot.GetComponent<RectTransform>();
+        prt.anchorMin = new Vector2(0, 0); prt.anchorMax = new Vector2(1, 0);
+        prt.pivot = new Vector2(0.5f, 0); prt.sizeDelta = new Vector2(-8, 22); prt.anchoredPosition = new Vector2(0, 4);
+
+        var track = UIFactory.Panel(prt, "Track", UITheme.TrackBg);
+        UIFactory.Stretch(track.rectTransform);
+        progressFill = UIFactory.Panel(track.transform, "Fill", UITheme.Good);
+        var frt = progressFill.rectTransform;
+        frt.anchorMin = new Vector2(0, 0); frt.anchorMax = new Vector2(0, 1);
+        frt.offsetMin = Vector2.zero; frt.offsetMax = Vector2.zero;
+
+        progressLabel = UIFactory.Text(prt, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Center);
+        UIFactory.Stretch(progressLabel.rectTransform);
+
+        progressRoot.SetActive(false);
+    }
+
     static string LegendText()
     {
-        return "<color=#4DFF6E>C</color> Settlement   <color=#B98CFF>R</color> Ancient Ruins   " +
-               "<color=#8FD0FF>M</color> Special Resource   <color=#FFD24D>?</color> Mystery (click to explore)\n" +
+        return "<color=#4DFF6E>C</color> Settlement    <color=#B98CFF>R</color> Ancient Ruins    " +
+               "<color=#8FD0FF>M</color> Special Resource    <color=#FFD24D>?</color> Mystery\n" +
+               "Left-click a marker for info. <b>Right-click a mystery or resource to Research it.</b>\n" +
                "Hover the map for terrain. Shapes match the small viewer — this view just shows more detail.";
     }
 
@@ -76,13 +102,19 @@ public class DetailedSurfaceWindow : MonoBehaviour
     {
         body = b;
         if (titleText != null) titleText.text = $"Detailed Surface — {b.name}";
-
-        var tex = SurfaceTextureRenderer.Build(b);
-        map.texture = tex;
-
+        map.texture = SurfaceTextureRenderer.Build(b);
         BuildMarkers();
         root.SetActive(true);
         rootRT.SetAsLastSibling();
+    }
+
+    public void RefreshIfShowing(CelestialBody b)
+    {
+        if (root != null && root.activeSelf && body == b)
+        {
+            map.texture = SurfaceTextureRenderer.Build(b);
+            BuildMarkers();
+        }
     }
 
     public void Close() { if (root != null) root.SetActive(false); }
@@ -92,7 +124,6 @@ public class DetailedSurfaceWindow : MonoBehaviour
     {
         for (int i = markerLayer.childCount - 1; i >= 0; i--)
             Destroy(markerLayer.GetChild(i).gameObject);
-
         foreach (var poi in body.pointsOfInterest)
             CreateMarker(poi);
     }
@@ -105,15 +136,26 @@ public class DetailedSurfaceWindow : MonoBehaviour
         rt.anchorMin = rt.anchorMax = new Vector2(Mathf.Clamp01(poi.u), Mathf.Clamp01(poi.v));
         rt.pivot = new Vector2(0.5f, 0.5f);
         rt.sizeDelta = new Vector2(20, 20);
-
-        var outline = go.AddComponent<Outline>();
-        outline.effectColor = new Color(0, 0, 0, 0.8f);
+        go.AddComponent<Outline>().effectColor = new Color(0, 0, 0, 0.8f);
 
         var label = UIFactory.Text(go.transform, "", 13, Color.black, TextAlignmentOptions.Center);
         UIFactory.Stretch(label.rectTransform);
 
-        var marker = go.AddComponent<POIMarker>();
-        marker.Init(this, poi, img, label);
+        go.AddComponent<POIMarker>().Init(this, poi, img, label);
+    }
+
+    void Update()
+    {
+        if (!IsOpen || body == null) return;
+        var task = ResearchTaskManager.Instance != null ? ResearchTaskManager.Instance.GetActiveFor(body) : null;
+        if (task == null) { progressRoot.SetActive(false); return; }
+
+        progressRoot.SetActive(true);
+        progressFill.rectTransform.anchorMax = new Vector2(task.Progress, 1f);
+        string name = task.poi.type == POIType.Mystery
+            ? (string.IsNullOrEmpty(task.poi.revealTitle) ? task.poi.kind : task.poi.revealTitle)
+            : task.poi.title;
+        progressLabel.text = $"Researching {name}:  {task.Progress * 100f:F0}%   ({task.Remaining:F0}s)";
     }
 }
 
@@ -131,23 +173,22 @@ public class MapHoverProbe : MonoBehaviour, IPointerEnterHandler, IPointerExitHa
     void Update()
     {
         if (!hovering || window == null || window.Body == null || POIMarker.HoveringAny) return;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(mapRT, Input.mousePosition, null, out Vector2 local)) return;
 
-        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(mapRT, Input.mousePosition, null, out Vector2 local))
-            return;
         Rect r = mapRT.rect;
         float u = Mathf.Clamp01((local.x - r.xMin) / r.width);
         float v = Mathf.Clamp01((local.y - r.yMin) / r.height);
 
-        var body = window.Body;
-        var s = PlanetTerrainGenerator.SampleNormalized(body, u, v, PlanetTerrainGenerator.NoiseParams.Default, 6);
+        var b = window.Body;
+        var s = PlanetTerrainGenerator.SampleNormalized(b, u, v, b.terrainParams, 6);
 
         var sb = new StringBuilder();
         sb.Append($"<b>{s.terrain}</b>\n{TerrainColorMap.Describe(s.terrain)}");
-        if (body.surface != null)
+        if (b.surface != null)
         {
-            int lx = Mathf.Clamp((int)(u * body.surface.width), 0, body.surface.width - 1);
-            int ly = Mathf.Clamp((int)(v * body.surface.height), 0, body.surface.height - 1);
-            var tile = body.surface.tiles[lx, ly];
+            int lx = Mathf.Clamp((int)(u * b.surface.width), 0, b.surface.width - 1);
+            int ly = Mathf.Clamp((int)(v * b.surface.height), 0, b.surface.height - 1);
+            var tile = b.surface.tiles[lx, ly];
             if (tile != null && tile.HasOre)
             {
                 var oi = OreDatabase.Get(tile.ore);
@@ -159,7 +200,7 @@ public class MapHoverProbe : MonoBehaviour, IPointerEnterHandler, IPointerExitHa
     }
 }
 
-// A point-of-interest pin. Hover shows details; clicking a mystery reveals it.
+// A point-of-interest pin. Hover shows details; right-click opens the research menu.
 public class POIMarker : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
 {
     public static bool HoveringAny;
@@ -203,17 +244,25 @@ public class POIMarker : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
 
     public void OnPointerClick(PointerEventData e)
     {
-        if (poi.type == POIType.Mystery && !poi.explored)
+        if (e.button == PointerEventData.InputButton.Right)
         {
-            poi.explored = true;
-            ResearchManager.AwardExploration();
-            if (poi.relatedOre != OreType.None) ResearchManager.Discover(poi.relatedOre);
-            Refresh();
-            TooltipManager.Instance.ShowAboveRect(window.RootRect, poi.HoverText());
+            var opts = new List<ContextMenu.Option>();
+            bool inProg = ResearchTaskManager.Instance != null && ResearchTaskManager.Instance.IsResearching(poi);
+            if (poi.IsResearchable)
+                opts.Add(new ContextMenu.Option(
+                    inProg ? "Researching..." : $"Research (~{poi.researchDuration:F0}s)",
+                    () => ResearchTaskManager.Instance?.StartResearch(window.Body, poi),
+                    !inProg));
+            else
+                opts.Add(new ContextMenu.Option("Already surveyed", null, false));
+
+            opts.Add(new ContextMenu.Option("View info", () =>
+                TooltipManager.Instance.ShowAboveRect(window.RootRect, poi.HoverText())));
+
+            ContextMenu.Instance?.Show(e.position, opts);
         }
-        else if (poi.type == POIType.SpecialResource && poi.relatedOre != OreType.None)
+        else
         {
-            ResearchManager.Discover(poi.relatedOre);
             TooltipManager.Instance.ShowAboveRect(window.RootRect, poi.HoverText());
         }
     }

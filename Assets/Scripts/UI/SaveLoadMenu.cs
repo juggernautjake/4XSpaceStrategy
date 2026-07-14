@@ -32,7 +32,7 @@ public class SaveLoadMenu : MonoBehaviour
         UIFactory.Label(content, "Save current game", UITheme.HeaderSize, UITheme.Accent, 22);
         nameInput = UIFactory.InputField(content, "Enter a save name…", DefaultName());
 
-        UIFactory.Button(content, "💾 Save", DoSave, 32);
+        UIFactory.Button(content, "Save", DoSave, 32);
 
         status = UIFactory.Label(content, "", UITheme.SmallSize, UITheme.Good, 18);
 
@@ -64,6 +64,7 @@ public class SaveLoadMenu : MonoBehaviour
         string name = string.IsNullOrWhiteSpace(nameInput.text) ? DefaultName() : nameInput.text.Trim();
         var game = GameStateSerializer.Capture(name);
         SaveSystem.Save(game);
+        SimpleAudio.Instance?.PlaySave();
         status.text = $"Saved '{name}'.";
         RefreshList();
     }
@@ -113,6 +114,7 @@ public class SaveLoadMenu : MonoBehaviour
         var g = SaveSystem.Load(name);
         if (g == null) { status.text = $"Could not load '{name}'."; return; }
         GameStateSerializer.Apply(g);
+        SimpleAudio.Instance?.PlayLoad();
         status.text = $"Loaded '{name}'.";
         root.SetActive(false);
     }

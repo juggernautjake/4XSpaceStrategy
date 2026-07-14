@@ -75,7 +75,7 @@ public class SpeciesWindow : MonoBehaviour
         var fit = card.gameObject.AddComponent<ContentSizeFitter>();
         fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        var title = UIFactory.Text(card.transform, $"<b>{s.name}</b>  <size=11><color=#9FB4C8>“Known for {s.signature}”</color></size>",
+        var title = UIFactory.Text(card.transform, $"<b>{s.name}</b>  <size=11><color=#9FB4C8>Known for {s.signature}</color></size>",
             18, new Color(s.color.r, s.color.g, s.color.b), TextAlignmentOptions.Left);
         UIFactory.AddLayout(title.gameObject, 24);
 
@@ -93,18 +93,18 @@ public class SpeciesWindow : MonoBehaviour
         AttrBar(card, "Adaptability", s.adaptability);
 
         string climate = s.idealTemp > 0.66f ? "hot worlds" : s.idealTemp < 0.34f ? "cold worlds" : "temperate worlds";
-        AddText(card, $"<color=#FFD24D>Prefers {climate}; tolerance ×{s.tolerance:0.0}</color>", UITheme.SubText, 20);
+        AddText(card, $"<color=#FFD24D>Prefers {climate}; tolerance x{s.tolerance:0.0}</color>", UITheme.SubText, 20);
 
         if (!current)
             UIFactory.Button(card.transform, $"View worlds as {s.name}", () => SpeciesManager.Select(index), 28);
         else
-            AddText(card, "<b><color=#4DFF6E>◄ Current perspective</color></b>", UITheme.Good, 20);
+            AddText(card, "<b><color=#4DFF6E>&gt; Current perspective</color></b>", UITheme.Good, 20);
     }
 
     void AddText(Image card, string text, Color color, float h)
     {
-        var t = UIFactory.Text(card.transform, text, UITheme.SmallSize, color, TextAlignmentOptions.Left);
-        UIFactory.AddLayout(t.gameObject, h);
+        // Height driven by content so nothing clips regardless of length.
+        UIFactory.WrapText(card.transform, text, UITheme.SmallSize, color);
     }
 
     void AttrBar(Image card, string label, int value)

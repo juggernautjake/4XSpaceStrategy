@@ -25,25 +25,25 @@ public static class PlanetTerrainGenerator
     }
 
     // ---- Low-res grid (used by the classic tile viewer and gameplay) ----
+    // Uses the body's own terrainParams so live edits are reflected everywhere consistently.
     public static PlanetSurface GenerateSurface(CelestialBody body)
     {
-        return Build(body, NoiseParams.Default, 4);
+        return Build(body, body.terrainParams, 4);
     }
 
     public static PlanetSurface GenerateSurfaceWithParams(
         CelestialBody body, float noiseScale, float elevationStrength,
         float moistureStrength, float heatStrength, float ridgeStrength)
     {
-        // The editor sliders historically ran ~0..1; reinterpret as sensible multipliers.
-        var p = new NoiseParams
+        body.terrainParams = new NoiseParams
         {
-            scale = Mathf.Clamp(noiseScale <= 0f ? 1f : (noiseScale < 0.35f ? noiseScale * 12f : noiseScale), 0.3f, 4f),
+            scale = Mathf.Clamp(noiseScale <= 0f ? 1f : noiseScale, 0.3f, 4f),
             elevation = Mathf.Max(0.1f, elevationStrength),
             moisture = Mathf.Max(0.1f, moistureStrength),
             heat = Mathf.Max(0.1f, heatStrength),
             ridge = Mathf.Max(0.1f, ridgeStrength)
         };
-        return Build(body, p, 4);
+        return Build(body, body.terrainParams, 4);
     }
 
     static PlanetSurface Build(CelestialBody body, NoiseParams p, int octaves)

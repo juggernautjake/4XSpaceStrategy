@@ -78,23 +78,17 @@ public class ResearchWindow : MonoBehaviour
 
         if (!discovered)
         {
-            var hint = UIFactory.Text(card.transform, "Find this ore on a planet surface to discover it.", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.Left);
-            UIFactory.AddLayout(hint.gameObject, 18);
+            UIFactory.WrapText(card.transform, "Find this ore on a planet surface to discover it.", UITheme.SmallSize, UITheme.SubText);
             return;
         }
 
-        var meta = UIFactory.Text(card.transform, $"Tier {info.tier} · Value {info.baseValue}cr · Research cost {info.researchCost}", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.Left);
-        UIFactory.AddLayout(meta.gameObject, 18);
-
-        var desc = UIFactory.Text(card.transform, info.description, UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
-        UIFactory.AddLayout(desc.gameObject, 34);
+        UIFactory.WrapText(card.transform, $"Tier {info.tier}  ·  Value {info.baseValue}cr  ·  Research cost {info.researchCost}", UITheme.SmallSize, UITheme.SubText);
+        UIFactory.WrapText(card.transform, info.description, UITheme.SmallSize, UITheme.Text);
 
         if (researched)
         {
-            var uses = UIFactory.Text(card.transform, $"<color=#8FD0FF>Uses:</color> {info.uses}", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
-            UIFactory.AddLayout(uses.gameObject, 34);
-            var refine = UIFactory.Text(card.transform, $"<color=#FFBF4D>Refining:</color> {info.refining}", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
-            UIFactory.AddLayout(refine.gameObject, 34);
+            UIFactory.WrapText(card.transform, $"<color=#8FD0FF>Uses:</color> {info.uses}", UITheme.SmallSize, UITheme.Text);
+            UIFactory.WrapText(card.transform, $"<color=#FFBF4D>Refining:</color> {info.refining}", UITheme.SmallSize, UITheme.Text);
         }
         else
         {

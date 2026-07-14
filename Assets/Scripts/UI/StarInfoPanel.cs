@@ -46,19 +46,35 @@ public class StarInfoPanel : MonoBehaviour
     public void Show(StarData star)
     {
         if (star == null) return;
-        titleText.text = $"{star.type}-type Star";
+
+        string title = star.isBlackHole ? "Black Hole"
+            : star.starCount >= 3 ? "Ternary System"
+            : star.starCount == 2 ? "Binary System"
+            : $"{star.type}-type Star";
+        titleText.text = title;
 
         string hz = star.hasHabitableZone
-            ? $"{star.hzInner:F1} – {star.hzOuter:F1} units"
-            : "<color=#FF6659>none (too hot / short-lived)</color>";
+            ? $"{star.hzInner:F1} - {star.hzOuter:F1} units"
+            : "<color=#FF6659>none</color>";
 
-        body.text =
-            $"Class: {star.type}\n" +
-            $"Temperature: {star.temperatureK:N0} K\n" +
-            $"Luminosity: {star.luminosity:0.##} × Sun\n" +
-            $"Mass: {OrbitalMechanics.StarMass(star.type):0.##} × Sun\n" +
-            $"Light intensity: {star.lightIntensity:0.0}\n\n" +
-            $"<b>Habitable Zone:</b> {hz}";
+        if (star.isBlackHole)
+        {
+            body.text =
+                "A collapsed star of immense gravity.\n" +
+                $"Mass: {star.mass:0.#} x Sun\n" +
+                "It emits no light of its own — only the glow of its accretion disc.\n\n" +
+                $"<b>Habitable Zone:</b> {hz}";
+        }
+        else
+        {
+            body.text =
+                (star.starCount > 1 ? $"Stars: {star.starCount}\n" : $"Class: {star.type}\n") +
+                $"Temperature: {star.temperatureK:N0} K\n" +
+                $"Luminosity: {star.luminosity:0.##} x Sun\n" +
+                $"Mass: {star.mass:0.##} x Sun\n" +
+                $"Light intensity: {star.lightIntensity:0.0}\n\n" +
+                $"<b>Habitable Zone:</b> {hz}";
+        }
 
         suppress = true;
         zoneToggle.isOn = SystemContext.Zone != null && SystemContext.Zone.IsVisible;

@@ -82,7 +82,7 @@ public static class UIFactory
 
         if (closeButton)
         {
-            var close = Button(barRT, "✕", null);
+            var close = Button(barRT, "X", null);
             var crt = close.GetComponent<RectTransform>();
             crt.anchorMin = new Vector2(1, 0.5f); crt.anchorMax = new Vector2(1, 0.5f);
             crt.pivot = new Vector2(1, 0.5f); crt.sizeDelta = new Vector2(30, 26);
@@ -127,6 +127,17 @@ public static class UIFactory
         return t;
     }
 
+    // Multi-line text whose HEIGHT is driven by its content (no fixed height -> never clipped).
+    // Use inside a VerticalLayoutGroup with childControlHeight = true.
+    public static TMP_Text WrapText(Transform parent, string content, int size, Color color)
+    {
+        var t = Text(parent, content, size, color);
+        var le = t.gameObject.AddComponent<LayoutElement>();
+        le.minHeight = size + 4;             // at least one line
+        // No preferredHeight: the VerticalLayoutGroup will query TMP's own preferred height.
+        return t;
+    }
+
     public static LayoutElement AddLayout(GameObject go, float preferredHeight, float minHeight = -1)
     {
         var le = go.GetComponent<LayoutElement>() ?? go.AddComponent<LayoutElement>();
@@ -151,7 +162,9 @@ public static class UIFactory
 
         var t = Text(go.transform, label, UITheme.BodySize, UITheme.Text, TextAlignmentOptions.Center);
         Stretch(t.rectTransform);
+        btn.onClick.AddListener(() => SimpleAudio.Instance?.PlayClick());
         if (onClick != null) btn.onClick.AddListener(() => onClick());
+        go.AddComponent<ButtonHoverSound>();   // soft hover cue
         AddLayout(go, height);
         return btn;
     }
@@ -177,6 +190,7 @@ public static class UIFactory
         toggle.targetGraphic = box;
         toggle.graphic = check;
         toggle.isOn = isOn;
+        toggle.onValueChanged.AddListener(_ => SimpleAudio.Instance?.PlayClick());
         if (onChanged != null) toggle.onValueChanged.AddListener(v => onChanged(v));
         return toggle;
     }
@@ -202,6 +216,7 @@ public static class UIFactory
         var slider = Slider(group.transform, min, max, value, v =>
         {
             readout.text = v.ToString(valueFormat);
+            SimpleAudio.Instance?.PlayTick();
             onChanged?.Invoke(v);
         });
         var srt = slider.GetComponent<RectTransform>();
@@ -213,6 +228,9 @@ public static class UIFactory
     public static UnityEngine.UI.Slider Slider(Transform parent, float min, float max, float value, Action<float> onChanged)
     {
         var go = NewUI(parent, "Slider");
+        // Transparent root graphic so the whole slider area reliably receives drags.
+        var rootImg = go.AddComponent<Image>();
+        rootImg.color = new Color(0, 0, 0, 0);
         var slider = go.AddComponent<UnityEngine.UI.Slider>();
 
         var bg = Panel(go.transform, "Background", UITheme.TrackBg);

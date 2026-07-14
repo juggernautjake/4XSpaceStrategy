@@ -18,7 +18,7 @@ public static class SurfaceTextureRenderer
             wrapMode = TextureWrapMode.Clamp
         };
 
-        var p = PlanetTerrainGenerator.NoiseParams.Default;
+        var p = body.terrainParams; // same params as the grid -> both views always match
         var pixels = new Color[w * h];
 
         for (int y = 0; y < h; y++)

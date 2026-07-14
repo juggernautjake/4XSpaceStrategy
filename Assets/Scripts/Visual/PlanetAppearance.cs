@@ -5,6 +5,19 @@ using UnityEngine;
 // bodies that should have one. Airless worlds (moons, asteroids, barren rock) get no atmosphere.
 public static class PlanetAppearance
 {
+    // Updates ONLY the surface texture (no atmosphere churn) — used for live terrain editing.
+    public static void RefreshTexture(CelestialBody body, GameObject go)
+    {
+        if (go == null) return;
+        var rend = go.GetComponent<Renderer>();
+        if (rend == null) return;
+        Texture2D tex = SurfaceTextureRenderer.Build(body);
+        tex.wrapMode = TextureWrapMode.Repeat;
+        var m = rend.material;
+        m.mainTexture = tex;
+        if (m.HasProperty("_BaseMap")) m.SetTexture("_BaseMap", tex);
+    }
+
     public static void Apply(CelestialBody body, GameObject go)
     {
         var rend = go.GetComponent<Renderer>();

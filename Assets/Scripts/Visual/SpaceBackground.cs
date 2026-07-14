@@ -1,11 +1,12 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// Procedural, per-map space backdrop: layered nebula + starfield with parallax, twinkling stars,
-// occasional shooting stars and a few distant galaxies. Generated once from a seed and kept constant
-// until regenerated. Can be toggled off, or switched to a flat solid colour of the dev's choosing.
-// Everything is parented to the camera so it always fills the view and sits behind the system, and
-// it is deliberately dark so planets, rings and text stay readable.
+// Procedural, per-map space backdrop: layered nebulae + gas clouds, many small sparkling stars,
+// distant galaxies (round + spiral), occasional small shooting stars, and parallax. Deliberately dim
+// so it never competes with the foreground system.
+//
+// Two modes: SPACE (the procedural sky) or SOLID (a flat colour from the RGB sliders). Turning the
+// space background OFF simply shows the solid colour — the colour sliders always apply.
 public class SpaceBackground : MonoBehaviour
 {
     public static SpaceBackground Instance;
@@ -16,18 +17,21 @@ public class SpaceBackground : MonoBehaviour
     readonly List<TwinkleStar> twinkles = new List<TwinkleStar>();
 
     public int Seed { get; private set; } = 12345;
-    public bool Enabled { get; private set; } = true;
-    public bool SolidMode { get; private set; } = false;
+    public bool SpaceEnabled { get; private set; } = true;    // false => show the solid colour
     public Color SolidColor { get; private set; } = new Color(0.02f, 0.03f, 0.06f);
+
+    // Back-compat alias used by the save system.
+    public bool Enabled => SpaceEnabled;
+    public bool SolidMode => !SpaceEnabled;
 
     float shootingTimer;
     Vector3 lastCamPos;
+    Texture2D _dot, _galaxyRound, _galaxySpiral, _cloud;
 
     public static void Create()
     {
         if (Instance != null) return;
-        var go = new GameObject("SpaceBackground");
-        Instance = go.AddComponent<SpaceBackground>();
+        new GameObject("SpaceBackground").AddComponent<SpaceBackground>();
     }
 
     void Awake()
@@ -42,7 +46,6 @@ public class SpaceBackground : MonoBehaviour
         Rebuild();
     }
 
-    // ---- Shared unlit, double-sided material (Sprites/Default culls nothing) ----
     static Material MakeMat(Texture2D tex, Color tint)
     {
         var m = new Material(Shader.Find("Sprites/Default"));
@@ -69,7 +72,7 @@ public class SpaceBackground : MonoBehaviour
     float FovSize(float distance)
     {
         float fov = (cam != null && !cam.orthographic) ? cam.fieldOfView : 60f;
-        return distance * 2f * Mathf.Tan(fov * 0.5f * Mathf.Deg2Rad) * 3f; // ×3 headroom for parallax
+        return distance * 2f * Mathf.Tan(fov * 0.5f * Mathf.Deg2Rad) * 3f;
     }
 
     public void SetSeed(int seed) { Seed = seed; }
@@ -80,22 +83,25 @@ public class SpaceBackground : MonoBehaviour
         Rebuild();
     }
 
-    public void SetEnabled(bool on) { Enabled = on; ApplyVisibility(); }
-    public void SetSolidMode(bool on) { SolidMode = on; ApplyVisibility(); }
+    public void SetEnabled(bool spaceOn) { SpaceEnabled = spaceOn; ApplyVisibility(); }
+
+    // Kept for save-compat: solid mode == space off.
+    public void SetSolidMode(bool solid) { SpaceEnabled = !solid; ApplyVisibility(); }
+
     public void SetSolidColor(Color c)
     {
         SolidColor = c;
         if (solidQuad != null) solidQuad.GetComponent<MeshRenderer>().material.color = c;
-        if (cam != null) cam.backgroundColor = c;
+        if (cam != null && !SpaceEnabled) cam.backgroundColor = c;
     }
 
     void ApplyVisibility()
     {
-        bool space = Enabled && !SolidMode;
-        if (rootFar) rootFar.gameObject.SetActive(space);
-        if (rootMid) rootMid.gameObject.SetActive(space);
-        if (rootNear) rootNear.gameObject.SetActive(space);
-        if (solidQuad) solidQuad.SetActive(Enabled && SolidMode);
+        if (rootFar) rootFar.gameObject.SetActive(SpaceEnabled);
+        if (rootMid) rootMid.gameObject.SetActive(SpaceEnabled);
+        if (rootNear) rootNear.gameObject.SetActive(SpaceEnabled);
+        if (solidQuad) solidQuad.SetActive(!SpaceEnabled);
+        if (cam != null) cam.backgroundColor = SpaceEnabled ? Color.black : SolidColor;
     }
 
     public void Rebuild()
@@ -103,7 +109,6 @@ public class SpaceBackground : MonoBehaviour
         if (cam == null) cam = Camera.main != null ? Camera.main : FindFirstObjectByType<Camera>();
         if (cam == null) return;
 
-        // Clear previous
         foreach (Transform c in transform) Destroy(c.gameObject);
         twinkles.Clear();
 
@@ -114,9 +119,12 @@ public class SpaceBackground : MonoBehaviour
         var rng = new System.Random(Seed);
 
         var nebula = GenerateNebula(Seed, rng);
-        var starsFar = GenerateStars(Seed + 7, rng, 900, 0.6f);
-        var starsMid = GenerateStars(Seed + 31, rng, 500, 0.9f);
-        var galaxyTex = GenerateGalaxy(Seed + 91);
+        var starsFar = GenerateStars(Seed + 7, rng, 0.5f);
+        var starsMid = GenerateStars(Seed + 31, rng, 0.75f);
+        _galaxyRound = GenerateGalaxyRound(Seed + 91);
+        _galaxySpiral = GenerateGalaxySpiral(Seed + 133);
+        _cloud = GenerateCloud(Seed + 200);
+        _dot = GenerateDot();
 
         rootFar = new GameObject("Far").transform; rootFar.SetParent(transform, false);
         rootMid = new GameObject("Mid").transform; rootMid.SetParent(transform, false);
@@ -127,48 +135,59 @@ public class SpaceBackground : MonoBehaviour
         MakeQuad(rootFar, "StarsFar", dFar - 5f, FovSize(dFar), starsFar, Color.white);
         MakeQuad(rootMid, "StarsMid", dMid, FovSize(dMid), starsMid, Color.white);
 
-        // Distant galaxies scattered on the far layer.
-        int galaxies = 3;
+        // Extra faint gas clouds scattered around (background depth, low alpha).
+        int clouds = 7;
+        for (int i = 0; i < clouds; i++)
+        {
+            float cs = FovSize(dFar) * (0.14f + (float)rng.NextDouble() * 0.14f);
+            var tint = RandomNebulaHue(rng); tint.a = 0.10f + (float)rng.NextDouble() * 0.06f;
+            var g = MakeQuad(rootMid, "GasCloud", dMid + (float)rng.NextDouble() * 60f, cs, _cloud, tint);
+            Scatter(g, rng, FovSize(dMid) * 0.4f);
+        }
+
+        // Distant galaxies — a mix of round and spiral, faint and small.
+        int galaxies = 8;
         for (int i = 0; i < galaxies; i++)
         {
-            float gs = FovSize(dFar) * 0.10f;
-            var g = MakeQuad(rootFar, "Galaxy", dFar - 8f, gs, galaxyTex, new Color(1, 1, 1, 0.5f));
-            float span = FovSize(dFar) * 0.35f;
-            g.transform.localPosition += new Vector3((float)(rng.NextDouble() * 2 - 1) * span, (float)(rng.NextDouble() * 2 - 1) * span, 0);
+            bool spiral = rng.NextDouble() < 0.5;
+            float gs = FovSize(dFar) * (0.05f + (float)rng.NextDouble() * 0.06f);
+            var g = MakeQuad(rootFar, spiral ? "Spiral" : "Galaxy", dFar - 8f, gs,
+                             spiral ? _galaxySpiral : _galaxyRound, new Color(1, 1, 1, 0.42f));
+            Scatter(g, rng, FovSize(dFar) * 0.38f);
             g.transform.localRotation = Quaternion.Euler(0, 0, (float)(rng.NextDouble() * 360));
         }
 
-        // Bright twinkling stars on the near layer.
-        var starDot = GenerateDot();
-        int twinkleCount = 46;
-        float nearSpan = FovSize(dNear) * 0.45f;
+        // Many small, sparkling stars on the near layer.
+        int twinkleCount = 90;
         for (int i = 0; i < twinkleCount; i++)
         {
-            float s = FovSize(dNear) * (0.004f + (float)rng.NextDouble() * 0.006f);
-            var dot = MakeQuad(rootNear, "Twinkle", dNear, s, starDot, StarTint(rng));
-            dot.transform.localPosition += new Vector3((float)(rng.NextDouble() * 2 - 1) * nearSpan, (float)(rng.NextDouble() * 2 - 1) * nearSpan, 0);
+            float s = FovSize(dNear) * (0.0016f + (float)rng.NextDouble() * 0.0026f); // small
+            var dot = MakeQuad(rootNear, "Twinkle", dNear, s, _dot, StarTint(rng));
+            Scatter(dot, rng, FovSize(dNear) * 0.46f);
             var tw = dot.AddComponent<TwinkleStar>();
-            tw.Init((float)(rng.NextDouble() * 6.28), 0.6f + (float)rng.NextDouble() * 1.6f, dot.transform.localScale);
+            tw.Init((float)(rng.NextDouble() * 6.28), 1.0f + (float)rng.NextDouble() * 2.4f, dot.transform.localScale);
             twinkles.Add(tw);
         }
 
-        // Solid-colour fallback quad.
         solidQuad = MakeQuad(transform, "SolidColor", dFar + 20f, FovSize(dFar + 20f), Texture2D.whiteTexture, SolidColor);
 
         ApplyVisibility();
-        if (cam != null && SolidMode) cam.backgroundColor = SolidColor;
 
-        // Optional: if the dev dropped in a CC0 skybox material, register it (visible when the
-        // camera's Clear Flags are set to Skybox). Harmless otherwise.
         var sky = AssetIntegration.LoadSkybox();
         if (sky != null) RenderSettings.skybox = sky;
     }
 
+    void Scatter(GameObject go, System.Random rng, float span)
+    {
+        go.transform.localPosition += new Vector3(
+            (float)(rng.NextDouble() * 2 - 1) * span,
+            (float)(rng.NextDouble() * 2 - 1) * span, 0);
+    }
+
     void LateUpdate()
     {
-        if (cam == null) return;
+        if (cam == null || !SpaceEnabled) { if (cam != null) lastCamPos = cam.transform.position; return; }
 
-        // Parallax: drift layers opposite to camera pan, scaled by depth.
         Vector3 delta = cam.transform.position - lastCamPos;
         lastCamPos = cam.transform.position;
         float dr = Vector3.Dot(delta, cam.transform.right);
@@ -177,11 +196,10 @@ public class SpaceBackground : MonoBehaviour
         Drift(rootMid, dr, du, 0.035f, 90f);
         Drift(rootNear, dr, du, 0.06f, 120f);
 
-        // Occasional shooting star.
         shootingTimer -= Time.unscaledDeltaTime;
-        if (shootingTimer <= 0f && Enabled && !SolidMode && rootNear != null)
+        if (shootingTimer <= 0f && rootNear != null)
         {
-            shootingTimer = Random.Range(4f, 11f);
+            shootingTimer = Random.Range(5f, 13f);
             SpawnShootingStar();
         }
     }
@@ -198,21 +216,19 @@ public class SpaceBackground : MonoBehaviour
     void SpawnShootingStar()
     {
         float dNear = 520f;
-        var dot = GenerateDot();
-        var q = MakeQuad(rootNear, "Shooting", dNear, FovSize(dNear) * 0.02f, dot, new Color(0.8f, 0.9f, 1f, 1f));
+        var q = MakeQuad(rootNear, "Shooting", dNear, FovSize(dNear) * 0.012f, _dot, new Color(0.85f, 0.92f, 1f, 1f));
         float span = FovSize(dNear) * 0.4f;
-        Vector3 start = new Vector3(-span, Random.Range(-span * 0.3f, span * 0.5f), dNear);
-        q.transform.localPosition = start;
+        q.transform.localPosition = new Vector3(-span, Random.Range(-span * 0.3f, span * 0.5f), dNear);
         var ss = q.AddComponent<ShootingStar>();
-        ss.Init(new Vector3(1f, Random.Range(-0.4f, -0.1f), 0f).normalized * span * 2.2f, 1.1f);
+        ss.Init(new Vector3(1f, Random.Range(-0.4f, -0.1f), 0f).normalized * span * 2.2f, 1.0f);
     }
 
     static Color StarTint(System.Random rng)
     {
         float r = (float)rng.NextDouble();
         if (r < 0.6f) return Color.white;
-        if (r < 0.8f) return new Color(0.7f, 0.8f, 1f);   // blue-white
-        return new Color(1f, 0.85f, 0.7f);                // warm
+        if (r < 0.8f) return new Color(0.7f, 0.8f, 1f);
+        return new Color(1f, 0.85f, 0.7f);
     }
 
     // ---- Texture generation ----
@@ -221,51 +237,40 @@ public class SpaceBackground : MonoBehaviour
         int w = 512, h = 512;
         var tex = new Texture2D(w, h, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
         var px = new Color[w * h];
-
-        Color baseCol = new Color(0.015f, 0.02f, 0.04f);
-        Color hueA = RandomNebulaHue(rng);
-        Color hueB = RandomNebulaHue(rng);
+        Color baseCol = new Color(0.012f, 0.016f, 0.032f);
+        Color hueA = RandomNebulaHue(rng), hueB = RandomNebulaHue(rng), hueC = RandomNebulaHue(rng);
         float so = seed % 1000 * 0.01f;
-
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
                 float u = x / (float)w, v = y / (float)h;
-                float n = FBm(u * 3f + so, v * 3f + so, 5);
-                float n2 = FBm(u * 6f + so + 40f, v * 6f + so + 40f, 4);
-                float cloud = Mathf.Clamp01((n - 0.45f) * 2.2f);
-                float cloud2 = Mathf.Clamp01((n2 - 0.55f) * 2.4f);
-                Color c = baseCol;
-                c += hueA * cloud * 0.22f;
-                c += hueB * cloud2 * 0.16f;
+                float cloud = Mathf.Clamp01((FBm(u * 3f + so, v * 3f + so, 5) - 0.45f) * 2.2f);
+                float cloud2 = Mathf.Clamp01((FBm(u * 6f + so + 40f, v * 6f + so + 40f, 4) - 0.55f) * 2.4f);
+                float cloud3 = Mathf.Clamp01((FBm(u * 1.6f + so + 90f, v * 1.6f + so + 90f, 3) - 0.5f) * 1.8f);
+                Color c = baseCol + hueA * cloud * 0.16f + hueB * cloud2 * 0.12f + hueC * cloud3 * 0.10f;
                 px[y * w + x] = new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
             }
-
-        // Dense faint background stars baked in.
-        int starCount = 900;
-        for (int i = 0; i < starCount; i++)
+        // Faint baked background stars (small/dim; the sparkle comes from the near-layer sprites).
+        for (int i = 0; i < 700; i++)
         {
             int x = rng.Next(w), y = rng.Next(h);
-            float b = 0.4f + (float)rng.NextDouble() * 0.6f;
+            float b = 0.3f + (float)rng.NextDouble() * 0.45f;
             px[y * w + x] = new Color(b, b, Mathf.Min(1f, b + 0.1f), 1f);
         }
-
         tex.SetPixels(px); tex.Apply();
         return tex;
     }
 
-    Texture2D GenerateStars(int seed, System.Random rng, int distanceHint, float brightness)
+    Texture2D GenerateStars(int seed, System.Random rng, float brightness)
     {
         int w = 512, h = 512;
         var tex = new Texture2D(w, h, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
         var px = new Color[w * h];
         for (int i = 0; i < px.Length; i++) px[i] = new Color(0, 0, 0, 0);
-
-        int count = 500;
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < 420; i++)
         {
             int x = rng.Next(w), y = rng.Next(h);
-            float b = brightness * (0.5f + (float)rng.NextDouble() * 0.5f);
+            float b = brightness * (0.4f + (float)rng.NextDouble() * 0.5f);
             var tint = StarTint(rng);
             px[y * w + x] = new Color(tint.r * b, tint.g * b, tint.b * b, 1f);
         }
@@ -273,50 +278,74 @@ public class SpaceBackground : MonoBehaviour
         return tex;
     }
 
-    Texture2D GenerateGalaxy(int seed)
+    Texture2D GenerateGalaxyRound(int seed)
     {
-        int s = 128;
-        var tex = new Texture2D(s, s, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
-        var px = new Color[s * s];
-        Vector2 c = new Vector2(s / 2f, s / 2f);
-        for (int y = 0; y < s; y++)
-            for (int x = 0; x < s; x++)
-            {
-                Vector2 d = new Vector2(x - c.x, y - c.y);
-                float r = d.magnitude / (s * 0.5f);
-                float a = Mathf.Clamp01(1f - r);
-                a = a * a * 0.8f;
-                px[y * s + x] = new Color(0.8f, 0.8f, 1f, a);
-            }
-        tex.SetPixels(px); tex.Apply();
-        return tex;
+        int s = 128; var tex = NewTex(s);
+        var px = new Color[s * s]; Vector2 c = new Vector2(s / 2f, s / 2f);
+        for (int y = 0; y < s; y++) for (int x = 0; x < s; x++)
+        {
+            float r = new Vector2(x - c.x, y - c.y).magnitude / (s * 0.5f);
+            float a = Mathf.Clamp01(1f - r); a = a * a * 0.85f;
+            px[y * s + x] = new Color(0.8f, 0.82f, 1f, a);
+        }
+        tex.SetPixels(px); tex.Apply(); return tex;
     }
 
-    Texture2D _dot;
+    Texture2D GenerateGalaxySpiral(int seed)
+    {
+        int s = 128; var tex = NewTex(s);
+        var px = new Color[s * s]; Vector2 c = new Vector2(s / 2f, s / 2f);
+        for (int y = 0; y < s; y++) for (int x = 0; x < s; x++)
+        {
+            Vector2 d = new Vector2(x - c.x, y - c.y);
+            float r = d.magnitude / (s * 0.5f);
+            float ang = Mathf.Atan2(d.y, d.x);
+            // Two-arm logarithmic spiral.
+            float arm = Mathf.Cos(2f * (ang - r * 5f));
+            float core = Mathf.Clamp01(1f - r) * 0.9f;
+            float arms = Mathf.Clamp01(arm) * Mathf.Clamp01(1f - r) * 0.7f;
+            float a = Mathf.Clamp01(core * 0.5f + arms);
+            px[y * s + x] = new Color(0.85f, 0.85f, 1f, a * 0.8f);
+        }
+        tex.SetPixels(px); tex.Apply(); return tex;
+    }
+
+    Texture2D GenerateCloud(int seed)
+    {
+        int s = 128; var tex = NewTex(s);
+        var px = new Color[s * s]; Vector2 c = new Vector2(s / 2f, s / 2f);
+        float so = seed % 500 * 0.01f;
+        for (int y = 0; y < s; y++) for (int x = 0; x < s; x++)
+        {
+            float r = new Vector2(x - c.x, y - c.y).magnitude / (s * 0.5f);
+            float n = FBm(x * 0.05f + so, y * 0.05f + so, 4);
+            float a = Mathf.Clamp01((1f - r)) * n;
+            px[y * s + x] = new Color(1f, 1f, 1f, a * a);
+        }
+        tex.SetPixels(px); tex.Apply(); return tex;
+    }
+
     Texture2D GenerateDot()
     {
-        if (_dot != null) return _dot;
-        int s = 16;
-        _dot = new Texture2D(s, s, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
-        var px = new Color[s * s];
-        Vector2 c = new Vector2(s / 2f, s / 2f);
-        for (int y = 0; y < s; y++)
-            for (int x = 0; x < s; x++)
-            {
-                float r = Vector2.Distance(new Vector2(x, y), c) / (s * 0.5f);
-                float a = Mathf.Clamp01(1f - r);
-                px[y * s + x] = new Color(1, 1, 1, a * a);
-            }
-        _dot.SetPixels(px); _dot.Apply();
-        return _dot;
+        int s = 16; var tex = NewTex(s);
+        var px = new Color[s * s]; Vector2 c = new Vector2(s / 2f, s / 2f);
+        for (int y = 0; y < s; y++) for (int x = 0; x < s; x++)
+        {
+            float r = Vector2.Distance(new Vector2(x, y), c) / (s * 0.5f);
+            float a = Mathf.Clamp01(1f - r);
+            px[y * s + x] = new Color(1, 1, 1, a * a);
+        }
+        tex.SetPixels(px); tex.Apply(); return tex;
     }
+
+    static Texture2D NewTex(int s) => new Texture2D(s, s, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
 
     static Color RandomNebulaHue(System.Random rng)
     {
         Color[] hues =
         {
             new Color(0.4f, 0.2f, 0.8f), new Color(0.2f, 0.4f, 0.9f), new Color(0.8f, 0.25f, 0.5f),
-            new Color(0.2f, 0.7f, 0.7f), new Color(0.7f, 0.4f, 0.2f)
+            new Color(0.2f, 0.7f, 0.7f), new Color(0.7f, 0.4f, 0.2f), new Color(0.5f, 0.3f, 0.7f)
         };
         return hues[rng.Next(hues.Length)];
     }
@@ -324,16 +353,12 @@ public class SpaceBackground : MonoBehaviour
     static float FBm(float x, float y, int oct)
     {
         float amp = 1, freq = 1, sum = 0, norm = 0;
-        for (int i = 0; i < oct; i++)
-        {
-            sum += amp * Mathf.PerlinNoise(x * freq, y * freq);
-            norm += amp; amp *= 0.5f; freq *= 2f;
-        }
+        for (int i = 0; i < oct; i++) { sum += amp * Mathf.PerlinNoise(x * freq, y * freq); norm += amp; amp *= 0.5f; freq *= 2f; }
         return norm > 0 ? sum / norm : 0;
     }
 }
 
-// Animates a star's brightness/size for a twinkle effect.
+// Subtle sparkle: gentle brightness/size pulse.
 public class TwinkleStar : MonoBehaviour
 {
     float phase, speed;
@@ -349,29 +374,23 @@ public class TwinkleStar : MonoBehaviour
     void Update()
     {
         float t = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * speed + phase);
-        transform.localScale = baseScale * (0.6f + 0.6f * t);
-        if (mr != null)
-        {
-            var c = mr.material.color; c.a = 0.4f + 0.6f * t; mr.material.color = c;
-        }
+        transform.localScale = baseScale * (0.8f + 0.35f * t);   // small variation
+        if (mr != null) { var c = mr.material.color; c.a = 0.55f + 0.45f * t; mr.material.color = c; }
     }
 }
 
-// Streaks a shooting star across the near layer, then fades and self-destructs.
+// Small shooting star: a short streak that fades and self-destructs.
 public class ShootingStar : MonoBehaviour
 {
-    Vector3 velocity;
-    float life, age;
-    MeshRenderer mr;
+    Vector3 velocity; float life, age; MeshRenderer mr;
 
     public void Init(Vector3 velocity, float life)
     {
         this.velocity = velocity; this.life = life;
         mr = GetComponent<MeshRenderer>();
-        // Point the quad along its travel direction and stretch it into a streak.
         float ang = Mathf.Atan2(velocity.y, velocity.x) * Mathf.Rad2Deg;
         transform.localRotation = Quaternion.Euler(0, 0, ang);
-        transform.localScale = new Vector3(transform.localScale.x * 6f, transform.localScale.y * 0.4f, 1f);
+        transform.localScale = new Vector3(transform.localScale.x * 5f, transform.localScale.y * 0.3f, 1f);
     }
 
     void Update()
