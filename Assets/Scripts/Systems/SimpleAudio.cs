@@ -56,7 +56,7 @@ public class SimpleAudio : MonoBehaviour
         ambGO.transform.SetParent(transform, false);
         ambient = ambGO.AddComponent<AudioSource>(); ambient.playOnAwake = false;
         ambientLP = ambGO.AddComponent<AudioLowPassFilter>(); ambientLP.cutoffFrequency = 2200f; // muffled/distant
-        var echo = ambGO.AddComponent<AudioEchoFilter>(); echo.delay = 180f; echo.decayRatio = 0.3f; echo.wetMix = 0.35f; echo.dryMix = 0.9f;
+        var echo = ambGO.AddComponent<AudioEchoFilter>(); echo.delay = 220f; echo.decayRatio = 0.5f; echo.wetMix = 0.6f; echo.dryMix = 0.85f; // more echo-y, longer tail
         var reverb = ambGO.AddComponent<AudioReverbFilter>(); reverb.reverbPreset = AudioReverbPreset.Hangar;
 
         cDing = Chord(new[] { 880f, 1320f, 1760f }, 0.6f, 5f, 0.8f);
@@ -90,7 +90,7 @@ public class SimpleAudio : MonoBehaviour
         hum.clip = cHum; hum.volume = 0.5f; hum.Play();   // louder, but still a background bed
 
         ApplyVolume();
-        ambientTimer = Random.Range(7f, 12f);
+        ambientTimer = Random.Range(5f, 9f);
     }
 
     void Update()
@@ -101,7 +101,7 @@ public class SimpleAudio : MonoBehaviour
         ambientTimer -= Time.unscaledDeltaTime;
         if (ambientTimer <= 0f)
         {
-            ambientTimer = Random.Range(7f, 12f);   // sporadic
+            ambientTimer = Random.Range(5f, 9f);   // sporadic, a touch more frequent
             if (cChatter != null && cChatter.Length > 0)
             {
                 // Occasionally a "closer/clearer" one; usually faint & muffled/distant.
@@ -221,6 +221,19 @@ public class SimpleAudio : MonoBehaviour
             int gap = (int)(sr * 0.02f);
             for (int i = 0; i < gap; i++) d.Add(0f);
         }
+
+        // Smooth overall fade across the last ~45% so the message trails off instead of stopping hard.
+        int total = d.Count;
+        int fadeStart = (int)(total * 0.55f);
+        for (int i = fadeStart; i < total; i++)
+        {
+            float k = 1f - (i - fadeStart) / (float)Mathf.Max(1, total - fadeStart);
+            d[i] *= k * k;   // eased fade-out
+        }
+        // Silent tail so the echo/reverb wet signal rings out naturally past the dry sound.
+        int tail = (int)(sr * 0.5f);
+        for (int i = 0; i < tail; i++) d.Add(0f);
+
         var arr = d.ToArray();
         var c = AudioClip.Create("chatter", arr.Length, 1, sr, false); c.SetData(arr, 0); return c;
     }
