@@ -12,6 +12,13 @@ public class PlanetClick : MonoBehaviour
             return;
         }
 
+        // Unity fires OnMouseDown even when the cursor is over UI, so without this a click on an open
+        // window ALSO punched through to whatever world happened to be orbiting behind it — selecting a
+        // planet while you were trying to place a building on the surface map. Every other click handler
+        // already guards this way; this one didn't.
+        if (UnityEngine.EventSystems.EventSystem.current != null &&
+            UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
+
         // If a fleet is currently being aimed, this click is the destination confirmation — let the
         // FleetMovementController handle it instead of opening the info panel.
         if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;

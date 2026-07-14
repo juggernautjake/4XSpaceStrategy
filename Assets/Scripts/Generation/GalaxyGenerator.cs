@@ -81,16 +81,26 @@ public static class GalaxyGenerator
         LinkBodies(home);
 
         if (home.bodies.Count == 0) home.bodies.Add(new CelestialBody(CelestialBodyType.RockyPlanet));
-        var planet = home.bodies[0];
-
         Habitability.GetZone(home.combinedStar, species, out float inner, out float outer);
         float center = (inner + outer) * 0.5f;
 
+        // Promote the planet ALREADY nearest the habitable zone, and convert it where it stands.
+        //
+        // This used to grab bodies[0] — the innermost planet — and teleport it out to the zone centre,
+        // ignoring the spacing the layout had just computed. It landed the home world on top of
+        // whatever already orbited there, which is exactly how planets ended up overlapping and their
+        // orbit rings crossing. Its habitability is force-set by difficulty below and locked, so it does
+        // not actually need to sit at the centre — only to be the right KIND of world.
+        var planet = home.bodies[0];
+        float bestD = float.MaxValue;
+        foreach (var b in home.bodies)
+        {
+            float d = Mathf.Abs(b.distanceFromStar - center);
+            if (d < bestD) { bestD = d; planet = b; }
+        }
+
         planet.type = BestTypeFor(species);
         planet.surfaceSize = Random.Range(11, 17);
-        planet.distanceFromStar = center;
-        planet.orbitRadius = center;
-        planet.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(home.combinedStar, center);
         planet.orbitPhase = Random.Range(0f, 360f);
         planet.spinSpeed = OrbitalMechanics.Spin(planet, Random.Range(0.7f, 1.3f));
         SeedTerrain(planet);
@@ -110,7 +120,9 @@ public static class GalaxyGenerator
         // Moons: usually 1, sometimes 2, rarely 3.
         int moonCount = Random.value < 0.6f ? 1 : (Random.value < 0.75f ? 2 : 3);
         planet.moons.Clear();
-        float moonR = 2.6f;
+        // Start clear of the home world's own surface rather than at a fixed 2.6, which a large world
+        // (surfaceSize up to 16) came close to touching.
+        float moonR = Mathf.Max(0.6f, planet.surfaceSize * 0.08f) * 0.5f + 0.3f + 0.9f;
         for (int m = 0; m < moonCount; m++)
         {
             var moon = new CelestialBody(CelestialBodyType.Moon) { name = $"Homeworld-{(char)('a' + m)}" };
@@ -135,7 +147,7 @@ public static class GalaxyGenerator
             moon.visited = true;
             moon.explorationProgress = 1f;
             planet.moons.Add(moon);
-            moonR += Random.Range(1.6f, 2.6f);
+            moonR += 0.6f + Random.Range(1.6f, 2.6f);   // clear both moons' discs, not just "some gap"
         }
 
         planet.owner = FactionManager.Player;

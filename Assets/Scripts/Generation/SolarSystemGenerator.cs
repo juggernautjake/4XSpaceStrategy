@@ -30,6 +30,7 @@ public class SolarSystemGenerator : MonoBehaviour
         NameStars(systemName);
 
         float currentRadius = Random.Range(9f, 12f);   // clear the star + inner-moon reach
+        float prevOuterReach = 0f;                     // outermost point the previous planet's system reaches
 
         for (int i = 0; i < bodyCount; i++)
         {
@@ -54,9 +55,13 @@ public class SolarSystemGenerator : MonoBehaviour
             ApplyHabitability(body);
             POIGenerator.Populate(body);
 
-            // Moons
+            // Moons.
+            // The first moon has to clear the PLANET'S OWN SURFACE, which the old fixed 2.6 start did
+            // not: a large world's visual radius is surfaceSize * 0.08 * 0.5, so a big gas giant's
+            // surface reached past 2.6 and its innermost moon flew through it.
             int moonCount = RollMoonCount(type);
-            float moonR = 2.6f;
+            float planetVisRadius = Mathf.Max(0.6f, body.surfaceSize * 0.08f) * 0.5f;
+            float moonR = planetVisRadius + MaxMoonVisRadius + MoonSurfaceGap;
             for (int m = 0; m < moonCount; m++)
             {
                 CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
@@ -81,19 +86,61 @@ public class SolarSystemGenerator : MonoBehaviour
                 POIGenerator.Populate(moon);
 
                 body.moons.Add(moon);
-                moonR += Random.Range(1.6f, 2.6f);
+                // Consecutive moons must clear each other's discs, not just be "some distance" apart.
+                moonR += MaxMoonVisRadius * 2f + Random.Range(1.6f, 2.6f);
             }
 
             system.Add(body);
 
-            // Step outward far enough that nothing clips: clear this planet's own radius AND the reach
-            // of its moon system, plus a margin for the NEXT planet's body/inner moons, plus jitter.
-            float planetRadius = Mathf.Max(0.6f, body.surfaceSize * 0.08f);
-            float moonExtent = moonCount > 0 ? moonR + 1f : 0f;     // outer reach of the moon orbits
-            currentRadius += planetRadius + moonExtent + 8f + body.surfaceSize * 0.12f + Random.Range(0f, 3f);
+            // ---- Step outward to the next LANE ----
+            // A planet doesn't occupy a line, it occupies a BAND: its own disc plus the whole reach of
+            // its moon system, which sweeps inward and outward as the planet goes round.
+            //
+            // The old step added this planet's moon extent but nothing for the NEXT planet's, so a world
+            // with a big moon system reached back INTO the previous planet's band and the two sets of
+            // moons flew through each other. We now reserve room for both sides plus a visible gap, and
+            // remember this body's outer reach so the next lane can clear it explicitly.
+            float outerReach = OuterReach(body, moonCount, moonR);
+            prevOuterReach = currentRadius + outerReach;
+
+            // Reserve for the next planet reaching inward: its own disc + a typical moon system.
+            currentRadius = prevOuterReach + LaneGap + TypicalInnerReach + Random.Range(0f, 2.5f);
         }
 
-        // Lean towards a living world: make sure at least one planet sits in the habitable zone.
+        // ---- Orbit spacing ----
+    // Two bodies orbiting one centre can never come closer than the difference of their orbital radii
+    // (triangle inequality — inclination and tilt can't beat it). So keeping systems from intersecting
+    // is purely a matter of reserving enough RADIAL room for everything each planet drags around with it.
+
+    const float MaxMoonVisRadius = 0.3f;    // moon scale = max(0.35, surfaceSize*0.05), surfaceSize <= 12
+    const float MoonSurfaceGap = 0.9f;      // clear air between a planet's surface and its first moon
+    const float LaneGap = 6f;               // visible empty space between one planet's band and the next
+    const float TypicalInnerReach = 8f;     // room reserved for the NEXT planet's disc + moon system
+
+    /// How far a finished body's system reaches from its own orbit — its disc, or its outermost moon
+    /// plus that moon's radius. Used to keep bands apart after the fact.
+    public static float SystemReach(CelestialBody b)
+    {
+        float discRadius = Mathf.Max(0.6f, b.surfaceSize * 0.08f) * 0.5f;
+        float reach = discRadius;
+        if (b.moons != null)
+            foreach (var m in b.moons)
+                reach = Mathf.Max(reach, m.orbitRadius + Mathf.Max(0.35f, m.surfaceSize * 0.05f) * 0.5f);
+        return reach;
+    }
+
+    // How far this planet's system reaches beyond its own orbit: its disc, or the outermost moon's
+    // orbit plus that moon's own radius — whichever is greater.
+    static float OuterReach(CelestialBody body, int moonCount, float lastMoonR)
+    {
+        float discRadius = Mathf.Max(0.6f, body.surfaceSize * 0.08f) * 0.5f;
+        if (moonCount <= 0) return discRadius;
+        // lastMoonR has already been advanced past the final moon, so step back one spacing.
+        float outermost = lastMoonR - (MaxMoonVisRadius * 2f + 1.6f);
+        return Mathf.Max(discRadius, outermost + MaxMoonVisRadius + 0.5f);
+    }
+
+    // Lean towards a living world: make sure at least one planet sits in the habitable zone.
         EnsureHabitableWorld(system);
 
         return system;
@@ -120,9 +167,32 @@ public class SolarSystemGenerator : MonoBehaviour
         }
         if (best == null) return;
 
-        best.distanceFromStar = Random.Range(inner, outer);
-        best.orbitRadius = best.distanceFromStar;
-        best.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, best.orbitRadius);
+        // Re-home it INSIDE ITS OWN LANE.
+        //
+        // This used to be `Random.Range(inner, outer)` — a random radius anywhere in the habitable zone,
+        // ignoring the spacing the layout loop had just worked out. It cheerfully dropped this planet on
+        // top of a neighbour, which is how worlds ended up close enough to fly through each other. The
+        // planet may only move as far as its neighbours' bands allow; if that leaves no room inside the
+        // zone, it stays exactly where it is and we just change its TYPE, which is the point anyway.
+        float lo = inner, hi = outer;
+        int idx = system.IndexOf(best);
+        if (idx > 0)
+        {
+            var innerNb = system[idx - 1];
+            lo = Mathf.Max(lo, innerNb.distanceFromStar + SystemReach(innerNb) + LaneGap + SystemReach(best));
+        }
+        if (idx >= 0 && idx < system.Count - 1)
+        {
+            var outerNb = system[idx + 1];
+            hi = Mathf.Min(hi, outerNb.distanceFromStar - SystemReach(outerNb) - LaneGap - SystemReach(best));
+        }
+
+        if (hi > lo)
+        {
+            best.distanceFromStar = Random.Range(lo, hi);
+            best.orbitRadius = best.distanceFromStar;
+            best.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, best.orbitRadius);
+        }
 
         bool cool = currentStarType == StarType.M || currentStarType == StarType.K;
         best.type = cool ? CelestialBodyType.OceanPlanet : CelestialBodyType.RockyPlanet;
