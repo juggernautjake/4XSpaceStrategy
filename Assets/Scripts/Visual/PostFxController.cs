@@ -10,7 +10,7 @@ public class PostFxController : MonoBehaviour
 {
     public static void Create()
     {
-        if (FindObjectOfType<PostFxController>() != null) return;
+        if (FindFirstObjectByType<PostFxController>() != null) return;
         new GameObject("PostFX").AddComponent<PostFxController>();
     }
 
@@ -18,7 +18,7 @@ public class PostFxController : MonoBehaviour
     {
         try
         {
-            var cam = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
+            var cam = Camera.main != null ? Camera.main : FindFirstObjectByType<Camera>();
             if (cam != null)
             {
                 var data = cam.GetUniversalAdditionalCameraData();

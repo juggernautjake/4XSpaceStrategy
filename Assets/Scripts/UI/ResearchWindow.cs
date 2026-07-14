@@ -68,7 +68,7 @@ public class ResearchWindow : MonoBehaviour
         vlg.padding = new RectOffset(8, 8, 6, 6); vlg.spacing = 3;
         vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
         var fitter = card.gameObject.AddComponent<ContentSizeFitter>();
-        fitter.verticalFit = ContentSizeFitter.Fit.PreferredSize;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
         // Colour chip + title
         string title = discovered ? info.displayName : "??? — Undiscovered";

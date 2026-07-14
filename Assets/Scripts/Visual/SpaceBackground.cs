@@ -33,7 +33,7 @@ public class SpaceBackground : MonoBehaviour
     void Awake()
     {
         Instance = this;
-        cam = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
+        cam = Camera.main != null ? Camera.main : FindFirstObjectByType<Camera>();
     }
 
     void Start()
@@ -100,7 +100,7 @@ public class SpaceBackground : MonoBehaviour
 
     public void Rebuild()
     {
-        if (cam == null) cam = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
+        if (cam == null) cam = Camera.main != null ? Camera.main : FindFirstObjectByType<Camera>();
         if (cam == null) return;
 
         // Clear previous
