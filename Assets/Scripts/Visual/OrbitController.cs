@@ -1,148 +1,197 @@
-﻿using UnityEngine;
-using System.Collections;
+using UnityEngine;
 
-[RequireComponent(typeof(LineRenderer))]
+// Drives a body's orbit around a parent and draws its orbit ring.
+//
+// KEY FIX vs the original: the orbit ring used to be parented to the (scaled) star/planet
+// transform, so the ring inherited that scale and never lined up with the body. The ring is now
+// parented to the unscaled system container and positioned in world space each frame, so it always
+// matches the body — for planets AND moving moons.
+//
+// Adds a full set of live-editable parameters: radius, speed, starting phase, direction,
+// inclination (tilt), eccentricity (elliptical orbits), vertical offset, and ring visibility/colour.
 public class OrbitController : MonoBehaviour
 {
-    [Header("Orbit Settings")]
+    [Header("Orbit")]
     public Transform parentBody;
-    public float orbitRadius = 10f;
-    public float orbitSpeed = 20f;
+    public float orbitRadius = 10f;   // semi-major axis
+    public float orbitSpeed = 8f;     // angular speed in DEGREES PER SECOND (physically defaulted)
+    public float phase = 0f;          // starting angle, degrees
+    public int direction = 1;         // +1 CCW, -1 CW
+    public float inclination = 0f;    // tilt of orbit plane, degrees
+    [Range(0f, 0.7f)] public float eccentricity = 0f;
+    public float verticalOffset = 0f;
+    public float spinSpeed = 0f;      // axial rotation, degrees per second
 
-    [Header("Visual Ring")]
-    public int segments = 120;
-    public float lineWidth = 0.1f;
+    [Header("Ring")]
+    public int segments = 128;
+    public float lineWidth = 0.08f;
+    public bool ringVisible = true;
     public Color ringColor = new Color(0.4f, 0.7f, 1f, 0.6f);
 
-    private LineRenderer lineRenderer;
-    private float currentAngle = 0f;
-    private Transform ringTransform;
+    float currentAngle;
+    LineRenderer orbitRing;
+    LineRenderer habitableRing;
+    Transform Container => transform.parent; // unscaled system container
 
-    private void Awake()
-    {
-        lineRenderer = GetComponent<LineRenderer>();
-    }
+    // ---- Setup ----
 
     public void Setup(Transform parent, float radius, float speed)
     {
         parentBody = parent;
         orbitRadius = radius;
         orbitSpeed = speed;
-
-        if (parentBody == null)
-        {
-            Debug.LogWarning($"Setup: null parent on {gameObject.name}");
-            return;
-        }
-
-        currentAngle = Random.Range(0f, 360f);
-        CreateOrbitRing();
+        currentAngle = phase != 0f ? phase : Random.Range(0f, 360f);
+        BuildRing();
         UpdatePosition();
-
-        Debug.Log($"Setup OK for {gameObject.name} | Parent: {parentBody.name} | R:{orbitRadius:F1} S:{orbitSpeed:F1}");
     }
 
-    private void CreateOrbitRing()
+    // Preferred setup: pull every orbital parameter from the data model.
+    public void SetupFromData(Transform parent, CelestialBody data)
     {
-        if (ringTransform != null) Destroy(ringTransform.gameObject);
-
-        GameObject ringObj = new GameObject(gameObject.name + "_OrbitRing");
-        ringTransform = ringObj.transform;
-        ringTransform.SetParent(parentBody); // ← Child of planet (stable!)
-        ringTransform.localPosition = Vector3.zero;
-
-        LineRenderer ringLR = ringObj.AddComponent<LineRenderer>();
-        ringLR.loop = true;
-        ringLR.positionCount = segments;
-        ringLR.startWidth = lineWidth;
-        ringLR.endWidth = lineWidth;
-        ringLR.useWorldSpace = false; // Local space now
-        ringLR.material = new Material(Shader.Find("Sprites/Default"));
-        ringLR.startColor = ringColor;
-        ringLR.endColor = ringColor;
-
-        DrawRing(ringLR);
-        Debug.Log($"[CreateOrbitRing] Ring created as child of {parentBody.name} for {gameObject.name}");
+        parentBody = parent;
+        orbitRadius = data.orbitRadius;
+        orbitSpeed = data.orbitSpeed;
+        phase = data.orbitPhase;
+        direction = data.orbitDirection == 0 ? 1 : data.orbitDirection;
+        inclination = data.inclination;
+        eccentricity = data.eccentricity;
+        verticalOffset = data.verticalOffset;
+        spinSpeed = data.spinSpeed;
+        ringVisible = data.showRing;
+        currentAngle = phase;
+        BuildRing();
+        UpdatePosition();
     }
 
-    private void DrawRing(LineRenderer ringLR)
+    void BuildRing()
     {
-        if (ringLR == null) return;
+        if (orbitRing == null)
+        {
+            var go = new GameObject(gameObject.name + "_OrbitRing");
+            go.transform.SetParent(Container, false);
+            orbitRing = go.AddComponent<LineRenderer>();
+            orbitRing.useWorldSpace = false;
+            orbitRing.loop = true;
+            orbitRing.material = new Material(Shader.Find("Sprites/Default"));
+            orbitRing.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            orbitRing.receiveShadows = false;
+        }
+        orbitRing.startWidth = orbitRing.endWidth = lineWidth;
+        orbitRing.startColor = orbitRing.endColor = ringColor;
+        DrawEllipse(orbitRing, orbitRadius, SemiMinor(orbitRadius, eccentricity));
+        orbitRing.enabled = ringVisible;
+    }
 
+    float SemiMinor(float a, float e) => a * Mathf.Sqrt(Mathf.Max(0.0001f, 1f - e * e));
+
+    void DrawEllipse(LineRenderer lr, float a, float b)
+    {
+        lr.positionCount = segments;
         for (int i = 0; i < segments; i++)
         {
-            float angle = i * Mathf.PI * 2f / segments;
-            Vector3 localPos = new Vector3(
-                Mathf.Cos(angle) * orbitRadius,
-                0f,
-                Mathf.Sin(angle) * orbitRadius
-            );
-            ringLR.SetPosition(i, localPos);
+            float ang = i * Mathf.PI * 2f / segments;
+            lr.SetPosition(i, new Vector3(Mathf.Cos(ang) * a, 0f, Mathf.Sin(ang) * b));
         }
     }
 
-    private void Update()
+    // ---- Per-frame motion ----
+
+    void Update()
     {
         if (parentBody == null) return;
-
-        float angularSpeed = orbitSpeed / Mathf.Max(1f, orbitRadius);
-        currentAngle += angularSpeed * Time.deltaTime;
+        // orbitSpeed is now an angular speed in deg/sec (Kepler-defaulted, dev-overridable).
+        currentAngle += direction * orbitSpeed * Time.deltaTime;
+        if (spinSpeed != 0f) transform.Rotate(0f, spinSpeed * Time.deltaTime, 0f, Space.Self);
         UpdatePosition();
     }
+
+    public void SetSpin(float v) { spinSpeed = v; }
 
     public void UpdatePosition()
     {
         if (parentBody == null) return;
 
+        float a = orbitRadius;
+        float b = SemiMinor(orbitRadius, eccentricity);
         float rad = currentAngle * Mathf.Deg2Rad;
-        Vector3 offset = new Vector3(
-            Mathf.Cos(rad) * orbitRadius,
-            0f,
-            Mathf.Sin(rad) * orbitRadius
-        );
+
+        Vector3 local = new Vector3(Mathf.Cos(rad) * a, 0f, Mathf.Sin(rad) * b);
+        Quaternion tilt = Quaternion.Euler(inclination, 0f, 0f);
+        Vector3 offset = tilt * local + Vector3.up * verticalOffset;
+
         transform.position = parentBody.position + offset;
-    }
 
-    public void SetRadius(float newRadius)
-    {
-        float old = orbitRadius;
-        orbitRadius = Mathf.Max(1f, newRadius);
-        Debug.Log($"[SetRadius] {old:F1} → {orbitRadius:F1} on {gameObject.name}");
-
-        if (ringTransform != null)
+        // Keep the orbit ring glued to (and tilted like) the orbit, following moving parents.
+        if (orbitRing != null)
         {
-            LineRenderer lr = ringTransform.GetComponent<LineRenderer>();
-            if (lr != null) DrawRing(lr);
+            orbitRing.transform.position = parentBody.position + Vector3.up * verticalOffset;
+            orbitRing.transform.rotation = tilt;
         }
-
-        // Force immediate position update
-        UpdatePosition();
+        // Green habitability highlight sits on the body itself.
+        if (habitableRing != null)
+            habitableRing.transform.position = transform.position;
     }
 
-    public void SetSpeed(float newSpeed)
+    // ---- Live setters (used by the orbit control panel for real-time editing) ----
+
+    public void SetRadius(float v)      { orbitRadius = Mathf.Max(1f, v); RedrawRing(); UpdatePosition(); }
+    public void SetSpeed(float v)       { orbitSpeed = v; }
+    public void SetPhase(float v)       { phase = v; currentAngle = v; UpdatePosition(); }
+    public void SetDirection(int d)     { direction = d >= 0 ? 1 : -1; }
+    public void SetInclination(float v) { inclination = v; RedrawRing(); UpdatePosition(); }
+    public void SetEccentricity(float v){ eccentricity = Mathf.Clamp(v, 0f, 0.7f); RedrawRing(); UpdatePosition(); }
+    public void SetVerticalOffset(float v){ verticalOffset = v; UpdatePosition(); }
+
+    public void SetRingVisible(bool v)  { ringVisible = v; if (orbitRing != null) orbitRing.enabled = v; }
+    public void SetRingColor(Color c)   { ringColor = c; if (orbitRing != null) orbitRing.startColor = orbitRing.endColor = c; }
+
+    public void RedrawRing()
     {
-        orbitSpeed = newSpeed;
-        Debug.Log($"[SetSpeed] Changed to {newSpeed:F1} on {gameObject.name}");
+        if (orbitRing != null)
+            DrawEllipse(orbitRing, orbitRadius, SemiMinor(orbitRadius, eccentricity));
     }
+
+    public void ForceRingRedraw() => RedrawRing();
 
     public void RestoreParent(Transform parent)
     {
         parentBody = parent;
-        if (ringTransform != null) ringTransform.SetParent(parent);
-        Debug.Log($"Restored parent for {gameObject.name}");
+        UpdatePosition();
     }
 
-    private void OnDestroy()
-    {
-        if (ringTransform != null) Destroy(ringTransform.gameObject);
-    }
+    // ---- Green habitable-zone highlight ring around the body ----
 
-    public void ForceRingRedraw()
+    public void SetHabitableHighlight(bool on)
     {
-        if (ringTransform != null)
+        if (on)
         {
-            LineRenderer lr = ringTransform.GetComponent<LineRenderer>();
-            if (lr != null) DrawRing(lr);
+            if (habitableRing == null)
+            {
+                var go = new GameObject(gameObject.name + "_HabitableRing");
+                go.transform.SetParent(Container, false);
+                habitableRing = go.AddComponent<LineRenderer>();
+                habitableRing.useWorldSpace = false;
+                habitableRing.loop = true;
+                habitableRing.material = new Material(Shader.Find("Sprites/Default"));
+                habitableRing.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                Color green = new Color(0.25f, 1f, 0.35f, 0.95f);
+                habitableRing.startColor = habitableRing.endColor = green;
+                float r = Mathf.Max(1.2f, transform.lossyScale.x * 1.4f);
+                habitableRing.startWidth = habitableRing.endWidth = 0.12f;
+                DrawEllipse(habitableRing, r, r);
+            }
+            habitableRing.enabled = true;
+            UpdatePosition();
         }
+        else if (habitableRing != null)
+        {
+            habitableRing.enabled = false;
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (orbitRing != null) Destroy(orbitRing.gameObject);
+        if (habitableRing != null) Destroy(habitableRing.gameObject);
     }
 }

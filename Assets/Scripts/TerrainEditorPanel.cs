@@ -79,6 +79,9 @@ public class TerrainEditorPanel : MonoBehaviour
             ridgeStr
         );
 
+        // Re-seed ore deposits so the mineral markers persist after a regenerate.
+        OreGenerator.Populate(currentBody);
+
         // Refresh the grid in the UI
         if (PlanetUI.Instance != null && PlanetUI.Instance.gridVisualizer != null)
         {

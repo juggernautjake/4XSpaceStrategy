@@ -1,7 +1,10 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class GameManager : MonoBehaviour
 {
+    public static GameManager Instance;
+
     [Header("Generation")]
     public SolarSystemGenerator solarSystemGenerator;
 
@@ -13,7 +16,12 @@ public class GameManager : MonoBehaviour
 
     public bool isEditMode = false;   // Toggle this to enter/exit sandbox mode
 
-    private void Start()
+    public List<CelestialBody> CurrentBodies { get; private set; } = new List<CelestialBody>();
+    public StarData CurrentStar { get; private set; }
+
+    void Awake() { Instance = this; }
+
+    void Start()
     {
         GenerateStartingSystem();
     }
@@ -26,27 +34,38 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        Debug.Log("=== Generating New Solar System ===");
+        ResearchManager.NewGame();
 
-        var bodies = solarSystemGenerator.GenerateSystem();  // Use solarSystemGenerator
+        CurrentBodies = solarSystemGenerator.GenerateSystem();
+        CurrentStar = solarSystemGenerator.currentStar;
 
-        Debug.Log($"Successfully generated {bodies.Count} celestial bodies!");
+        Debug.Log($"Generated {CurrentBodies.Count} bodies around a {CurrentStar.type}-type star " +
+                  $"(HZ: {(CurrentStar.hasHabitableZone ? $"{CurrentStar.hzInner:F1}-{CurrentStar.hzOuter:F1}" : "none")}).");
 
-        // Log details...
-        for (int i = 0; i < bodies.Count; i++)
+        Visualize();
+    }
+
+    // Used by the save system to display a loaded system.
+    public void LoadSystem(List<CelestialBody> bodies, StarData star)
+    {
+        CurrentBodies = bodies;
+        CurrentStar = star;
+        if (solarSystemGenerator != null)
         {
-            var body = bodies[i];
-            Debug.Log($"Body {i + 1}: {body.type} | Size: {body.surfaceSize} | Moons: {body.moons.Count}");
+            solarSystemGenerator.currentStar = star;
+            solarSystemGenerator.currentStarType = star.type;
         }
+        Visualize();
+    }
 
-        if (systemVisualizer != null)
-        {
-            systemVisualizer.solarSystemGenerator = solarSystemGenerator;
-            systemVisualizer.VisualizeSystem(bodies, solarSystemGenerator.currentStarType);
-        }
-        else
+    void Visualize()
+    {
+        if (systemVisualizer == null)
         {
             Debug.LogWarning("SystemVisualizer not assigned!");
+            return;
         }
+        systemVisualizer.solarSystemGenerator = solarSystemGenerator;
+        systemVisualizer.VisualizeSystem(CurrentBodies, CurrentStar);
     }
 }

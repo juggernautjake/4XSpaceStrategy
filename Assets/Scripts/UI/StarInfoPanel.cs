@@ -1,0 +1,73 @@
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+// Opens when the star is clicked. Shows the star's physical attributes (heat/light/mass) and a
+// toggle that reveals the green Goldilocks zone (and green rings on habitable worlds).
+public class StarInfoPanel : MonoBehaviour
+{
+    public static StarInfoPanel Instance;
+
+    GameObject root;
+    TMP_Text titleText;
+    TMP_Text body;
+    Toggle zoneToggle;
+    bool suppress;
+
+    public static void Create(Transform parent)
+    {
+        if (Instance != null) return;
+        var go = new GameObject("StarInfoPanel");
+        go.transform.SetParent(parent, false);
+        Instance = go.AddComponent<StarInfoPanel>();
+        Instance.Build(parent);
+    }
+
+    void Build(Transform parent)
+    {
+        var content = UIFactory.Window(parent, "Star", new Vector2(320, 300), out root, out titleText);
+        var rt = root.GetComponent<RectTransform>();
+        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = new Vector2(-260, 60);
+
+        UIFactory.VerticalLayout(content, 8);
+        body = UIFactory.Label(content, "", UITheme.BodySize, UITheme.Text, 180);
+        body.alignment = TextAlignmentOptions.TopLeft;
+
+        zoneToggle = UIFactory.Toggle(content, "Show Habitable Zone", false, on =>
+        {
+            if (suppress) return;
+            if (SystemContext.Zone != null) SystemContext.Zone.SetVisible(on);
+        });
+
+        root.SetActive(false);
+    }
+
+    public void Show(StarData star)
+    {
+        if (star == null) return;
+        titleText.text = $"{star.type}-type Star";
+
+        string hz = star.hasHabitableZone
+            ? $"{star.hzInner:F1} – {star.hzOuter:F1} units"
+            : "<color=#FF6659>none (too hot / short-lived)</color>";
+
+        body.text =
+            $"Class: {star.type}\n" +
+            $"Temperature: {star.temperatureK:N0} K\n" +
+            $"Luminosity: {star.luminosity:0.##} × Sun\n" +
+            $"Mass: {OrbitalMechanics.StarMass(star.type):0.##} × Sun\n" +
+            $"Light intensity: {star.lightIntensity:0.0}\n\n" +
+            $"<b>Habitable Zone:</b> {hz}";
+
+        suppress = true;
+        zoneToggle.isOn = SystemContext.Zone != null && SystemContext.Zone.IsVisible;
+        zoneToggle.interactable = star.hasHabitableZone;
+        suppress = false;
+
+        root.SetActive(true);
+        root.GetComponent<RectTransform>().SetAsLastSibling();
+    }
+
+    public void Hide() { if (root != null) root.SetActive(false); }
+}

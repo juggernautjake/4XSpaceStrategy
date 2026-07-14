@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 public class SystemVisualizer : MonoBehaviour
 {
-    public SolarSystemGenerator solarSystemGenerator; // Assign in Inspector on the GameManager object
+    public SolarSystemGenerator solarSystemGenerator;
 
     [Header("Prefabs")]
     public GameObject planetPrefab;
@@ -12,7 +12,10 @@ public class SystemVisualizer : MonoBehaviour
     [Header("References")]
     public Transform systemParent;
 
-    public void VisualizeSystem(List<CelestialBody> bodies, StarType starType)
+    GameObject starObject;
+
+    // New preferred entry point: full star data drives light/heat and the habitable zone.
+    public void VisualizeSystem(List<CelestialBody> bodies, StarData star)
     {
         if (planetPrefab == null || systemParent == null)
         {
@@ -20,106 +23,96 @@ public class SystemVisualizer : MonoBehaviour
             return;
         }
 
-        // Clear old visuals (important when regenerating from sandbox)
         foreach (Transform child in systemParent)
             Destroy(child.gameObject);
 
-        // === Spawn Central Star ===
-        GameObject starObj = starPrefab != null
+        // === Star ===
+        starObject = starPrefab != null
             ? Instantiate(starPrefab, systemParent)
             : GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        if (starObject.transform.parent != systemParent) starObject.transform.SetParent(systemParent);
+        starObject.name = "Star";
+        starObject.transform.localPosition = Vector3.zero;
+        starObject.transform.localScale = Vector3.one * star.visualScale;
 
-        starObj.name = "Star";
-        starObj.transform.localScale = Vector3.one * 3.5f;
+        var starRend = starObject.GetComponent<Renderer>();
+        if (starRend != null)
+        {
+            starRend.material.color = star.color;
+            starRend.material.EnableKeyword("_EMISSION");
+            starRend.material.SetColor("_EmissionColor", star.color * 1.5f);
+        }
+        if (starObject.GetComponent<Collider>() == null)
+            starObject.AddComponent<SphereCollider>();
 
-        float currentRadius = 8f; // Starting distance from center
+        // Starlight (heat/light made visible).
+        var lightGo = new GameObject("StarLight");
+        lightGo.transform.SetParent(starObject.transform, false);
+        var light = lightGo.AddComponent<Light>();
+        light.type = LightType.Point;
+        light.color = star.color;
+        light.intensity = star.lightIntensity;
+        light.range = 600f;
 
-        // === Spawn Planets ===
+        var starInfo = starObject.GetComponent<StarInteraction>() ?? starObject.AddComponent<StarInteraction>();
+        starInfo.star = star;
+
+        // === Planets ===
         for (int i = 0; i < bodies.Count; i++)
         {
-            var bodyData = bodies[i];
+            var body = bodies[i];
             GameObject visual = Instantiate(planetPrefab, systemParent);
-            visual.name = bodyData.type.ToString();
+            visual.name = body.name;
+            body.visualObject = visual;
 
-            // Link data to visual
-            bodyData.visualObject = visual;
+            visual.transform.localScale = Vector3.one * Mathf.Max(0.6f, body.surfaceSize * 0.08f);
 
-            // Visual scale based on surface size
-            float scale = Mathf.Max(0.6f, bodyData.surfaceSize * 0.08f);
-            visual.transform.localScale = Vector3.one * scale;
+            var click = visual.GetComponent<PlanetClick>();
+            if (click != null) click.data = body;
 
-            // Clicking support
-            PlanetClick clickHandler = visual.GetComponent<PlanetClick>();
-            if (clickHandler != null) clickHandler.data = bodyData;
+            var oc = visual.AddComponent<OrbitController>();
+            oc.SetupFromData(starObject.transform, body);
 
-            // === ORBIT SETUP ===
-            OrbitController orbitController = visual.AddComponent<OrbitController>();
-
-            // Get speed from generator (Kepler-like)
-            float orbitSpeed = solarSystemGenerator.GetOrbitSpeed(bodyData.type, currentRadius);
-
-            // Setup the orbit (this creates the ring and starts movement)
-            orbitController.Setup(starObj.transform, currentRadius, orbitSpeed);
-
-            Debug.Log($"Added OrbitController to {visual.name} | Radius: {currentRadius:F1} | Speed: {orbitSpeed:F1}");
-
-            // Color the planet
-            Renderer rend = visual.GetComponent<Renderer>();
-            if (rend != null)
-                rend.material.color = GetColorForType(bodyData.type);
-
-            // Move outward for next planet
-            currentRadius += 5f + (bodyData.surfaceSize * 0.25f);
+            // Texture the globe with its own surface map + atmosphere.
+            PlanetAppearance.Apply(body, visual);
         }
 
-        // === Spawn Moons ===
-        for (int i = 0; i < bodies.Count; i++)
+        // === Moons ===
+        foreach (var body in bodies)
         {
-            var planetData = bodies[i];
-            var planetVisual = planetData.visualObject;
-            if (planetVisual == null || planetData.moons.Count == 0) continue;
-
-            foreach (var moonData in planetData.moons)
+            if (body.visualObject == null) continue;
+            foreach (var moon in body.moons)
             {
-                moonData.parentBody = planetData;
+                moon.parentBody = body;
                 GameObject moonVisual = Instantiate(planetPrefab, systemParent);
-                moonVisual.name = "Moon of " + planetVisual.name;
+                moonVisual.name = moon.name;
+                moon.visualObject = moonVisual;
+                moonVisual.transform.localScale = Vector3.one * Mathf.Max(0.35f, moon.surfaceSize * 0.05f);
 
-                // Smaller visual scale for moons
-                moonVisual.transform.localScale = Vector3.one * (moonData.surfaceSize * 0.05f);
-                moonData.visualObject = moonVisual;
+                var moonClick = moonVisual.GetComponent<PlanetClick>();
+                if (moonClick != null) moonClick.data = moon;
 
-                // === MOON ORBIT SETUP ===
-                OrbitController moonOrbit = moonVisual.AddComponent<OrbitController>();
-                float moonRadius = Random.Range(2.5f, 5f);
-                float moonSpeed = Random.Range(40f, 80f);
+                var moc = moonVisual.AddComponent<OrbitController>();
+                moc.SetupFromData(body.visualObject.transform, moon);
 
-                // Setup with correct values
-                moonOrbit.Setup(planetVisual.transform, moonRadius, moonSpeed);
-
-                // Ensure data is stored
-                moonData.orbitRadius = moonRadius;  // Add this line if not present
-                moonData.orbitSpeed = moonSpeed;     // Add this line if not present
-
-                // Clicking
-                PlanetClick moonClick = moonVisual.GetComponent<PlanetClick>();
-                if (moonClick != null) moonClick.data = moonData;
-
-                Debug.Log($"Spawned moon for {planetVisual.name} | Radius: {moonRadius:F1} | Speed: {moonSpeed:F1}");
+                PlanetAppearance.Apply(moon, moonVisual);
             }
         }
+
+        // === Habitable zone ===
+        var zoneGo = new GameObject("HabitableZone");
+        zoneGo.transform.SetParent(systemParent, false);
+        var zone = zoneGo.AddComponent<HabitableZoneVisualizer>();
+        zone.Build(star, starObject.transform, bodies);
+
+        // Set Zone first so OnSystemChanged handlers (species recompute) see the new zone.
+        SystemContext.Zone = zone;
+        SystemContext.Set(bodies, star, starObject.transform, systemParent, this);
     }
 
-    private Color GetColorForType(CelestialBodyType type)
+    // Back-compat overload (StarType only).
+    public void VisualizeSystem(List<CelestialBody> bodies, StarType starType)
     {
-        switch (type)
-        {
-            case CelestialBodyType.GasGiant: return new Color(0.9f, 0.7f, 0.4f);
-            case CelestialBodyType.IcePlanet: return Color.cyan;
-            case CelestialBodyType.VolcanicPlanet: return new Color(0.8f, 0.2f, 0.1f);
-            case CelestialBodyType.OceanPlanet: return new Color(0.2f, 0.5f, 0.9f);
-            case CelestialBodyType.BarrenPlanet: return Color.gray;
-            default: return Color.green;
-        }
+        VisualizeSystem(bodies, StarDatabase.Get(starType));
     }
 }
