@@ -7,28 +7,15 @@ public enum SurfaceIndexKind { None, Mineral, Heat, Fertile, Weather }
 // Per-tile survey indexes.
 //
 // These are DERIVED, never stored: a tile's mineral wealth, heat, fertility and weather all fall out of
-// its biome, its ore, and a stable hash of its position and the world's terrain seed. That means they
-// cost nothing to save, they survive a reload untouched, and a world re-rolled from the same seed reads
-// the same way — the same guarantee the terrain itself already makes.
+// its biome, its ore, and a noise field sampled from its position and the world's terrain seed. That
+// means they cost nothing to save, they survive a reload untouched, and a world re-rolled from the same
+// seed reads the same way — the same guarantee the terrain itself already makes.
 //
 // Gating: a basic survey reveals the Mineral index (you can see the seams from orbit). Heat, Fertility
 // and Weather need a DEEP survey — a research ship actually working the world — which is what makes
 // "come back with a science vessel" worth doing.
 public static class SurfaceIndex
 {
-    // Stable per-tile noise in 0..1. Deterministic from the world's seed and the tile's position, so it
-    // never changes and never needs saving.
-    static float Hash(CelestialBody b, int x, int y, int salt)
-    {
-        unchecked
-        {
-            int h = (int)b.terrainSeed;
-            h = h * 73856093 ^ x * 19349663 ^ y * 83492791 ^ salt * 2971215073;
-            h &= 0x7fffffff;
-            return (h % 10007) / 10007f;
-        }
-    }
-
     // Smooth blobs rather than per-tile static, so a rich area reads as a REGION you can fit a building
     // into rather than a spray of unrelated pixels. That matters: the whole point of the overlays is to
     // find a good patch to place a multi-tile footprint on.
