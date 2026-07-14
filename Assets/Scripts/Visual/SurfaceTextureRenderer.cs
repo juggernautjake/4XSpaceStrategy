@@ -7,6 +7,56 @@ using UnityEngine;
 // regions are visible.
 public static class SurfaceTextureRenderer
 {
+    // ============================================================================================
+    // GRID-RESOLUTION render: EXACTLY ONE TEXEL PER GRID CELL.
+    //
+    // Build() below renders at 6x the grid (surfaceSize * 2 * 6 wide) because it's a pretty read-only
+    // map. That is fine there — but the Planet View is a BUILD grid, and a building's footprint is
+    // measured in grid cells. Showing 6x6 terrain texels underneath a one-cell tile is what made the
+    // structures look six times too big: they weren't wrong, the terrain was finer than the grid.
+    //
+    // This reads body.surface.tiles DIRECTLY rather than re-sampling the noise at a matching
+    // resolution. That's a stronger guarantee than matching numbers: the terrain you see IS the grid
+    // the placement code tests against, so a tile and a footprint cell cannot drift apart — there is
+    // only one grid.
+    // ============================================================================================
+    public static Texture2D BuildGrid(CelestialBody body)
+    {
+        if (body?.surface == null) return null;
+        int w = body.surface.width, h = body.surface.height;
+
+        var tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
+        {
+            filterMode = FilterMode.Point,   // hard cell edges: each texel reads as one buildable tile
+            wrapMode = TextureWrapMode.Clamp
+        };
+
+        var pixels = new Color[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                var tile = body.surface.tiles[x, y];
+                if (tile == null) { pixels[y * w + x] = Color.black; continue; }
+
+                // Per-type colour, so every terrain type stays clearly distinguishable.
+                Color c = TerrainColorMap.Get(tile.type);
+
+                // The same per-tile shade jitter the detailed map uses, so the two views still look
+                // like the same world — just at different fidelity.
+                float b = Mathf.Lerp(0.86f, 1.12f, tile.shade);
+                c = new Color(c.r * b, c.g * b, c.b * b, 1f);
+
+                if (tile.HasOre)
+                    c = Color.Lerp(c, OreDatabase.Get(tile.ore).color, 0.35f);
+
+                pixels[y * w + x] = new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
+            }
+
+        tex.SetPixels(pixels);
+        tex.Apply();
+        return tex;
+    }
+
     public static Texture2D Build(CelestialBody body)
     {
         int w = Mathf.Clamp(body.surfaceSize * 2 * 6, 96, 384);

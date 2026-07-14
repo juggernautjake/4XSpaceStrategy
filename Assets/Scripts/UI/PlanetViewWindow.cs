@@ -175,7 +175,19 @@ public class PlanetViewWindow : MonoBehaviour
     void RefreshMapTexture()
     {
         if (body == null) return;
-        mapImage.texture = Pastel(SurfaceTextureRenderer.Build(body));
+
+        // GRID resolution, not the 6x detail render: one texel per buildable cell, so a terrain tile
+        // and a building tile are the same tile. Anything else and footprints look oversized because
+        // the terrain under them is finer than the grid they actually occupy.
+        //
+        // Rebuilt on every open rather than cached by body id, because terraforming can remodel a
+        // world's terrain outright and a cache keyed only on identity would show the planet it used
+        // to be.
+        var src = SurfaceTextureRenderer.BuildGrid(body);
+        BuildPastel(src);
+        if (src != null) Destroy(src);      // Pastel copied it; the source would otherwise leak
+
+        mapImage.texture = pastelTex;
         titleText.text = $"Planet View — {body.name}";
         ApplyMapSize();
     }
@@ -188,17 +200,15 @@ public class PlanetViewWindow : MonoBehaviour
     // whole map toward the dark panel behind it, which crushes the differences BETWEEN terrain types —
     // exactly the information the map exists to convey. Pastel keeps the hue relationships intact and
     // only gives up intensity.
-    Texture2D pastelTex; int pastelFor = -1;
+    Texture2D pastelTex;
 
-    Texture2D Pastel(Texture2D src)
+    void BuildPastel(Texture2D src)
     {
-        if (src == null) return null;
-        if (pastelTex != null && pastelFor == body.id &&
-            pastelTex.width == src.width && pastelTex.height == src.height) return pastelTex;
+        if (src == null) return;
 
         if (pastelTex != null) Destroy(pastelTex);
         pastelTex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false)
-        { filterMode = src.filterMode, wrapMode = TextureWrapMode.Clamp };
+        { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
 
         var px = src.GetPixels();
         for (int i = 0; i < px.Length; i++)
@@ -213,8 +223,6 @@ public class PlanetViewWindow : MonoBehaviour
         }
         pastelTex.SetPixels(px);
         pastelTex.Apply();
-        pastelFor = body.id;
-        return pastelTex;
     }
 
     // Size the map from MapMetrics, exactly like the detailed viewer does, instead of stretching the
