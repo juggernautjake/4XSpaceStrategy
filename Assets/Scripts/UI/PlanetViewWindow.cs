@@ -25,7 +25,7 @@ public class PlanetViewWindow : MonoBehaviour
 {
     public static PlanetViewWindow Instance;
 
-    public enum Tab { Info, Build, Survey }
+    public enum Tab { Info, Build, Infrastructure, Survey }
 
     GameObject root;
     TMP_Text titleText;
@@ -49,6 +49,12 @@ public class PlanetViewWindow : MonoBehaviour
     readonly LiveSet live = new LiveSet();
     string lastSig = null;
     Texture2D overlayTex;
+
+    // Selection marker (see DrawSelectionMarker / AnimateMarker).
+    RectTransform markerLayer;
+    Image markerRing, markerArrow;
+    float markerRingBase, markerArrowBaseY;
+    PlacedBuilding lastMarkedSelection;
 
     // The map is sized per body from MapMetrics (see ApplyMapSize) so one grid cell is always exactly a
     // detailed-map tile. These are only the initial/fallback dimensions before a world is selected.
@@ -99,6 +105,12 @@ public class PlanetViewWindow : MonoBehaviour
         UIFactory.Stretch(pieceLayer);
         var plImg = pieceLayer.gameObject.AddComponent<Image>();
         plImg.color = new Color(0, 0, 0, 0); plImg.raycastTarget = false;
+
+        // Above the pieces so the ring/arrow are never hidden behind a structure's own tiles.
+        markerLayer = UIFactory.NewUI(mapRT, "Markers").GetComponent<RectTransform>();
+        UIFactory.Stretch(markerLayer);
+        var mlImg = markerLayer.gameObject.AddComponent<Image>();
+        mlImg.color = new Color(0, 0, 0, 0); mlImg.raycastTarget = false;
 
         ghostLayer = UIFactory.NewUI(mapRT, "Ghost").GetComponent<RectTransform>();
         UIFactory.Stretch(ghostLayer);
@@ -216,6 +228,16 @@ public class PlanetViewWindow : MonoBehaviour
         live.Tick();
         PollHover();
 
+        // The selection marker is rebuilt only when the SELECTION changes — not on the signature, since
+        // clicking a building must move the ring instantly without tearing down the whole side panel.
+        SurfaceSelection.Validate();
+        if (SurfaceSelection.Selected != lastMarkedSelection)
+        {
+            lastMarkedSelection = SurfaceSelection.Selected;
+            DrawSelectionMarker();
+        }
+        AnimateMarker();
+
         // Rotate the held piece 90° — before it snaps to the grid and after. Handled here rather than on
         // the map so it works the moment you pick a building up, wherever the cursor happens to be.
         // R is offered alongside right-click because right-click is also the world's "send fleet" verb,
@@ -293,6 +315,7 @@ public class PlanetViewWindow : MonoBehaviour
         {
             case Tab.Info: BuildInfoPanel(); break;
             case Tab.Build: BuildBuildPanel(); break;
+            case Tab.Infrastructure: BuildInfrastructurePanel(); break;
             case Tab.Survey: BuildSurveyPanel(); break;
         }
 
@@ -560,6 +583,119 @@ public class PlanetViewWindow : MonoBehaviour
         }
     }
 
+    // ---------------- INFRASTRUCTURE ----------------
+    // Everything standing on this world: what it is, its tech level, its condition, and how well it was
+    // sited. Clicking a row selects that structure and moves the map's ring/arrow onto it — the list
+    // half of "select by clicking the map, or the list".
+    void BuildInfrastructurePanel()
+    {
+        Header("BUILT ON THIS WORLD");
+
+        var placed = SurfaceBuildManager.On(body);
+        if (placed.Count == 0)
+        {
+            Note("Nothing built here yet. Use the Build tab to develop the surface.");
+            return;
+        }
+
+        var summary = UIFactory.WrapText(sidePanel, "", UITheme.SmallSize, UITheme.SubText);
+        live.Text(summary, () =>
+        {
+            int n = SurfaceBuildManager.On(body).Count;
+            return $"{n} structure(s) · {SurfaceBuildManager.Density(body) * 100f:F0}% of buildable land developed";
+        });
+
+        // Grouped by category so a long list stays navigable, matching the build tray.
+        foreach (SurfaceBuildingCategory cat in System.Enum.GetValues(typeof(SurfaceBuildingCategory)))
+        {
+            bool headerAdded = false;
+            foreach (var p in new List<PlacedBuilding>(placed))
+            {
+                if (p.Info.category != cat) continue;
+                if (!headerAdded) { Header(CategoryName(cat)); headerAdded = true; }
+                BuildInfraRow(p);
+            }
+        }
+    }
+
+    void BuildInfraRow(PlacedBuilding p)
+    {
+        var cap = p;
+        var card = Card();
+
+        // The card itself is the click target, so the whole row selects — not just a button on it.
+        var bg = card.GetComponent<Image>();
+        var btn = card.gameObject.AddComponent<Button>();
+        btn.targetGraphic = bg;
+        var colors = btn.colors;
+        colors.normalColor = UITheme.RowBg;
+        colors.highlightedColor = UITheme.RowBg;
+        colors.pressedColor = UITheme.ButtonActive;
+        colors.selectedColor = UITheme.RowBg;
+        btn.colors = colors;
+        btn.navigation = new Navigation { mode = Navigation.Mode.None };
+        btn.onClick.AddListener(() =>
+        {
+            SurfaceSelection.Select(body, cap);
+            SimpleAudio.Instance?.PlaySelect();
+        });
+
+        // Title: colour chip, name, level. Marked when selected so the list agrees with the map.
+        var title = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
+        live.Text(title, () =>
+        {
+            var info = cap.Info;
+            string hex = ColorUtility.ToHtmlStringRGB(info.color);
+            string mark = SurfaceSelection.IsSelected(cap) ? "<color=#FFF266>▸ </color>" : "";
+            string lvl = cap.CanUpgrade
+                ? $"<color=#9FB4C8>Tech Lv {cap.level}/{PlacedBuilding.MaxLevel}</color>"
+                : $"<color=#4DFF6E>Tech Lv {cap.level} (max)</color>";
+            return $"{mark}<color=#{hex}>■</color> <b>{info.name}</b>  <size=10>{lvl}</size>";
+        });
+
+        // Health bar — real data, not a label.
+        Bar(card, () =>
+        {
+            float f = Mathf.Clamp01(cap.health);
+            Color c = f > 0.66f ? UITheme.Good : f > 0.33f ? UITheme.Warn : UITheme.Bad;
+            return (f, $"{cap.CurrentHealth}/{cap.MaxHealth} HP", c);
+        });
+
+        var stats = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.SubText);
+        live.Text(stats, () =>
+        {
+            var info = cap.Info;
+            string site = info.index == SurfaceIndexKind.None
+                ? "<color=#9FB4C8>terrain-independent</color>"
+                : $"{SurfaceIndex.Name(info.index)} <color=#{ColorUtility.ToHtmlStringRGB(SurfaceBuildManager.EfficiencyColor(cap.efficiency))}>" +
+                  $"{cap.efficiency * 100f:F0}% ({SurfaceBuildManager.EfficiencyLabel(cap.efficiency)})</color>";
+            string adj = SurfaceBuildManager.AdjacencyBonus(body, cap) > 0f
+                ? $" · <color=#F5F58C>+{SurfaceBuildManager.AdjacencyBonus(body, cap) * 100f:F0}% grid</color>" : "";
+            return $"({cap.x},{cap.y}) · {site}{adj}\n" +
+                   $"<color=#9FB4C8>Output ×{cap.OutputMult:0.00}</color> (siting × tech level)";
+        });
+
+        // Upgrade + demolish.
+        var row = UIFactory.NewUI(card, "Row"); UIFactory.AddLayout(row, 22);
+        var h = row.AddComponent<HorizontalLayoutGroup>();
+        h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true;
+
+        var up = UIFactory.Button(row.transform, "", () => { SurfaceBuildManager.UpgradeLevel(body, cap); lastSig = null; }, 20);
+        live.Button(up, () =>
+        {
+            if (!cap.CanUpgrade) return (false, "Max tech level");
+            bool can = SurfaceBuildManager.CanUpgradeLevel(body, cap, out string why);
+            SurfaceBuildManager.LevelUpCost(cap, out int m, out int e);
+            return (can, can ? $"Upgrade → Lv{cap.level + 1} ({m}m {e}e)" : $"Upgrade — {why}");
+        });
+
+        UIFactory.Button(row.transform, "Demolish", () =>
+        {
+            SurfaceBuildManager.Demolish(body, cap);
+            lastSig = null;
+        }, 20);
+    }
+
     // ---------------- SURVEY ----------------
     void BuildSurveyPanel()
     {
@@ -663,8 +799,92 @@ public class PlanetViewWindow : MonoBehaviour
         foreach (var p in SurfaceBuildManager.On(body))
         {
             var info = p.Info;
-            var c = info.color; c.a = 0.92f;
+            // FULLY OPAQUE. These were drawn at 92% alpha, which let the terrain bleed through and made
+            // a structure hard to pick out at a glance against busy ground — the whole point of the
+            // tile is to say "something is here", so it hides what's under it completely.
+            var c = info.color; c.a = 1f;
             foreach (var cell in SurfaceBuildingDatabase.Footprint(p)) AddCellQuad(pieceLayer, cell.x, cell.y, c);
+        }
+    }
+
+    // ---- Selection marker ----
+    // A pulsing ring around the selected structure plus a downward arrow hovering over it. Rebuilt only
+    // when the SELECTION changes; the pulse/spin is animated in place each frame (AnimateMarker).
+    void DrawSelectionMarker()
+    {
+        for (int i = markerLayer.childCount - 1; i >= 0; i--) Destroy(markerLayer.GetChild(i).gameObject);
+        markerRing = null; markerArrow = null;
+
+        var sel = SurfaceSelection.Selected;
+        if (sel == null || SurfaceSelection.Body != body || body?.surface == null) return;
+
+        // Centre the marker on the footprint's middle, so it sits on the building rather than its origin.
+        var cells = SurfaceBuildingDatabase.Footprint(sel);
+        if (cells.Count == 0) return;
+        float sx = 0f, sy = 0f;
+        foreach (var c in cells) { sx += c.x + 0.5f; sy += c.y + 0.5f; }
+        Vector2 centre = new Vector2(sx / cells.Count, sy / cells.Count);
+
+        int w = body.surface.width, h = body.surface.height;
+        float tileW = mapRT.rect.width / w, tileH = mapRT.rect.height / h;
+
+        // Ring big enough to enclose the whole footprint.
+        int minX = int.MaxValue, maxX = int.MinValue, minY = int.MaxValue, maxY = int.MinValue;
+        foreach (var c in cells)
+        {
+            minX = Mathf.Min(minX, c.x); maxX = Mathf.Max(maxX, c.x);
+            minY = Mathf.Min(minY, c.y); maxY = Mathf.Max(maxY, c.y);
+        }
+        float ringPx = Mathf.Max((maxX - minX + 1) * tileW, (maxY - minY + 1) * tileH) * 1.55f;
+
+        var ringGO = UIFactory.NewUI(markerLayer, "SelRing");
+        markerRing = ringGO.AddComponent<Image>();
+        markerRing.sprite = SurfaceMarkerArt.Ring();
+        markerRing.raycastTarget = false;
+        var rrt = markerRing.rectTransform;
+        rrt.anchorMin = rrt.anchorMax = new Vector2(centre.x / w, centre.y / h);
+        rrt.pivot = new Vector2(0.5f, 0.5f);
+        rrt.sizeDelta = new Vector2(ringPx, ringPx);
+        rrt.anchoredPosition = Vector2.zero;
+        markerRingBase = ringPx;
+
+        // Arrow hovering above, pivoted at its point so it aims AT the building.
+        var arrowGO = UIFactory.NewUI(markerLayer, "SelArrow");
+        markerArrow = arrowGO.AddComponent<Image>();
+        markerArrow.sprite = SurfaceMarkerArt.Arrow();
+        markerArrow.raycastTarget = false;
+        markerArrow.color = new Color(1f, 0.95f, 0.4f);
+        var art = markerArrow.rectTransform;
+        art.anchorMin = art.anchorMax = new Vector2(centre.x / w, (maxY + 1) / (float)h);
+        art.pivot = new Vector2(0.5f, 0f);
+        art.sizeDelta = new Vector2(22f, 28f);
+        art.anchoredPosition = new Vector2(0, 6f);
+        markerArrowBaseY = 6f;
+    }
+
+    // The pulse and the spin. Runs every frame, touching only transform/colour — never the layout.
+    void AnimateMarker()
+    {
+        if (markerRing == null && markerArrow == null) return;
+        float t = Time.unscaledTime;
+
+        if (markerRing != null)
+        {
+            float pulse = 1f + Mathf.Sin(t * 3.2f) * 0.07f;
+            markerRing.rectTransform.sizeDelta = new Vector2(markerRingBase * pulse, markerRingBase * pulse);
+            float a = 0.55f + Mathf.Sin(t * 3.2f) * 0.25f;
+            markerRing.color = new Color(1f, 0.95f, 0.4f, a);
+        }
+
+        if (markerArrow != null)
+        {
+            // Squashing X to cos(t) reads as an arrow spinning about its own vertical axis. Actually
+            // ROTATING a downward arrow in 2D would just make it point sideways, which is not what a
+            // "spinning downward arrow" means.
+            float spin = Mathf.Cos(t * 2.4f);
+            var rt = markerArrow.rectTransform;
+            rt.localScale = new Vector3(Mathf.Max(0.12f, Mathf.Abs(spin)), 1f, 1f);
+            rt.anchoredPosition = new Vector2(0, markerArrowBaseY + 3f + Mathf.Sin(t * 2f) * 3f);
         }
     }
 
@@ -771,10 +991,24 @@ public class PlanetViewWindow : MonoBehaviour
 
     public void OnGridClick(int x, int y)
     {
-        if (tab != Tab.Build || !selected.HasValue) return;
-        if (!SurfaceBuildManager.CanPlace(body, selected.Value, x, y, rotation, out _)) return;
-        if (SurfaceBuildManager.Place(body, selected.Value, x, y, rotation))
-            lastSig = null;   // the built list and the map both changed
+        // Holding a piece? The click places it.
+        if (tab == Tab.Build && selected.HasValue)
+        {
+            if (!SurfaceBuildManager.CanPlace(body, selected.Value, x, y, rotation, out _)) return;
+            if (SurfaceBuildManager.Place(body, selected.Value, x, y, rotation))
+                lastSig = null;   // the built list and the map both changed
+            return;
+        }
+
+        // Otherwise the click SELECTS whatever is standing on that cell — the map half of "select a
+        // building by clicking it on the map, or in the list". Clicking bare ground clears.
+        var hit = SurfaceBuildManager.At(body, x, y);
+        if (hit != null)
+        {
+            SurfaceSelection.Select(body, hit);
+            SimpleAudio.Instance?.PlaySelect();
+        }
+        else SurfaceSelection.Clear();
     }
 
     public CelestialBody Body => body;

@@ -61,6 +61,9 @@ public class SurfaceBuildingInfo
 
     public bool allowsWater = false;   // most structures need dry ground
 
+    // Hit points at level 1. Bigger, heavier structures are tougher.
+    public int baseHealth = 100;
+
     public Color color;                // how it reads on the map
 
     public SurfaceBuildingInfo(SurfaceBuildingType t, SurfaceBuildingCategory cat, string n, string d,
@@ -68,6 +71,9 @@ public class SurfaceBuildingInfo
     {
         type = t; category = cat; name = n; description = d; this.shape = shape; this.index = index;
         costMetal = cm; costEnergy = ce; buildTime = bt; this.color = color;
+        // Toughness follows footprint: a nine-tile spaceport is a far harder thing to knock down than
+        // a three-tile mine. Individual entries can override this after construction.
+        baseHealth = 60 + shape.Length * 25;
     }
 
     public int Cells => shape.Length;
@@ -82,8 +88,39 @@ public class PlacedBuilding
     public int rotation;      // 0..3, in 90° steps
     public float efficiency;  // 0..1, locked in at placement time from the ground it sits on
 
+    // Tech level, 1..MaxLevel. Upgrading raises output and toughness — the same "a tier buys you more"
+    // ladder the shipyard and research centre already use.
+    public int level = 1;
+
+    // Condition, 0..1 of this building's maximum. Damage is not yet dealt to surface structures, so in
+    // practice this reads 100% — but it's stored per building so the readout is real rather than a
+    // hardcoded label, and so raids/decay have somewhere to land.
+    public float health = 1f;
+
+    public const int MaxLevel = 3;
+
     public SurfaceBuildingType Type => (SurfaceBuildingType)type;
     public SurfaceBuildingInfo Info => SurfaceBuildingDatabase.Get(Type);
+
+    /// Output multiplier from tech level: 1.0 / 1.35 / 1.75.
+    public float LevelMult => 1f + (Mathf.Clamp(level, 1, MaxLevel) - 1) * 0.375f;
+
+    public int MaxHealth => Mathf.RoundToInt(Info.baseHealth * (1f + (Mathf.Clamp(level, 1, MaxLevel) - 1) * 0.5f));
+    public int CurrentHealth => Mathf.RoundToInt(Mathf.Clamp01(health) * MaxHealth);
+    public bool CanUpgrade => level < MaxLevel;
+
+    /// Everything that scales a building's production: where you sited it, and how good it is.
+    public float OutputMult => Mathf.Clamp01(efficiency) * LevelMult;
+
+    /// Repair the record after a load. JsonUtility fills MISSING fields with 0, so a save written
+    /// before levels/health existed comes back as level 0 / health 0 — a dead, non-existent tier.
+    public void NormalizeAfterLoad()
+    {
+        if (level < 1) level = 1;
+        if (level > MaxLevel) level = MaxLevel;
+        if (health <= 0f) health = 1f;
+        health = Mathf.Clamp01(health);
+    }
 }
 
 public static class SurfaceBuildingDatabase

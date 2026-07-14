@@ -222,6 +222,48 @@ public static class SurfaceBuildManager
         return true;
     }
 
+    // ---- Tech levels ----
+    // Upgrading a structure in place: more output, more hit points. Each tier costs more than the last,
+    // so a level-3 building is a real investment rather than a formality.
+    public static void LevelUpCost(PlacedBuilding p, out int metal, out int energy)
+    {
+        var info = p.Info;
+        float mult = 0.8f + p.level * 0.5f;                 // Lv1->2 costs 1.3x base, Lv2->3 costs 1.8x
+        metal = Mathf.RoundToInt(ColonyManager.DiscCost(info.costMetal) * mult);
+        energy = Mathf.RoundToInt(ColonyManager.DiscCost(info.costEnergy) * mult);
+    }
+
+    public static bool CanUpgradeLevel(CelestialBody b, PlacedBuilding p, out string why)
+    {
+        why = null;
+        if (p == null) { why = "nothing selected"; return false; }
+        if (!p.CanUpgrade) { why = "already at max tech level"; return false; }
+        if (b == null || b.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
+        LevelUpCost(p, out int m, out int e);
+        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = $"need {m} metal, {e} energy"; return false; }
+        return true;
+    }
+
+    public static bool UpgradeLevel(CelestialBody b, PlacedBuilding p)
+    {
+        if (!CanUpgradeLevel(b, p, out _)) return false;
+        LevelUpCost(p, out int m, out int e);
+        if (!GameMode.DevMode && !PlayerEconomy.Spend(m, e)) return false;
+
+        p.level = Mathf.Clamp(p.level + 1, 1, PlacedBuilding.MaxLevel);
+        p.health = 1f;   // a rebuilt structure comes back in full repair
+
+        // A shipyard's tier IS the world's shipyard tier — upgrading the structure upgrades the yard.
+        if (p.Type == SurfaceBuildingType.SurfaceShipyard)
+        {
+            b.shipyardLevel = Mathf.Max(b.shipyardLevel, p.level);
+            UnitManager.Instance?.NotifyBuildChanged();
+        }
+
+        SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
+        return true;
+    }
+
     // ---- Adjacency ----
     // A power plant next to a Power Distribution hub runs better. This is checked LIVE rather than baked
     // into efficiency, so building a hub later rewards the plants already standing around it.
@@ -279,7 +321,7 @@ public static class SurfaceBuildManager
         foreach (var p in On(b))
         {
             var info = p.Info;
-            float eff = Mathf.Clamp01(p.efficiency);
+            float eff = p.OutputMult;   // siting x tech level
             if (info.metalPerSec > 0f) PlayerEconomy.Add(ResourceType.Metal, info.metalPerSec * eff * TechEffects.OreYieldMult * dt);
             // Power plants get their Power Distribution bonus applied live, so a hub built later still
             // rewards the generators already sitting around it.
@@ -292,14 +334,14 @@ public static class SurfaceBuildManager
     public static float ResearchPerSec(CelestialBody b)
     {
         float sum = 0f;
-        foreach (var p in On(b)) sum += p.Info.researchPerSec * Mathf.Clamp01(p.efficiency);
+        foreach (var p in On(b)) sum += p.Info.researchPerSec * p.OutputMult;
         return sum;
     }
 
     public static float PopGrowthPerSec(CelestialBody b)
     {
         float sum = 0f;
-        foreach (var p in On(b)) sum += p.Info.popGrowthPerSec * Mathf.Clamp01(p.efficiency);
+        foreach (var p in On(b)) sum += p.Info.popGrowthPerSec * p.OutputMult;
         return sum;
     }
 
