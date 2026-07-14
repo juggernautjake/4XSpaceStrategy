@@ -116,7 +116,7 @@ public class ColonyWindow : MonoBehaviour
         string owner = b.owner == FactionManager.Player ? "yours" : "unclaimed (ship present)";
         statusText.text =
             $"<b>{b.name}</b>  ({b.type})  ·  {owner}\n" +
-            $"Population {b.population}   Cities {b.cities}   Habitability {b.habitability:F0}%\n" +
+            $"Population {Population.Format(b.population)}   Cities {b.cities}   Habitability {b.habitability:F0}%\n" +
             $"Development: <b>{Colony.ClaimProgress(b) * 100f:F0}%</b>" + (Colony.IsFullyEstablished(b) ? "  <color=#4DFF6E>FULLY ESTABLISHED</color>" : "");
 
         var sb = new StringBuilder();

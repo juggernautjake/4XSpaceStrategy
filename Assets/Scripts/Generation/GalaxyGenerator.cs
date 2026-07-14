@@ -152,6 +152,11 @@ public static class GalaxyGenerator
 
         planet.owner = FactionManager.Player;
         planet.birthrightClaim = true;
+        // The capital is an established world, not a landing site: about a million people, adjusted for
+        // how the species breeds and how long it lives (see Population.HomeStart).
+        planet.cities = 1;
+        planet.population = Population.HomeStart(species);
+        if (!planet.buildings.Contains((int)BuildingType.City)) planet.buildings.Add((int)BuildingType.City);
         planet.shipyardLevel = 1;          // the capital always has a working (level-1) shipyard
         planet.researchCenterLevel = 1;    // ...and its founding laboratory, so research can start at all
         planet.explorationProgress = 1f;   // home world is fully known from the start

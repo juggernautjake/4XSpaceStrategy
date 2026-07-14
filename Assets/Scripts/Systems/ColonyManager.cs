@@ -23,7 +23,10 @@ public static class Colony
     // A world must be at least this habitable to found a city (below it you must terraform first).
     public static float FoundThreshold => UnitManager.ColonizeMinHabitability;
 
-    public static int PopTarget(CelestialBody b) => 40 + b.surfaceSize * 6;
+    // How many population units a world can hold. Delegates to Population, which scales it by
+    // habitability and by the housing actually built — it used to be a flat 40 + size*6, which meant a
+    // paradise and a barely-livable rock held the same number of people.
+    public static int PopTarget(CelestialBody b) => Population.Capacity(b);
     public const int BuildingTarget = 4;   // city + 3 more
 
     // Facility tiers. Tiers 1-3 gate WHICH ships a yard can build; every tier (including 4 and 5) also
@@ -92,7 +95,7 @@ public static class Colony
         list.Add(new ColonyObjective { label = "Survey the world", done = b.explorationProgress >= 1f, detail = $"{b.explorationProgress * 100f:F0}%" });
         list.Add(new ColonyObjective { label = $"Habitable (>= {FoundThreshold:F0}%)", done = b.habitability >= FoundThreshold, detail = $"{b.habitability:F0}%" });
         int pt = PopTarget(b);
-        list.Add(new ColonyObjective { label = "Grow the population", done = b.population >= pt, detail = $"{b.population}/{pt}" });
+        list.Add(new ColonyObjective { label = "Grow the population", done = b.population >= pt, detail = $"{Population.Short(b.population)} of {Population.Short(pt)}" });
         list.Add(new ColonyObjective { label = "Develop infrastructure", done = b.buildings.Count >= BuildingTarget, detail = $"{b.buildings.Count}/{BuildingTarget} buildings" });
         return list;
     }
@@ -392,7 +395,7 @@ public class ColonyManager : MonoBehaviour
             {
                 if (!c.body.buildings.Contains((int)BuildingType.City)) c.body.buildings.Add((int)BuildingType.City);
                 c.body.cities = Mathf.Max(1, c.body.cities);
-                c.body.population = Mathf.Max(c.body.population, Mathf.Max(20, c.body.surfaceSize * 3));
+                c.body.population = Mathf.Max(c.body.population, Population.ColonyStart(c.body, SpeciesManager.Current));
                 c.body.claimProgress = Colony.ClaimProgress(c.body);
                 SimpleAudio.Instance?.PlayNotify(NotifKind.Victory);
                 NotificationManager.Instance?.Push($"City founded on {c.body.name}!",
@@ -416,7 +419,10 @@ public class ColonyManager : MonoBehaviour
     void TickColony(CelestialBody b, float dt)
     {
         if (b.cities < 1) b.cities = 1;
-        float popMult = 0.5f + b.population / 200f;
+        // Output scales with the workforce. Tuned against the population UNIT scale (1 = 100,000), so a
+        // one-million homeworld (10) starts near 0.9x and a large city world climbs toward ~2x.
+        float popMult = 0.5f + b.population / 25f;
+        popMult = Mathf.Min(popMult, 2.5f);   // diminishing returns; a megacity isn't 50x a town
         float oreRich = 1f + OreGenerator.OresOnBody(b).Count * 0.15f;
 
         float growth = 0f;
@@ -440,14 +446,27 @@ public class ColonyManager : MonoBehaviour
 
         if (researchAccum >= 1f) { int p = Mathf.FloorToInt(researchAccum); researchAccum -= p; ResearchManager.AddPoints(p); }
 
-        // Population growth is gated by how content the colony is: a miserable world stops having
-        // children entirely, a thriving one booms (see Satisfaction.GrowthMultiplier).
-        int target = Colony.PopTarget(b);
-        float happy = Satisfaction.GrowthMultiplier(b);
-        if (b.habitability >= Colony.FoundThreshold && b.population < target && happy > 0f)
+        // ---- Population ----
+        // A real birth rate (see Population.BirthRate): housing x satisfaction x habitability x room,
+        // multiplied, so an unhappy colony doesn't grow just because it has farms.
+        //
+        // Accumulated FRACTIONALLY. This previously did
+        //     b.population += Mathf.Max(1, Mathf.RoundToInt(grown))
+        // and `grown` is almost always well under 1 — so RoundToInt gave 0, the Max forced +1 unit
+        // every tick, and every multiplier above it was thrown away. One unit is 100,000 people, so
+        // that was 100k people a second on every colony regardless of how well it was run. The whole
+        // satisfaction system was decorative.
+        int capacity = Colony.PopTarget(b);
+        float rate = Population.BirthRate(b, growth);
+        if (rate > 0f && b.population < capacity)
         {
-            float grown = growth * happy * dt;
-            if (grown > 0f) b.population = Mathf.Min(target, b.population + Mathf.Max(1, Mathf.RoundToInt(grown)));
+            b.popAccum += rate * dt;
+            if (b.popAccum >= 1f)
+            {
+                int whole = Mathf.FloorToInt(b.popAccum);
+                b.popAccum -= whole;
+                b.population = Mathf.Min(capacity, b.population + whole);
+            }
         }
 
         // A research centre analyses ore samples that ships have brought to this world. The analysis
