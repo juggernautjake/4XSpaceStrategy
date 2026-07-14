@@ -8,7 +8,13 @@ public class CameraController : MonoBehaviour
     public float heightSpeed = 130f;       // Mouse wheel height change speed
 
     [Header("Limits")]
-    public float minHeight = 4f;           // Closest to the system
+    // The absolute floor. Low, because a moon is only ~0.35 world units across and filling the screen
+    // with one genuinely needs the camera this close. It was 4, which is further away than some whole
+    // planets are wide — you could never get near anything.
+    public float minHeight = 0.25f;
+    // The floor when nothing is selected. Free-look doesn't need to press its nose against the orbital
+    // plane, and letting it would just be disorienting — there's nothing there to look at.
+    public float freeLookMinHeight = 3f;
     public float maxHeight = 9000f;        // Farthest view — pull right back to a galaxy-wide symbol map
 
     private float targetHeight;            // For smooth movement
@@ -183,13 +189,58 @@ public class CameraController : MonoBehaviour
         }
     }
 
-    // Snap onto and zoom close to an object; smaller objects get a closer view.
-    public void FocusAndZoom(Transform target, float objectSize, bool follow)
+    // Snap onto an object and zoom until it FILLS the view — a small moon gets a close look, a giant
+    // gets a wider one, automatically.
+    //
+    // `objectSizeHint` is now only a fallback. It used to be the whole calculation
+    //     targetHeight = 3.5 + objectSize * 0.45   (clamped 3.5 .. 22)
+    // which was wrong twice over. First, callers disagreed about what it MEANT: bodies passed
+    // surfaceSize (a gameplay number, 3-28), the star passed lossyScale.x (a world diameter), tokens
+    // passed a literal 3 — all fed to one formula as if they were the same unit. Second, a planet is
+    // only ~0.6-2.2 world units across, so parking the camera 9.8 units up left it a speck.
+    //
+    // The object's real size is a property of the object, so we measure it: renderer bounds first,
+    // falling back to scale, and only then to the hint.
+    public void FocusAndZoom(Transform target, float objectSizeHint, bool follow)
     {
         followTarget = target;
         following = follow;
-        targetHeight = Mathf.Clamp(3.5f + objectSize * 0.45f, 3.5f, 22f);
+        targetHeight = Mathf.Clamp(FillHeight(WorldRadius(target, objectSizeHint)), minHeight, maxHeight);
         if (target != null) FocusOn(target.position);
+    }
+
+    /// The height at which an object of this radius fills most of the view.
+    ///
+    /// Solve it rather than guess: at distance d an object of radius R subtends asin(R/d), so to fill
+    /// ~80% of the vertical FOV we need d = R / sin(0.8 * fov/2). The camera sits at Pitch above the
+    /// plane, so h = d * sin(Pitch).
+    public float FillHeight(float radius)
+    {
+        if (cam == null) cam = GetComponent<Camera>();
+        float fov = cam != null ? cam.fieldOfView : 60f;
+        float halfAngle = fov * 0.5f * 0.8f * Mathf.Deg2Rad;
+        float d = radius / Mathf.Max(0.05f, Mathf.Sin(halfAngle));
+        return d * Mathf.Sin(Pitch * Mathf.Deg2Rad);
+    }
+
+    /// An object's actual radius in world units. Bounds are authoritative (they account for children
+    /// and any scaling); lossyScale is the fallback; the caller's hint is the last resort.
+    public static float WorldRadius(Transform t, float hint = 1f)
+    {
+        if (t != null)
+        {
+            var rends = t.GetComponentsInChildren<Renderer>();
+            if (rends.Length > 0)
+            {
+                var b = rends[0].bounds;
+                for (int i = 1; i < rends.Length; i++) b.Encapsulate(rends[i].bounds);
+                float r = Mathf.Max(b.extents.x, Mathf.Max(b.extents.y, b.extents.z));
+                if (r > 0.0001f) return r;
+            }
+            float s = t.lossyScale.x * 0.5f;
+            if (s > 0.0001f) return s;
+        }
+        return Mathf.Max(0.25f, hint * 0.5f);
     }
 
     // Jump to a world position at a chosen height (used by the galaxy view's "Go to system").
@@ -231,7 +282,19 @@ public class CameraController : MonoBehaviour
         if (scroll == 0) return;
 
         float factor = Mathf.Exp(-scroll * 6f);      // scroll up -> factor < 1 -> closer
-        targetHeight = Mathf.Clamp(targetHeight * factor, minHeight, maxHeight);
+        targetHeight = Mathf.Clamp(targetHeight * factor, ZoomFloor(), maxHeight);
+    }
+
+    // How close the wheel may get.
+    //
+    // With something focused, the limit comes from THAT OBJECT: you may zoom until it fills the view
+    // and then a little closer, so a moon lets you in much further than a gas giant. With nothing
+    // focused there's no subject to frame, so it stops at a sensible free-look height.
+    private float ZoomFloor()
+    {
+        if (followTarget == null) return Mathf.Max(minHeight, freeLookMinHeight);
+        float fill = FillHeight(WorldRadius(followTarget));
+        return Mathf.Max(minHeight, fill * 0.5f);   // half the fill height: right up against it
     }
 
     private void SmoothHeightMovement()
