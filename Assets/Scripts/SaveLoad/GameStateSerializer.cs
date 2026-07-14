@@ -32,7 +32,8 @@ public static class GameStateSerializer
         {
             discovered = ResearchManager.ExportDiscovered(),
             researched = ResearchManager.ExportResearched(),
-            points = ResearchManager.ResearchPoints
+            points = ResearchManager.ResearchPoints,
+            empireLevel = EmpireTech.Level
         };
 
         int bodyCount = 0;
@@ -151,6 +152,7 @@ public static class GameStateSerializer
 
         ResearchManager.Import(game.research?.discovered, game.research?.researched,
                                game.research != null ? game.research.points : 0);
+        EmpireTech.SetLevel(game.research != null ? game.research.empireLevel : 1);
 
         GameManager.Instance.LoadGalaxy(galaxy);
         SpeciesManager.Select(game.speciesIndex);

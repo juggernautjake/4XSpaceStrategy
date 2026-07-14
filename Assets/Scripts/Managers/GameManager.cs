@@ -48,6 +48,7 @@ public class GameManager : MonoBehaviour
         }
 
         ResearchManager.NewGame();
+        EmpireTech.Reset();
         Galaxy = GalaxyGenerator.Generate(solarSystemGenerator, systemCount, avgPlanets, SpeciesManager.Current);
         FocusedSystem = Galaxy.Home;
 
