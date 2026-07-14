@@ -27,6 +27,7 @@ public class SaveGame
     public List<BuildOrderDTO> buildQueue = new List<BuildOrderDTO>();
     public List<ResearchOrderDTO> researchQueue = new List<ResearchOrderDTO>();
     public bool researchPaused = false;
+    public bool organicCityGrowth = true;                   // the player's taste toggle, saved with the game
     public List<TerraformJobDTO> terraformJobs = new List<TerraformJobDTO>();
     public List<ControlGroupDTO> controlGroups = new List<ControlGroupDTO>();
 
@@ -118,7 +119,8 @@ public class BodyDTO
     public float terraformability;
     public List<int> terraformProjects = new List<int>();   // completed TerraformProjectType ids
     public List<PlacedBuilding> placedBuildings = new List<PlacedBuilding>();   // surface-grid structures
-    public bool deepSurveyed;                               // unlocks the Heat/Fertile/Weather indexes
+    public bool deepSurveyed;                               // unlocks the Heat/Fertile/Wind/Solar/Water indexes
+    public float cityGrowthTimer;                           // progress toward this world's next settlement
     public bool birthrightClaim;
     public bool visited;
     public float explorationProgress;

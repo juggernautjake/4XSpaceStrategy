@@ -14,7 +14,9 @@ public enum SurfaceBuildingType
     // Military
     SurfaceShipyard,
     // Harvesting
-    HydroPlant
+    HydroPlant,
+    // Government — grown by the population itself, not placed (see CityGrowth)
+    Settlement, Town, City
 }
 
 // What a structure is FOR. The build menu groups by this, so a long catalogue stays navigable and you
@@ -279,6 +281,38 @@ public static class SurfaceBuildingDatabase
             S(0, 0, 1, 0, 2, 0, 2, 1), SurfaceIndexKind.Water, 80, 35, 18f, new Color(0.35f, 0.75f, 1.00f));
         hydro.energyPerSec = 2.1f;
         _all[(int)SurfaceBuildingType.HydroPlant] = hydro;
+
+        // ---- Grown, not placed ----
+        // The population houses itself (CityGrowth). You never build these; they appear near what's
+        // already there and thicken over time. They occupy real tiles and compete for the ground you
+        // wanted to mine, which is the point — a living world costs you something.
+        var settlement = new SurfaceBuildingInfo(SurfaceBuildingType.Settlement, SurfaceBuildingCategory.Government,
+            "Settlement",
+            "A handful of homes that grew up on their own as the colony spread out. Given people and time it will become a town.",
+            S(0, 0, 1, 0), SurfaceIndexKind.None, 0, 0, 0f, new Color(0.62f, 0.66f, 0.78f));
+        settlement.popGrowthPerSec = 0.25f;
+        settlement.storageCapacity = 120f;
+        _all[(int)SurfaceBuildingType.Settlement] = settlement;
+
+        var town = new SurfaceBuildingInfo(SurfaceBuildingType.Town, SurfaceBuildingCategory.Government,
+            "Town",
+            "A proper town, grown from a settlement. Houses people, and puts a little of everything back into the colony.",
+            S(0, 0, 1, 0, 0, 1, 1, 1), SurfaceIndexKind.None, 0, 0, 0f, new Color(0.74f, 0.78f, 0.90f));
+        town.popGrowthPerSec = 0.6f;
+        town.metalPerSec = 0.15f;
+        town.storageCapacity = 350f;
+        _all[(int)SurfaceBuildingType.Town] = town;
+
+        var city = new SurfaceBuildingInfo(SurfaceBuildingType.City, SurfaceBuildingCategory.Government,
+            "City",
+            "A full city. Only a genuinely habitable world grows these — and a world that grows enough of them becomes one continuous city.",
+            S(0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1, 1, 2), SurfaceIndexKind.None, 0, 0, 0f, new Color(0.88f, 0.92f, 1.00f));
+        city.popGrowthPerSec = 1.1f;
+        city.metalPerSec = 0.3f;
+        city.energyPerSec = 0.2f;
+        city.researchPerSec = 0.15f;
+        city.storageCapacity = 700f;
+        _all[(int)SurfaceBuildingType.City] = city;
 
         // ---- Siting requirements ----
         // The floor below which a site is not merely poor but POINTLESS. Absolute, not graded on a

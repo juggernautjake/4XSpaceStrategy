@@ -8,7 +8,7 @@ public class SettingsWindow : MonoBehaviour
     public static SettingsWindow Instance;
 
     GameObject root;
-    Toggle muteT, spaceT;
+    Toggle muteT, spaceT, cityGrowthT;
     Slider volS, effS, humS, ambS, rS, gS, bS;
     Image swatch;
     bool suppress;
@@ -38,6 +38,13 @@ public class SettingsWindow : MonoBehaviour
 
         UIFactory.Label(col, "BACKGROUND / VIEW", UITheme.SmallSize, UITheme.Accent, 18);
         spaceT = UIFactory.Toggle(col, "Show space background", true, on => { if (!suppress) SpaceBackground.Instance?.SetEnabled(on); });
+
+        // Taste, not balance — some people want a world to stay exactly as they built it.
+        cityGrowthT = UIFactory.Toggle(col, "Organic city growth", GameConfig.OrganicCityGrowth,
+            on => { if (!suppress) GameConfig.SetOrganicCityGrowth(on); });
+        UIFactory.Label(col, "<size=10><color=#7C8CA0>Colonies grow their own settlements as they populate, and those " +
+                             "take up ground you might have wanted. Off: worlds only ever hold what you place.</color></size>",
+                        UITheme.SmallSize, UITheme.SubText, 30);
         UIFactory.Label(col, "When OFF, the solid colour below is used.", UITheme.SmallSize, UITheme.SubText, 30);
         UIFactory.Button(col, "Regenerate Space", () => SpaceBackground.Instance?.Regenerate(), 30);
 
@@ -78,6 +85,8 @@ public class SettingsWindow : MonoBehaviour
         suppress = true;
         var a = SimpleAudio.Instance;
         if (a != null) { muteT.isOn = a.Muted; volS.value = a.MasterVolume; effS.value = a.EffectsVolume; humS.value = a.HumVolume; ambS.value = a.AmbientVolume; }
+        // Loading a save can change this underneath us, so re-read rather than trusting the widget.
+        if (cityGrowthT != null) cityGrowthT.isOn = GameConfig.OrganicCityGrowth;
         var bg = SpaceBackground.Instance;
         if (bg != null)
         {
