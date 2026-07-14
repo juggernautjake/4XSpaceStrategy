@@ -56,18 +56,24 @@ public class UnitTokenRenderer : MonoBehaviour
 
     public void Rebuild()
     {
-        // Remove tokens for units that no longer exist.
+        // Remove tokens for units that no longer exist — or that have graduated to a real 3D model.
         var live = new HashSet<Unit>();
-        if (UnitManager.Instance != null) foreach (var u in UnitManager.Instance.Units) live.Add(u);
+        if (UnitManager.Instance != null)
+            foreach (var u in UnitManager.Instance.Units)
+                if (!StationModelRenderer.UsesModel(u)) live.Add(u);
 
         var toRemove = new List<Unit>();
         foreach (var kv in tokens) if (!live.Contains(kv.Key)) toRemove.Add(kv.Key);
         foreach (var u in toRemove) { if (tokens[u] != null) Destroy(tokens[u].gameObject); tokens.Remove(u); }
 
-        // Add tokens for new units.
+        // Add tokens for new units. A deployed station that has a real 3D model is drawn by
+        // StationModelRenderer instead — giving it a billboard too would double-render it.
         if (UnitManager.Instance != null)
             foreach (var u in UnitManager.Instance.Units)
+            {
+                if (StationModelRenderer.UsesModel(u)) continue;
                 if (!tokens.ContainsKey(u)) tokens[u] = BuildToken(u);
+            }
     }
 
     UnitToken BuildToken(Unit u)
