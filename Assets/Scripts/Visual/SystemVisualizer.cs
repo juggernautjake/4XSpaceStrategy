@@ -113,7 +113,9 @@ public class SystemVisualizer : MonoBehaviour
             GameObject visual = Instantiate(planetPrefab, systemParent);
             visual.name = body.name;
             body.visualObject = visual;
-            visual.transform.localScale = Vector3.one * Mathf.Max(0.6f, body.surfaceSize * 0.08f);
+            // Size comes from OrbitSafety, which is also what reserves orbital room for it. Hardcoding
+            // it here (as this used to) let the rendered size drift away from the spacing maths.
+            visual.transform.localScale = Vector3.one * OrbitSafety.Scale(body);
             EnsureClickCollider(visual, 1.5f);   // generous, easy-to-hit selection target
 
             var click = visual.GetComponent<PlanetClick>();
@@ -132,7 +134,7 @@ public class SystemVisualizer : MonoBehaviour
                 GameObject moonVisual = Instantiate(planetPrefab, systemParent);
                 moonVisual.name = moon.name;
                 moon.visualObject = moonVisual;
-                moonVisual.transform.localScale = Vector3.one * Mathf.Max(0.35f, moon.surfaceSize * 0.05f);
+                moonVisual.transform.localScale = Vector3.one * OrbitSafety.Scale(moon);
                 EnsureClickCollider(moonVisual, 1.1f);
 
                 var moonClick = moonVisual.GetComponent<PlanetClick>();
