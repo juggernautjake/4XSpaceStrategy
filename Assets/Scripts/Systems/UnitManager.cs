@@ -960,7 +960,8 @@ public class UnitManager : MonoBehaviour
         b.visited = true;
         b.explorationProgress = Mathf.Max(b.explorationProgress, 1f);   // owning fully reveals it
         b.cities = 1;
-        b.population = Mathf.Max(20, b.surfaceSize * 3);
+        // A beachhead, not a city: the colony ship's complement, scaled by how the species breeds.
+        b.population = Population.ColonyStart(b, SpeciesManager.Current);
         if (!b.buildings.Contains((int)BuildingType.City)) b.buildings.Add((int)BuildingType.City);
         b.claimProgress = Colony.ClaimProgress(b);
         u.AddExperience(XpColonize);

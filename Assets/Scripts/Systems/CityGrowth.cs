@@ -30,10 +30,12 @@ public class CityGrowth : MonoBehaviour
     // think about them more often than this, and it keeps the cost invisible.
     const float TickSeconds = 5f;
 
-    // A colony must reach this much population before it spills out of its capital at all.
-    const int FirstSettlementPop = 45;
-    // ...and every settlement beyond the first needs roughly this many more people to justify it.
-    const int PopPerSettlement = 55;
+    // Population UNITS (1 unit = 100,000 people — see Population) before a colony spills out of its
+    // capital at all: 1.8 million. A homeworld starts around 10 units (a million), so it has to roughly
+    // double before anyone founds a settlement of their own.
+    const int FirstSettlementPop = 18;
+    // ...and every settlement beyond the first needs roughly this many more people (1.2M) to justify it.
+    const int PopPerSettlement = 12;
 
     float timer;
 

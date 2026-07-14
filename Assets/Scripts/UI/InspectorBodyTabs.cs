@@ -236,7 +236,7 @@ public partial class InspectorWindow
 
         Header(p, "POPULATION");
         var card = Card(p);
-        Stat(card, "People", () => $"{b.population} / {Colony.PopTarget(b)}");
+        Stat(card, "People", () => $"{Population.Format(b.population)} <color=#9FB4C8>of {Population.Format(Colony.PopTarget(b))} capacity</color>");
         Stat(card, "Cities", () => b.cities.ToString());
         Bar(p, () =>
         {
@@ -264,10 +264,13 @@ public partial class InspectorWindow
                 string hex = ColorUtility.ToHtmlStringRGB(f.delta >= 0f ? UITheme.Good : UITheme.Bad);
                 sb.AppendLine($"<color=#{hex}>{(f.delta >= 0f ? "+" : "")}{f.delta:F0}</color>  <b>{f.label}</b>  <color=#9FB4C8>{f.detail}</color>");
             }
+            // Satisfaction's real teeth: it multiplies the birth rate, and can zero it.
             float mult = Satisfaction.GrowthMultiplier(b);
-            sb.AppendLine(mult <= 0f
-                ? "\n<color=#FF6659>The colony is too miserable to grow at all.</color>"
-                : $"\n<color=#9FB4C8>Population growth ×{mult:0.00}</color>");
+            string stall = Population.StallReason(b, InfrastructureGrowth(b));
+            sb.AppendLine(stall != null
+                ? $"\n<color=#FF6659>Not growing — {stall}.</color>"
+                : $"\n<color=#9FB4C8>Birth rate ×{mult:0.00} from satisfaction · " +
+                  $"{Population.Format(Mathf.RoundToInt(Population.BirthRate(b, InfrastructureGrowth(b)) * 60f))} per minute</color>");
             return sb.ToString();
         });
 
@@ -291,6 +294,17 @@ public partial class InspectorWindow
             sb.Append(Colony.IsFullyEstablished(b) ? "\n<color=#4DFF6E>FULLY ESTABLISHED</color>" : $"\nDevelopment: {Colony.ClaimProgress(b) * 100f:F0}%");
             return sb.ToString();
         });
+    }
+
+    // The colony's total capacity to raise people: every building's popGrowthPerSec, scaled by how well
+    // each was sited. Mirrors what ColonyManager feeds to Population.BirthRate, so the readout and the
+    // simulation can't disagree.
+    static float InfrastructureGrowth(CelestialBody b)
+    {
+        float g = 0f;
+        foreach (int id in b.buildings) g += BuildingDatabase.Get((BuildingType)id).popGrowthPerSec;
+        g += SurfaceBuildManager.PopGrowthPerSec(b);
+        return g;
     }
 
     // ---------------- Production ----------------

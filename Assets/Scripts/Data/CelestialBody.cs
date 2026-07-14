@@ -66,7 +66,13 @@ public class CelestialBody
 
     public float claimProgress = 0f;         // 0..1 colonization toward full claim
     public Faction claimingFaction;          // who is colonizing (null if nobody)
+    // Population in UNITS of 100,000 people (see Population). A homeworld starts around 10 — a million.
     public int population = 0;
+
+    // Fractional people waiting to become a whole unit. Growth is far slower than one unit per tick, so
+    // without this the remainder is discarded every frame and a colony never grows at all — or, as the
+    // original code did, is rounded up to a whole unit and grows 100,000 people a second.
+    [System.NonSerialized] public float popAccum = 0f;
     public int cities = 0;
 
     // --- Colony ---

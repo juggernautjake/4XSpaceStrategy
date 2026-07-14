@@ -65,7 +65,7 @@ public static class Satisfaction
             {
                 label = "Crowding",
                 delta = crowdDelta,
-                detail = $"{b.population}/{target} — housing is running out"
+                detail = $"{Population.Short(b.population)} of {Population.Short(target)} — housing is running out"
             });
 
         // ---- Amenities: research centres and shipyards mean jobs and prospects ----
