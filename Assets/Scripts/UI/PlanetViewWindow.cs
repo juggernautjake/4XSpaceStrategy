@@ -300,7 +300,9 @@ public class PlanetViewWindow : MonoBehaviour
         var card = Card();
         Stat(card, "Name", () => body.name);
         Stat(card, "Type", () => TerraformDiagnosis.Pretty(body.type));
-        Stat(card, "Surface", () => $"{body.surface != null ? body.surface.width : 0} × {body.surface != null ? body.surface.height : 0} tiles");
+        // The conditionals MUST be parenthesised: inside an interpolation hole a bare ':' is parsed as
+        // the start of a format specifier, not as part of a ternary.
+        Stat(card, "Surface", () => $"{(body.surface != null ? body.surface.width : 0)} × {(body.surface != null ? body.surface.height : 0)} tiles");
         Stat(card, "Size class", () => SizeWord(body.surfaceSize));
         Stat(card, "Owner", () =>
         {
