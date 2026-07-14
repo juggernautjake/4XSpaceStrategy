@@ -37,6 +37,7 @@ public class ResearchWindow : MonoBehaviour
         UIFactory.ScrollView(listHolder, out list);
 
         ResearchManager.OnChanged += Refresh;
+        EmpireTech.OnChanged += Refresh;
         root.SetActive(false);
     }
 
@@ -54,8 +55,44 @@ public class ResearchWindow : MonoBehaviour
 
         for (int i = list.childCount - 1; i >= 0; i--) Destroy(list.GetChild(i).gameObject);
 
+        BuildEmpireCard();
+
         foreach (var info in OreDatabase.All())
             BuildCard(info);
+    }
+
+    // The empire-wide Tech Level: the hybrid progression track that gates the big milestones
+    // (probes, stations, hyper-relays, terraforming stations, hyperdrives, mega-stations).
+    void BuildEmpireCard()
+    {
+        var card = UIFactory.Panel(list, "EmpireTech", new Color(0.10f, 0.16f, 0.24f, 0.98f));
+        var outline = card.gameObject.AddComponent<UnityEngine.UI.Outline>();
+        outline.effectColor = new Color(1f, 0.85f, 0.35f, 0.9f);
+        var vlg = card.gameObject.AddComponent<VerticalLayoutGroup>();
+        vlg.padding = new RectOffset(10, 10, 8, 8); vlg.spacing = 4;
+        vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
+        var fit = card.gameObject.AddComponent<ContentSizeFitter>(); fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        UIFactory.WrapText(card.transform,
+            $"<b>Empire Tech Level {EmpireTech.Level}<color=#9FB4C8>/{EmpireTech.MaxLevel}</color></b>", UITheme.HeaderSize, new Color(1f, 0.85f, 0.35f));
+
+        if (EmpireTech.AtMax)
+        {
+            UIFactory.WrapText(card.transform, EmpireTech.CanReachEleven
+                ? "Your species has reached the transcendent peak. All milestones are unlocked."
+                : "Peak level for your species. A more intelligent race could push to level 11.",
+                UITheme.SmallSize, UITheme.Good);
+            return;
+        }
+
+        UIFactory.WrapText(card.transform, $"<color=#8FD0FF>Next (Lv {EmpireTech.Level + 1}):</color> {EmpireTech.MilestoneFor(EmpireTech.Level + 1)}", UITheme.SmallSize, UITheme.Text);
+
+        bool can = EmpireTech.CanAdvance;
+        var btn = UIFactory.Button(card.transform,
+            can ? $"Advance to Level {EmpireTech.Level + 1}  ({EmpireTech.NextCost} RP)"
+                : $"Advance to Level {EmpireTech.Level + 1} — need {EmpireTech.NextCost} RP (have {ResearchManager.ResearchPoints})",
+            () => { EmpireTech.Advance(); }, 30);
+        btn.interactable = can;
     }
 
     void BuildCard(OreInfo info)
@@ -99,5 +136,5 @@ public class ResearchWindow : MonoBehaviour
         }
     }
 
-    void OnDestroy() { ResearchManager.OnChanged -= Refresh; }
+    void OnDestroy() { ResearchManager.OnChanged -= Refresh; EmpireTech.OnChanged -= Refresh; }
 }

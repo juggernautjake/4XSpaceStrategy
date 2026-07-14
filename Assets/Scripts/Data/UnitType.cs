@@ -99,6 +99,6 @@ public static class UnitDatabase
         // ---- Level-2 shipyard: expendable deep-space probe ----
         _all[(int)UnitType.Probe] = new UnitInfo(UnitType.Probe, "Probe",
             "A cheap, expendable deep-space probe. Launch it in any direction and it coasts on starlight alone — no fuel — scanning everything within its sensor range and pulsing back what it finds, until it drifts too far, loses power or is destroyed and its signal goes dark. Ignores travel-range limits. Requires a level-2 shipyard.",
-            15, 10, 6f, 0, 8, 7, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.85f, 0.92f, 0.5f), minShipyardLevel: 2, range: 0, vision: 140, probe: true);
+            15, 10, 6f, 0, 8, 7, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.85f, 0.92f, 0.5f), minShipyardLevel: 1, range: 0, vision: 140, probe: true);
     }
 }

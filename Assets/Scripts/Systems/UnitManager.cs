@@ -88,6 +88,11 @@ public class UnitManager : MonoBehaviour
             reason = $"needs a level-{info.minShipyardLevel} shipyard (yours: {Colony.PlayerMaxShipyardLevel()})";
             return false;
         }
+        if (info.isProbe && !GameMode.DevMode && !EmpireTech.ProbesUnlocked)
+        {
+            reason = "reach Empire Tech Level 2 to build probes";
+            return false;
+        }
         if (!GameMode.DevMode && !PlayerEconomy.CanAfford(info.costMetal, info.costEnergy))
         { reason = $"need {info.costMetal} metal, {info.costEnergy} energy"; return false; }
         return true;

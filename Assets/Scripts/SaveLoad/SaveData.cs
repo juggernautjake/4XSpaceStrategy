@@ -101,4 +101,5 @@ public class ResearchDTO
     public List<int> discovered = new List<int>();
     public List<int> researched = new List<int>();
     public int points;
+    public int empireLevel = 1;
 }
