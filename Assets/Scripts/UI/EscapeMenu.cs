@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 
 // The pause / main menu. Opening it pauses the simulation; closing resumes the previous speed.
 public class EscapeMenu : MonoBehaviour
@@ -7,6 +8,9 @@ public class EscapeMenu : MonoBehaviour
     public static EscapeMenu Instance;
 
     GameObject root;
+    Button firstButton;
+
+    public bool IsOpen => root != null && root.activeSelf;
 
     public static void Create(Transform canvas)
     {
@@ -40,7 +44,7 @@ public class EscapeMenu : MonoBehaviour
 
         BuildLights(box.transform);
 
-        UIFactory.Button(box.transform, "Resume", Close, 40);
+        firstButton = UIFactory.Button(box.transform, "Resume", Close, 40);
         UIFactory.Button(box.transform, "New Game", NewGame, 40);
         UIFactory.Button(box.transform, "Save", () => { SaveLoadMenu.Instance?.Toggle(); }, 40);
         UIFactory.Button(box.transform, "Load", () => { SaveLoadMenu.Instance?.Toggle(); }, 40);
@@ -83,12 +87,16 @@ public class EscapeMenu : MonoBehaviour
         TimeControl.Pause();
         root.SetActive(true);
         root.GetComponent<RectTransform>().SetAsLastSibling();
+        // Give the menu keyboard focus so WASD / arrows navigate the options.
+        if (firstButton != null && EventSystem.current != null)
+            EventSystem.current.SetSelectedGameObject(firstButton.gameObject);
     }
 
     public void Close()
     {
         root.SetActive(false);
         TimeControl.Resume();
+        if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
     }
 
     void NewGame()

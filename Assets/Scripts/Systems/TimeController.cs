@@ -10,7 +10,9 @@ public class TimeController : MonoBehaviour
 
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Space))
+        // Space toggles pause, except while the menu is open (there it's the UI submit key).
+        bool menuOpen = EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen;
+        if (!menuOpen && Input.GetKeyDown(KeyCode.Space))
             TimeControl.TogglePause();
     }
 }
