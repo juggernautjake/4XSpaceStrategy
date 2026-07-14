@@ -116,7 +116,7 @@ public class ColonyWindow : MonoBehaviour
 
         var sb = new StringBuilder();
         foreach (var o in Colony.Objectives(b))
-            sb.AppendLine($"{(o.done ? "<color=#4DFF6E>✔</color>" : "<color=#FF7A6E>✗</color>")} {o.label}  <color=#9FB4C8>({o.detail})</color>");
+            sb.AppendLine($"{(o.done ? "<color=#4DFF6E>[x]</color>" : "<color=#FF7A6E>[ ]</color>")} {o.label}  <color=#9FB4C8>({o.detail})</color>");
         objectivesText.text = sb.ToString();
 
         // Terraforming criteria + live status.
