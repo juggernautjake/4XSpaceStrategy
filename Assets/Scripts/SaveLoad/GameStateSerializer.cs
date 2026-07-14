@@ -13,9 +13,13 @@ public static class GameStateSerializer
             saveName = saveName,
             savedAtIso = System.DateTime.UtcNow.ToString("o"),
             starType = (int)(gm.CurrentStar != null ? gm.CurrentStar.type : StarType.G),
+            isBlackHole = gm.IsBlackHole,
             speciesIndex = SpeciesManager.CurrentIndex,
             timeScale = Time.timeScale
         };
+
+        if (gm.Stars != null)
+            foreach (var s in gm.Stars) game.starTypes.Add((int)s.type);
 
         var bg = SpaceBackground.Instance;
         if (bg != null)
@@ -55,6 +59,11 @@ public static class GameStateSerializer
             surfaceSize = b.surfaceSize,
             terrainSeed = b.terrainSeed,
             continentFrequency = b.continentFrequency,
+            tScale = b.terrainParams.scale,
+            tElev = b.terrainParams.elevation,
+            tMoist = b.terrainParams.moisture,
+            tHeat = b.terrainParams.heat,
+            tRidge = b.terrainParams.ridge,
             orbitRadius = b.orbitRadius,
             orbitSpeed = b.orbitSpeed,
             orbitPhase = b.orbitPhase,
@@ -87,7 +96,8 @@ public static class GameStateSerializer
             {
                 type = (int)p.type, u = p.u, v = p.v, title = p.title, description = p.description,
                 explored = p.explored, relatedOre = (int)p.relatedOre,
-                revealTitle = p.revealTitle, revealText = p.revealText
+                revealTitle = p.revealTitle, revealText = p.revealText,
+                kind = p.kind, researchDuration = p.researchDuration, reportText = p.reportText
             });
 
         foreach (var m in b.moons)
@@ -105,12 +115,27 @@ public static class GameStateSerializer
         foreach (var dto in game.bodies)
             bodies.Add(FromDTO(dto, null));
 
-        var star = StarDatabase.Get((StarType)game.starType);
+        // Rebuild the star cluster.
+        var starList = new List<StarData>();
+        StarData star;
+        if (game.isBlackHole)
+        {
+            starList.Add(StarDatabase.BlackHole());
+            star = starList[0];
+        }
+        else
+        {
+            if (game.starTypes != null && game.starTypes.Count > 0)
+                foreach (var t in game.starTypes) starList.Add(StarDatabase.Get((StarType)t));
+            else
+                starList.Add(StarDatabase.Get((StarType)game.starType));
+            star = StarDatabase.Combine(starList);
+        }
 
         ResearchManager.Import(game.research?.discovered, game.research?.researched, game.research != null ? game.research.points : 0);
 
         // Show the loaded system (fires OnSystemChanged → recompute + per-map sky).
-        GameManager.Instance.LoadSystem(bodies, star);
+        GameManager.Instance.LoadSystem(bodies, star, starList, game.isBlackHole);
 
         // Restore the viewing species (re-scores every body for that perspective).
         SpeciesManager.Select(game.speciesIndex);
@@ -155,7 +180,16 @@ public static class GameStateSerializer
             parentBody = parent
         };
 
-        // Terrain regenerates deterministically from the seed (shapes match the saved game).
+        b.terrainParams = new PlanetTerrainGenerator.NoiseParams
+        {
+            scale = dto.tScale <= 0f ? 1f : dto.tScale,
+            elevation = dto.tElev <= 0f ? 1f : dto.tElev,
+            moisture = dto.tMoist <= 0f ? 1f : dto.tMoist,
+            heat = dto.tHeat <= 0f ? 1f : dto.tHeat,
+            ridge = dto.tRidge <= 0f ? 1f : dto.tRidge
+        };
+
+        // Terrain regenerates deterministically from the seed + params (matches the saved game).
         b.surface = PlanetTerrainGenerator.GenerateSurface(b);
 
         // Re-apply stored ore deposits.
@@ -175,7 +209,9 @@ public static class GameStateSerializer
             {
                 type = (POIType)p.type, u = p.u, v = p.v, title = p.title, description = p.description,
                 explored = p.explored, relatedOre = (OreType)p.relatedOre,
-                revealTitle = p.revealTitle, revealText = p.revealText
+                revealTitle = p.revealTitle, revealText = p.revealText,
+                kind = p.kind, researchDuration = p.researchDuration <= 0f ? 12f : p.researchDuration,
+                reportText = p.reportText
             });
 
         foreach (var m in dto.moons)

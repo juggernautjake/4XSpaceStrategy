@@ -7,7 +7,9 @@ public class SolarSystemGenerator : MonoBehaviour
     public int maxBodies = 6;
 
     public StarType currentStarType;
-    public StarData currentStar;     // physical data for the rolled star (light/heat/HZ)
+    public StarData currentStar;     // combined physical data for the cluster (light/heat/HZ/orbits)
+    public List<StarData> stars = new List<StarData>();  // 1-3 suns (or a single black hole)
+    public bool isBlackHole;
 
     static readonly string[] NamePrefixes =
     { "Kepler", "Cygnus", "Vega", "Tau Ceti", "Draconis", "Helios", "Orion", "Lyra",
@@ -22,10 +24,12 @@ public class SolarSystemGenerator : MonoBehaviour
         _idCounter = 0;
         List<CelestialBody> system = new();
 
-        currentStarType = RollStarType();
-        currentStar = StarDatabase.Get(currentStarType);
+        RollStarSystem();
 
-        int bodyCount = Random.Range(minBodies, maxBodies + 1);
+        // Always produce a reasonably populated system (ignore a too-low Inspector minBodies).
+        int lo = Mathf.Max(3, minBodies);
+        int hi = Mathf.Max(lo, maxBodies);
+        int bodyCount = Mathf.Clamp(Random.Range(lo, hi + 1), 3, 8);
         string systemName = NamePrefixes[Random.Range(0, NamePrefixes.Length)];
 
         float currentRadius = Random.Range(7f, 10f);
@@ -86,7 +90,49 @@ public class SolarSystemGenerator : MonoBehaviour
             currentRadius += 5f + body.surfaceSize * 0.25f + Random.Range(0f, 3.5f);
         }
 
+        // Lean towards a living world: make sure at least one planet sits in the habitable zone.
+        EnsureHabitableWorld(system);
+
         return system;
+    }
+
+    // If no life-friendly planet already sits in the (default-species) habitable zone, convert the
+    // nearest planet into one and place it inside the zone.
+    void EnsureHabitableWorld(List<CelestialBody> system)
+    {
+        if (system.Count == 0 || currentStar == null || !currentStar.hasHabitableZone) return;
+        if (!Habitability.GetZone(currentStar, SpeciesManager.Current, out float inner, out float outer)) return;
+
+        foreach (var b in system)
+            if (b.distanceFromStar >= inner && b.distanceFromStar <= outer &&
+                (b.type == CelestialBodyType.RockyPlanet || b.type == CelestialBodyType.OceanPlanet))
+                return; // already have a habitable-zone world
+
+        float center = (inner + outer) * 0.5f;
+        CelestialBody best = null; float bestD = float.MaxValue;
+        foreach (var b in system)
+        {
+            float d = Mathf.Abs(b.distanceFromStar - center);
+            if (d < bestD) { bestD = d; best = b; }
+        }
+        if (best == null) return;
+
+        best.distanceFromStar = Random.Range(inner, outer);
+        best.orbitRadius = best.distanceFromStar;
+        best.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, best.orbitRadius);
+
+        bool cool = currentStarType == StarType.M || currentStarType == StarType.K;
+        best.type = cool ? CelestialBodyType.OceanPlanet : CelestialBodyType.RockyPlanet;
+        SeedTerrain(best);
+        best.surface = PlanetTerrainGenerator.GenerateSurface(best);
+        OreGenerator.Populate(best);
+        best.resources = new ResourceDeposit();
+        ResourceGenerator.GenerateResources(best);
+
+        ApplyHabitability(best);
+        POIGenerator.Populate(best);
+
+        foreach (var m in best.moons) { m.distanceFromStar = best.distanceFromStar; ApplyHabitability(m); }
     }
 
     CelestialBody MakeBody(CelestialBodyType type)
@@ -157,6 +203,30 @@ public class SolarSystemGenerator : MonoBehaviour
         if (o < 0.8f)  return CelestialBodyType.IcePlanet;
         if (o < 0.92f) return CelestialBodyType.BarrenPlanet;
         return CelestialBodyType.Asteroid;
+    }
+
+    // Rolls the centre of the system: almost always a single sun, occasionally binary/ternary,
+    // very rarely a black hole.
+    void RollStarSystem()
+    {
+        stars = new List<StarData>();
+
+        if (Random.value < 0.02f)   // very rare black hole
+        {
+            isBlackHole = true;
+            stars.Add(StarDatabase.BlackHole());
+            currentStar = stars[0];
+            currentStarType = currentStar.type;
+            return;
+        }
+
+        isBlackHole = false;
+        float c = Random.value;
+        int count = c < 0.04f ? 3 : (c < 0.16f ? 2 : 1);   // ~4% ternary, ~12% binary, ~84% single
+        for (int i = 0; i < count; i++) stars.Add(StarDatabase.Get(RollStarType()));
+
+        currentStar = StarDatabase.Combine(stars);
+        currentStarType = currentStar.type;
     }
 
     StarType RollStarType()

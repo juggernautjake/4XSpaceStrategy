@@ -2,57 +2,93 @@ using System.Collections.Generic;
 using UnityEngine;
 
 // Places points of interest on a body's surface: current settlements (habitable worlds only),
-// ancient ruins, special resource sites (tied to real high-tier ore deposits), and mystery
-// anomalies that must be explored to reveal new tech or materials.
+// ancient ruins, special resource sites (tied to real ore deposits), and a rich variety of mystery
+// anomalies (wreckage, caverns, unidentified ore, signals...) that must be researched to reveal
+// new tech or materials. Each mystery carries a research duration and a completion report.
 public static class POIGenerator
 {
     static readonly string[] AncientNames =
     { "the Velari", "the Themis Compact", "Old Kadesh", "the Sunken Choir", "the Iron Prophets",
-      "the Umbral Dynasty", "the First Builders", "the Ashen Court" };
+      "the Umbral Dynasty", "the First Builders", "the Ashen Court", "the Lattice Kings", "the Pale Synod" };
 
     static readonly string[] ColonyNames =
     { "New Meridian", "Port Absalom", "Halcyon Reach", "Fort Kestrel", "Tycho Landing",
-      "Serevin City", "Camp Dauntless", "Elysium Station" };
+      "Serevin City", "Camp Dauntless", "Elysium Station", "Bastion Hollow", "Cradle Point" };
 
-    static readonly (string title, string text, bool givesOre)[] Mysteries =
+    // kind, hover title, hover blurb, report on completion, base duration (s), ore reward (or None)
+    struct MysterySpec
     {
-        ("Derelict Ship", "A drifting hulk of unknown make. Its salvaged drive hints at a faster propulsion technology.", false),
-        ("Buried Vault", "A sealed vault of data-crystals describing a lost branch of science.", false),
-        ("Repeating Signal", "A looping transmission traced to this exact spot. Decoding it may unlock new comms tech.", false),
-        ("Crashed Probe", "An alien probe still logging materials your labs have never catalogued.", true),
-        ("Impossible Deposit", "Sensors detect a substance that should not form naturally here.", true),
-        ("Black Monolith", "A perfectly smooth monolith radiating faint, patterned energy.", false),
+        public string kind, title, blurb, report; public float dur; public OreType ore;
+        public MysterySpec(string k, string t, string b, string r, float d, OreType o)
+        { kind = k; title = t; blurb = b; report = r; dur = d; ore = o; }
+    }
+
+    static readonly MysterySpec[] Mysteries =
+    {
+        new MysterySpec("Wreckage", "Derelict Wreckage",
+            "A drifting hulk of unknown make, hull scorched by some ancient battle.",
+            "Salvage crews recovered intact drive components — a measurable leap in propulsion efficiency.", 18f, OreType.None),
+        new MysterySpec("Cavern", "Unexplored Cavern",
+            "A deep cavern system plunging far beneath the surface.",
+            "Mapping revealed vast mineral veins and a sunless underground sea teeming with strange life.", 14f, OreType.Cryonite),
+        new MysterySpec("Unidentified Ore", "Unidentified Ore",
+            "A vein of ore that matches no sample in the archives.",
+            "Assay confirmed a viable, previously-unknown material with remarkable properties.", 22f, OreType.Xenocryst),
+        new MysterySpec("Signal", "Repeating Signal",
+            "A looping transmission traced to this exact spot.",
+            "The signal decoded into schematics for a new communications method.", 20f, OreType.None),
+        new MysterySpec("Monolith", "Black Monolith",
+            "A perfectly smooth monolith radiating faint, patterned energy.",
+            "Prolonged study of the monolith hinted at exotic physics beyond current theory.", 28f, OreType.Quantite),
+        new MysterySpec("Probe", "Crashed Probe",
+            "An alien probe, half-buried, its sensors still faintly warm.",
+            "The probe's databanks catalogued technologies your engineers had never imagined.", 16f, OreType.None),
+        new MysterySpec("Cache", "Buried Cache",
+            "A sealed vault of data-crystals and sealed containers.",
+            "The cache held ancient tools and schematics, jump-starting a line of research.", 15f, OreType.None),
+        new MysterySpec("Laboratory", "Ruined Laboratory",
+            "The collapsed remains of a high-technology laboratory.",
+            "Recovered research notes meaningfully advanced your understanding of materials science.", 24f, OreType.Platinode),
+        new MysterySpec("Crater", "Impact Anomaly",
+            "An impact crater with an oddly metallic, magnetized core.",
+            "The impactor proved to be a fragment of exotic, ultra-dense matter.", 26f, OreType.Neutronium),
+        new MysterySpec("Bloom", "Bioluminescent Bloom",
+            "An expanse of glowing organisms unlike any catalogued.",
+            "Study of the bloom yielded novel biochemistry with medical potential.", 19f, OreType.Luminite),
     };
 
     public static void Populate(CelestialBody body)
     {
         body.pointsOfInterest.Clear();
         var pois = body.pointsOfInterest;
-
         bool solid = body.type != CelestialBodyType.GasGiant;
 
         // --- Special resources: promote real high-tier ore deposits into named sites ---
         if (solid && body.surface != null)
         {
             var seenOre = new HashSet<OreType>();
-            for (int attempt = 0; attempt < 400 && seenOre.Count < 2; attempt++)
+            for (int attempt = 0; attempt < 500 && seenOre.Count < 3; attempt++)
             {
                 int x = Random.Range(0, body.surface.width);
                 int y = Random.Range(0, body.surface.height);
                 var tile = body.surface.tiles[x, y];
                 if (tile == null || !tile.HasOre) continue;
-                if (OreDatabase.Get(tile.ore).tier < 3) continue;
+                if (OreDatabase.Get(tile.ore).tier < 2) continue;
                 if (!seenOre.Add(tile.ore)) continue;
 
+                var oi = OreDatabase.Get(tile.ore);
                 pois.Add(new PointOfInterest
                 {
                     type = POIType.SpecialResource,
                     u = (x + 0.5f) / body.surface.width,
                     v = (y + 0.5f) / body.surface.height,
-                    title = "Rich Deposit",
+                    kind = "Deposit",
+                    title = $"{oi.displayName} Deposit",
                     description = "A concentration far above normal background levels.",
                     relatedOre = tile.ore,
-                    explored = true
+                    explored = true,
+                    researchDuration = 10f + oi.tier * 4f,
+                    reportText = $"Survey confirmed a rich, workable {oi.displayName} deposit. {oi.uses}"
                 });
             }
         }
@@ -66,10 +102,9 @@ public static class POIGenerator
                 if (!TryFindLand(body, out float u, out float v)) break;
                 pois.Add(new PointOfInterest
                 {
-                    type = POIType.Settlement,
-                    u = u, v = v,
+                    type = POIType.Settlement, u = u, v = v, kind = "Settlement",
                     title = ColonyNames[Random.Range(0, ColonyNames.Length)],
-                    description = "An active settlement of a living civilization.",
+                    description = "An active settlement of a living civilization, trading and expanding.",
                     explored = true
                 });
             }
@@ -78,14 +113,13 @@ public static class POIGenerator
         // --- Ancient ruins ---
         if (solid)
         {
-            int ruins = Random.value < 0.6f ? Random.Range(0, 2) : 0;
+            int ruins = Random.value < 0.7f ? Random.Range(0, 3) : 0;
             for (int i = 0; i < ruins; i++)
             {
                 if (!TryFindLand(body, out float u, out float v)) break;
                 pois.Add(new PointOfInterest
                 {
-                    type = POIType.AncientRuins,
-                    u = u, v = v,
+                    type = POIType.AncientRuins, u = u, v = v, kind = "Ruins",
                     title = $"Ruins of {AncientNames[Random.Range(0, AncientNames.Length)]}",
                     description = "Weathered structures of a civilization long gone. Study may recover lost knowledge.",
                     explored = true
@@ -93,9 +127,8 @@ public static class POIGenerator
             }
         }
 
-        // --- Mystery anomalies (start unexplored) ---
-        int mysteries = Random.Range(0, 3);
-        if (!solid) mysteries = Random.Range(0, 2); // gas giants: atmospheric anomalies
+        // --- Mystery anomalies (start unexplored; must be researched) ---
+        int mysteries = solid ? Random.Range(1, 4) : Random.Range(0, 2);
         for (int i = 0; i < mysteries; i++)
         {
             float u, v;
@@ -103,24 +136,21 @@ public static class POIGenerator
             else { u = Random.value; v = Random.value; }
 
             var m = Mysteries[Random.Range(0, Mysteries.Length)];
-            var poi = new PointOfInterest
+            pois.Add(new PointOfInterest
             {
-                type = POIType.Mystery,
-                u = u, v = v,
-                title = "Unknown Anomaly",
-                explored = false,
-                revealTitle = m.title,
-                revealText = m.text
-            };
-            if (m.givesOre) poi.relatedOre = Random.value < 0.5f ? OreType.Xenocryst : OreType.Quantite;
-            pois.Add(poi);
+                type = POIType.Mystery, u = u, v = v, kind = m.kind,
+                title = "Unknown Anomaly", explored = false,
+                revealTitle = m.title, revealText = m.blurb,
+                reportText = m.report,
+                researchDuration = m.dur * Random.Range(0.8f, 1.3f),
+                relatedOre = m.ore
+            });
         }
     }
 
-    // Rejection-sample a non-water location.
     static bool TryFindLand(CelestialBody body, out float u, out float v)
     {
-        var p = PlanetTerrainGenerator.NoiseParams.Default;
+        var p = body.terrainParams;
         for (int i = 0; i < 30; i++)
         {
             u = Random.value; v = Random.Range(0.1f, 0.9f);

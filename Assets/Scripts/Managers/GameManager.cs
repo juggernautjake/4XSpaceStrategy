@@ -18,6 +18,8 @@ public class GameManager : MonoBehaviour
 
     public List<CelestialBody> CurrentBodies { get; private set; } = new List<CelestialBody>();
     public StarData CurrentStar { get; private set; }
+    public List<StarData> Stars { get; private set; } = new List<StarData>();
+    public bool IsBlackHole { get; private set; }
 
     void Awake() { Instance = this; }
 
@@ -38,22 +40,28 @@ public class GameManager : MonoBehaviour
 
         CurrentBodies = solarSystemGenerator.GenerateSystem();
         CurrentStar = solarSystemGenerator.currentStar;
+        Stars = solarSystemGenerator.stars;
+        IsBlackHole = solarSystemGenerator.isBlackHole;
 
-        Debug.Log($"Generated {CurrentBodies.Count} bodies around a {CurrentStar.type}-type star " +
+        Debug.Log($"Generated {CurrentBodies.Count} bodies; centre = {(IsBlackHole ? "BLACK HOLE" : Stars.Count + "-star " + CurrentStar.type)} " +
                   $"(HZ: {(CurrentStar.hasHabitableZone ? $"{CurrentStar.hzInner:F1}-{CurrentStar.hzOuter:F1}" : "none")}).");
 
         Visualize();
     }
 
     // Used by the save system to display a loaded system.
-    public void LoadSystem(List<CelestialBody> bodies, StarData star)
+    public void LoadSystem(List<CelestialBody> bodies, StarData star, List<StarData> stars, bool isBlackHole)
     {
         CurrentBodies = bodies;
         CurrentStar = star;
+        Stars = (stars != null && stars.Count > 0) ? stars : new List<StarData> { star };
+        IsBlackHole = isBlackHole;
         if (solarSystemGenerator != null)
         {
             solarSystemGenerator.currentStar = star;
             solarSystemGenerator.currentStarType = star.type;
+            solarSystemGenerator.stars = Stars;
+            solarSystemGenerator.isBlackHole = isBlackHole;
         }
         Visualize();
     }
@@ -66,6 +74,6 @@ public class GameManager : MonoBehaviour
             return;
         }
         systemVisualizer.solarSystemGenerator = solarSystemGenerator;
-        systemVisualizer.VisualizeSystem(CurrentBodies, CurrentStar);
+        systemVisualizer.VisualizeSystem(CurrentBodies, CurrentStar, Stars, IsBlackHole);
     }
 }

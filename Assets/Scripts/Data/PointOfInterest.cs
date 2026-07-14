@@ -20,6 +20,13 @@ public class PointOfInterest
     public string revealTitle;      // shown after a Mystery is explored
     public string revealText;       // what the exploration uncovered
 
+    public string kind;             // flavour label: "Wreckage", "Cavern", "Unidentified Ore"...
+    public float researchDuration = 12f;  // seconds to research (varies per opportunity)
+    public string reportText;       // full report shown when research completes
+
+    public bool IsResearchable => (type == POIType.Mystery && !explored)
+                                  || (type == POIType.SpecialResource && relatedOre != OreType.None && !ResearchManager.IsResearched(relatedOre));
+
     public string HoverText()
     {
         switch (type)

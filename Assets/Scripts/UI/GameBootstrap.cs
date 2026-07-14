@@ -1,8 +1,8 @@
 using UnityEngine;
 
-// Spawns all runtime-built UI, the HUD, the tooltip and the space background automatically when the
-// scene starts — so none of it needs to be wired up in the Unity Editor. Also gives each generated
-// system its own procedural sky and keeps habitability in sync with the current species.
+// Spawns all runtime-built systems and UI automatically when the scene starts — so none of it needs
+// to be wired up in the Unity Editor. Also gives each generated system its own procedural sky and
+// keeps habitability in sync with the current species.
 public static class GameBootstrap
 {
     static bool initialized;
@@ -13,22 +13,30 @@ public static class GameBootstrap
         if (initialized) return;
         initialized = true;
 
-        // Ensure a tooltip exists.
-        var _ = TooltipManager.Instance;
+        // Core managers (no canvas needed).
+        SimpleAudio.Create();
+        ResearchTaskManager.Create();
+        SpaceBackground.Create();
+        PostFxController.Create();
+
+        var _ = TooltipManager.Instance; // ensure tooltip exists
 
         // Main window canvas (above the scene's own UI).
         var canvas = UIFactory.CreateCanvas("RuntimeUICanvas", 100);
 
+        ObjectLabelManager.Create(canvas.transform);
+        ContextMenu.Create(canvas.transform);
+        NotificationManager.Create(canvas.transform);
+
         OrbitControlPanel.Create(canvas.transform);
+        TerrainControlPanel.Create(canvas.transform);
         StarInfoPanel.Create(canvas.transform);
         ResearchWindow.Create(canvas.transform);
         SaveLoadMenu.Create(canvas.transform);
         SpeciesWindow.Create(canvas.transform);
-        BackgroundSettingsWindow.Create(canvas.transform);
         DetailedSurfaceWindow.Create(canvas.transform);
-
-        SpaceBackground.Create();
-        PostFxController.Create();
+        SettingsWindow.Create(canvas.transform);
+        EscapeMenu.Create(canvas.transform);
 
         var hud = new GameObject("GameHUD").AddComponent<GameHUD>();
         hud.Build(canvas.transform);
@@ -47,7 +55,6 @@ public static class GameBootstrap
         SpeciesManager.RecomputeWorld();
     }
 
-    // A stable seed derived from the current system, so its sky stays constant until regenerated.
     static int DeriveSeed()
     {
         var g = GameManager.Instance;

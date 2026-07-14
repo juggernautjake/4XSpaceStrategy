@@ -2,12 +2,16 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
-// Top command bar. Opens every tool window, drives simulation speed, toggles the habitable zone,
-// and shows the current species / research points. Built entirely at runtime.
+// Top command bar. Opens tool windows and the pause menu, controls simulation speed via a slider +
+// pause/play (which remembers the last speed), toggles camera-follow on the selection, and shows the
+// current species / research points / speed.
 public class GameHUD : MonoBehaviour
 {
     TMP_Text statusText;
-    Button orbitBtn, detailedBtn;
+    TMP_Text speedReadout;
+    Button orbitBtn, terrainBtn, detailedBtn, followBtn;
+    Slider timeSlider;
+    bool suppress;
 
     public void Build(Transform canvas)
     {
@@ -17,41 +21,45 @@ public class GameHUD : MonoBehaviour
         brt.pivot = new Vector2(0.5f, 1); brt.sizeDelta = new Vector2(0, 40); brt.anchoredPosition = Vector2.zero;
 
         var h = bar.gameObject.AddComponent<HorizontalLayoutGroup>();
-        h.padding = new RectOffset(8, 8, 5, 5); h.spacing = 6;
+        h.padding = new RectOffset(8, 8, 5, 5); h.spacing = 5;
         h.childControlWidth = true; h.childControlHeight = true;
         h.childForceExpandWidth = false; h.childForceExpandHeight = true;
         h.childAlignment = TextAnchor.MiddleLeft;
 
-        BarButton(bar.transform, "New System", 96, () => GameManager.Instance?.GenerateStartingSystem());
-        BarButton(bar.transform, "Save / Load", 96, () => SaveLoadMenu.Instance?.Toggle());
-        BarButton(bar.transform, "Species", 74, () => SpeciesWindow.Instance?.Toggle());
-        BarButton(bar.transform, "Ore Codex", 86, () => ResearchWindow.Instance?.Toggle());
-        BarButton(bar.transform, "Background", 92, () => BackgroundSettingsWindow.Instance?.Toggle());
-        BarButton(bar.transform, "Zone", 60, () => SystemContext.Zone?.Toggle());
-        orbitBtn = BarButton(bar.transform, "Orbit", 62, () => OrbitControlPanel.Instance?.Toggle());
-        detailedBtn = BarButton(bar.transform, "Detailed Map", 106, OpenDetailed);
+        BarButton(bar.transform, "Menu", 66, () => EscapeMenu.Instance?.Toggle());
+        BarButton(bar.transform, "Species", 72, () => SpeciesWindow.Instance?.Toggle());
+        BarButton(bar.transform, "Ore Codex", 84, () => ResearchWindow.Instance?.Toggle());
+        BarButton(bar.transform, "Notices", 70, () => NotificationManager.Instance?.ToggleHistory());
+        BarButton(bar.transform, "Zone", 56, () => SystemContext.Zone?.Toggle());
+        orbitBtn = BarButton(bar.transform, "Orbit", 58, () => OrbitControlPanel.Instance?.Toggle());
+        terrainBtn = BarButton(bar.transform, "Terrain", 68, () => TerrainControlPanel.Instance?.Toggle());
+        detailedBtn = BarButton(bar.transform, "Map", 52, OpenDetailed);
+        followBtn = BarButton(bar.transform, "Follow", 66, ToggleFollow);
 
-        Spacer(bar.transform, 14);
-        BarButton(bar.transform, "❚❚", 40, () => SetSpeed(0f));
-        BarButton(bar.transform, "1x", 40, () => SetSpeed(1f));
-        BarButton(bar.transform, "2x", 40, () => SetSpeed(2f));
-        BarButton(bar.transform, "5x", 40, () => SetSpeed(5f));
+        Spacer(bar.transform, 10);
+        BarButton(bar.transform, "Pause", 56, () => TimeControl.TogglePause());
+        // Inline time slider.
+        var slHolder = UIFactory.NewUI(bar.transform, "TimeSlider");
+        var le = slHolder.AddComponent<LayoutElement>(); le.preferredWidth = 130; le.minWidth = 130;
+        timeSlider = UIFactory.Slider(slHolder.transform, 0f, TimeControl.Max, 1f, v => { if (!suppress) TimeControl.Set(v); });
+        UIFactory.Stretch(timeSlider.GetComponent<RectTransform>(), 0, 0, 6, 6);
+        speedReadout = UIFactory.Text(bar.transform, "1.0x", UITheme.SmallSize, UITheme.Accent, TextAlignmentOptions.Center);
+        var sle = speedReadout.gameObject.AddComponent<LayoutElement>(); sle.preferredWidth = 40; sle.minWidth = 40;
 
-        // Status readout on the right.
         statusText = UIFactory.Text(bar.transform, "", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.Right);
-        var le = statusText.gameObject.AddComponent<LayoutElement>();
-        le.flexibleWidth = 1; le.minWidth = 200;
+        var stle = statusText.gameObject.AddComponent<LayoutElement>();
+        stle.flexibleWidth = 1; stle.minWidth = 150;
 
         PlanetUI.OnBodySelected += HandleSelected;
         PlanetUI.OnClosed += UpdateContext;
         SpeciesManager.OnSpeciesChanged += UpdateStatus;
         ResearchManager.OnChanged += UpdateStatus;
+        TimeControl.OnChanged += UpdateSpeed;
 
         UpdateContext();
         UpdateStatus();
+        UpdateSpeed();
     }
-
-    void HandleSelected(CelestialBody b) => UpdateContext();
 
     Button BarButton(Transform parent, string label, float width, System.Action onClick)
     {
@@ -73,25 +81,43 @@ public class GameHUD : MonoBehaviour
         if (PlanetUI.Selected != null) DetailedSurfaceWindow.Instance?.Open(PlanetUI.Selected);
     }
 
-    void SetSpeed(float v)
+    void ToggleFollow()
     {
-        Time.timeScale = v;
-        TimeController.timeScale = v; // keep the scene TimeController in sync (it writes every frame)
-        UpdateStatus();
+        var cam = CameraController.Instance;
+        var sel = PlanetUI.Selected;
+        if (cam == null || sel == null || sel.visualObject == null) return;
+        if (cam.IsFollowing) cam.ClearFocus();
+        else cam.FocusAndZoom(sel.visualObject.transform, sel.surfaceSize, true);
+        UpdateContext();
     }
+
+    void HandleSelected(CelestialBody b) => UpdateContext();
 
     void UpdateContext()
     {
         bool has = PlanetUI.Selected != null;
         if (orbitBtn != null) orbitBtn.interactable = has;
+        if (terrainBtn != null) terrainBtn.interactable = has;
         if (detailedBtn != null) detailedBtn.interactable = has;
+        if (followBtn != null)
+        {
+            followBtn.interactable = has;
+            var lbl = followBtn.GetComponentInChildren<TMP_Text>();
+            if (lbl != null) lbl.text = (CameraController.Instance != null && CameraController.Instance.IsFollowing) ? "Unfollow" : "Follow";
+        }
         UpdateStatus();
     }
 
     void UpdateStatus()
     {
         if (statusText == null) return;
-        statusText.text = $"Species: <b>{SpeciesManager.Current.name}</b>   ·   Research: <b>{ResearchManager.ResearchPoints}</b>   ·   Speed: {Time.timeScale:0.#}x";
+        statusText.text = $"Species: <b>{SpeciesManager.Current.name}</b>   Research: <b>{ResearchManager.ResearchPoints}</b>";
+    }
+
+    void UpdateSpeed()
+    {
+        if (speedReadout != null) speedReadout.text = TimeControl.IsPaused ? "Paused" : $"{Time.timeScale:0.#}x";
+        if (timeSlider != null) { suppress = true; timeSlider.value = Time.timeScale; suppress = false; }
     }
 
     void OnDestroy()
@@ -100,5 +126,6 @@ public class GameHUD : MonoBehaviour
         PlanetUI.OnClosed -= UpdateContext;
         SpeciesManager.OnSpeciesChanged -= UpdateStatus;
         ResearchManager.OnChanged -= UpdateStatus;
+        TimeControl.OnChanged -= UpdateSpeed;
     }
 }

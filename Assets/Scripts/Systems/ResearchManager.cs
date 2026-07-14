@@ -38,6 +38,8 @@ public static class ResearchManager
         if (discovered.Add(ore))
         {
             ResearchPoints += PointsPerDiscovery;
+            var info = OreDatabase.Get(ore);
+            NotificationManager.Instance?.Push($"New ore discovered: {info.displayName}", info.description, null, NotifKind.Discovery);
             OnChanged?.Invoke();
             return true;
         }
@@ -59,6 +61,15 @@ public static class ResearchManager
         researched.Add(ore);
         OnChanged?.Invoke();
         return true;
+    }
+
+    // Complete research for free (e.g. finishing a timed field-research task).
+    public static void ForceResearch(OreType ore)
+    {
+        if (ore == OreType.None) return;
+        discovered.Add(ore);
+        researched.Add(ore);
+        OnChanged?.Invoke();
     }
 
     public static void AwardExploration()

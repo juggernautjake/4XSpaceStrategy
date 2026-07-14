@@ -8,33 +8,99 @@ public class CameraController : MonoBehaviour
     public float heightSpeed = 80f;        // Mouse wheel height change speed
 
     [Header("Limits")]
-    public float minHeight = 8f;           // Closest to the system
-    public float maxHeight = 120f;         // Farthest view
+    public float minHeight = 4f;           // Closest to the system
+    public float maxHeight = 400f;         // Farthest view (room to zoom way out)
 
     private float targetHeight;            // For smooth movement
+
+    public static CameraController Instance;
+    private void Awake() { Instance = this; }
 
     private void Start()
     {
         targetHeight = transform.position.y;
     }
 
+    // Recenters the view on a world position (used by notifications to jump to a discovery).
+    public void FocusOn(Vector3 worldPos)
+    {
+        Vector3 f = transform.forward;
+        if (Mathf.Abs(f.y) < 0.001f)
+        {
+            transform.position = new Vector3(worldPos.x, transform.position.y, worldPos.z);
+            return;
+        }
+        float h = transform.position.y;
+        float d = (worldPos.y - h) / f.y;   // distance along forward until it hits the body's height
+        Vector3 pos = worldPos - f * d;
+        pos.y = h;
+        transform.position = pos;
+        targetHeight = h;
+    }
+
+    // Convenience: focus whatever camera controller exists (or the main camera as a fallback).
+    public static void Focus(Vector3 worldPos)
+    {
+        if (Instance != null) { Instance.FocusOn(worldPos); return; }
+        var cam = Camera.main;
+        if (cam != null) cam.transform.position = new Vector3(worldPos.x, cam.transform.position.y, worldPos.z - 10f);
+    }
+
+    [Header("Follow / Focus")]
+    public Transform followTarget;
+    public bool following;
+
     private void Update()
     {
-        // Prevent camera movement when hovering UI
-        if (EventSystem.current.IsPointerOverGameObject())
-            return;
-        HandlePanning();
-        HandleHeightChange();
-        SmoothHeightMovement();
+        bool overUI = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
+
+        // WASD panning works even when the mouse is over a UI window (e.g. the terrain viewer),
+        // because it's keyboard input — only disabled while locked/following an object.
+        if (!following) HandlePanning();
+
+        // Mouse-wheel zoom is suppressed only when the cursor is over UI (so scrolling a window
+        // doesn't also zoom the world).
+        if (!overUI) HandleHeightChange();
+
+        if (!following) SmoothHeightMovement();
         KeepCameraAngle();
     }
+
+    private void LateUpdate()
+    {
+        // Keep the camera centred on (and zooming toward) the followed body as it orbits.
+        if (following && followTarget != null)
+        {
+            Vector3 p = transform.position;
+            p.y = Mathf.Lerp(p.y, targetHeight, 8f * Time.unscaledDeltaTime);
+            transform.position = p;
+            FocusOn(followTarget.position);
+            KeepCameraAngle();
+        }
+    }
+
+    // Snap onto and zoom close to an object; smaller objects get a closer view.
+    public void FocusAndZoom(Transform target, float objectSize, bool follow)
+    {
+        followTarget = target;
+        following = follow;
+        targetHeight = Mathf.Clamp(3.5f + objectSize * 0.45f, 3.5f, 22f);
+        if (target != null) FocusOn(target.position);
+    }
+
+    public void SetFollow(bool on) { following = on; }
+    public bool IsFollowing => following;
+    public void ClearFocus() { following = false; followTarget = null; }
 
     private void HandlePanning()
     {
         float h = Input.GetAxis("Horizontal");
         float v = Input.GetAxis("Vertical");
 
-        Vector3 move = new Vector3(h, 0, v) * panSpeed * Time.deltaTime;
+        // Unscaled time so panning speed is constant regardless of the simulation speed (and works
+        // while paused). Scale with height so panning stays usable when zoomed far out.
+        float heightFactor = Mathf.Clamp(transform.position.y / 20f, 1f, 20f);
+        Vector3 move = new Vector3(h, 0, v) * panSpeed * heightFactor * Time.unscaledDeltaTime;
         transform.Translate(move, Space.World);
     }
 
@@ -51,7 +117,7 @@ public class CameraController : MonoBehaviour
     private void SmoothHeightMovement()
     {
         Vector3 pos = transform.position;
-        pos.y = Mathf.Lerp(pos.y, targetHeight, 10f * Time.deltaTime); // Smoothness
+        pos.y = Mathf.Lerp(pos.y, targetHeight, 10f * Time.unscaledDeltaTime); // Smoothness (time-independent)
         transform.position = pos;
     }
 

@@ -12,9 +12,10 @@ public class CelestialBody
     public List<CelestialBody> moons = new List<CelestialBody>();
 
     // Terrain field identity. Both the low-res grid and the high-res detailed map are sampled from
-    // this same seed/frequency, so continents & oceans line up between the two views.
+    // this same seed/frequency/params, so the two views ALWAYS match (including live edits).
     public float terrainSeed = 0f;
     public float continentFrequency = 4f;
+    public PlanetTerrainGenerator.NoiseParams terrainParams = PlanetTerrainGenerator.NoiseParams.Default;
 
     public List<PointOfInterest> pointsOfInterest = new List<PointOfInterest>();
 

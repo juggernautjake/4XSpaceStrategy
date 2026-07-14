@@ -53,8 +53,7 @@ public class PlanetUI : MonoBehaviour
     {
         if (infoPanel == null || !infoPanel.activeSelf) return;
 
-        if (Input.GetKeyDown(KeyCode.Escape)) { CloseAll(); return; }
-
+        // Esc is handled by EscapeMenu (pause menu); planet UI closes via click-outside or the X button.
         if (Input.GetMouseButtonDown(0) && !justOpened && EventSystem.current != null &&
             !EventSystem.current.IsPointerOverGameObject())
         {
@@ -79,10 +78,15 @@ public class PlanetUI : MonoBehaviour
 
         if (infoPanel != null) infoPanel.SetActive(true);
 
-        if (TerrainEditorPanel.Instance != null) TerrainEditorPanel.Instance.ShowForPlanet(body);
-        if (SandboxEditorPanel.Instance != null) SandboxEditorPanel.Instance.ShowForBody(body);
-
         justOpened = true;
+        SimpleAudio.Instance?.PlaySelect();
+
+        // Zoom in on the selection (smaller bodies zoom closer) and float its labels.
+        if (CameraController.Instance != null && body.visualObject != null)
+            CameraController.Instance.FocusAndZoom(body.visualObject.transform, body.surfaceSize, CameraController.Instance.IsFollowing);
+        ObjectLabelManager.Instance?.ShowForBody(body);
+
+        // Runtime tools (orbit + terrain panels) react to this.
         OnBodySelected?.Invoke(body);
     }
 
@@ -153,9 +157,9 @@ public class PlanetUI : MonoBehaviour
     {
         if (infoPanel != null) infoPanel.SetActive(false);
         if (gridWindow != null) gridWindow.SetActive(false);
-        if (TerrainEditorPanel.Instance != null) TerrainEditorPanel.Instance.Hide();
-        if (SandboxEditorPanel.Instance != null) SandboxEditorPanel.Instance.Hide();
         TooltipManager.Instance.Hide();
+        ObjectLabelManager.Instance?.Hide();
+        CameraController.Instance?.ClearFocus();
         Selected = null;
         OnClosed?.Invoke();
     }

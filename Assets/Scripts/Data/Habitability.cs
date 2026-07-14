@@ -13,12 +13,15 @@ public static class Habitability
         if (star == null || !star.hasHabitableZone || species == null) return false;
 
         // Hotter-preferring species pull the band inward (closer = hotter); colder push it outward.
-        float tempShift = Mathf.Lerp(1.6f, 0.55f, Mathf.Clamp01(species.idealTemp));
+        // Range widened so cold species reach noticeably further out than warm ones.
+        float tempShift = Mathf.Lerp(1.95f, 0.5f, Mathf.Clamp01(species.idealTemp));
         float center = star.HzCenter * tempShift;
-        float half = star.HzWidth * 0.5f * Mathf.Max(0.3f, species.tolerance);
 
-        inner = Mathf.Max(0.5f, center - half);
-        outer = center + half;
+        // Broader, more forgiving bands, and asymmetric so the zone extends further OUTWARD than in.
+        float half = star.HzWidth * Mathf.Max(0.35f, species.tolerance) * 1.15f;
+
+        inner = Mathf.Max(0.5f, center - half * 0.85f);
+        outer = center + half * 1.45f;   // reaches further from the star
         return true;
     }
 

@@ -42,7 +42,7 @@ public static class OrbitalMechanics
     }
 
     public static float PlanetAngularSpeed(StarData star, float radius)
-        => AngularSpeedDeg(StarMass(star.type), radius);
+        => AngularSpeedDeg(star != null && star.mass > 0f ? star.mass : StarMass(star != null ? star.type : StarType.G), radius);
 
     public static float MoonAngularSpeed(CelestialBody planet, float radius)
         => AngularSpeedDeg(Mathf.Max(0.2f, BodyMass(planet)), radius);
