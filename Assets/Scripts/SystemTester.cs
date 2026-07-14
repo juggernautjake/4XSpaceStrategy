@@ -7,7 +7,8 @@ public class SystemTester : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.R))   // Press R to regenerate
+        // R regenerates the galaxy — DEV MODE only (never in normal player mode).
+        if (GameMode.DevMode && Input.GetKeyDown(KeyCode.R))
         {
             if (gameManager != null)
                 gameManager.GenerateStartingSystem();
