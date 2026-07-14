@@ -214,10 +214,38 @@ public class ColonyManager : MonoBehaviour
         return false;
     }
 
+    // The ACTIVE construction on a world (first queued), or null.
     public Construction ConstructionFor(CelestialBody b)
     {
         foreach (var c in building) if (c.body == b) return c;
         return null;
+    }
+
+    // Everything queued on a world, in build order (the first is the one actually building).
+    public List<Construction> QueueFor(CelestialBody b)
+    {
+        var l = new List<Construction>();
+        foreach (var c in building) if (c.body == b) l.Add(c);
+        return l;
+    }
+
+    // A construction only advances when it's first in line for its world (one build at a time per colony).
+    bool IsActive(Construction c)
+    {
+        foreach (var o in building) { if (o == c) return true; if (o.body == c.body) return false; }
+        return true;
+    }
+
+    // Cancel a queued/active construction and refund its cost (it wasn't completed).
+    public void CancelConstruction(Construction c)
+    {
+        if (c == null || !building.Remove(c)) return;
+        if (!GameMode.DevMode)
+        {
+            if (c.shipyardUpgrade) { int nl = c.body.shipyardLevel + 1; PlayerEconomy.Add(ResourceType.Metal, ShipyardUpgradeMetal(nl)); PlayerEconomy.Add(ResourceType.Energy, ShipyardUpgradeEnergy(nl)); }
+            else if (c.establishCity) { PlayerEconomy.Add(ResourceType.Metal, CityMetal); PlayerEconomy.Add(ResourceType.Energy, CityEnergy); }
+            else { var info = BuildingDatabase.Get(c.type); PlayerEconomy.Add(ResourceType.Metal, DiscCost(info.costMetal)); PlayerEconomy.Add(ResourceType.Energy, DiscCost(info.costEnergy)); }
+        }
     }
 
     void AdvanceConstruction(float dt)
@@ -225,6 +253,7 @@ public class ColonyManager : MonoBehaviour
         for (int i = building.Count - 1; i >= 0; i--)
         {
             var c = building[i];
+            if (!IsActive(c)) continue;   // queued behind another build on this world — wait its turn
             c.elapsed += dt;
             if (c.elapsed < c.duration) continue;
             building.RemoveAt(i);
