@@ -102,10 +102,21 @@ public class DetailedSurfaceWindow : MonoBehaviour
     {
         body = b;
         if (titleText != null) titleText.text = $"Detailed Surface — {b.name}";
+        ApplySize(b);
         map.texture = SurfaceTextureRenderer.Build(b);
         BuildMarkers();
         root.SetActive(true);
         rootRT.SetAsLastSibling();
+    }
+
+    // The detailed map (and its window) scale with the body's size, so a small moon shows a small map
+    // and a giant world a large one. Markers use normalized anchors, so they scale automatically.
+    void ApplySize(CelestialBody b)
+    {
+        float scale = Mathf.Clamp((b != null ? b.surfaceSize : 12) / 13f, 0.55f, 1.6f);
+        float w = MapW * scale, h = MapH * scale;
+        mapRT.sizeDelta = new Vector2(w, h);
+        rootRT.sizeDelta = new Vector2(w + 40f, h + 156f);
     }
 
     public void RefreshIfShowing(CelestialBody b)

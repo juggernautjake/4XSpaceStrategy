@@ -59,7 +59,7 @@ public class SolarSystemGenerator : MonoBehaviour
             {
                 CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
                 moon.name = NameGenerator.MoonName(body.name, m);
-                moon.surfaceSize = Random.Range(4, 9);
+                moon.surfaceSize = Random.Range(3, 13);
                 SeedTerrain(moon);
                 moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
                 OreGenerator.Populate(moon);
@@ -252,14 +252,15 @@ public class SolarSystemGenerator : MonoBehaviour
     {
         switch (type)
         {
-            case CelestialBodyType.GasGiant:       return Random.Range(16, 24);
-            case CelestialBodyType.IcePlanet:      return Random.Range(9, 16);
-            case CelestialBodyType.OceanPlanet:    return Random.Range(10, 18);
-            case CelestialBodyType.RockyPlanet:    return Random.Range(8, 15);
-            case CelestialBodyType.VolcanicPlanet: return Random.Range(9, 14);
-            case CelestialBodyType.BarrenPlanet:   return Random.Range(7, 13);
-            case CelestialBodyType.Moon:           return Random.Range(4, 9);
-            case CelestialBodyType.Asteroid:       return Random.Range(4, 7);
+            // Wider spread so bodies (and their maps) vary noticeably in size.
+            case CelestialBodyType.GasGiant:       return Random.Range(18, 32);
+            case CelestialBodyType.IcePlanet:      return Random.Range(7, 21);
+            case CelestialBodyType.OceanPlanet:    return Random.Range(9, 23);
+            case CelestialBodyType.RockyPlanet:    return Random.Range(6, 20);
+            case CelestialBodyType.VolcanicPlanet: return Random.Range(6, 18);
+            case CelestialBodyType.BarrenPlanet:   return Random.Range(5, 17);
+            case CelestialBodyType.Moon:           return Random.Range(3, 13);
+            case CelestialBodyType.Asteroid:       return Random.Range(3, 8);
             default:                               return 10;
         }
     }

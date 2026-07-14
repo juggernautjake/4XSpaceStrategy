@@ -109,7 +109,7 @@ public static class GalaxyGenerator
         for (int m = 0; m < moonCount; m++)
         {
             var moon = new CelestialBody(CelestialBodyType.Moon) { name = $"Homeworld-{(char)('a' + m)}" };
-            moon.surfaceSize = Random.Range(4, 9);
+            moon.surfaceSize = Random.Range(4, 12);
             SeedTerrain(moon);
             moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
             OreGenerator.Populate(moon);
