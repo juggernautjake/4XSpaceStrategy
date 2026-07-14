@@ -49,8 +49,8 @@ public static class UnitDatabase
     {
         _all = new UnitInfo[4];
         _all[(int)UnitType.Scout] = new UnitInfo(UnitType.Scout, "Scout",
-            "Cheap, fast explorer. Surveys worlds and does limited research. Can plant a small outpost but cannot colonize. Must return home from hostile worlds.",
-            20, 10, 6f, 1, 20, 9, 2, 1, explore: true, doResearch: true, colonize: false, iconShape: 0, iconColor: new Color(0.5f, 0.85f, 1f));
+            "Cheap, fast explorer with a survey BONUS. Surveys worlds and collects ore samples, but can't research them itself — bring samples to a research ship or a world with a research centre. Cannot colonize. Must return home from hostile worlds.",
+            20, 10, 6f, 1, 20, 9, 2, 1, explore: true, doResearch: false, colonize: false, iconShape: 0, iconColor: new Color(0.5f, 0.85f, 1f));
 
         _all[(int)UnitType.ResearchShip] = new UnitInfo(UnitType.ResearchShip, "Research Ship",
             "A mobile laboratory. Slower and pricier than a scout, with no attack and only light defense, but researches a world far more deeply to unlock technologies.",
@@ -61,7 +61,7 @@ public static class UnitDatabase
             35, 25, 12f, 6, 80, 8, 0, 10, explore: false, doResearch: false, colonize: false, iconShape: 2, iconColor: new Color(1f, 0.6f, 0.4f));
 
         _all[(int)UnitType.ColonyShip] = new UnitInfo(UnitType.ColonyShip, "Colony Ship",
-            "A large, expensive settler vessel with heavy defenses, very little attack, and some research capacity. Slow but carries the population to fully claim a world (objectives: habitability, population, cities, exploration).",
-            220, 180, 40f, 6, 160, 3, 3, 1, explore: true, doResearch: true, colonize: true, iconShape: 3, iconColor: new Color(0.85f, 0.75f, 0.45f));
+            "A large, expensive settler vessel with heavy defenses and very little attack. Slow, but it sacrifices itself to found your first CITY on a habitable-enough world — after which you build shipyards, research centres and farms there.",
+            220, 180, 40f, 6, 160, 3, 0, 1, explore: true, doResearch: false, colonize: true, iconShape: 3, iconColor: new Color(0.85f, 0.75f, 0.45f));
     }
 }

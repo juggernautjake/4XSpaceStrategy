@@ -124,7 +124,8 @@ public class FleetMovementController : MonoBehaviour
         if (Input.GetMouseButtonDown(0) &&
             !(UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()))
         {
-            UnitManager.Instance?.SendUnits(fleet, hovered);
+            bool queue = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            UnitManager.Instance?.IssueMove(fleet, hovered, queue);
             Disarm();
         }
     }
@@ -208,29 +209,48 @@ public class FleetMovementController : MonoBehaviour
         if (cam == null) return;
         if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
 
-        var group = new List<Unit>();
-        foreach (var u in UnitSelection.Selected) if (u.status != UnitStatus.Traveling) group.Add(u);
+        // Selected ships that can still take orders (traveling ships CAN be redirected/queued too).
+        var group = new List<Unit>(SelectableFleet());
+        foreach (var u in UnitSelection.Selected)
+            if (u.status == UnitStatus.Traveling && !group.Contains(u)) group.Add(u);
         if (group.Count == 0) return;
 
+        bool queue = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+        string verb = queue ? "Queue" : "Send";
         Vector2 mp = Input.mousePosition;
         var body = RaycastBody();
+        var mgr = UnitManager.Instance;
+
         if (body != null)
         {
-            ContextMenu.Instance?.Show(mp, new List<ContextMenu.Option>
+            var options = new List<ContextMenu.Option>
             {
-                new ContextMenu.Option($"Send {group.Count} ship(s) to {body.name}", () => UnitManager.Instance?.SendUnits(group, body)),
-                new ContextMenu.Option("Cancel", null)
-            });
+                new ContextMenu.Option($"{verb}: move to {body.name}", () => mgr?.IssueMove(group, body, queue))
+            };
+            bool canSurvey = !body.Surveyed && Any(group, u => u.Info.canExplore);
+            bool canResearch = body.Surveyed && Any(group, u => u.Info.canResearch);
+            bool canColonize = body.owner != FactionManager.Player && Any(group, u => u.Info.canColonize);
+            if (canSurvey) options.Add(new ContextMenu.Option($"{verb}: survey {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Survey, body, queue)));
+            if (canResearch) options.Add(new ContextMenu.Option($"{verb}: research {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Research, body, queue)));
+            if (canColonize) options.Add(new ContextMenu.Option($"{verb}: colonize {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Colonize, body, queue)));
+            options.Add(new ContextMenu.Option("Cancel", null));
+            ContextMenu.Instance?.Show(mp, options);
         }
         else
         {
             Vector3 pt = RaycastPlane();
             ContextMenu.Instance?.Show(mp, new List<ContextMenu.Option>
             {
-                new ContextMenu.Option($"Send {group.Count} ship(s) here (deep space)", () => UnitManager.Instance?.SendUnitsToPoint(group, pt)),
+                new ContextMenu.Option($"{verb}: move here (deep space)", () => mgr?.IssueMovePoint(group, pt, queue)),
                 new ContextMenu.Option("Cancel", null)
             });
         }
+    }
+
+    static bool Any(List<Unit> group, System.Func<Unit, bool> pred)
+    {
+        foreach (var u in group) if (pred(u)) return true;
+        return false;
     }
 
     // Left-clicking empty space (no token, no body) drops the ship selection, so the send menu never

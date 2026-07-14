@@ -32,13 +32,14 @@ public static class OrbitalMechanics
     const float SpeedK = 460f;    // maps sqrt(mass / r^3) into a pleasant deg/sec range
     const float MinDeg = 0.4f;    // never fully stops
     const float MaxDeg = 30f;     // never whips around
+    const float GlobalSpeedScale = 0.5f;  // base orbits run at 50% (the time slider still scales on top)
 
     // Default angular speed (deg/sec) for a body orbiting a primary of the given mass at radius r.
     public static float AngularSpeedDeg(float primaryMass, float radius)
     {
         radius = Mathf.Max(1f, radius);
         float w = SpeedK * Mathf.Sqrt(primaryMass / (radius * radius * radius));
-        return Mathf.Clamp(w, MinDeg, MaxDeg);
+        return Mathf.Clamp(w, MinDeg, MaxDeg) * GlobalSpeedScale;
     }
 
     public static float PlanetAngularSpeed(StarData star, float radius)
