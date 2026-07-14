@@ -1,31 +1,47 @@
-# Station models
+# Unit models
 
-`StationModel.Path` (`SpaceAssets/Stations/LP Space Station`) is loaded at runtime by
-`StationModelRenderer` and used as the mesh for every deployed space station. If nothing importable
-exists at that path, stations silently fall back to their billboard tokens — the game never breaks
-over a missing model.
+`UnitModelLibrary` maps a `UnitType` to a model under `Assets/Resources/SpaceAssets/`, and
+`UnitModelRenderer` instantiates it in the world. Anything with a model is skipped by
+`UnitTokenRenderer`, so it never double-renders as a billboard as well.
 
-## Important: Unity needs Blender installed to import a `.blend`
+Current mapping:
 
-Unity does not read `.blend` files itself. It **shells out to a local Blender install** to convert the
-file to FBX at import time. On a machine without Blender, `LP Space Station.blend` will fail to import,
-`Resources.Load` returns null, and you'll get billboard tokens plus one explanatory line in the console.
+| Class | Model | Motion |
+|---|---|---|
+| Every station (`UnitInfo.isStation`) | `SpaceAssets/Stations/LP Space Station` | orbits its host body + axial spin |
+| Colony Ship | `SpaceAssets/Ships/LP Colony Ship` | faces its course, idle bob |
 
-Two ways to get the model rendering:
+## Everything here is optional
 
-1. **Install Blender** (any recent version; the file is Blender 4.04). Unity picks it up automatically
-   and imports the `.blend` on the next asset refresh. Nothing else to change.
-2. **Export to FBX** — open the `.blend`, `File > Export > FBX`, and save it into this folder as
-   `LP Space Station.fbx`. FBX needs no external tool, so it imports anywhere, including on a build
-   machine or a teammate's box that has no Blender. This is the better option if anyone else is going
-   to build the project.
+If a model is missing or won't import, `Resources.Load` returns null and that class quietly falls back
+to its billboard token, with one explanatory line in the console. Art is never load-bearing — the game
+runs fine on a checkout with no models at all.
 
-Either way the path stays the same, so no code changes are needed — `Resources.Load` finds whichever
-importable asset sits at `SpaceAssets/Stations/LP Space Station`.
+## Prefer .fbx over .blend
 
-## Notes
+Unity does **not** read `.blend` itself: it shells out to a **local Blender install** to convert the
+file to FBX at import time. On a machine without Blender the asset simply won't import. FBX needs no
+external tool and imports anywhere, including on a build machine or a teammate's box.
 
-- The renderer normalises scale: whatever size the model is authored at, it's fitted so its largest
-  dimension is a known number of world units, then scaled up by the station's tier. So the model does
-  not need to be built to any particular scale.
-- Materials are tinted 35% toward the owning faction's colour so allegiance stays readable.
+That's why `LP Space Station.blend` lives in `Assets/ModelSource~/` rather than here. Unity ignores any
+folder whose name ends in `~`, so the source file stays in version control without producing an import
+error — and without colliding with the FBX (two assets at the same Resources path make
+`Resources.Load` ambiguous).
+
+## Sizing
+
+Do not author to a particular scale — the renderer normalises it. `UnitModelRenderer.FitTo` scales each
+model so its largest dimension matches `UnitModelLibrary.Entry.size` in world units.
+
+Those sizes are deliberately small. `SystemVisualizer` scales a planet to `surfaceSize * 0.08` (min 0.6)
+and a moon to `* 0.05` (min 0.35), so a **whole world is only ~0.6–2.2 world units across**. Anything
+orbiting one has to be a few tenths of a unit or it dwarfs the planet. A Mega-Station tops out around
+0.37 — roughly the size of a small moon, which is exactly what its description promises.
+
+## Animation
+
+If an FBX ships with its own clip (an `Animator` with a controller, or a legacy `Animation` with a
+clip), the renderer plays it and skips its procedural motion. Neither current model has clips, so both
+are animated procedurally: stations orbit their host and spin on their axis; the colony ship turns to
+face its course and bobs gently. Drop in an animated replacement at the same path and it takes over
+automatically.
