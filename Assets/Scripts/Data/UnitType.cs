@@ -212,38 +212,38 @@ public static class UnitDatabase
         // orbits with that body and radiates its effect; a battle station also defends it.
         var battle = new UnitInfo(UnitType.BattleStation, "Battle Station",
             "A rudimentary orbital fortress. Immobile once anchored, but heavily armed and armored — a strong defensive anchor over a world you want to hold. Unlocks at Empire Tech Level 2.",
-            260, 160, 30f, 30, 700, 3, 0, 60, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(1f, 0.5f, 0.45f), minShipyardLevel: 2, range: 130);
+            260, 160, 30f, 30, 700, 3, 0, 60, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(1f, 0.5f, 0.45f), minShipyardLevel: 2, range: 350);
         battle.isStation = true; battle.stationRole = StationRole.Battle; battle.minEmpireLevel = 2;
         _all[(int)UnitType.BattleStation] = battle;
 
         var researchSt = new UnitInfo(UnitType.ResearchStation, "Research Station",
             "An orbital laboratory. While anchored it steadily feeds research to your empire and deepens study of the world it orbits. Unlocks at Empire Tech Level 2.",
-            240, 220, 30f, 10, 400, 3, 10, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.55f, 0.95f, 1f), minShipyardLevel: 2, range: 130);
+            240, 220, 30f, 10, 400, 3, 10, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.55f, 0.95f, 1f), minShipyardLevel: 2, range: 350);
         researchSt.isStation = true; researchSt.stationRole = StationRole.Research; researchSt.minEmpireLevel = 2; researchSt.researchAura = 1.4f;
         _all[(int)UnitType.ResearchStation] = researchSt;
 
         var relay = new UnitInfo(UnitType.RelayStation, "Relay Station",
             "A rudimentary comms-and-navigation relay. While active it lengthens and quickens your fleet's travel a little — the first step toward a fast-travel network. Unlocks at Empire Tech Level 2.",
-            200, 180, 26f, 8, 300, 3, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.7f, 0.8f, 1f), minShipyardLevel: 2, range: 200);
+            200, 180, 26f, 8, 300, 3, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.7f, 0.8f, 1f), minShipyardLevel: 2, range: 350);
         relay.isStation = true; relay.stationRole = StationRole.Relay; relay.minEmpireLevel = 2; relay.relayBoost = 0.12f;
         _all[(int)UnitType.RelayStation] = relay;
 
         var supply = new UnitInfo(UnitType.SupplyStation, "Supply Station",
             "An orbital depot and fuel dump. Anchored at a colony it adds a steady stream of metal and energy and helps ships range a little further. Unlocks at Empire Tech Level 2.",
-            220, 140, 26f, 10, 380, 3, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.85f, 0.85f, 0.55f), minShipyardLevel: 2, range: 140);
+            220, 140, 26f, 10, 380, 3, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.85f, 0.85f, 0.55f), minShipyardLevel: 2, range: 350);
         supply.isStation = true; supply.stationRole = StationRole.Supply; supply.minEmpireLevel = 2; supply.supplyBonus = 0.9f; supply.relayBoost = 0.05f;
         _all[(int)UnitType.SupplyStation] = supply;
 
         var multi = new UnitInfo(UnitType.MultiStation, "Multi-Role Station",
             "A substantial orbital complex that does a bit of everything — research, logistics, fleet support and defense. Unlocks at Empire Tech Level 4.",
-            500, 420, 46f, 22, 900, 2, 8, 40, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.8f, 0.7f, 1f), minShipyardLevel: 3, range: 120);
+            500, 420, 46f, 22, 900, 2, 8, 40, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.8f, 0.7f, 1f), minShipyardLevel: 3, range: 350);
         multi.isStation = true; multi.stationRole = StationRole.MultiRole; multi.minEmpireLevel = 4;
         multi.researchAura = 1.2f; multi.supplyBonus = 0.7f; multi.relayBoost = 0.12f;
         _all[(int)UnitType.MultiStation] = multi;
 
         var terra = new UnitInfo(UnitType.TerraformStation, "Terraforming Station",
             "A colossal climate-engineering platform. Anchored over a world it dramatically accelerates terraforming there — many times faster than ships alone, and it stacks with terraformers. Unlocks at Empire Tech Level 6.",
-            480, 460, 44f, 10, 500, 3, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.5f, 0.95f, 0.7f), minShipyardLevel: 3, range: 120);
+            480, 460, 44f, 10, 500, 3, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.5f, 0.95f, 0.7f), minShipyardLevel: 3, range: 350);
         terra.isStation = true; terra.stationRole = StationRole.Terraform; terra.minEmpireLevel = 6; terra.terraformAura = 4.5f;
         _all[(int)UnitType.TerraformStation] = terra;
 
@@ -256,7 +256,7 @@ public static class UnitDatabase
 
         var mega = new UnitInfo(UnitType.MegaStation, "Mega-Station",
             "A do-everything orbital city the size of a small moon: prodigious research, logistics, a fast-travel hub, terraforming support and a fearsome defensive battery. The pinnacle of station engineering. Unlocks at Empire Tech Level 9.",
-            1500, 1200, 90f, 60, 3000, 1, 20, 120, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.85f, 0.8f, 1f), minShipyardLevel: 3, range: 100);
+            1500, 1200, 90f, 60, 3000, 1, 20, 120, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.85f, 0.8f, 1f), minShipyardLevel: 3, range: 350);
         mega.isStation = true; mega.stationRole = StationRole.Mega; mega.minEmpireLevel = 9; mega.stationLevel = 3;
         mega.researchAura = 3f; mega.supplyBonus = 1.6f; mega.relayBoost = 0.3f; mega.terraformAura = 1.5f;
         _all[(int)UnitType.MegaStation] = mega;
