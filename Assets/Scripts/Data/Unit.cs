@@ -7,7 +7,7 @@ public enum Rank { Rookie, Regular, Veteran, Elite, Legendary }
 // A queued instruction for a ship. Every order has an optional target (a body) or a point in space.
 // Move = travel there (then auto-do the class default on arrival); the others are explicit actions
 // performed once the ship is at the target.
-public enum OrderKind { Move, Survey, Research, Colonize }
+public enum OrderKind { Move, Survey, Research, Colonize, Terraform }
 
 public class ShipOrder
 {

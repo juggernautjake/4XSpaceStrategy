@@ -13,8 +13,8 @@ public class UnitInfoPanel : MonoBehaviour
     TMP_Text titleText, body, progressLabel;
     TMP_InputField nameInput;
     Image progressFill;
-    Button surveyBtn, researchBtn, colonizeBtn, returnBtn, scrapBtn, pauseBtn;
-    TMP_Text pauseLabel, colonizeLabel;
+    Button surveyBtn, researchBtn, colonizeBtn, terraformBtn, returnBtn, scrapBtn, pauseBtn;
+    TMP_Text pauseLabel, colonizeLabel, terraformLabel;
     Toggle queueModeToggle;
     RectTransform queueList;
     TMP_Text queueHeader;
@@ -80,6 +80,8 @@ public class UnitInfoPanel : MonoBehaviour
         researchBtn = UIFactory.Button(content, "Research Here", DoResearch, 28);
         colonizeBtn = UIFactory.Button(content, "Found Colony", DoColonize, 28);
         colonizeLabel = colonizeBtn.GetComponentInChildren<TMP_Text>();
+        terraformBtn = UIFactory.Button(content, "Terraform", DoTerraform, 28);
+        terraformLabel = terraformBtn.GetComponentInChildren<TMP_Text>();
 
         var row = UIFactory.NewUI(content, "Row"); UIFactory.AddLayout(row, 30);
         var h = row.AddComponent<HorizontalLayoutGroup>(); h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true;
@@ -152,6 +154,13 @@ public class UnitInfoPanel : MonoBehaviour
         if (current == null || t == null || !current.Info.canColonize) return;
         if (t.owner == FactionManager.Player) return;
         UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Colonize, t, QueueMode);
+    }
+
+    void DoTerraform()
+    {
+        var t = ActionTarget();
+        if (current == null || t == null || !current.Info.canTerraform) return;
+        UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Terraform, t, QueueMode);
     }
 
     void DoStop() { if (current != null) UnitManager.Instance?.StopAll(current); }
@@ -235,6 +244,19 @@ public class UnitInfoPanel : MonoBehaviour
         if (pauseLabel != null) pauseLabel.text = u.queuePaused ? "Resume Queue" : "Pause Queue";
 
         UpdateColonizeButton(u, t);
+
+        // Terraform button only exists for terraformer-capable ships.
+        terraformBtn.gameObject.SetActive(u.Info.canTerraform);
+        if (u.Info.canTerraform)
+        {
+            string tr = null;
+            if (t == null) tr = QueueMode ? "queue a destination first" : "travel to a world first";
+            else if (t.habitability >= Colony.FoundThreshold) tr = "already habitable";
+            else if (!Colony.CanReachLivable(t)) tr = "can't be made livable";
+            terraformBtn.interactable = tr == null;
+            if (terraformLabel != null) terraformLabel.text = tr == null ? $"Terraform {t.name}" : $"Terraform — {tr}";
+        }
+
         RefreshQueue(u);
     }
 

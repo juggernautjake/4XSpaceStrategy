@@ -71,7 +71,11 @@ public class ColonyWindow : MonoBehaviour
 
         PlanetUI.OnBodySelected += ShowFor;
         PlanetUI.OnClosed += Hide;
-        if (UnitManager.Instance != null) UnitManager.Instance.OnUnitsChanged += RefreshIfShowing;
+        if (UnitManager.Instance != null)
+        {
+            UnitManager.Instance.OnUnitsChanged += RefreshIfShowing;
+            UnitManager.Instance.OnBuildChanged += RefreshIfShowing;   // shipyard built/upgraded
+        }
         root.SetActive(false);
     }
 
@@ -103,6 +107,7 @@ public class ColonyWindow : MonoBehaviour
     {
         if (root == null || !root.activeSelf || body == null) return;
         UpdateLive();
+        RebuildBuildings();   // cheap: no-ops unless buildings / shipyard level / construction changed
     }
 
     void UpdateLive()
@@ -135,7 +140,8 @@ public class ColonyWindow : MonoBehaviour
         if (c != null)
         {
             constructionFill.rectTransform.anchorMax = new Vector2(c.Progress, 1f);
-            constructionText.text = $"Building {BuildingDatabase.Get(c.type).name}: {c.Progress * 100f:F0}%";
+            string lbl = string.IsNullOrEmpty(c.Label) ? $"Building {BuildingDatabase.Get(c.type).name}" : c.Label;
+            constructionText.text = $"{lbl}: {c.Progress * 100f:F0}%";
         }
         else { constructionFill.rectTransform.anchorMax = new Vector2(0, 1f); constructionText.text = ""; }
     }
@@ -144,7 +150,8 @@ public class ColonyWindow : MonoBehaviour
     void RebuildBuildings()
     {
         var b = body;
-        string sig = string.Join(",", b.buildings);
+        bool constructing = ColonyManager.Instance != null && ColonyManager.Instance.ConstructionFor(b) != null;
+        string sig = string.Join(",", b.buildings) + $"|yard{b.shipyardLevel}|hab{b.habitability >= Colony.FoundThreshold}|c{constructing}";
         if (sig == lastBuildSig && buildList.childCount > 0) return;
         lastBuildSig = sig;
 
@@ -159,6 +166,38 @@ public class ColonyWindow : MonoBehaviour
         }
 
         var mgr = ColonyManager.Instance;
+
+        // Owned world without a city yet (e.g. a home moon): let the player found one — once it's
+        // habitable enough (terraform first if not). This is how birthright worlds get settled.
+        if (mgr != null && b.owner == FactionManager.Player && !b.buildings.Contains((int)BuildingType.City))
+        {
+            bool canCity = mgr.CanEstablishCity(b, out string cityWhy);
+            var cityBtn = UIFactory.Button(buildList,
+                canCity ? $"Establish City  ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {ColonyManager.CityBuildTime:F0}s)"
+                        : $"Establish City — {cityWhy}",
+                () => { if (mgr.StartEstablishCity(b)) { lastBuildSig = ""; RebuildBuildings(); } }, 30);
+            cityBtn.interactable = canCity;
+        }
+
+        // Shipyard tier + upgrade.
+        if (b.shipyardLevel >= 1)
+        {
+            UIFactory.Label(buildList, $"Shipyard: <b>Level {b.shipyardLevel}</b>" +
+                (b.shipyardLevel >= Colony.MaxShipyardLevel ? "  (max — builds Terraformers)"
+                 : b.shipyardLevel == 2 ? "  (builds Mk II ships)" : ""), UITheme.SmallSize, UITheme.SubText, 22);
+            if (mgr != null && b.shipyardLevel < Colony.MaxShipyardLevel)
+            {
+                bool canUp = mgr.CanUpgradeShipyard(b, out string upWhy, out int next);
+                if (!canUp) mgr.CanUpgradeShipyard(b, out upWhy, out next);
+                int m = ColonyManager.ShipyardUpgradeMetal(b.shipyardLevel + 1), e = ColonyManager.ShipyardUpgradeEnergy(b.shipyardLevel + 1);
+                var upBtn = UIFactory.Button(buildList,
+                    canUp ? $"Upgrade Shipyard → Lv{b.shipyardLevel + 1}  ({m}m {e}e, {ColonyManager.ShipyardUpgradeTime(b.shipyardLevel + 1):F0}s)"
+                          : $"Upgrade Shipyard → Lv{b.shipyardLevel + 1} — {upWhy}",
+                    () => { if (mgr.StartShipyardUpgrade(b)) { lastBuildSig = ""; RebuildBuildings(); } }, 30);
+                upBtn.interactable = canUp;
+            }
+        }
+
         foreach (BuildingType t in System.Enum.GetValues(typeof(BuildingType)))
         {
             if (t == BuildingType.City) continue;
