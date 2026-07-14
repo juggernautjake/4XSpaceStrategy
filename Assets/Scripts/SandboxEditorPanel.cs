@@ -23,6 +23,7 @@ public class SandboxEditorPanel : MonoBehaviour
 
     private CelestialBody currentBody;
     private OrbitController currentOrbit;
+    private bool suppress;
 
     void Awake()
     {
@@ -34,6 +35,36 @@ public class SandboxEditorPanel : MonoBehaviour
         if (panel != null) panel.SetActive(false);
         if (applyButton != null)
             applyButton.onClick.AddListener(ApplyChanges);
+
+        // Real-time editing: these sliders now apply live as you drag (not only on Apply).
+        if (sizeSlider != null) sizeSlider.onValueChanged.AddListener(LiveSize);
+        if (radiusSlider != null) radiusSlider.onValueChanged.AddListener(LiveRadius);
+        if (speedSlider != null) speedSlider.onValueChanged.AddListener(LiveSpeed);
+    }
+
+    void LiveSize(float v)
+    {
+        if (suppress || currentBody == null) return;
+        currentBody.surfaceSize = Mathf.RoundToInt(v);
+        if (currentBody.visualObject != null)
+        {
+            bool moon = currentBody.parentBody != null;
+            currentBody.visualObject.transform.localScale = Vector3.one * Mathf.Max(0.35f, v * (moon ? 0.05f : 0.08f));
+        }
+    }
+
+    void LiveRadius(float v)
+    {
+        if (suppress || currentOrbit == null) return;
+        currentOrbit.SetRadius(v);
+        currentBody.orbitRadius = v;
+    }
+
+    void LiveSpeed(float v)
+    {
+        if (suppress || currentOrbit == null) return;
+        currentOrbit.SetSpeed(v);
+        currentBody.orbitSpeed = v;
     }
 
     public void ShowForBody(CelestialBody body)
@@ -72,6 +103,7 @@ public class SandboxEditorPanel : MonoBehaviour
     private void RefreshAllSliders()
     {
         if (currentBody == null) return;
+        suppress = true; // don't let programmatic value changes fire live edits
 
         // Size
         if (sizeSlider != null)
@@ -92,8 +124,8 @@ public class SandboxEditorPanel : MonoBehaviour
             }
             if (speedSlider != null)
             {
-                speedSlider.minValue = 10f;
-                speedSlider.maxValue = 120f;
+                speedSlider.minValue = 0f;
+                speedSlider.maxValue = 30f;   // angular speed in deg/sec
                 speedSlider.value = currentOrbit.orbitSpeed;
             }
         }
@@ -103,6 +135,8 @@ public class SandboxEditorPanel : MonoBehaviour
             if (radiusSlider != null) radiusSlider.value = currentBody.orbitRadius;
             if (speedSlider != null) speedSlider.value = currentBody.orbitSpeed;
         }
+
+        suppress = false;
     }
 
     public void ApplyChanges()
