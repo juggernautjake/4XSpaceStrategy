@@ -96,6 +96,17 @@ public class CameraController : MonoBehaviour
         if (target != null) FocusOn(target.position);
     }
 
+    // Jump to a world position at a chosen height (used by the galaxy view's "Go to system").
+    public void JumpTo(Vector3 worldPos, float height)
+    {
+        ClearFocus();
+        targetHeight = Mathf.Clamp(height, minHeight, maxHeight);
+        var p = transform.position; p.y = targetHeight; transform.position = p;
+        FocusOn(worldPos);
+    }
+
+    public float Height => transform.position.y;
+
     public void SetFollow(bool on) { following = on; }
     public bool IsFollowing => following;
     public void ClearFocus() { following = false; followTarget = null; }
