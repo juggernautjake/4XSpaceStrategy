@@ -50,6 +50,8 @@ public class ResearchTaskManager : MonoBehaviour
 
     void Update()
     {
+        TechManager.Tick(Time.deltaTime);   // advance the timed tech-research queue
+
         for (int i = active.Count - 1; i >= 0; i--)
         {
             var t = active[i];
