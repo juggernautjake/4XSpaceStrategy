@@ -114,12 +114,22 @@ public class FleetMovementController : MonoBehaviour
         }
         else marker.SetActive(false);
 
+        // Colour the path by whether the fleet can actually reach it (range gate).
+        bool reach = UnitManager.Instance == null || UnitManager.Instance.CanReachBody(fleet, hovered, out _);
+        line.startColor = line.endColor = reach ? new Color(0.6f, 0.85f, 1f, 0.9f) : new Color(1f, 0.45f, 0.4f, 0.95f);
+
         line.SetPosition(0, origin);
         line.SetPosition(1, endPoint);
 
         if (Input.GetMouseButtonDown(0) &&
             !(UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()))
         {
+            if (!reach)
+            {
+                NotificationManager.Instance?.Push($"Out of range — {hovered.name}",
+                    "Your fleet can't reach it yet. Upgrade drives or build a relay to extend your range.", null, NotifKind.Danger);
+                return;
+            }
             bool queue = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
             UnitManager.Instance?.IssueMove(fleet, hovered, queue);
             Disarm();
@@ -180,6 +190,8 @@ public class FleetMovementController : MonoBehaviour
         }
         else marker.SetActive(false);
 
+        bool reach = UnitManager.Instance == null || UnitManager.Instance.CanReach(sel, endPoint, out _);
+        line.startColor = line.endColor = reach ? new Color(0.6f, 0.85f, 1f, 0.9f) : new Color(1f, 0.45f, 0.4f, 0.9f);
         line.enabled = true;
         line.SetPosition(0, origin);
         line.SetPosition(1, endPoint);
@@ -217,13 +229,17 @@ public class FleetMovementController : MonoBehaviour
         {
             // Lock the pulsing indicator onto the body — it travels with it as it orbits.
             TargetIndicator.Instance?.ShowAtBody(body);
-            var options = new List<ContextMenu.Option>
-            {
-                new ContextMenu.Option($"{verb}: move to {body.name}", () => mgr?.IssueMove(group, body, queue))
-            };
-            bool canSurvey = !body.Surveyed && Any(group, u => u.Info.canExplore);
-            bool canResearch = body.Surveyed && Any(group, u => u.Info.canResearch);
-            bool canColonize = body.owner != FactionManager.Player && Any(group, u => u.Info.canColonize);
+            bool reach = mgr == null || mgr.CanReachBody(group, body, out _);
+            var options = new List<ContextMenu.Option>();
+            if (reach)
+                options.Add(new ContextMenu.Option($"{verb}: move to {body.name}", () => mgr?.IssueMove(group, body, queue)));
+            else
+                options.Add(new ContextMenu.Option($"Out of range — {body.name}",
+                    () => NotificationManager.Instance?.Push($"Out of range — {body.name}",
+                        "Your fleet can't reach it yet. Upgrade drives or build a relay to extend your range.", null, NotifKind.Danger)));
+            bool canSurvey = reach && !body.Surveyed && Any(group, u => u.Info.canExplore);
+            bool canResearch = reach && body.Surveyed && Any(group, u => u.Info.canResearch);
+            bool canColonize = reach && body.owner != FactionManager.Player && Any(group, u => u.Info.canColonize);
             if (canSurvey) options.Add(new ContextMenu.Option($"{verb}: survey {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Survey, body, queue)));
             if (canResearch) options.Add(new ContextMenu.Option($"{verb}: research {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Research, body, queue)));
             if (canColonize) options.Add(new ContextMenu.Option($"{verb}: colonize {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Colonize, body, queue)));
@@ -234,11 +250,16 @@ public class FleetMovementController : MonoBehaviour
         {
             Vector3 pt = RaycastPlane();
             TargetIndicator.Instance?.ShowAtPoint(pt);
-            ContextMenu.Instance?.Show(mp, new List<ContextMenu.Option>
-            {
-                new ContextMenu.Option($"{verb}: move here (deep space)", () => mgr?.IssueMovePoint(group, pt, queue)),
-                new ContextMenu.Option("Cancel", () => TargetIndicator.Instance?.Hide())
-            });
+            bool reach = mgr == null || mgr.CanReach(group, pt, out _);
+            var opts = new List<ContextMenu.Option>();
+            if (reach)
+                opts.Add(new ContextMenu.Option($"{verb}: move here (deep space)", () => mgr?.IssueMovePoint(group, pt, queue)));
+            else
+                opts.Add(new ContextMenu.Option("Out of range — deep space",
+                    () => NotificationManager.Instance?.Push("Out of range",
+                        "Your fleet can't reach that far yet. Upgrade drives or build a relay.", null, NotifKind.Danger)));
+            opts.Add(new ContextMenu.Option("Cancel", () => TargetIndicator.Instance?.Hide()));
+            ContextMenu.Instance?.Show(mp, opts);
         }
     }
 
