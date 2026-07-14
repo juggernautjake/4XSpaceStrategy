@@ -135,6 +135,18 @@ public class OrbitController : MonoBehaviour
             ownerRing.transform.position = transform.position;
     }
 
+    // Predicts where this body will be `futureSeconds` from now (used for fleet intercept preview).
+    public Vector3 PredictWorldPosition(float futureSeconds)
+    {
+        if (parentBody == null) return transform.position;
+        float futureAngle = currentAngle + direction * orbitSpeed * futureSeconds;
+        float a = orbitRadius, b = SemiMinor(orbitRadius, eccentricity);
+        float rad = futureAngle * Mathf.Deg2Rad;
+        Vector3 local = new Vector3(Mathf.Cos(rad) * a, 0f, Mathf.Sin(rad) * b);
+        Quaternion tilt = Quaternion.Euler(inclination, 0f, 0f);
+        return parentBody.position + tilt * local + Vector3.up * verticalOffset;
+    }
+
     // ---- Live setters (used by the orbit control panel for real-time editing) ----
 
     public void SetRadius(float v)      { orbitRadius = Mathf.Max(1f, v); RedrawRing(); UpdatePosition(); }

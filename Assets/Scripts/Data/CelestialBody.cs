@@ -39,8 +39,20 @@ public class CelestialBody
     // --- Ownership ---
     public Faction owner;               // null == unclaimed
 
+    // --- Exploration / colonization ---
+    public float explorationProgress = 0f;   // 0..1 surveyed & researched
+
+    // Info (habitability, resources, ores, secrets) stays hidden until a ship surveys the body
+    // (or Dev Mode reveals everything).
+    public bool Surveyed => GameMode.DevMode || explorationProgress >= 0.5f || owner == FactionManager.Player;
+    public float claimProgress = 0f;         // 0..1 colonization toward full claim
+    public Faction claimingFaction;          // who is colonizing (null if nobody)
+    public int population = 0;
+    public int cities = 0;
+
     [System.NonSerialized] public StarData hostStar;          // the star this body belongs to
     [System.NonSerialized] public StarSystemData system;      // the system this body belongs to
+    [System.NonSerialized] public List<Unit> units = new List<Unit>();  // units currently here
 
     [System.NonSerialized]
     public GameObject visualObject;

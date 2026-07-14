@@ -53,6 +53,19 @@ public class GameManager : MonoBehaviour
 
         Debug.Log($"Generated galaxy: {Galaxy.systems.Count} systems; home = {(Galaxy.Home != null ? Galaxy.Home.name : "?")}.");
         Visualize();
+
+        // Player economy + starting fleet (home planet is rendered by Visualize above).
+        var homePlanet = FindHomePlanet();
+        PlayerEconomy.NewGame(homePlanet, SpeciesManager.Current);
+        UnitManager.Instance?.NewGame(homePlanet);
+    }
+
+    CelestialBody FindHomePlanet()
+    {
+        var home = Galaxy != null ? Galaxy.Home : null;
+        if (home == null) return null;
+        foreach (var b in home.bodies) if (b.owner == FactionManager.Player) return b;
+        return home.bodies.Count > 0 ? home.bodies[0] : null;
     }
 
     public void LoadGalaxy(Galaxy g)

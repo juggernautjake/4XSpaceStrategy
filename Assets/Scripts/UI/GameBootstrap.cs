@@ -16,6 +16,9 @@ public static class GameBootstrap
         // Core managers (no canvas needed).
         SimpleAudio.Create();
         ResearchTaskManager.Create();
+        UnitManager.Create();               // before the token renderer subscribes to it
+        FleetMovementController.Create();
+        UnitTokenRenderer.Create();
         SpaceBackground.Create();
         PostFxController.Create();
 
@@ -35,6 +38,9 @@ public static class GameBootstrap
         SaveLoadMenu.Create(canvas.transform);
         SpeciesWindow.Create(canvas.transform);
         DetailedSurfaceWindow.Create(canvas.transform);
+        UnitInfoPanel.Create(canvas.transform);
+        FleetWindow.Create(canvas.transform);
+        ShipyardWindow.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);
         GenerationMenu.Create(canvas.transform);
         EscapeMenu.Create(canvas.transform);
@@ -45,6 +51,9 @@ public static class GameBootstrap
 
         // Per-map sky + keep habitability aligned with the current species on (re)generation.
         SystemContext.OnSystemChanged += OnSystemChanged;
+
+        // Toggling Dev Mode re-reveals or re-fogs every world.
+        GameMode.OnChanged += () => SystemContext.Visualizer?.RefreshFog();
     }
 
     static void OnSystemChanged()

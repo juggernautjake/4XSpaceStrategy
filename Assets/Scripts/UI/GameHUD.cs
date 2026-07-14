@@ -9,7 +9,7 @@ public class GameHUD : MonoBehaviour
 {
     TMP_Text statusText;
     TMP_Text speedReadout;
-    Button orbitBtn, terrainBtn, detailedBtn, followBtn;
+    Button orbitBtn, terrainBtn, detailedBtn, followBtn, devBtn;
     Slider timeSlider;
     bool suppress;
 
@@ -35,6 +35,9 @@ public class GameHUD : MonoBehaviour
         terrainBtn = BarButton(bar.transform, "Terrain", 68, () => TerrainControlPanel.Instance?.Toggle());
         detailedBtn = BarButton(bar.transform, "Map", 52, OpenDetailed);
         followBtn = BarButton(bar.transform, "Follow", 66, ToggleFollow);
+        BarButton(bar.transform, "Fleet", 56, () => FleetWindow.Instance?.Toggle());
+        BarButton(bar.transform, "Build", 56, () => ShipyardWindow.Instance?.Toggle());
+        devBtn = BarButton(bar.transform, "Dev: OFF", 78, () => GameMode.Toggle());
 
         Spacer(bar.transform, 10);
         BarButton(bar.transform, "Pause", 56, () => TimeControl.TogglePause());
@@ -54,7 +57,9 @@ public class GameHUD : MonoBehaviour
         PlanetUI.OnClosed += UpdateContext;
         SpeciesManager.OnSpeciesChanged += UpdateStatus;
         ResearchManager.OnChanged += UpdateStatus;
+        PlayerEconomy.OnChanged += UpdateStatus;
         TimeControl.OnChanged += UpdateSpeed;
+        GameMode.OnChanged += UpdateContext;
 
         UpdateContext();
         UpdateStatus();
@@ -96,8 +101,18 @@ public class GameHUD : MonoBehaviour
     void UpdateContext()
     {
         bool has = PlanetUI.Selected != null;
-        if (orbitBtn != null) orbitBtn.interactable = has;
-        if (terrainBtn != null) terrainBtn.interactable = has;
+        bool dev = GameMode.DevMode;
+        // Orbit / terrain editors are Dev-Mode sandbox tools.
+        if (orbitBtn != null) orbitBtn.interactable = has && dev;
+        if (terrainBtn != null) terrainBtn.interactable = has && dev;
+        if (devBtn != null)
+        {
+            var lbl = devBtn.GetComponentInChildren<TMP_Text>();
+            if (lbl != null) lbl.text = dev ? "DEV MODE" : "Dev: OFF";
+            var c = devBtn.colors;
+            c.normalColor = dev ? new Color(0.5f, 0.25f, 0.1f) : UITheme.ButtonBg;
+            devBtn.colors = c;
+        }
         if (detailedBtn != null) detailedBtn.interactable = has;
         if (followBtn != null)
         {
@@ -111,7 +126,7 @@ public class GameHUD : MonoBehaviour
     void UpdateStatus()
     {
         if (statusText == null) return;
-        statusText.text = $"Species: <b>{SpeciesManager.Current.name}</b>   Research: <b>{ResearchManager.ResearchPoints}</b>";
+        statusText.text = $"{PlayerEconomy.Summary()}   ·   <b>{SpeciesManager.Current.name}</b>   ·   RP <b>{ResearchManager.ResearchPoints}</b>";
     }
 
     void UpdateSpeed()
@@ -126,6 +141,8 @@ public class GameHUD : MonoBehaviour
         PlanetUI.OnClosed -= UpdateContext;
         SpeciesManager.OnSpeciesChanged -= UpdateStatus;
         ResearchManager.OnChanged -= UpdateStatus;
+        PlayerEconomy.OnChanged -= UpdateStatus;
         TimeControl.OnChanged -= UpdateSpeed;
+        GameMode.OnChanged -= UpdateContext;
     }
 }

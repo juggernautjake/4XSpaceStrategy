@@ -112,6 +112,7 @@ public class OrbitControlPanel : MonoBehaviour
 
     public void ShowFor(CelestialBody body)
     {
+        if (!GameMode.DevMode) { Hide(); return; }   // sandbox tool: Dev Mode only
         current = body;
         oc = body.visualObject != null ? body.visualObject.GetComponent<OrbitController>() : null;
         if (oc == null) { Hide(); return; }

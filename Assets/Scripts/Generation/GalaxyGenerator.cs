@@ -127,6 +127,7 @@ public static class GalaxyGenerator
         }
 
         planet.owner = FactionManager.Player;
+        planet.explorationProgress = 1f;   // home world is fully known from the start
 
         // Extra starting resources by difficulty.
         var keys = new List<ResourceType>(planet.resources.resources.Keys);
