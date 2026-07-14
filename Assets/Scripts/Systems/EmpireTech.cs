@@ -68,7 +68,7 @@ public static class EmpireTech
     static void ApplyMilestones()
     {
         int i = Mathf.Clamp(Level, 0, RangeByLevel.Length - 1);
-        ShipUpgrades.RangeMult = RangeByLevel[i];
+        ShipUpgrades.EmpireRange = RangeByLevel[i];   // drive techs multiply this via ShipUpgrades.TechRange
     }
 
     static void Announce()

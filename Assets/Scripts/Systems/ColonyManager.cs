@@ -70,8 +70,10 @@ public static class Colony
 
     public static bool IsFullyEstablished(CelestialBody b) => ClaimProgress(b) >= 1f;
 
-    // The highest habitability terraforming could reach for the current species (its ceiling).
-    public static float TerraformCeiling(CelestialBody b) => Mathf.Max(b.habitability, b.terraformability);
+    // The highest habitability terraforming could reach for the current species (its ceiling), including
+    // any bonus from researched Expansion technologies.
+    public static float TerraformCeiling(CelestialBody b)
+        => Mathf.Min(100f, Mathf.Max(b.habitability, b.terraformability) + TechEffects.TerraformCeilingBonus);
 
     // Can terraforming ever make this world colonizable for us?
     public static bool CanReachLivable(CelestialBody b) => TerraformCeiling(b) >= FoundThreshold;
@@ -125,17 +127,21 @@ public class ColonyManager : MonoBehaviour
         if (b.buildings.Contains((int)t)) { reason = "already built"; return false; }
         if (IsConstructing(b, t)) { reason = "under construction"; return false; }
         var info = BuildingDatabase.Get(t);
-        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(info.costMetal, info.costEnergy))
-        { reason = $"need {info.costMetal} metal, {info.costEnergy} energy"; return false; }
+        int cm = DiscCost(info.costMetal), ce = DiscCost(info.costEnergy);
+        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(cm, ce))
+        { reason = $"need {cm} metal, {ce} energy"; return false; }
         return true;
     }
+
+    // Build costs/times are reduced by researched Industry technologies.
+    public static int DiscCost(int c) => Mathf.RoundToInt(c * TechEffects.BuildCostMult);
 
     public bool StartBuilding(CelestialBody b, BuildingType t)
     {
         if (!CanBuild(b, t, out _)) return false;
         var info = BuildingDatabase.Get(t);
-        if (!GameMode.DevMode && !PlayerEconomy.Spend(info.costMetal, info.costEnergy)) return false;
-        building.Add(new Construction { body = b, type = t, duration = info.buildTime, Label = $"Building {info.name}" });
+        if (!GameMode.DevMode && !PlayerEconomy.Spend(DiscCost(info.costMetal), DiscCost(info.costEnergy))) return false;
+        building.Add(new Construction { body = b, type = t, duration = info.buildTime * TechEffects.BuildTimeMult, Label = $"Building {info.name}" });
         return true;
     }
 
@@ -264,11 +270,12 @@ public class ColonyManager : MonoBehaviour
         foreach (int id in b.buildings)
         {
             var info = BuildingDatabase.Get((BuildingType)id);
-            float mine = id == (int)BuildingType.Mine ? oreRich : 1f;
+            // Mines benefit from researched Industry tech (ore-yield bonus).
+            float mine = id == (int)BuildingType.Mine ? oreRich * TechEffects.OreYieldMult : 1f;
             if (info.metalPerSec > 0f) PlayerEconomy.Add(ResourceType.Metal, info.metalPerSec * popMult * mine * dt);
             if (info.energyPerSec > 0f) PlayerEconomy.Add(ResourceType.Energy, info.energyPerSec * popMult * dt);
             if (info.waterPerSec > 0f) PlayerEconomy.Add(ResourceType.Water, info.waterPerSec * popMult * dt);
-            researchAccum += info.researchPerSec * popMult * dt;
+            researchAccum += info.researchPerSec * popMult * TechEffects.ResearchRateMult * dt;   // Science tech speeds research
             growth += info.popGrowthPerSec;
         }
         if (researchAccum >= 1f) { int p = Mathf.FloorToInt(researchAccum); researchAccum -= p; ResearchManager.AddPoints(p); }
@@ -308,7 +315,7 @@ public class ColonyManager : MonoBehaviour
         // so parking several on the same world finishes it much faster (they burn resources faster too).
         int tformers = CountTerraformers(b);
         float rate = Mathf.Min(1f + tformers, 6f);       // 1× baseline, +1× per terraformer, capped ~5
-        float gain = 1.1f * rate * dt;                    // habitability points this step
+        float gain = 1.1f * rate * TechEffects.TerraformSpeedMult * dt;   // Expansion tech speeds it further
         float water = gain * 4f, energy = gain * 3f, metal = gain * 2f;   // hauled water + power + materials
         if (PlayerEconomy.Get(ResourceType.Water) >= water &&
             PlayerEconomy.Get(ResourceType.Energy) >= energy &&
