@@ -67,6 +67,9 @@ public class PlanetUI : MonoBehaviour
         if (body == null) return;
         Selected = body;
 
+        // Clear any lingering UI focus so WASD drives the mini-map tile cursor, not a stray button.
+        if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+
         if (titleText != null) titleText.text = body.name ?? body.type.ToString();
         if (infoText != null) infoText.text = BuildBodyInfo(body);
 

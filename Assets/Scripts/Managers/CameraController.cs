@@ -53,14 +53,19 @@ public class CameraController : MonoBehaviour
     private void Update()
     {
         bool overUI = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
+        bool menuOpen = EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen;
+        bool planetSelected = PlanetUI.Selected != null;
 
-        // WASD panning works even when the mouse is over a UI window (e.g. the terrain viewer),
-        // because it's keyboard input — only disabled while locked/following an object.
-        if (!following) HandlePanning();
+        // WASD pans the camera ONLY when nothing else wants the keys:
+        //  - a planet is selected  -> WASD drives the mini-map tile cursor instead
+        //  - the pause menu is open -> WASD navigates the menu instead
+        //  - following an object    -> camera is locked
+        bool canPan = !following && !menuOpen && !planetSelected;
+        if (canPan) HandlePanning();
 
         // Mouse-wheel zoom is suppressed only when the cursor is over UI (so scrolling a window
-        // doesn't also zoom the world).
-        if (!overUI) HandleHeightChange();
+        // doesn't also zoom the world) and while the menu is open.
+        if (!overUI && !menuOpen) HandleHeightChange();
 
         if (!following) SmoothHeightMovement();
         KeepCameraAngle();
