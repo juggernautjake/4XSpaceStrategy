@@ -66,7 +66,7 @@ public class SimpleAudio : MonoBehaviour
         cSelect = Sweep(600f, 950f, 0.12f, 8f, 0.5f);
         cSave = Seq(new[] { 660f, 880f }, 0.08f, 0.02f, 14f, 0.45f);
         cLoad = Seq(new[] { 880f, 660f }, 0.08f, 0.02f, 14f, 0.45f);
-        cHum = MakeHum(2f);
+        cHum = MakeHum(4f);
 
         // Typed notification cues.
         cInfo = Tone(700f, 0.1f, 12f, 0.4f);
@@ -87,7 +87,7 @@ public class SimpleAudio : MonoBehaviour
         cUnitSelect[(int)UnitType.ColonyShip]  = Chord(new[] { 300f, 400f, 500f }, 0.28f, 6f, 0.45f);         // deep swell
         cDestroyed = Explosion(0.6f);
 
-        hum.clip = cHum; hum.volume = 0.35f; hum.Play();
+        hum.clip = cHum; hum.volume = 0.5f; hum.Play();   // louder, but still a background bed
 
         ApplyVolume();
         ambientTimer = Random.Range(7f, 12f);
@@ -95,8 +95,8 @@ public class SimpleAudio : MonoBehaviour
 
     void Update()
     {
-        // Gently waver the hum so it feels alive.
-        hum.pitch = 1f + Mathf.Sin(Time.unscaledTime * 0.35f) * 0.03f + Mathf.Sin(Time.unscaledTime * 0.13f) * 0.02f;
+        // Very slowly waver the drone so the deep tones shift now and then.
+        hum.pitch = 1f + Mathf.Sin(Time.unscaledTime * 0.15f) * 0.02f + Mathf.Sin(Time.unscaledTime * 0.06f) * 0.012f;
 
         ambientTimer -= Time.unscaledDeltaTime;
         if (ambientTimer <= 0f)
@@ -262,18 +262,40 @@ public class SimpleAudio : MonoBehaviour
         var c = AudioClip.Create("boom", n, 1, sr, false); c.SetData(d, 0); return c;
     }
 
-    // A loopable low drone: a couple of detuned low sines + a slow tremolo.
+    // A gravitational, Star-Wars-ish deep drone: a chord of complementing low pitches with an
+    // undertone and overtones, plus detuned pairs that beat slowly and per-partial tremolos, so it
+    // vibrates and subtly shifts. All frequencies/rates are multiples of 1/dur so it loops seamlessly.
     static AudioClip MakeHum(float dur)
     {
         int sr = 44100, n = (int)(sr * dur); var d = new float[n];
+
+        // { frequency, amplitude, tremolo rate (Hz), tremolo depth }
+        float[,] partials =
+        {
+            { 36.75f, 0.55f, 0.25f, 0.16f },  // deep undertone (gravitational rumble)
+            { 55.00f, 0.60f, 0.50f, 0.12f },  // root
+            { 55.50f, 0.34f, 0.75f, 0.10f },  // detuned root -> slow beat
+            { 73.50f, 0.30f, 0.50f, 0.12f },  // low complement
+            { 82.50f, 0.42f, 0.50f, 0.12f },  // fifth
+            { 110.0f, 0.30f, 1.00f, 0.10f },  // octave
+            { 110.5f, 0.18f, 0.75f, 0.10f },  // detuned octave -> shimmer beat
+            { 165.0f, 0.15f, 1.00f, 0.10f },  // overtone (fifth above octave)
+        };
+        int P = partials.GetLength(0);
+        float norm = 0f;
+        for (int p = 0; p < P; p++) norm += partials[p, 1];
+
         for (int i = 0; i < n; i++)
         {
             float t = i / (float)sr;
-            float trem = 0.85f + 0.15f * Mathf.Sin(2f * Mathf.PI * (1f / dur) * t); // seamless over the loop
-            float s = Mathf.Sin(2f * Mathf.PI * 55f * t) * 0.6f
-                    + Mathf.Sin(2f * Mathf.PI * 82.5f * t) * 0.3f
-                    + Mathf.Sin(2f * Mathf.PI * 110f * t) * 0.2f;
-            d[i] = s * trem * 0.5f;
+            float s = 0f;
+            for (int p = 0; p < P; p++)
+            {
+                float f = partials[p, 0], a = partials[p, 1], tr = partials[p, 2], td = partials[p, 3];
+                float trem = 1f - td * 0.5f * (1f - Mathf.Cos(2f * Mathf.PI * tr * t)); // 0..1, integer cycles
+                s += Mathf.Sin(2f * Mathf.PI * f * t) * a * trem;
+            }
+            d[i] = (s / norm) * 0.75f;
         }
         var c = AudioClip.Create("hum", n, 1, sr, true); c.SetData(d, 0); return c;
     }
