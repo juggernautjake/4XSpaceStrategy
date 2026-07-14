@@ -200,16 +200,15 @@ public class TerraformManager : MonoBehaviour
                 break;
 
             // The orbital migrations genuinely move the planet, which re-scores its habitability from
-            // scratch — that is the entire point of spending this much on one world.
+            // scratch — that is the entire point of spending this much on one world. They are also the
+            // only thing in the game that moves an orbit at RUNTIME, so they're the one place a planet
+            // could be walked straight into a neighbour: the move is clamped to the room its neighbours
+            // leave (see MigrateTo).
             case TerraformProjectType.OrbitShiftOut:
-                b.orbitRadius *= 1.45f;
-                b.distanceFromStar *= 1.45f;
-                RescoreOrbit(b);
+                MigrateTo(b, b.orbitRadius * 1.45f);
                 break;
             case TerraformProjectType.OrbitShiftIn:
-                b.orbitRadius *= 0.68f;
-                b.distanceFromStar *= 0.68f;
-                RescoreOrbit(b);
+                MigrateTo(b, b.orbitRadius * 0.68f);
                 break;
 
             // Stripping a world's oceans really does dry it out — and an ocean world without an ocean
@@ -270,6 +269,36 @@ public class TerraformManager : MonoBehaviour
             b.isHabitable = Habitability.IsHabitable(star, s, b.type, b.distanceFromStar);
         }
         b.terraformability = Habitability.Terraformability(star, s, b);
+    }
+
+    // Walk a planet to a new orbit, but never through one of its neighbours. If the neighbours leave no
+    // room at all the planet stays put — the project still counts as done (it raised the ceiling), it
+    // just couldn't move as far as it wanted. Better a short migration than two worlds sharing an orbit.
+    static void MigrateTo(CelestialBody b, float desiredRadius)
+    {
+        var sys = b.system;
+        var siblings = sys != null ? sys.bodies : null;
+
+        float final = desiredRadius;
+        if (siblings != null &&
+            !OrbitSafety.ClampRadius(siblings, b, b.hostStar, desiredRadius, out final))
+        {
+            NotificationManager.Instance?.Push($"{b.name} could not be moved",
+                "Its neighbours leave no room to migrate into. The engineering still paid off — the " +
+                "world's habitability ceiling rose — but its orbit stays where it is.", null, NotifKind.Info);
+            RescoreOrbit(b);
+            return;
+        }
+
+        b.orbitRadius = final;
+        b.distanceFromStar = final;
+        if (b.moons != null)
+            foreach (var m in b.moons) if (m != null) m.distanceFromStar = final;
+
+        RescoreOrbit(b);
+
+        // Re-assert the whole system afterwards: moving one body can only ever have made it tighter.
+        if (siblings != null) OrbitSafety.EnforceSystem(siblings, b.hostStar);
     }
 
     static void RefreshSpin(CelestialBody b)

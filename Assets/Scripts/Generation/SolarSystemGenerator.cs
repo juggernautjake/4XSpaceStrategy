@@ -100,51 +100,43 @@ public class SolarSystemGenerator : MonoBehaviour
             // with a big moon system reached back INTO the previous planet's band and the two sets of
             // moons flew through each other. We now reserve room for both sides plus a visible gap, and
             // remember this body's outer reach so the next lane can clear it explicitly.
-            float outerReach = OuterReach(body, moonCount, moonR);
+            float outerReach = OuterReach(body);   // moons already assigned -> real reach
             prevOuterReach = currentRadius + outerReach;
 
             // Reserve for the next planet reaching inward: its own disc + a typical moon system.
             currentRadius = prevOuterReach + LaneGap + TypicalInnerReach + Random.Range(0f, 2.5f);
         }
 
-        // ---- Orbit spacing ----
-    // Two bodies orbiting one centre can never come closer than the difference of their orbital radii
-    // (triangle inequality — inclination and tilt can't beat it). So keeping systems from intersecting
-    // is purely a matter of reserving enough RADIAL room for everything each planet drags around with it.
-
-    const float MaxMoonVisRadius = 0.3f;    // moon scale = max(0.35, surfaceSize*0.05), surfaceSize <= 12
-    const float MoonSurfaceGap = 0.9f;      // clear air between a planet's surface and its first moon
-    const float LaneGap = 6f;               // visible empty space between one planet's band and the next
-    const float TypicalInnerReach = 8f;     // room reserved for the NEXT planet's disc + moon system
-
-    /// How far a finished body's system reaches from its own orbit — its disc, or its outermost moon
-    /// plus that moon's radius. Used to keep bands apart after the fact.
-    public static float SystemReach(CelestialBody b)
-    {
-        float discRadius = Mathf.Max(0.6f, b.surfaceSize * 0.08f) * 0.5f;
-        float reach = discRadius;
-        if (b.moons != null)
-            foreach (var m in b.moons)
-                reach = Mathf.Max(reach, m.orbitRadius + Mathf.Max(0.35f, m.surfaceSize * 0.05f) * 0.5f);
-        return reach;
-    }
-
-    // How far this planet's system reaches beyond its own orbit: its disc, or the outermost moon's
-    // orbit plus that moon's own radius — whichever is greater.
-    static float OuterReach(CelestialBody body, int moonCount, float lastMoonR)
-    {
-        float discRadius = Mathf.Max(0.6f, body.surfaceSize * 0.08f) * 0.5f;
-        if (moonCount <= 0) return discRadius;
-        // lastMoonR has already been advanced past the final moon, so step back one spacing.
-        float outermost = lastMoonR - (MaxMoonVisRadius * 2f + 1.6f);
-        return Mathf.Max(discRadius, outermost + MaxMoonVisRadius + 0.5f);
-    }
-
-    // Lean towards a living world: make sure at least one planet sits in the habitable zone.
+        // Lean towards a living world: make sure at least one planet sits in the habitable zone.
         EnsureHabitableWorld(system);
+
+        // THE BACKSTOP. Everything above tries to lay bodies out with room to spare, but any of it can
+        // be wrong — and EnsureHabitableWorld deliberately moves a planet after the fact. This pass is
+        // what actually guarantees no two orbits ever intersect: it walks the system outward and pushes
+        // anything overlapping until nothing does. Idempotent, so a correct layout passes through it
+        // untouched.
+        OrbitSafety.EnforceSystem(system, currentStar);
+
+        if (!OrbitSafety.Validate(system, out string problem))
+            Debug.LogWarning($"[OrbitSafety] {currentSystemName}: {problem}");
 
         return system;
     }
+
+    // ---- Orbit spacing ----
+    // Two bodies orbiting one centre can never come closer than the difference of their orbital radii
+    // (triangle inequality — inclination and tilt can't beat it). So keeping systems from intersecting
+    // is purely a matter of reserving enough RADIAL room for everything each planet drags around with it.
+    //
+    // Sizes and clearances come from OrbitSafety — the single authority that also enforces spacing.
+    // These used to be local copies of the same magic numbers, which is precisely how the layout and
+    // the renderer drifted apart in the first place.
+    const float MaxMoonVisRadius = 0.3f;    // widest moon disc: max(0.35, 12*0.05) * 0.5
+    const float MoonSurfaceGap = OrbitSafety.MoonSurfaceGap;
+    const float LaneGap = OrbitSafety.LaneGap;
+    const float TypicalInnerReach = 8f;     // room reserved for the NEXT planet's disc + moon system
+
+    static float OuterReach(CelestialBody body) => OrbitSafety.SystemReach(body);
 
     // If no life-friendly planet already sits in the (default-species) habitable zone, convert the
     // nearest planet into one and place it inside the zone.
@@ -179,12 +171,12 @@ public class SolarSystemGenerator : MonoBehaviour
         if (idx > 0)
         {
             var innerNb = system[idx - 1];
-            lo = Mathf.Max(lo, innerNb.distanceFromStar + SystemReach(innerNb) + LaneGap + SystemReach(best));
+            lo = Mathf.Max(lo, innerNb.distanceFromStar + OrbitSafety.SystemReach(innerNb) + LaneGap + OrbitSafety.SystemReach(best));
         }
         if (idx >= 0 && idx < system.Count - 1)
         {
             var outerNb = system[idx + 1];
-            hi = Mathf.Min(hi, outerNb.distanceFromStar - SystemReach(outerNb) - LaneGap - SystemReach(best));
+            hi = Mathf.Min(hi, outerNb.distanceFromStar - OrbitSafety.SystemReach(outerNb) - LaneGap - OrbitSafety.SystemReach(best));
         }
 
         if (hi > lo)
