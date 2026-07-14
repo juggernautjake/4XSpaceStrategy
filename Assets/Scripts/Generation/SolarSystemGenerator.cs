@@ -33,8 +33,8 @@ public class SolarSystemGenerator : MonoBehaviour
 
         for (int i = 0; i < bodyCount; i++)
         {
-            float orbitPercent = bodyCount > 1 ? (float)i / (bodyCount - 1) : 0.5f;
-            CelestialBodyType type = RollBodyByDistance(orbitPercent, currentStarType);
+            // Type is chosen by ACTUAL temperature at this radius for this star.
+            CelestialBodyType type = RollBodyByTemperature(currentRadius, currentStar);
 
             CelestialBody body = MakeBody(type);
             body.name = NameGenerator.PlanetName(systemName, i);
@@ -42,6 +42,8 @@ public class SolarSystemGenerator : MonoBehaviour
             // Orbital layout (data-authoritative so save/load & sandbox can round-trip it).
             body.distanceFromStar = currentRadius;
             body.orbitRadius = currentRadius;
+            BiasHeat(body, currentRadius, currentStar);                       // climate follows distance
+            body.surface = PlanetTerrainGenerator.GenerateSurface(body);      // regenerate with correct heat
             body.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
             body.spinSpeed = OrbitalMechanics.Spin(body, Random.Range(0.7f, 1.3f));
             body.orbitPhase = Random.Range(0f, 360f);
@@ -60,7 +62,9 @@ public class SolarSystemGenerator : MonoBehaviour
                 CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
                 moon.name = NameGenerator.MoonName(body.name, m);
                 moon.surfaceSize = Random.Range(3, 13);
+                moon.distanceFromStar = body.distanceFromStar;   // shares the planet's solar distance
                 SeedTerrain(moon);
+                BiasHeat(moon, moon.distanceFromStar, currentStar);           // same climate band as its planet
                 moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
                 OreGenerator.Populate(moon);
                 ResourceGenerator.GenerateResources(moon);
@@ -72,7 +76,6 @@ public class SolarSystemGenerator : MonoBehaviour
                 moon.orbitDirection = Random.value < 0.85f ? 1 : -1;
                 moon.inclination = Random.Range(-15f, 15f);
                 moon.eccentricity = Random.Range(0f, 0.2f);
-                moon.distanceFromStar = body.distanceFromStar; // shares the planet's solar distance
                 moon.parentBody = body;
                 ApplyHabitability(moon);
                 POIGenerator.Populate(moon);
@@ -177,34 +180,62 @@ public class SolarSystemGenerator : MonoBehaviour
         }
     }
 
-    CelestialBodyType RollBodyByDistance(float d, StarType star)
+    // The distance at which this star delivers roughly Earth-like warmth (sqrt-of-luminosity law).
+    // Planet type and climate are judged relative to this, so a bright star's "temperate" band sits
+    // much further out than a dim red dwarf's.
+    static float TempReference(StarData star)
     {
-        // Cooler stars push the "warm" band inward, so ocean/rocky worlds can sit closer.
-        bool coolStar = (star == StarType.M || star == StarType.K);
+        float L = star != null ? Mathf.Max(0.02f, star.luminosity) : 1f;
+        return Mathf.Sqrt(L) * StarDatabase.AU;
+    }
 
-        if (d < 0.12f)
-            return Random.value < 0.7f ? CelestialBodyType.VolcanicPlanet : CelestialBodyType.BarrenPlanet;
+    // Body type by ACTUAL temperature (physical distance vs the star's warmth) rather than ordinal
+    // slot. Oceans only ever form in the temperate band, so no water worlds hug the star.
+    CelestialBodyType RollBodyByTemperature(float distance, StarData star)
+    {
+        float rel = distance / Mathf.Max(0.5f, TempReference(star));   // <1 hot, ~1 temperate, >1 cold
+        float r = Random.value;
 
-        if (d < 0.30f)
-            return Random.value < 0.5f ? CelestialBodyType.RockyPlanet : CelestialBodyType.VolcanicPlanet;
+        if (rel < 0.45f)                       // scorching — right by the star
+            return r < 0.65f ? CelestialBodyType.VolcanicPlanet : CelestialBodyType.BarrenPlanet;
 
-        if (d < 0.55f)
+        if (rel < 0.85f)                       // hot
         {
-            float r = Random.value;
-            if (r < 0.4f) return CelestialBodyType.RockyPlanet;
-            if (r < 0.7f) return coolStar ? CelestialBodyType.RockyPlanet : CelestialBodyType.OceanPlanet;
+            if (r < 0.45f) return CelestialBodyType.RockyPlanet;
+            if (r < 0.75f) return CelestialBodyType.VolcanicPlanet;
             return CelestialBodyType.BarrenPlanet;
         }
 
-        if (d < 0.75f)
-            return Random.value < 0.6f ? CelestialBodyType.IcePlanet : CelestialBodyType.RockyPlanet;
+        if (rel <= 1.5f)                       // temperate (habitable band) — the ONLY place oceans form
+        {
+            if (r < 0.45f) return CelestialBodyType.OceanPlanet;
+            if (r < 0.85f) return CelestialBodyType.RockyPlanet;
+            return CelestialBodyType.BarrenPlanet;
+        }
 
-        // Outer system
-        float o = Random.value;
-        if (o < 0.55f) return CelestialBodyType.GasGiant;
-        if (o < 0.8f)  return CelestialBodyType.IcePlanet;
-        if (o < 0.92f) return CelestialBodyType.BarrenPlanet;
+        if (rel < 3f)                          // cool
+        {
+            if (r < 0.45f) return CelestialBodyType.IcePlanet;
+            if (r < 0.70f) return CelestialBodyType.RockyPlanet;
+            if (r < 0.90f) return CelestialBodyType.GasGiant;
+            return CelestialBodyType.BarrenPlanet;
+        }
+
+        // Cold outer system
+        if (r < 0.50f) return CelestialBodyType.GasGiant;
+        if (r < 0.80f) return CelestialBodyType.IcePlanet;
+        if (r < 0.92f) return CelestialBodyType.BarrenPlanet;
         return CelestialBodyType.Asteroid;
+    }
+
+    // Bias a world's terrain temperature by how close it is to the star: closer = hotter climate,
+    // further = colder. Call before generating the surface so biomes reflect it.
+    static void BiasHeat(CelestialBody b, float distance, StarData star)
+    {
+        float rel = TempReference(star) / Mathf.Max(1f, distance);    // >1 hot (close), <1 cold (far)
+        var p = b.terrainParams;
+        p.heat = Mathf.Clamp(rel * Random.Range(0.9f, 1.15f), 0.45f, 1.85f);
+        b.terrainParams = p;
     }
 
     // Rolls the centre of the system: almost always a single sun, occasionally binary/ternary,
