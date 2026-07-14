@@ -104,10 +104,28 @@ public class UnitManager : MonoBehaviour
         int slow = int.MaxValue;
         foreach (var u in group) slow = Mathf.Min(slow, Mathf.Max(1, u.Speed));
 
-        Vector3 from = WorldPos(group[0].location);
-        Vector3 to = WorldPos(target);
-        float dist = Vector3.Distance(from, to);
-        float duration = Mathf.Clamp(dist / (slow * SpeedScale), 3f, 120f);
+        Vector3 from = UnitPos(group[0]);
+
+        // Intercept trajectory: solve for where a moving target will be when the fleet arrives, so the
+        // ships fly a straight line to that predicted point rather than chasing the live position.
+        var oc = target.visualObject != null ? target.visualObject.GetComponent<OrbitController>() : null;
+        Vector3 to; float duration;
+        if (oc != null)
+        {
+            float t = Mathf.Clamp(Vector3.Distance(from, WorldPos(target)) / (slow * SpeedScale), 3f, 120f);
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3 p = oc.PredictWorldPosition(t);
+                t = Mathf.Clamp(Vector3.Distance(from, p) / (slow * SpeedScale), 3f, 120f);
+            }
+            to = oc.PredictWorldPosition(t);
+            duration = t;
+        }
+        else
+        {
+            to = WorldPos(target);
+            duration = Mathf.Clamp(Vector3.Distance(from, to) / (slow * SpeedScale), 3f, 120f);
+        }
 
         foreach (var u in group)
         {
@@ -171,6 +189,41 @@ public class UnitManager : MonoBehaviour
         return Vector3.zero;
     }
 
+    // A unit's current world position (at a body, parked in space, or mid-transit).
+    public Vector3 UnitPos(Unit u)
+    {
+        if (u == null) return Vector3.zero;
+        if (u.location != null) return WorldPos(u.location);
+        if (u.status == UnitStatus.Traveling) return Vector3.Lerp(u.travelFrom, u.travelTo, u.TravelProgress);
+        if (u.inSpace) return u.parkPosition;
+        return Vector3.zero;
+    }
+
+    // Send a fleet to a point in empty space (not a body).
+    public void SendUnitsToPoint(List<Unit> group, Vector3 worldPos)
+    {
+        if (group == null || group.Count == 0) return;
+        int slow = int.MaxValue;
+        foreach (var u in group) slow = Mathf.Min(slow, Mathf.Max(1, u.Speed));
+        Vector3 from = UnitPos(group[0]);
+        float duration = Mathf.Clamp(Vector3.Distance(from, worldPos) / (slow * SpeedScale), 3f, 120f);
+
+        foreach (var u in group)
+        {
+            if (u.location != null && u.location.units != null) u.location.units.Remove(u);
+            u.location = null;
+            u.inSpace = false;
+            u.travelTarget = null;   // no body -> pure space move
+            u.status = UnitStatus.Traveling;
+            u.travelFrom = from;
+            u.travelTo = worldPos;
+            u.travelElapsed = 0f;
+            u.travelDuration = duration;
+            u.missionTimer = 0f;
+        }
+        OnUnitsChanged?.Invoke();
+    }
+
     // ---- Simulation ----
     void Update()
     {
@@ -206,8 +259,22 @@ public class UnitManager : MonoBehaviour
         // Arrive.
         var dest = u.travelTarget;
         u.travelTarget = null;
+
+        if (dest == null)
+        {
+            // Reached a point in empty space — hold position.
+            u.location = null;
+            u.inSpace = true;
+            u.parkPosition = u.travelTo;
+            u.status = UnitStatus.Idle;
+            NotificationManager.Instance?.Push($"{u.name} reached its destination", "Holding position in space.", null, NotifKind.Info);
+            return true;
+        }
+
         u.location = dest;
-        if (dest != null) { if (dest.units == null) dest.units = new List<Unit>(); dest.units.Add(u); }
+        u.inSpace = false;
+        if (dest.units == null) dest.units = new List<Unit>();
+        dest.units.Add(u);
         u.worldsExplored++;
         u.AddExperience(15f);
 

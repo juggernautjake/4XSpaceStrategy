@@ -123,12 +123,16 @@ public class UnitTokenRenderer : MonoBehaviour
                 pos = basePos + new Vector3(Mathf.Cos(ang) * ring, u.location.visualObject != null ? u.location.visualObject.transform.lossyScale.x * 0.6f + 1.2f : 1.2f, Mathf.Sin(ang) * ring);
                 emblemAlpha = (u.location.owner == u.owner) ? 0.95f : 0.4f;   // transparent = presence, not ownership
             }
+            else if (u.status == UnitStatus.Traveling)
+            {
+                // In transit: fly the straight intercept line computed at launch.
+                pos = Vector3.Lerp(u.travelFrom, u.travelTo, u.TravelProgress) + Vector3.up * 1.2f;
+                emblemAlpha = 0.85f;
+            }
             else
             {
-                // In transit: home in on the (moving) destination.
-                Vector3 to = u.travelTarget != null && u.travelTarget.visualObject != null
-                    ? u.travelTarget.visualObject.transform.position : u.travelTo;
-                pos = Vector3.Lerp(u.travelFrom, to, u.TravelProgress) + Vector3.up * 1.2f;
+                // Parked in deep space.
+                pos = u.parkPosition + Vector3.up * 1.2f;
                 emblemAlpha = 0.85f;
             }
 

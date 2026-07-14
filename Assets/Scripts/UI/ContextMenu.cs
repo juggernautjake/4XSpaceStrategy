@@ -18,6 +18,7 @@ public class ContextMenu : MonoBehaviour
     GameObject root;
     RectTransform panel;
     RectTransform list;
+    bool justOpened;
 
     public static void Create(Transform canvas)
     {
@@ -62,6 +63,7 @@ public class ContextMenu : MonoBehaviour
         panel.position = new Vector3(screenPos.x, screenPos.y, 0);
         root.SetActive(true);
         panel.SetAsLastSibling();
+        justOpened = true;   // don't let the opening click immediately close it
     }
 
     public void Hide() { if (root != null) root.SetActive(false); }
@@ -69,6 +71,7 @@ public class ContextMenu : MonoBehaviour
     void Update()
     {
         if (root == null || !root.activeSelf) return;
+        if (justOpened) { justOpened = false; return; }
         if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1))
         {
             if (!RectTransformUtility.RectangleContainsScreenPoint(panel, Input.mousePosition, null))

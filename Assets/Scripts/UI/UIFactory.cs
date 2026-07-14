@@ -135,7 +135,9 @@ public static class UIFactory
     public static TMP_Text Label(Transform parent, string content, int size, Color color, float height = 22f)
     {
         var t = Text(parent, content, size, color);
-        AddLayout(t.gameObject, height);
+        // Content-driven height (with a floor) so multi-line labels never clip inside layout groups.
+        var le = t.gameObject.AddComponent<LayoutElement>();
+        le.minHeight = height;
         return t;
     }
 
@@ -270,6 +272,8 @@ public static class UIFactory
         slider.handleRect = handleRT;
         slider.targetGraphic = handle;
         slider.direction = UnityEngine.UI.Slider.Direction.LeftToRight;
+        // No keyboard navigation, so WASD/arrow panning never changes a slider (e.g. the time slider).
+        slider.navigation = new Navigation { mode = Navigation.Mode.None };
         slider.minValue = min; slider.maxValue = max; slider.value = value;
         if (onChanged != null) slider.onValueChanged.AddListener(v => onChanged(v));
         return slider;

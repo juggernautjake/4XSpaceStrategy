@@ -72,7 +72,7 @@ public class FleetMovementController : MonoBehaviour
 
     void Update()
     {
-        if (!targeting) return;
+        if (!targeting) { HandleRightClickMove(); return; }
         if (cam == null) cam = Camera.main;
         if (cam == null || fleet == null || fleet.Count == 0) { Disarm(); return; }
 
@@ -127,6 +127,50 @@ public class FleetMovementController : MonoBehaviour
             UnitManager.Instance?.SendUnits(fleet, hovered);
             Disarm();
         }
+    }
+
+    // Right-click a body or empty space with ships selected -> confirm sending them there.
+    void HandleRightClickMove()
+    {
+        if (!Input.GetMouseButtonDown(1)) return;
+        if (cam == null) cam = Camera.main;
+        if (cam == null) return;
+        if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
+
+        var group = new List<Unit>();
+        foreach (var u in UnitSelection.Selected) if (u.status != UnitStatus.Traveling) group.Add(u);
+        if (group.Count == 0) return;
+
+        Vector2 mp = Input.mousePosition;
+        var body = RaycastBody();
+        if (body != null)
+        {
+            ContextMenu.Instance?.Show(mp, new List<ContextMenu.Option>
+            {
+                new ContextMenu.Option($"Send {group.Count} ship(s) to {body.name}", () => UnitManager.Instance?.SendUnits(group, body)),
+                new ContextMenu.Option("Cancel", null)
+            });
+        }
+        else
+        {
+            Vector3 pt = RaycastPlane();
+            ContextMenu.Instance?.Show(mp, new List<ContextMenu.Option>
+            {
+                new ContextMenu.Option($"Send {group.Count} ship(s) here (deep space)", () => UnitManager.Instance?.SendUnitsToPoint(group, pt)),
+                new ContextMenu.Option("Cancel", null)
+            });
+        }
+    }
+
+    Vector3 RaycastPlane()
+    {
+        var ray = cam.ScreenPointToRay(Input.mousePosition);
+        if (Mathf.Abs(ray.direction.y) > 0.0001f)
+        {
+            float t = -ray.origin.y / ray.direction.y;   // intersect the y=0 orbital plane
+            if (t > 0f) return ray.origin + ray.direction * t;
+        }
+        return ray.origin + ray.direction * 100f;
     }
 
     Vector3 FleetPos()
