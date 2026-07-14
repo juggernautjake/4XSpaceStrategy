@@ -54,6 +54,7 @@ public class UnitManager : MonoBehaviour
         units.Clear();
         nextId = 1;
         HomePlanet = homePlanet;
+        ShipUpgrades.Reset();
 
         // Starting fleet: two scouts + one colony ship.
         CreateUnit(UnitType.Scout, FactionManager.Player, homePlanet);
@@ -166,6 +167,15 @@ public class UnitManager : MonoBehaviour
             duration = Mathf.Clamp(Vector3.Distance(from, to) / (slow * SpeedScale), 3f, 120f);
         }
 
+        if (!CanReach(group, to, out string reason))
+        {
+            // Drop the impossible order so it doesn't retry every frame, and say why once.
+            foreach (var u in group) { if (u.orders.Count > 0) u.orders.RemoveAt(0); u.status = UnitStatus.Idle; }
+            NotificationManager.Instance?.Push($"Out of range — {target.name}", reason, null, NotifKind.Danger);
+            OnUnitsChanged?.Invoke();
+            return;
+        }
+
         foreach (var u in group)
         {
             if (u.location != null && u.location.units != null) u.location.units.Remove(u);
@@ -247,6 +257,14 @@ public class UnitManager : MonoBehaviour
         Vector3 from = UnitPos(group[0]);
         float duration = Mathf.Clamp(Vector3.Distance(from, worldPos) / (slow * SpeedScale), 3f, 120f);
 
+        if (!CanReach(group, worldPos, out string reason))
+        {
+            foreach (var u in group) { if (u.orders.Count > 0) u.orders.RemoveAt(0); u.status = UnitStatus.Idle; }
+            NotificationManager.Instance?.Push("Out of range", reason, null, NotifKind.Danger);
+            OnUnitsChanged?.Invoke();
+            return;
+        }
+
         foreach (var u in group)
         {
             if (u.location != null && u.location.units != null) u.location.units.Remove(u);
@@ -263,7 +281,46 @@ public class UnitManager : MonoBehaviour
         OnUnitsChanged?.Invoke();
     }
 
+    // ---- Travel range ----
+    // A ship's reach in world units, scaled by empire drive/relay upgrades. 0 base range = unlimited
+    // (probes). Early game this keeps most ships inside their home system; better drives and relays
+    // extend it until colony/research ships — and eventually stations — can cross to other systems.
+    public float EffectiveRange(Unit u)
+        => (u == null || u.Info.range <= 0) ? float.MaxValue : u.Info.range * Mathf.Max(0.1f, ShipUpgrades.RangeMult);
+
+    // A fleet is limited by its SHORTEST-ranged ship.
+    public float GroupRange(List<Unit> group)
+    {
+        float r = float.MaxValue;
+        if (group != null) foreach (var u in group) r = Mathf.Min(r, EffectiveRange(u));
+        return r;
+    }
+
+    public bool CanReach(List<Unit> group, Vector3 targetPos, out string reason)
+    {
+        reason = null;
+        if (group == null || group.Count == 0) return true;
+        float range = GroupRange(group);
+        if (range >= float.MaxValue) return true;              // all-unlimited (e.g. probes)
+        float dist = Vector3.Distance(UnitPos(group[0]), targetPos);
+        if (dist > range)
+        {
+            reason = $"{dist:F0} units away · fleet range {range:F0}. Upgrade drives or build a relay to reach it.";
+            return false;
+        }
+        return true;
+    }
+
+    public bool CanReachBody(List<Unit> group, CelestialBody body, out string reason)
+    {
+        reason = null;
+        return body == null || CanReach(group, WorldPos(body), out reason);
+    }
+
     // ---- Simulation ----
+    const float ProbePulsePeriod = 2.5f;   // seconds between probe sensor pulses
+    const float ProbeLifetime = 90f;       // a probe eventually loses power / signal
+
     void Update()
     {
         float dt = Time.deltaTime;   // scaled by game speed
@@ -466,10 +523,57 @@ public class UnitManager : MonoBehaviour
         PlanetUI.Instance?.Show(b);
     };
 
+    // A launched probe pulses on a fixed cadence: it reveals every object within its sensor range and
+    // relays a report home. It runs on starlight (no fuel) but eventually loses power and goes dark.
+    void ProbeScan(Unit u, float dt)
+    {
+        u.missionTimer += dt;
+        if (u.serviceTime > ProbeLifetime) { ProbeLoseSignal(u, "drifted beyond contact range"); return; }
+        if (u.missionTimer < ProbePulsePeriod) return;
+        u.missionTimer = 0f;
+
+        Vector3 pos = UnitPos(u);
+        float vis = u.Info.visionRange;
+        int found = 0; string firstName = null;
+        foreach (var b in SystemContext.AllBodies())
+        {
+            if (b == null || b.visited) continue;
+            if (Vector3.Distance(pos, WorldPos(b)) <= vis)
+            {
+                b.visited = true; u.worldsExplored++; found++;
+                if (firstName == null) firstName = b.name;
+            }
+        }
+        if (found > 0)
+        {
+            SimpleAudio.Instance?.PlayNotify(NotifKind.Discovery);
+            string msg = found == 1 ? $"detected {firstName}" : $"detected {firstName} and {found - 1} more object(s)";
+            NotificationManager.Instance?.Push($"Probe pulse — {u.name}", $"Sensors {msg}. Data relayed home.", null, NotifKind.Discovery);
+        }
+    }
+
+    void ProbeLoseSignal(Unit u, string why)
+    {
+        int seen = u.worldsExplored;
+        u.status = UnitStatus.Idle;   // so Travel() stops processing this now-removed probe
+        if (u.location != null && u.location.units != null) u.location.units.Remove(u);
+        units.Remove(u);
+        if (UnitSelection.IsSelected(u)) UnitSelection.Clear();
+        SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
+        NotificationManager.Instance?.Push($"Signal lost — {u.name}",
+            $"The probe {why} and went dark. It revealed {seen} object(s) before contact was lost.", null, NotifKind.Info);
+        OnUnitsChanged?.Invoke();
+    }
+
     bool Travel(Unit u, float dt)
     {
+        if (u.Info.isProbe) { ProbeScan(u, dt); if (u.status != UnitStatus.Traveling) return true; }
+
         u.travelElapsed += dt;
         if (u.travelElapsed < u.travelDuration) return false;
+
+        // A probe that reaches the end of its trajectory goes dark rather than "arriving".
+        if (u.Info.isProbe) { ProbeLoseSignal(u, "reached the end of its trajectory"); return true; }
 
         // Arrive.
         var dest = u.travelTarget;

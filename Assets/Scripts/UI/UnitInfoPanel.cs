@@ -225,10 +225,12 @@ public class UnitInfoPanel : MonoBehaviour
             ? $"\n<color=#8FD0FF>Carrying {u.samples.Count} ore sample(s)</color> (needs a research ship/centre)"
             : "";
 
+        float er = UnitManager.Instance != null ? UnitManager.Instance.EffectiveRange(u) : u.Info.range;
+        string rangeStr = (u.Info.range <= 0 || er >= float.MaxValue) ? "unlimited" : $"{er:F0}";
         body.text =
             $"<b>{u.Info.name}</b>  ·  <color=#FFD24D>{u.RankName}</color>\n" +
             $"Owner: <color={ownerHex}>{FactionManager.OwnerName(u.owner)}</color>\n" +
-            $"Health {u.EffectiveHealth}  Armor {u.Armor}  Speed {u.Speed}\n" +
+            $"Health {u.EffectiveHealth}  Armor {u.Armor}  Speed {u.Speed}  Range {rangeStr}\n" +
             $"Research {u.EffectiveResearch}  Attack {u.EffectiveAttack}\n" +
             $"XP {u.experience:F0}  Worlds {u.worldsExplored}\n\n" +
             $"<color=#8FD0FF>Task:</color> {task}{queueLine}{sampleLine}";

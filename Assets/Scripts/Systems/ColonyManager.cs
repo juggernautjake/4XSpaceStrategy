@@ -304,9 +304,11 @@ public class ColonyManager : MonoBehaviour
             return;
         }
 
-        // A Terraformer ship present at the world roughly doubles the pace of the project.
-        bool terraformer = HasTerraformerPresent(b);
-        float gain = (terraformer ? 2.2f : 1.1f) * dt;   // habitability points this step
+        // Terraforming is slow on its own; each Terraformer ship present speeds it up and they STACK,
+        // so parking several on the same world finishes it much faster (they burn resources faster too).
+        int tformers = CountTerraformers(b);
+        float rate = Mathf.Min(1f + tformers, 6f);       // 1× baseline, +1× per terraformer, capped ~5
+        float gain = 1.1f * rate * dt;                    // habitability points this step
         float water = gain * 4f, energy = gain * 3f, metal = gain * 2f;   // hauled water + power + materials
         if (PlayerEconomy.Get(ResourceType.Water) >= water &&
             PlayerEconomy.Get(ResourceType.Energy) >= energy &&
@@ -347,11 +349,14 @@ public class ColonyManager : MonoBehaviour
         return false;
     }
 
-    public static bool HasTerraformerPresent(CelestialBody b)
+    public static bool HasTerraformerPresent(CelestialBody b) => CountTerraformers(b) > 0;
+
+    public static int CountTerraformers(CelestialBody b)
     {
-        if (b == null || b.units == null) return false;
-        foreach (var u in b.units) if (u.owner == FactionManager.Player && u.Info.canTerraform) return true;
-        return false;
+        if (b == null || b.units == null) return 0;
+        int n = 0;
+        foreach (var u in b.units) if (u.owner == FactionManager.Player && u.Info.canTerraform) n++;
+        return n;
     }
 
     System.Action Fly(CelestialBody b) => () =>
