@@ -42,8 +42,10 @@ public class UnitInfoPanel : MonoBehaviour
         UIFactory.VerticalLayout(content, 7);
 
         // Name is read-only until you press Edit Name (so a stray click can't rename a ship).
-        nameInput = UIFactory.InputField(content, "Ship name…");
+        nameInput = UIFactory.InputField(content, "Ship name…", "", 44f);
         nameInput.interactable = false;
+        if (nameInput.textComponent != null) nameInput.textComponent.fontSize = UITheme.HeaderSize;
+        var phc = nameInput.placeholder as TMP_Text; if (phc != null) phc.fontSize = UITheme.HeaderSize;
         nameInput.onEndEdit.AddListener(v =>
         {
             if (current != null && !string.IsNullOrWhiteSpace(v)) { current.name = v.Trim(); Refresh(); }
@@ -54,7 +56,7 @@ public class UnitInfoPanel : MonoBehaviour
             if (current == null) return;
             nameInput.interactable = true;
             nameInput.ActivateInputField();
-        }, 24);
+        }, 34);
 
         body = UIFactory.Label(content, "", UITheme.SmallSize, UITheme.Text, 168);
         body.alignment = TextAlignmentOptions.TopLeft;
