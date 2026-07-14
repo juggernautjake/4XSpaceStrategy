@@ -97,9 +97,44 @@ public static class SurfaceBuildManager
             if (occupied.Contains(c)) { why = "something is already built here"; return false; }
         }
 
+        // SITING REQUIREMENT. Some things aren't merely inefficient on the wrong ground, they're
+        // pointless: a geothermal plant on cold rock produces nothing. Checked against the footprint's
+        // averaged index, so a plant half-on a volcano still counts.
+        if (info.minIndex > 0f && info.index != SurfaceIndexKind.None && !GameMode.DevMode)
+        {
+            float here = EfficiencyAt(b, t, x, y, rotation);
+            if (here < info.minIndex)
+            {
+                float best = SurfaceIndex.Best(b, info.index);
+                why = best >= info.minIndex
+                    ? $"{SurfaceIndex.Name(info.index)} only {here * 100f:F0}% here — needs {info.minIndex * 100f:F0}%. Try the highlighted sites."
+                    : $"{SurfaceIndex.Name(info.index)} only {here * 100f:F0}% here — needs {info.minIndex * 100f:F0}%. " +
+                      $"This world's best is {best * 100f:F0}%: nowhere on it will support one.";
+                return false;
+            }
+        }
+
         int m = ColonyManager.DiscCost(info.costMetal), e = ColonyManager.DiscCost(info.costEnergy);
         if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = $"need {m} metal, {e} energy"; return false; }
         return true;
+    }
+
+    /// What a structure would actually PRODUCE at this spot, per second, at tech level 1 — the number
+    /// the hover readout quotes. Distinct from the index: the index is the ground, this is the payoff.
+    public static string PredictedYield(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation)
+    {
+        var info = SurfaceBuildingDatabase.Get(t);
+        float eff = EfficiencyAt(b, t, x, y, rotation);
+
+        var parts = new List<string>();
+        if (info.metalPerSec > 0f) parts.Add($"{info.metalPerSec * eff * TechEffects.OreYieldMult:0.00} metal/s");
+        if (info.energyPerSec > 0f) parts.Add($"{info.energyPerSec * eff:0.00} energy/s");
+        if (info.waterPerSec > 0f) parts.Add($"{info.waterPerSec * eff:0.00} water/s");
+        if (info.researchPerSec > 0f) parts.Add($"{info.researchPerSec * eff:0.00} research/s");
+        if (info.popGrowthPerSec > 0f) parts.Add($"{info.popGrowthPerSec * eff:0.0} growth/s");
+        if (info.storageCapacity > 0f) parts.Add($"+{info.storageCapacity:0} storage");
+        if (parts.Count == 0) return "no direct output";
+        return string.Join(" · ", parts);
     }
 
     /// How well a structure would perform here: the average of its driving index across its footprint.
