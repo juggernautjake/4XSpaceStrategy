@@ -11,8 +11,33 @@ public class GalaxyLOD : MonoBehaviour
 {
     public static GalaxyLOD Instance;
 
-    const float EnterGalaxy = 1400f;   // above this height -> symbol view
-    const float ExitGalaxy = 1050f;    // below this -> detailed view (hysteresis avoids flicker)
+    // The height at which rendered systems give way to symbol markers, derived from how big the galaxy
+    // actually is rather than fixed. These were hardcoded at 1400/1050 — but a 5-system galaxy only
+    // needs ~900 to frame entirely, so the symbol view sat ABOVE the useful zoom range and could never
+    // trigger. Deriving it means the markers appear as the systems get too small to read, at any size.
+    const float EnterFrac = 0.55f;     // fraction of "whole galaxy framed" height -> symbol view
+    const float ExitFrac = 0.42f;      // below this -> detailed view (hysteresis avoids flicker)
+    const float MinEnter = 260f;       // floors, so a one-system game doesn't flip to symbols instantly
+
+    float EnterGalaxy
+    {
+        get
+        {
+            var cc = CameraController.Instance;
+            float frame = cc != null ? cc.HeightToFrame(CameraController.GalaxyRadius()) : 0f;
+            return Mathf.Max(MinEnter, frame * EnterFrac);
+        }
+    }
+
+    float ExitGalaxy
+    {
+        get
+        {
+            var cc = CameraController.Instance;
+            float frame = cc != null ? cc.HeightToFrame(CameraController.GalaxyRadius()) : 0f;
+            return Mathf.Max(MinEnter * 0.76f, frame * ExitFrac);
+        }
+    }
 
     Camera cam;
     RectTransform markerRoot;

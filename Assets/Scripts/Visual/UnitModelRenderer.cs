@@ -58,6 +58,17 @@ public static class UnitModelLibrary
             motion = Motion.Freeflying,
             spin = 0f       // it points where it's going; a spinning colony ship would look broken
         };
+
+        // The whole research line shares the science hull. They're the same silhouette conceptually —
+        // a mobile laboratory — and each tier is visibly bigger than the last, which is the cheapest
+        // honest way to show that a Mk III is a more serious ship than a Mk I.
+        const string sciencePath = "SpaceAssets/Ships/LP Science Ship";
+        map[UnitType.ResearchShip] = new Entry { path = sciencePath, size = 0.22f, motion = Motion.Freeflying };
+        map[UnitType.ResearchShipII] = new Entry { path = sciencePath, size = 0.26f, motion = Motion.Freeflying };
+        map[UnitType.ResearchShipIII] = new Entry { path = sciencePath, size = 0.30f, motion = Motion.Freeflying };
+        // The Science Vessel is the top of that line — a dedicated deep-survey laboratory, and the
+        // largest of them.
+        map[UnitType.ScienceVessel] = new Entry { path = sciencePath, size = 0.34f, motion = Motion.Freeflying };
     }
 
     public static Entry For(UnitType t)
