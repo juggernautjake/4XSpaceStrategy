@@ -72,7 +72,7 @@ public class FleetMovementController : MonoBehaviour
 
     void Update()
     {
-        if (!targeting) { HandleRightClickMove(); return; }
+        if (!targeting) { HandleRightClickMove(); HandleDeselect(); return; }
         if (cam == null) cam = Camera.main;
         if (cam == null || fleet == null || fleet.Count == 0) { Disarm(); return; }
 
@@ -160,6 +160,21 @@ public class FleetMovementController : MonoBehaviour
                 new ContextMenu.Option("Cancel", null)
             });
         }
+    }
+
+    // Left-clicking empty space (no token, no body) drops the ship selection, so the send menu never
+    // lingers on a world you were only inspecting. Clicks on tokens/bodies are handled by their own
+    // colliders and leave selection intact (tokens) or inspect (bodies).
+    void HandleDeselect()
+    {
+        if (!Input.GetMouseButtonDown(0)) return;
+        if (UnitSelection.Selected.Count == 0) return;
+        if (cam == null) cam = Camera.main;
+        if (cam == null) return;
+        if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
+
+        var ray = cam.ScreenPointToRay(Input.mousePosition);
+        if (!Physics.Raycast(ray, out _, 5000f)) UnitSelection.Clear();   // hit nothing -> deselect
     }
 
     Vector3 RaycastPlane()

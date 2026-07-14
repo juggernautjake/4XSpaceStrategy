@@ -200,7 +200,10 @@ public class UnitToken : MonoBehaviour
             UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
         if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;
 
-        UnitSelection.SelectOnly(unit);
+        // Shift-click adds to the current fleet selection; a plain click selects just this ship.
+        bool additive = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        if (additive) UnitSelection.Select(unit, true);
+        else UnitSelection.SelectOnly(unit);
         SimpleAudio.Instance?.PlayUnitSelect(unit.type);
         CameraController.Instance?.FocusAndZoom(transform, 3f, false);
         UnitInfoPanel.Instance?.Show(unit);
