@@ -12,7 +12,7 @@ public class PlanetClick : MonoBehaviour
             return;
         }
 
-        PlanetUI ui = FindObjectOfType<PlanetUI>(true); // true = include inactive
+        PlanetUI ui = FindFirstObjectByType<PlanetUI>(FindObjectsInactive.Include); // include inactive
         if (ui != null)
         {
             ui.Show(data);

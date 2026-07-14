@@ -38,7 +38,7 @@ public static class UIFactory
 
     public static void EnsureEventSystem()
     {
-        if (UnityEngine.Object.FindObjectOfType<EventSystem>() == null)
+        if (UnityEngine.Object.FindFirstObjectByType<EventSystem>() == null)
         {
             var es = new GameObject("EventSystem");
             es.AddComponent<EventSystem>();
@@ -59,7 +59,8 @@ public static class UIFactory
     public static RectTransform Window(Transform parent, string title, Vector2 size, out GameObject root, out TMP_Text titleText, bool closeButton = true)
     {
         var win = Panel(parent, title + "Window", UITheme.PanelBg);
-        root = win.gameObject;
+        var rootGO = win.gameObject; // local: 'out' params can't be captured in a lambda below
+        root = rootGO;
         var rt = win.rectTransform;
         rt.sizeDelta = size;
         rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
@@ -86,7 +87,7 @@ public static class UIFactory
             crt.anchorMin = new Vector2(1, 0.5f); crt.anchorMax = new Vector2(1, 0.5f);
             crt.pivot = new Vector2(1, 0.5f); crt.sizeDelta = new Vector2(30, 26);
             crt.anchoredPosition = new Vector2(-4, 0);
-            close.onClick.AddListener(() => root.SetActive(false));
+            close.onClick.AddListener(() => rootGO.SetActive(false));
         }
 
         // Content area
@@ -293,7 +294,7 @@ public static class UIFactory
         content.anchorMin = new Vector2(0, 1); content.anchorMax = new Vector2(1, 1);
         content.pivot = new Vector2(0.5f, 1); content.anchoredPosition = Vector2.zero;
         var fitter = content.gameObject.AddComponent<ContentSizeFitter>();
-        fitter.verticalFit = ContentSizeFitter.Fit.PreferredSize;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         var vlg = content.gameObject.AddComponent<VerticalLayoutGroup>();
         vlg.spacing = 6; vlg.padding = new RectOffset(6, 6, 6, 6);
         vlg.childControlWidth = true; vlg.childControlHeight = true;

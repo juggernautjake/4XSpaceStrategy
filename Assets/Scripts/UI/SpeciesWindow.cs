@@ -73,7 +73,7 @@ public class SpeciesWindow : MonoBehaviour
         vlg.padding = new RectOffset(10, 10, 8, 8); vlg.spacing = 3;
         vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
         var fit = card.gameObject.AddComponent<ContentSizeFitter>();
-        fit.verticalFit = ContentSizeFitter.Fit.PreferredSize;
+        fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
         var title = UIFactory.Text(card.transform, $"<b>{s.name}</b>  <size=11><color=#9FB4C8>“Known for {s.signature}”</color></size>",
             18, new Color(s.color.r, s.color.g, s.color.b), TextAlignmentOptions.Left);

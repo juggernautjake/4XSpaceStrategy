@@ -37,8 +37,8 @@ public class TooltipManager : MonoBehaviour
         outline.effectDistance = new Vector2(1f, -1f);
 
         var fitter = bg.gameObject.AddComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.Fit.PreferredSize;
-        fitter.verticalFit = ContentSizeFitter.Fit.PreferredSize;
+        fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         var vlg = bg.gameObject.AddComponent<VerticalLayoutGroup>();
         vlg.padding = new RectOffset(10, 10, 8, 8);
         vlg.childControlWidth = true; vlg.childControlHeight = true;
