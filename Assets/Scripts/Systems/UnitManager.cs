@@ -486,10 +486,10 @@ public class UnitManager : MonoBehaviour
         {
             u.AddExperience(XpSurvey);
             SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
-            NotificationManager.Instance?.Push($"{b.name} surveyed",
-                $"Detailed map and points of interest revealed." +
-                (u.samples.Count > 0 ? $" {u.name} is carrying {u.samples.Count} ore sample(s) — take them to a research ship or centre." : ""),
-                FlyTo(b), NotifKind.Research);
+            NotificationManager.Instance?.Push($"{b.name} surveyed", "Survey complete — map revealed.",
+                FlyTo(b), NotifKind.Research,
+                detail: $"{u.name} finished surveying {b.name}. Its detailed map and points of interest are now available." +
+                (u.samples.Count > 0 ? $" {u.name} is carrying {u.samples.Count} ore sample(s) — take them to a research ship or a world with a research centre to research them." : ""));
             RevealBodyVisual(b);
             FinishAction(u, OrderKind.Survey, b);
             return;

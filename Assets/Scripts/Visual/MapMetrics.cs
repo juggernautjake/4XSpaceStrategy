@@ -6,22 +6,16 @@ using UnityEngine;
 // of pixels on the detailed map, for every body, at every size.
 public static class MapMetrics
 {
-    public const float MiniTileMax = 26f;   // chunky tiles for small worlds
-    public const float MiniTileMin = 7f;
-    public const float MiniMaxW = 560f;      // mini map caps here (keeps huge worlds on-screen)
-    public const float MiniMaxH = 320f;
-    public const float DetailFactor = 2.2f;  // detailed map = this * mini map, always
+    // Pixels-per-tile are CONSTANT for every body — only the number of tiles (and thus the overall
+    // map size) changes with the world's size. So a big world just shows a bigger map, never bigger
+    // tiles. The detailed map uses a fixed larger tile, keeping a constant mini:detailed ratio too.
+    public const float MiniTilePx = 12f;
+    public const float DetailFactor = 2f;
 
     // Surface grid dimensions (matches PlanetTerrainGenerator: width = 2*size, height = size).
     public static int SurfW(int surfaceSize) => Mathf.Max(4, surfaceSize * 2);
     public static int SurfH(int surfaceSize) => Mathf.Max(2, surfaceSize);
 
-    // Pixels per tile on the mini map for a body of this surface size.
-    public static float MiniTile(int surfaceSize)
-    {
-        float t = Mathf.Min(MiniTileMax, MiniMaxW / SurfW(surfaceSize), MiniMaxH / SurfH(surfaceSize));
-        return Mathf.Clamp(t, MiniTileMin, MiniTileMax);
-    }
-
-    public static float DetailTile(int surfaceSize) => MiniTile(surfaceSize) * DetailFactor;
+    public static float MiniTile(int surfaceSize) => MiniTilePx;                 // same for all bodies
+    public static float DetailTile(int surfaceSize) => MiniTilePx * DetailFactor; // same for all bodies
 }

@@ -28,10 +28,14 @@ public class GenerationMenu : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "New Game", new Vector2(480, 580), out root, out _);
+        var content = UIFactory.Window(parent, "New Game", new Vector2(520, 640), out root, out _);
         root.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
 
-        var scroll = UIFactory.ScrollView(content, out RectTransform col);
+        // Scrollable wizard fills the window EXCEPT the bottom strip, where Start Game is pinned so it
+        // is always visible without needing to scroll or resize.
+        var holder = UIFactory.NewUI(content, "Holder").GetComponent<RectTransform>();
+        UIFactory.Stretch(holder, 0, 0, 0, 46);
+        UIFactory.ScrollView(holder, out RectTransform col);
 
         UIFactory.Label(col, "FACTION NAME", UITheme.SmallSize, UITheme.Accent, 16);
         nameInput = UIFactory.InputField(col, "Name your empire…", "Your Empire");
@@ -56,7 +60,12 @@ public class GenerationMenu : MonoBehaviour
 
         summary = UIFactory.Label(col, "", UITheme.SmallSize, UITheme.Text, 40);
 
-        UIFactory.Button(col, "Start Game", StartGame, 38);
+        // Start Game pinned to the bottom of the window (outside the scroll), always visible.
+        var start = UIFactory.Button(content, "Start Game", StartGame, 40);
+        var srt = start.GetComponent<RectTransform>();
+        srt.anchorMin = new Vector2(0, 0); srt.anchorMax = new Vector2(1, 0); srt.pivot = new Vector2(0.5f, 0);
+        srt.sizeDelta = new Vector2(-8, 40); srt.anchoredPosition = new Vector2(0, 4);
+        start.GetComponent<LayoutElement>().ignoreLayout = true;
 
         root.SetActive(false);
     }

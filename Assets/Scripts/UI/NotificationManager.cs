@@ -11,7 +11,7 @@ public class NotificationManager : MonoBehaviour
 {
     public static NotificationManager Instance;
 
-    class Entry { public string title, message; public Action onClick; public NotifKind kind; }
+    class Entry { public string title, message, detail; public Action onClick; public NotifKind kind; }
 
     static Color KindColor(NotifKind k)
     {
@@ -63,9 +63,11 @@ public class NotificationManager : MonoBehaviour
         historyRoot.SetActive(false);
     }
 
-    public void Push(string title, string message, Action onClick, NotifKind kind = NotifKind.Info)
+    // message = short/simple line shown on the toast; detail = the fuller version shown when the
+    // notification is expanded in the history (defaults to the simple message if not provided).
+    public void Push(string title, string message, Action onClick, NotifKind kind = NotifKind.Info, string detail = null)
     {
-        var e = new Entry { title = title, message = message, onClick = onClick, kind = kind };
+        var e = new Entry { title = title, message = message, detail = string.IsNullOrEmpty(detail) ? message : detail, onClick = onClick, kind = kind };
         history.Insert(0, e);
         SimpleAudio.Instance?.PlayNotify(kind);
         SpawnToast(e);
@@ -114,12 +116,27 @@ public class NotificationManager : MonoBehaviour
             vlg.padding = new RectOffset(8, 8, 6, 6); vlg.spacing = 2;
             vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
 
-            var btn = row.gameObject.AddComponent<Button>();
-            var captured = e;
-            btn.onClick.AddListener(() => captured.onClick?.Invoke());
-
             UIFactory.WrapText(row.transform, $"<b>{e.title}</b>", UITheme.SmallSize, KindColor(e.kind));
             UIFactory.WrapText(row.transform, e.message, UITheme.SmallSize, UITheme.Text);
+
+            // The fuller detail, hidden until you expand the row.
+            var detailText = UIFactory.WrapText(row.transform, e.detail, UITheme.SmallSize, UITheme.SubText);
+            bool hasExtra = !string.IsNullOrEmpty(e.detail) && e.detail != e.message;
+            detailText.gameObject.SetActive(false);
+
+            var hint = UIFactory.WrapText(row.transform,
+                (hasExtra ? "<size=10><i>(click for details" : "<size=10><i>(click") + (e.onClick != null ? " · locate)</i></size>" : ")</i></size>"),
+                UITheme.SmallSize, UITheme.Accent);
+
+            var btn = row.gameObject.AddComponent<Button>();
+            var captured = e;
+            var dt = detailText.gameObject;
+            var hn = hint.gameObject;
+            btn.onClick.AddListener(() =>
+            {
+                if (hasExtra && !dt.activeSelf) { dt.SetActive(true); hn.SetActive(false); }   // first click expands
+                captured.onClick?.Invoke();                                                     // and/or locates
+            });
         }
     }
 }
