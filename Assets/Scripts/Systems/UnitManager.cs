@@ -32,6 +32,10 @@ public class UnitManager : MonoBehaviour
     const float SpeedScale = 6f;
     const float HostileStaySeconds = 45f;   // limited stay on <80% worlds before forced return
 
+    // Active hyper-relays / relay stations quicken travel fleet-wide: the effective speed scale is
+    // multiplied by ShipUpgrades.SpeedMult (1 = no relays).
+    static float EffSpeedScale() => SpeedScale * Mathf.Max(1f, ShipUpgrades.SpeedMult);
+
     // XP is earned by COMPLETING tasks (not by idling). Travel gives a little; missions give more.
     const float XpTravel = 8f, XpSample = 5f, XpSurvey = 30f, XpResearch = 45f, XpColonize = 60f;
 
@@ -55,6 +59,7 @@ public class UnitManager : MonoBehaviour
         nextId = 1;
         HomePlanet = homePlanet;
         ShipUpgrades.Reset();
+        StationEffects.Reset();
 
         // Starting fleet: two scouts + one colony ship.
         CreateUnit(UnitType.Scout, FactionManager.Player, homePlanet);
@@ -91,6 +96,12 @@ public class UnitManager : MonoBehaviour
         if (info.isProbe && !GameMode.DevMode && !EmpireTech.ProbesUnlocked)
         {
             reason = "reach Empire Tech Level 2 to build probes";
+            return false;
+        }
+        if (!GameMode.DevMode && EmpireTech.Level < info.minEmpireLevel)
+        {
+            string what = info.isStation ? "deploy this station" : "build this class";
+            reason = $"reach Empire Tech Level {info.minEmpireLevel} to {what} (yours: {EmpireTech.Level})";
             return false;
         }
         int cm = ColonyManager.DiscCost(info.costMetal), ce = ColonyManager.DiscCost(info.costEnergy);
@@ -158,11 +169,11 @@ public class UnitManager : MonoBehaviour
         Vector3 to; float duration;
         if (oc != null)
         {
-            float t = Mathf.Clamp(Vector3.Distance(from, WorldPos(target)) / (slow * SpeedScale), 3f, 120f);
+            float t = Mathf.Clamp(Vector3.Distance(from, WorldPos(target)) / (slow * EffSpeedScale()), 3f, 120f);
             for (int i = 0; i < 4; i++)
             {
                 Vector3 p = oc.PredictWorldPosition(t);
-                t = Mathf.Clamp(Vector3.Distance(from, p) / (slow * SpeedScale), 3f, 120f);
+                t = Mathf.Clamp(Vector3.Distance(from, p) / (slow * EffSpeedScale()), 3f, 120f);
             }
             to = oc.PredictWorldPosition(t);
             duration = t;
@@ -170,7 +181,7 @@ public class UnitManager : MonoBehaviour
         else
         {
             to = WorldPos(target);
-            duration = Mathf.Clamp(Vector3.Distance(from, to) / (slow * SpeedScale), 3f, 120f);
+            duration = Mathf.Clamp(Vector3.Distance(from, to) / (slow * EffSpeedScale()), 3f, 120f);
         }
 
         if (!CanReach(group, to, out string reason))
@@ -261,7 +272,7 @@ public class UnitManager : MonoBehaviour
         int slow = int.MaxValue;
         foreach (var u in group) slow = Mathf.Min(slow, Mathf.Max(1, u.Speed));
         Vector3 from = UnitPos(group[0]);
-        float duration = Mathf.Clamp(Vector3.Distance(from, worldPos) / (slow * SpeedScale), 3f, 120f);
+        float duration = Mathf.Clamp(Vector3.Distance(from, worldPos) / (slow * EffSpeedScale()), 3f, 120f);
 
         if (!CanReach(group, worldPos, out string reason))
         {
@@ -647,6 +658,7 @@ public class UnitManager : MonoBehaviour
                 detail: $"{u.name} finished surveying {b.name}. Its detailed map and points of interest are now available." +
                 (u.samples.Count > 0 ? $" {u.name} is carrying {u.samples.Count} ore sample(s) — take them to a research ship or a world with a research centre to research them." : ""));
             RevealBodyVisual(b);
+            AncientLore.SurveyBody(b);   // recover any ancient schematics the ruins here hold
             FinishAction(u, OrderKind.Survey, b);
             return;
         }
@@ -781,22 +793,77 @@ public class UnitManager : MonoBehaviour
     static bool Crossed(float before, float after, float t) => before < t && after >= t;
 
     // ---- Save/load ----
-    public List<Unit> ExportUnits() => new List<Unit>(units);
+    // Serialize every ship and deployed station to plain DTOs. A unit in transit is stored parked at its
+    // current world position; on load it resumes any queued orders.
+    public List<UnitDTO> ExportUnitDTOs()
+    {
+        var list = new List<UnitDTO>();
+        foreach (var u in units)
+        {
+            var d = new UnitDTO
+            {
+                id = u.id,
+                type = (int)u.type,
+                isPlayer = u.owner == FactionManager.Player,
+                locationId = u.location != null ? u.location.id : -1,
+                experience = u.experience,
+                worldsExplored = u.worldsExplored,
+                serviceTime = u.serviceTime,
+                queuePaused = u.queuePaused
+            };
+            if (u.location == null) { var p = UnitPos(u); d.inSpace = true; d.px = p.x; d.py = p.y; d.pz = p.z; }
+            foreach (var s in u.samples) d.samples.Add(s);
+            foreach (var o in u.orders)
+                d.orders.Add(new OrderDTO { kind = (int)o.kind, targetId = o.target != null ? o.target.id : -1, isPoint = o.isPoint, px = o.point.x, py = o.point.y, pz = o.point.z });
+            list.Add(d);
+        }
+        return list;
+    }
 
-    public void ImportUnits(List<Unit> loaded, CelestialBody homePlanet)
+    // Rebuild the fleet from DTOs, resolving body references by id. Does NOT touch ShipUpgrades range
+    // factors (those are restored by EmpireTech/TechManager before this runs).
+    public void ImportUnitDTOs(List<UnitDTO> dtos, Dictionary<int, CelestialBody> byId, CelestialBody homePlanet)
     {
         units.Clear();
         nextId = 1;
         HomePlanet = homePlanet;
-        // Saves made before shipyard tiers existed have shipyardLevel 0 on the capital — guarantee the
-        // home world always has at least its level-1 shipyard (and birthright claim) so ships can build.
         if (homePlanet != null) { homePlanet.shipyardLevel = Mathf.Max(1, homePlanet.shipyardLevel); homePlanet.birthrightClaim = true; }
-        foreach (var u in loaded)
-        {
-            units.Add(u);
-            nextId = Mathf.Max(nextId, u.id + 1);
-            if (u.location != null) { if (u.location.units == null) u.location.units = new List<Unit>(); u.location.units.Add(u); }
-        }
+
+        if (dtos != null)
+            foreach (var d in dtos)
+            {
+                CelestialBody at = null;
+                if (d.locationId >= 0 && byId != null) byId.TryGetValue(d.locationId, out at);
+
+                var u = new Unit
+                {
+                    id = d.id,
+                    type = (UnitType)d.type,
+                    owner = d.isPlayer ? FactionManager.Player : null,
+                    location = at,
+                    status = UnitStatus.Idle,
+                    experience = d.experience,
+                    worldsExplored = d.worldsExplored,
+                    serviceTime = d.serviceTime,
+                    queuePaused = d.queuePaused
+                };
+                u.name = $"{UnitDatabase.Get(u.type).name} {u.id}";
+                if (at == null && d.inSpace) { u.inSpace = true; u.parkPosition = new Vector3(d.px, d.py, d.pz); }
+                if (d.samples != null) foreach (var s in d.samples) u.samples.Add(s);
+                if (d.orders != null)
+                    foreach (var od in d.orders)
+                    {
+                        CelestialBody tgt = null;
+                        if (od.targetId >= 0 && byId != null) byId.TryGetValue(od.targetId, out tgt);
+                        u.orders.Add(new ShipOrder { kind = (OrderKind)od.kind, target = tgt, isPoint = od.isPoint, point = new Vector3(od.px, od.py, od.pz) });
+                    }
+
+                units.Add(u);
+                nextId = Mathf.Max(nextId, u.id + 1);
+                if (at != null) { if (at.units == null) at.units = new List<Unit>(); at.units.Add(u); }
+            }
+
+        StationEffects.Reset();   // relay/aura totals recompute next frame from the restored fleet
         OnUnitsChanged?.Invoke();
     }
 }

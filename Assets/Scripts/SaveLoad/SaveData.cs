@@ -18,6 +18,10 @@ public class SaveGame
     public List<SystemDTO> galaxySystems = new List<SystemDTO>();
     public ResearchDTO research = new ResearchDTO();
 
+    // Player stockpile and fleet (ships + deployed stations).
+    public float ecoMetal, ecoEnergy, ecoWater;
+    public List<UnitDTO> units = new List<UnitDTO>();
+
     // Space background settings (kept constant per map).
     public int bgSeed = 12345;
     public bool bgEnabled = true;
@@ -57,6 +61,17 @@ public class BodyDTO
 
     public float distanceFromStar, habitability;
     public bool isHabitable;
+
+    // Colony / development state.
+    public List<int> buildings = new List<int>();
+    public int shipyardLevel;
+    public int population;
+    public int cities;
+    public bool terraforming;
+    public float terraformability;
+    public bool birthrightClaim;
+    public bool visited;
+    public float explorationProgress;
 
     public List<ResourceDTO> resources = new List<ResourceDTO>();
     public List<OreCellDTO> ores = new List<OreCellDTO>();
@@ -103,4 +118,33 @@ public class ResearchDTO
     public int points;
     public int empireLevel = 1;
     public List<string> tech = new List<string>();   // researched tech-tree node ids
+    public int schematics;                            // ancient schematics recovered
+}
+
+// A ship or deployed station.
+[System.Serializable]
+public class UnitDTO
+{
+    public int id;
+    public int type;
+    public bool isPlayer = true;
+    public int locationId = -1;      // body it is at (-1 = in open space)
+    public bool inSpace;
+    public float px, py, pz;         // park position when in open space
+    public float experience;
+    public int worldsExplored;
+    public float serviceTime;
+    public bool queuePaused;
+    public List<int> samples = new List<int>();
+    public List<OrderDTO> orders = new List<OrderDTO>();
+}
+
+// One queued ship order.
+[System.Serializable]
+public class OrderDTO
+{
+    public int kind;
+    public int targetId = -1;        // target body (-1 = a point in space)
+    public bool isPoint;
+    public float px, py, pz;
 }

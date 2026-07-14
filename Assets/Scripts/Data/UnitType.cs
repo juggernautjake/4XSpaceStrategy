@@ -3,7 +3,28 @@ using UnityEngine;
 // Ship classes. The first four are the starting tier-1 classes (Cost order: Scout < Research/Fighter
 // < Colony). The Mk II variants unlock at a level-2 shipyard, and the Terraformer at level 3.
 // IMPORTANT: append new entries only — the ordinal is serialized in saves.
-public enum UnitType { Scout, ResearchShip, Fighter, ColonyShip, ScoutII, ResearchShipII, FighterII, Terraformer, Probe }
+public enum UnitType
+{
+    // Tier-1 starters and their Mk II variants, Terraformer, Probe (indices 0-8, do not reorder).
+    Scout, ResearchShip, Fighter, ColonyShip, ScoutII, ResearchShipII, FighterII, Terraformer, Probe,
+    // Civilian / logistics hulls.
+    Miner, Transport,
+    // Combat hulls (escalating capital classes).
+    Frigate, Cruiser, Carrier, Dreadnought,
+    // Advanced utility / long-range hulls.
+    ScienceVessel, Explorer,
+    // Mk III refits.
+    ScoutIII, FighterIII, ResearchShipIII,
+    // Space stations — structures that orbit a body (or coast in deep space). Gated by Empire Tech Level.
+    BattleStation, ResearchStation, RelayStation, SupplyStation, MultiStation,
+    TerraformStation, DeepSpaceStation, MegaStation,
+    // The Level-5 milestone: a hyper-speed relay that greatly extends and speeds fleet travel.
+    HyperRelay
+}
+
+// The function a space station performs while deployed. Auras/effects are applied by the station
+// systems and ColonyManager while the station is stationed (location == a body, or parked in deep space).
+public enum StationRole { None, Battle, Research, Relay, Supply, MultiRole, Terraform, DeepSpace, Mega }
 
 // Static definition of a ship class: costs, build time, base stats, capabilities, and a placeholder
 // icon (a coloured geometric token so each class is recognizable).
@@ -30,6 +51,23 @@ public class UnitInfo
 
     public int iconShape;      // 0 up-triangle, 1 diamond, 2 right-triangle, 3 circle
     public Color iconColor;
+
+    // ---- Empire-tech gate + role/effect flags (set after construction; default to "plain ship") ----
+    public int minEmpireLevel = 1;      // Empire Tech Level required to build (1 = from the start)
+
+    public bool isWorker = false;       // civilian utility hull (miner/transport) — not a warship
+    public bool isStation = false;      // a deployable structure, not a mobile ship
+    public StationRole stationRole = StationRole.None;
+    public bool deepSpace = false;      // deep-space station: parks in open space, runs on starlight
+    public int stationLevel = 1;        // structure tier (mega = the "little moon")
+
+    // Passive effects applied by StationEffects/ColonyManager while the unit is DEPLOYED (idle, not
+    // travelling): at a body, or — for deep-space stations — parked in open space.
+    public float mineBonus = 0f;        // extra metal per second while stationed (miners)
+    public float supplyBonus = 0f;      // extra metal+energy per second while stationed (logistics)
+    public float researchAura = 0f;     // research points per second while stationed
+    public float terraformAura = 0f;    // added terraform-speed contribution at the body it orbits
+    public float relayBoost = 0f;       // hyper-relay: adds to fleet travel range & speed while active
 
     public UnitInfo(UnitType type, string name, string description, int cm, int ce, float buildTime,
                     int armor, int health, int speed, int research, int attack,
@@ -100,5 +138,135 @@ public static class UnitDatabase
         _all[(int)UnitType.Probe] = new UnitInfo(UnitType.Probe, "Probe",
             "A cheap, expendable deep-space probe. Launch it in any direction and it coasts on starlight alone — no fuel — scanning everything within its sensor range and pulsing back what it finds, until it drifts too far, loses power or is destroyed and its signal goes dark. Ignores travel-range limits. Requires a level-2 shipyard.",
             15, 10, 6f, 0, 8, 7, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.85f, 0.92f, 0.5f), minShipyardLevel: 1, range: 0, vision: 140, probe: true);
+
+        // ================= CIVILIAN / LOGISTICS HULLS =================
+        var miner = new UnitInfo(UnitType.Miner, "Mining Barge",
+            "A civilian worker that anchors over an ore-rich world and steadily ships refined metal back to your stockpile while it stays. No attack, light hull.",
+            45, 25, 10f, 2, 45, 6, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 1, iconColor: new Color(0.80f, 0.66f, 0.40f), minShipyardLevel: 1, range: 180);
+        miner.isWorker = true; miner.mineBonus = 0.9f;   // metal/sec while deployed
+        _all[(int)UnitType.Miner] = miner;
+
+        var transport = new UnitInfo(UnitType.Transport, "Transport",
+            "A civilian hauler. Parked at one of your colonies it runs supply routes, adding a steady trickle of metal and energy to your economy. Requires a level-2 shipyard.",
+            70, 40, 14f, 3, 70, 6, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.70f, 0.72f, 0.55f), minShipyardLevel: 2, range: 250);
+        transport.isWorker = true; transport.supplyBonus = 0.6f;
+        _all[(int)UnitType.Transport] = transport;
+
+        // ================= COMBAT HULLS (escalating capital classes) =================
+        _all[(int)UnitType.Frigate] = new UnitInfo(UnitType.Frigate, "Frigate",
+            "A nimble patrol warship — tougher and harder-hitting than a fighter, with better range. The workhorse escort of a growing fleet. Requires a level-2 shipyard.",
+            90, 60, 16f, 12, 180, 9, 0, 22, explore: false, doResearch: false, colonize: false, iconShape: 2, iconColor: new Color(1f, 0.55f, 0.35f), minShipyardLevel: 2, range: 230);
+
+        var cruiser = new UnitInfo(UnitType.Cruiser, "Cruiser",
+            "A heavy warship with thick armor and a powerful battery. Anchors a battle line. Requires a level-3 shipyard and Empire Tech Level 3.",
+            200, 150, 26f, 20, 340, 7, 0, 48, explore: false, doResearch: false, colonize: false, iconShape: 2, iconColor: new Color(1f, 0.42f, 0.28f), minShipyardLevel: 3, range: 240);
+        cruiser.minEmpireLevel = 3;
+        _all[(int)UnitType.Cruiser] = cruiser;
+
+        var carrier = new UnitInfo(UnitType.Carrier, "Carrier",
+            "A fleet command vessel with enormous hull integrity that fields strike craft. Durable rather than hard-hitting; the heart of a task force. Requires a level-3 shipyard and Empire Tech Level 4.",
+            320, 240, 34f, 18, 460, 6, 0, 34, explore: false, doResearch: false, colonize: false, iconShape: 2, iconColor: new Color(0.95f, 0.5f, 0.3f), minShipyardLevel: 3, range: 240);
+        carrier.minEmpireLevel = 4;
+        _all[(int)UnitType.Carrier] = carrier;
+
+        var dread = new UnitInfo(UnitType.Dreadnought, "Dreadnought",
+            "A capital ship of the line — colossal armor and firepower that dominates any battle it enters. Ruinously expensive and slow to build. Requires a level-3 shipyard and Empire Tech Level 5.",
+            600, 480, 55f, 35, 950, 5, 0, 92, explore: false, doResearch: false, colonize: false, iconShape: 2, iconColor: new Color(0.9f, 0.35f, 0.25f), minShipyardLevel: 3, range: 230);
+        dread.minEmpireLevel = 5;
+        _all[(int)UnitType.Dreadnought] = dread;
+
+        // ================= ADVANCED UTILITY / LONG-RANGE HULLS =================
+        var science = new UnitInfo(UnitType.ScienceVessel, "Science Vessel",
+            "A dedicated deep-survey laboratory. Researches worlds faster than any research ship and, while deployed, radiates a steady research output to your empire. Requires a level-3 shipyard and Empire Tech Level 4.",
+            260, 240, 30f, 6, 100, 7, 22, 0, explore: true, doResearch: true, colonize: false, iconShape: 1, iconColor: new Color(0.55f, 1f, 0.7f), minShipyardLevel: 3, range: 280);
+        science.minEmpireLevel = 4; science.researchAura = 0.8f;
+        _all[(int)UnitType.ScienceVessel] = science;
+
+        var explorer = new UnitInfo(UnitType.Explorer, "Explorer",
+            "A long-range pathfinder built to reach the very edge of your range and beyond. The furthest-ranging crewed ship you can field. Requires a level-2 shipyard.",
+            90, 60, 14f, 4, 60, 13, 6, 2, explore: true, doResearch: false, colonize: false, iconShape: 0, iconColor: new Color(0.4f, 0.98f, 0.95f), minShipyardLevel: 2, range: 360);
+        explorer.minEmpireLevel = 2;
+        _all[(int)UnitType.Explorer] = explorer;
+
+        // ================= Mk III REFITS (level-3 shipyard, Empire Level 3) =================
+        var scout3 = new UnitInfo(UnitType.ScoutIII, "Scout Mk III",
+            "The finest scout hull: blistering speed, a superb survey suite and the reach to cross between systems. Requires a level-3 shipyard and Empire Tech Level 3.",
+            70, 40, 10f, 5, 70, 15, 6, 5, explore: true, doResearch: false, colonize: false, iconShape: 0, iconColor: new Color(0.3f, 1f, 1f), minShipyardLevel: 3, range: 360);
+        scout3.minEmpireLevel = 3;
+        _all[(int)UnitType.ScoutIII] = scout3;
+
+        var fighter3 = new UnitInfo(UnitType.FighterIII, "Fighter Mk III",
+            "A top-line strike fighter — far tougher and deadlier than the Mk II, cheap enough to mass. Requires a level-3 shipyard and Empire Tech Level 3.",
+            130, 110, 22f, 16, 240, 11, 0, 26, explore: false, doResearch: false, colonize: false, iconShape: 2, iconColor: new Color(1f, 0.4f, 0.25f), minShipyardLevel: 3, range: 230);
+        fighter3.minEmpireLevel = 3;
+        _all[(int)UnitType.FighterIII] = fighter3;
+
+        var research3 = new UnitInfo(UnitType.ResearchShipIII, "Research Ship Mk III",
+            "A state-of-the-art mobile laboratory that unlocks a world's secrets faster and further afield than any prior model. Requires a level-3 shipyard and Empire Tech Level 3.",
+            200, 180, 26f, 7, 100, 8, 20, 0, explore: true, doResearch: true, colonize: false, iconShape: 1, iconColor: new Color(0.5f, 1f, 0.65f), minShipyardLevel: 3, range: 290);
+        research3.minEmpireLevel = 3;
+        _all[(int)UnitType.ResearchShipIII] = research3;
+
+        // ================= SPACE STATIONS =================
+        // Built at a shipyard, then towed to a target and left to anchor. Once deployed at a body it
+        // orbits with that body and radiates its effect; a battle station also defends it.
+        var battle = new UnitInfo(UnitType.BattleStation, "Battle Station",
+            "A rudimentary orbital fortress. Immobile once anchored, but heavily armed and armored — a strong defensive anchor over a world you want to hold. Unlocks at Empire Tech Level 2.",
+            260, 160, 30f, 30, 700, 3, 0, 60, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(1f, 0.5f, 0.45f), minShipyardLevel: 2, range: 130);
+        battle.isStation = true; battle.stationRole = StationRole.Battle; battle.minEmpireLevel = 2;
+        _all[(int)UnitType.BattleStation] = battle;
+
+        var researchSt = new UnitInfo(UnitType.ResearchStation, "Research Station",
+            "An orbital laboratory. While anchored it steadily feeds research to your empire and deepens study of the world it orbits. Unlocks at Empire Tech Level 2.",
+            240, 220, 30f, 10, 400, 3, 10, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.55f, 0.95f, 1f), minShipyardLevel: 2, range: 130);
+        researchSt.isStation = true; researchSt.stationRole = StationRole.Research; researchSt.minEmpireLevel = 2; researchSt.researchAura = 1.4f;
+        _all[(int)UnitType.ResearchStation] = researchSt;
+
+        var relay = new UnitInfo(UnitType.RelayStation, "Relay Station",
+            "A rudimentary comms-and-navigation relay. While active it lengthens and quickens your fleet's travel a little — the first step toward a fast-travel network. Unlocks at Empire Tech Level 2.",
+            200, 180, 26f, 8, 300, 3, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.7f, 0.8f, 1f), minShipyardLevel: 2, range: 200);
+        relay.isStation = true; relay.stationRole = StationRole.Relay; relay.minEmpireLevel = 2; relay.relayBoost = 0.12f;
+        _all[(int)UnitType.RelayStation] = relay;
+
+        var supply = new UnitInfo(UnitType.SupplyStation, "Supply Station",
+            "An orbital depot and fuel dump. Anchored at a colony it adds a steady stream of metal and energy and helps ships range a little further. Unlocks at Empire Tech Level 2.",
+            220, 140, 26f, 10, 380, 3, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.85f, 0.85f, 0.55f), minShipyardLevel: 2, range: 140);
+        supply.isStation = true; supply.stationRole = StationRole.Supply; supply.minEmpireLevel = 2; supply.supplyBonus = 0.9f; supply.relayBoost = 0.05f;
+        _all[(int)UnitType.SupplyStation] = supply;
+
+        var multi = new UnitInfo(UnitType.MultiStation, "Multi-Role Station",
+            "A substantial orbital complex that does a bit of everything — research, logistics, fleet support and defense. Unlocks at Empire Tech Level 4.",
+            500, 420, 46f, 22, 900, 2, 8, 40, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.8f, 0.7f, 1f), minShipyardLevel: 3, range: 120);
+        multi.isStation = true; multi.stationRole = StationRole.MultiRole; multi.minEmpireLevel = 4;
+        multi.researchAura = 1.2f; multi.supplyBonus = 0.7f; multi.relayBoost = 0.12f;
+        _all[(int)UnitType.MultiStation] = multi;
+
+        var terra = new UnitInfo(UnitType.TerraformStation, "Terraforming Station",
+            "A colossal climate-engineering platform. Anchored over a world it dramatically accelerates terraforming there — many times faster than ships alone, and it stacks with terraformers. Unlocks at Empire Tech Level 6.",
+            480, 460, 44f, 10, 500, 3, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.5f, 0.95f, 0.7f), minShipyardLevel: 3, range: 120);
+        terra.isStation = true; terra.stationRole = StationRole.Terraform; terra.minEmpireLevel = 6; terra.terraformAura = 4.5f;
+        _all[(int)UnitType.TerraformStation] = terra;
+
+        var deep = new UnitInfo(UnitType.DeepSpaceStation, "Deep-Space Station",
+            "A self-sufficient station that needs no world to orbit — it coasts in open space on starlight alone, needing virtually no fuel. Place it anywhere as a research outpost and relay node. Unlocks at Empire Tech Level 3.",
+            300, 120, 34f, 12, 450, 3, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.6f, 0.9f, 0.85f), minShipyardLevel: 3, range: 0);
+        deep.isStation = true; deep.stationRole = StationRole.DeepSpace; deep.deepSpace = true; deep.minEmpireLevel = 3;
+        deep.researchAura = 0.5f; deep.relayBoost = 0.18f;
+        _all[(int)UnitType.DeepSpaceStation] = deep;
+
+        var mega = new UnitInfo(UnitType.MegaStation, "Mega-Station",
+            "A do-everything orbital city the size of a small moon: prodigious research, logistics, a fast-travel hub, terraforming support and a fearsome defensive battery. The pinnacle of station engineering. Unlocks at Empire Tech Level 9.",
+            1500, 1200, 90f, 60, 3000, 1, 20, 120, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.85f, 0.8f, 1f), minShipyardLevel: 3, range: 100);
+        mega.isStation = true; mega.stationRole = StationRole.Mega; mega.minEmpireLevel = 9; mega.stationLevel = 3;
+        mega.researchAura = 3f; mega.supplyBonus = 1.6f; mega.relayBoost = 0.3f; mega.terraformAura = 1.5f;
+        _all[(int)UnitType.MegaStation] = mega;
+
+        // The Level-5 milestone: a hyper-speed relay. A big, expensive network node that greatly
+        // extends and speeds fleet travel — the leap that opens up interstellar movement.
+        var hyper = new UnitInfo(UnitType.HyperRelay, "Hyper-Speed Relay",
+            "A massive fast-travel relay. Each one active dramatically lengthens and quickens your fleet's travel across the galaxy — the milestone that finally frees your ships from their home system. Unlocks at Empire Tech Level 5.",
+            700, 620, 60f, 14, 600, 2, 0, 0, explore: false, doResearch: false, colonize: false, iconShape: 3, iconColor: new Color(0.55f, 0.75f, 1f), minShipyardLevel: 3, range: 0);
+        hyper.isStation = true; hyper.stationRole = StationRole.Relay; hyper.deepSpace = true; hyper.minEmpireLevel = 5; hyper.relayBoost = 0.45f;
+        _all[(int)UnitType.HyperRelay] = hyper;
     }
 }

@@ -134,7 +134,16 @@ public class ResearchWindow : MonoBehaviour
     }
 
     // ---- Tech tree ----
-    static string BranchName(TechBranch b) => b == TechBranch.Expansion ? "Expansion & Terraforming" : b.ToString();
+    static string BranchName(TechBranch b)
+    {
+        switch (b)
+        {
+            case TechBranch.Expansion: return "Expansion & Terraforming";
+            case TechBranch.Doctrine:  return "Doctrines";
+            case TechBranch.Ancients:  return $"Ancients — Precursor Secrets  <size=11><color=#9FB4C8>({AncientLore.SchematicsFound} schematic(s) recovered)</color></size>";
+            default: return b.ToString();
+        }
+    }
 
     static Color BranchColor(TechBranch b)
     {
@@ -146,6 +155,8 @@ public class ResearchWindow : MonoBehaviour
             case TechBranch.Expansion:   return new Color(0.30f, 0.82f, 0.54f);
             case TechBranch.Exploration: return new Color(0.88f, 0.66f, 0.30f);
             case TechBranch.Industry:    return new Color(0.82f, 0.52f, 0.30f);
+            case TechBranch.Doctrine:    return new Color(0.80f, 0.62f, 1f);
+            case TechBranch.Ancients:    return new Color(0.45f, 0.95f, 0.88f);
             default: return UITheme.Text;
         }
     }
@@ -166,8 +177,12 @@ public class ResearchWindow : MonoBehaviour
     void BuildTechTree()
     {
         UIFactory.WrapText(list, "<b>TECHNOLOGY</b>", UITheme.SmallSize, UITheme.Accent);
+        // The Ancients branch stays hidden until you've opened the path — by studying precursor ruins
+        // (Xenoarchaeology) or recovering your first schematic in the field.
+        bool ancientsUnlocked = AncientLore.SchematicsFound > 0 || TechManager.IsResearched("S3");
         foreach (TechBranch br in System.Enum.GetValues(typeof(TechBranch)))
         {
+            if (br == TechBranch.Ancients && !ancientsUnlocked) continue;
             UIFactory.WrapText(list, $"<b>{BranchName(br)}</b>", UITheme.SmallSize, BranchColor(br));
             foreach (var t in TechDatabase.InBranch(br)) BuildTechCard(t, BranchColor(br));
         }

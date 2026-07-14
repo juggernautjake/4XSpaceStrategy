@@ -107,6 +107,10 @@ public class ColonyManager : MonoBehaviour
         if (tick < 1f) return;
         float step = tick; tick = 0f;
 
+        // Station/worker auras + relay network, on the same 1s cadence as colony income (so the shared
+        // economy only fires its change event once per second, not every frame).
+        StationEffects.Tick(step);
+
         if (SystemContext.Galaxy == null) return;
         foreach (var b in SystemContext.AllBodies())
         {
@@ -343,7 +347,8 @@ public class ColonyManager : MonoBehaviour
         // Terraforming is slow on its own; each Terraformer ship present speeds it up and they STACK,
         // so parking several on the same world finishes it much faster (they burn resources faster too).
         int tformers = CountTerraformers(b);
-        float rate = Mathf.Min(1f + tformers, 6f);       // 1× baseline, +1× per terraformer, capped ~5
+        float stationAura = StationEffects.TerraformAuraAt(b);   // terraforming stations add huge speed on top
+        float rate = Mathf.Min(1f + tformers, 6f) + stationAura; // 1× baseline, +1× per terraformer (capped ~5), + stations
         float gain = 1.1f * rate * TechEffects.TerraformSpeedMult * dt;   // Expansion tech speeds it further
         float water = gain * 4f, energy = gain * 3f, metal = gain * 2f;   // hauled water + power + materials
         if (PlayerEconomy.Get(ResourceType.Water) >= water &&

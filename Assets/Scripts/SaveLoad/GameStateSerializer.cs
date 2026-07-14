@@ -34,8 +34,14 @@ public static class GameStateSerializer
             researched = ResearchManager.ExportResearched(),
             points = ResearchManager.ResearchPoints,
             empireLevel = EmpireTech.Level,
-            tech = TechManager.Export()
+            tech = TechManager.Export(),
+            schematics = AncientLore.Export()
         };
+
+        game.ecoMetal = PlayerEconomy.Get(ResourceType.Metal);
+        game.ecoEnergy = PlayerEconomy.Get(ResourceType.Energy);
+        game.ecoWater = PlayerEconomy.Get(ResourceType.Water);
+        game.units = UnitManager.Instance != null ? UnitManager.Instance.ExportUnitDTOs() : new List<UnitDTO>();
 
         int bodyCount = 0;
         if (galaxy != null)
@@ -80,7 +86,11 @@ public static class GameStateSerializer
             orbitRadius = b.orbitRadius, orbitSpeed = b.orbitSpeed, orbitPhase = b.orbitPhase,
             orbitDirection = b.orbitDirection, inclination = b.inclination, eccentricity = b.eccentricity,
             verticalOffset = b.verticalOffset, spinSpeed = b.spinSpeed, showRing = b.showRing,
-            distanceFromStar = b.distanceFromStar, habitability = b.habitability, isHabitable = b.isHabitable
+            distanceFromStar = b.distanceFromStar, habitability = b.habitability, isHabitable = b.isHabitable,
+            buildings = new List<int>(b.buildings),
+            shipyardLevel = b.shipyardLevel, population = b.population, cities = b.cities,
+            terraforming = b.terraforming, terraformability = b.terraformability,
+            birthrightClaim = b.birthrightClaim, visited = b.visited, explorationProgress = b.explorationProgress
         };
 
         if (b.resources != null)
@@ -159,6 +169,28 @@ public static class GameStateSerializer
         GameManager.Instance.LoadGalaxy(galaxy);
         SpeciesManager.Select(game.speciesIndex);
 
+        // Restore the player economy, ancient schematics, and fleet now the galaxy bodies exist.
+        var byId = new Dictionary<int, CelestialBody>();
+        foreach (var sys in galaxy.systems)
+            foreach (var b in sys.AllBodies())
+                byId[b.id] = b;
+
+        CelestialBody home = null;
+        var homeSys = galaxy.Home;
+        if (homeSys != null)
+        {
+            foreach (var b in homeSys.bodies) if (b.owner == FactionManager.Player) { home = b; break; }
+            if (home == null && homeSys.bodies.Count > 0) home = homeSys.bodies[0];
+        }
+
+        if (game.ecoMetal <= 0f && game.ecoEnergy <= 0f && game.ecoWater <= 0f)
+            PlayerEconomy.NewGame(home, SpeciesManager.Current);   // older save without economy: seed a start
+        else
+            PlayerEconomy.Import(game.ecoMetal, game.ecoEnergy, game.ecoWater);
+
+        AncientLore.Import(game.research != null ? game.research.schematics : 0);
+        UnitManager.Instance?.ImportUnitDTOs(game.units, byId, home);
+
         var bg = SpaceBackground.Instance;
         if (bg != null)
         {
@@ -185,8 +217,13 @@ public static class GameStateSerializer
             distanceFromStar = dto.distanceFromStar, habitability = dto.habitability,
             isHabitable = dto.isHabitable, habitabilityLocked = dto.habitabilityLocked,
             owner = dto.ownerId >= 0 ? FactionManager.Get(dto.ownerId) : null,
-            parentBody = parent
+            parentBody = parent,
+            shipyardLevel = dto.shipyardLevel, population = dto.population, cities = dto.cities,
+            terraforming = dto.terraforming, terraformability = dto.terraformability,
+            birthrightClaim = dto.birthrightClaim, visited = dto.visited,
+            explorationProgress = dto.explorationProgress
         };
+        if (dto.buildings != null) b.buildings = new List<int>(dto.buildings);
 
         b.terrainParams = new PlanetTerrainGenerator.NoiseParams
         {
