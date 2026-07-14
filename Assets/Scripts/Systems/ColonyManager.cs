@@ -471,6 +471,28 @@ public class ColonyManager : MonoBehaviour
                 b.population = Mathf.Min(capacity, b.population + whole);
             }
         }
+        else
+        {
+            // ---- Starvation ----
+            // A world that outgrew its farms LOSES people. Growth stopping isn't enough on its own: a
+            // colony parked at exactly its food ceiling forever is a stalemate, not a consequence, and
+            // overpopulation only means something if overshooting costs you.
+            //
+            // The same fractional accumulator as births, running the other way — one unit is 100,000
+            // people, so rounding a sub-unit death toll up to 1 every tick would depopulate a world in
+            // seconds regardless of how mild the shortage was.
+            float starve = Carrying.StarvationRate(b);
+            if (starve > 0f && b.population > 0)
+            {
+                b.popAccum -= starve * dt;
+                if (b.popAccum <= -1f)
+                {
+                    int lost = Mathf.FloorToInt(-b.popAccum);
+                    b.popAccum += lost;
+                    b.population = Mathf.Max(0, b.population - lost);
+                }
+            }
+        }
 
         // A research centre analyses ore samples that ships have brought to this world. The analysis
         // COSTS research points, and a bigger laboratory can work through more of them at once — a

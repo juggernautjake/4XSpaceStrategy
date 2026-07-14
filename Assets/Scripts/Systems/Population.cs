@@ -78,44 +78,14 @@ public static class Population
     }
 
     // ---- Capacity ----
-    /// How many units a world can hold: the land it has, scaled steeply by how livable it is, plus the
-    /// housing you and your colonists have actually built.
+    /// How many units a world can hold. Delegates to Carrying, which is the single authority on the
+    /// three ceilings (land, housing, food) and on which of them is binding.
     ///
-    /// The habitability curve is deliberately steep at the top (pow 1.6), which is what makes a 98-100%
-    /// world a genuinely different proposition from a 90% one rather than a slightly better one — the
-    /// "super city planet" only exists if the last few points are worth far more than the ones before.
-    public static int Capacity(CelestialBody b)
-    {
-        if (b == null) return 0;
-
-        float live = Liveability(b);
-        float land = Mathf.Max(4, b.surfaceSize) * 6f;
-        float natural = land * Mathf.Lerp(0.35f, 3.2f, Mathf.Pow(live, 1.6f));
-
-        // Housing built on the surface. This is what closes the loop: cities raise the ceiling, which
-        // lets more people arrive, which grows more cities.
-        float housing = 0f;
-        foreach (var p in SurfaceBuildManager.On(b)) housing += HousingUnits(p);
-
-        float longevity = LongevityFactor(SpeciesManager.Current);
-        return Mathf.Max(1, Mathf.RoundToInt((natural + housing) * longevity));
-    }
-
-    static float HousingUnits(PlacedBuilding p)
-    {
-        float baseUnits;
-        switch (p.Type)
-        {
-            case SurfaceBuildingType.City: baseUnits = 55f; break;
-            case SurfaceBuildingType.Town: baseUnits = 22f; break;
-            case SurfaceBuildingType.Settlement: baseUnits = 8f; break;
-            case SurfaceBuildingType.PlanetCapitol: baseUnits = 40f; break;
-            case SurfaceBuildingType.ColonyShipBase: baseUnits = 10f; break;
-            case SurfaceBuildingType.Habitat: baseUnits = 30f; break;
-            default: return 0f;
-        }
-        return baseUnits * p.LevelMult;
-    }
+    /// This used to ADD land and housing together, which had two problems. It meant housing could lift a
+    /// world above what its land could support — you could out-build a planet's own habitability — and
+    /// it left food out of the ceiling entirely, so a world could grow forever on a single farm. A
+    /// ceiling is the smallest of the things that bound you, not the sum of them.
+    public static int Capacity(CelestialBody b) => Carrying.Limit(b);
 
     /// 0..1 from "just barely colonisable" to "paradise". Below the threshold, nothing lives here
     /// unaided. Shared with CityGrowth so the two never disagree about what a good world is.
@@ -142,12 +112,19 @@ public static class Population
         // Habitability, continuous rather than a gate: a 46% world crawls where a 99% one races.
         float habFactor = Mathf.Lerp(0.2f, 1.4f, live);
 
+        // Food, as a brake before it's a crisis. Birth rates fall off as the surplus thins, so a colony
+        // slows down BEFORE it starves rather than sailing on and falling off a cliff — which is how
+        // real populations behave, and it gives you a chance to notice and plant more farms.
+        float ratio = Carrying.FoodRatio(b);
+        if (ratio < 1f) return 0f;                       // already short: nobody is planning a family
+        float foodFactor = Mathf.Clamp01(Mathf.InverseLerp(1f, 1.35f, ratio));
+
         // Crowding: growth tails off smoothly as the world fills, rather than slamming into a wall.
         int cap = Capacity(b);
         float room = cap > 0 ? Mathf.Clamp01(1f - (float)b.population / cap) : 0f;
         room = Mathf.Pow(room, 0.65f);                   // stays healthy until genuinely near the top
 
-        return infrastructure * happy * habFactor * room
+        return infrastructure * happy * habFactor * foodFactor * room
                * FertilityFactor(SpeciesManager.Current) * GrowthScale;
     }
 
@@ -166,8 +143,17 @@ public static class Population
             return "nowhere to live — build farms or habitats";
         if (Satisfaction.GrowthMultiplier(b) <= 0f)
             return $"the colony is too unhappy to have children ({Satisfaction.For(b):F0}% satisfaction)";
-        if (b.population >= Capacity(b))
-            return "at capacity — more housing, or a more habitable world, is needed";
+        if (Carrying.FoodRatio(b) < 1f)
+            return $"there isn't enough food — {Carrying.FoodLine(b)}";
+
+        int cap = Carrying.Limit(b, out PopLimit bound);
+        if (b.population >= cap)
+        {
+            // Say WHICH ceiling. "At capacity" on its own is a dead end; naming the binding constraint
+            // turns it into the next thing to do.
+            string advice = Carrying.Advice(bound);
+            return advice != null ? $"at capacity — {advice}" : "at capacity";
+        }
         return null;
     }
 }
