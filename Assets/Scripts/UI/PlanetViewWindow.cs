@@ -183,11 +183,14 @@ public class PlanetViewWindow : MonoBehaviour
         // Rebuilt on every open rather than cached by body id, because terraforming can remodel a
         // world's terrain outright and a cache keyed only on identity would show the planet it used
         // to be.
-        var src = SurfaceTextureRenderer.BuildGrid(body);
-        BuildPastel(src);
-        if (src != null) Destroy(src);      // Pastel copied it; the source would otherwise leak
-
-        mapImage.texture = pastelTex;
+        //
+        // The pastel tone is applied by the renderer itself (SurfaceTextureRenderer.MapTone), shared
+        // with the points-of-interest map so the two views are the same colours at the same intensity.
+        // This used to post-process a second copy of the texture here, which both duplicated the tone
+        // (letting the two maps drift apart) and doubled the allocation.
+        if (mapTex != null) Destroy(mapTex);
+        mapTex = SurfaceTextureRenderer.BuildGrid(body, pastel: true);
+        mapImage.texture = mapTex;
         titleText.text = $"Planet View — {body.name}";
         ApplyMapSize();
     }
@@ -200,30 +203,9 @@ public class PlanetViewWindow : MonoBehaviour
     // whole map toward the dark panel behind it, which crushes the differences BETWEEN terrain types —
     // exactly the information the map exists to convey. Pastel keeps the hue relationships intact and
     // only gives up intensity.
-    Texture2D pastelTex;
-
-    void BuildPastel(Texture2D src)
-    {
-        if (src == null) return;
-
-        if (pastelTex != null) Destroy(pastelTex);
-        pastelTex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false)
-        { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
-
-        var px = src.GetPixels();
-        for (int i = 0; i < px.Length; i++)
-        {
-            var c = px[i];
-            // Toward its own grey (keeps hue, drops saturation), then toward white (raises lightness).
-            float grey = c.r * 0.299f + c.g * 0.587f + c.b * 0.114f;
-            c = Color.Lerp(c, new Color(grey, grey, grey), 0.30f);
-            c = Color.Lerp(c, Color.white, 0.28f);
-            c.a = px[i].a;
-            px[i] = c;
-        }
-        pastelTex.SetPixels(px);
-        pastelTex.Apply();
-    }
+    // The map texture this window owns. Tone comes from the renderer now (see MapTone), so there's no
+    // second post-processed copy to keep in step.
+    Texture2D mapTex;
 
     // Size the map from MapMetrics, exactly like the detailed viewer does, instead of stretching the
     // surface across a fixed 720x380 rectangle.

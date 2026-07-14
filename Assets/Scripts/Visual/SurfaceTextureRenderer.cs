@@ -7,6 +7,25 @@ using UnityEngine;
 // regions are visible.
 public static class SurfaceTextureRenderer
 {
+    // ---- Shared map tone ----
+    // Both MAP views run their pixels through this, so the points-of-interest map and the Planet View
+    // build grid are the same colours at the same intensity. They used to differ: the Planet View
+    // post-processed its texture to a pastel and the detail map didn't, so one world looked like two.
+    //
+    // Desaturates toward each pixel's OWN grey and then lifts it toward white. That keeps every biome's
+    // hue — so terrain types stay clearly distinguishable — and only gives up intensity, which is what
+    // lets the fully-saturated structures on the build grid read as the foreground.
+    //
+    // Opt-in, because SurfaceTextureRenderer.Build also skins the 3D globes in space (PlanetAppearance).
+    // Those are the subject, not a backdrop, and must stay vivid.
+    public static Color MapTone(Color c)
+    {
+        float grey = c.r * 0.299f + c.g * 0.587f + c.b * 0.114f;
+        c = Color.Lerp(c, new Color(grey, grey, grey), 0.30f);
+        c = Color.Lerp(c, Color.white, 0.28f);
+        return new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
+    }
+
     // ============================================================================================
     // GRID-RESOLUTION render: EXACTLY ONE TEXEL PER GRID CELL.
     //
@@ -20,7 +39,7 @@ public static class SurfaceTextureRenderer
     // the placement code tests against, so a tile and a footprint cell cannot drift apart — there is
     // only one grid.
     // ============================================================================================
-    public static Texture2D BuildGrid(CelestialBody body)
+    public static Texture2D BuildGrid(CelestialBody body, bool pastel = true)
     {
         if (body?.surface == null) return null;
         int w = body.surface.width, h = body.surface.height;
@@ -49,7 +68,9 @@ public static class SurfaceTextureRenderer
                 if (tile.HasOre)
                     c = Color.Lerp(c, OreDatabase.Get(tile.ore).color, 0.35f);
 
-                pixels[y * w + x] = new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
+                pixels[y * w + x] = pastel
+                    ? MapTone(c)
+                    : new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
             }
 
         tex.SetPixels(pixels);
@@ -57,7 +78,7 @@ public static class SurfaceTextureRenderer
         return tex;
     }
 
-    public static Texture2D Build(CelestialBody body)
+    public static Texture2D Build(CelestialBody body, bool pastel = false)
     {
         int w = Mathf.Clamp(body.surfaceSize * 2 * 6, 96, 384);
         int h = Mathf.Max(48, w / 2);
@@ -100,7 +121,9 @@ public static class SurfaceTextureRenderer
                     }
                 }
 
-                pixels[y * w + x] = new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
+                pixels[y * w + x] = pastel
+                    ? MapTone(c)
+                    : new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
             }
         }
 
