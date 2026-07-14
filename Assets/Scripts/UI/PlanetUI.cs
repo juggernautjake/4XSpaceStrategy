@@ -115,10 +115,16 @@ public class PlanetUI : MonoBehaviour
         if (titleText != null) titleText.text = body.name ?? body.type.ToString();
         if (infoText != null) infoText.text = BuildBodyInfo(body);
 
+        // Low-res mini map only appears once a ship has ARRIVED here (Visited). The detailed map needs
+        // a completed survey (handled by the Detailed window itself).
         if (gridVisualizer != null && gridWindow != null)
         {
-            gridVisualizer.ShowSurface(body.surface);
-            gridWindow.SetActive(true);
+            if (body.Visited)
+            {
+                gridVisualizer.ShowSurface(body.surface);
+                gridWindow.SetActive(true);
+            }
+            else gridWindow.SetActive(false);
         }
 
         if (infoPanel != null) infoPanel.SetActive(true);

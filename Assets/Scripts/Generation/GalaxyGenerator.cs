@@ -173,9 +173,10 @@ public static class GalaxyGenerator
         foreach (var sys in galaxy.systems)
             foreach (var b in sys.AllBodies())
             {
-                if (b.habitabilityLocked) continue;   // keep the home world's difficulty rating
+                if (b.habitabilityLocked) { b.terraformability = Habitability.Terraformability(b.hostStar, species, b); continue; }
                 b.isHabitable = Habitability.InZone(b.hostStar, species, b.distanceFromStar);
                 b.habitability = Habitability.Rate(b.hostStar, species, b.type, b.distanceFromStar);
+                b.terraformability = Habitability.Terraformability(b.hostStar, species, b);
             }
     }
 

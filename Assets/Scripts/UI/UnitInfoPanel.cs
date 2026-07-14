@@ -13,7 +13,8 @@ public class UnitInfoPanel : MonoBehaviour
     TMP_Text titleText, body, progressLabel;
     TMP_InputField nameInput;
     Image progressFill;
-    Button surveyBtn, colonizeBtn, returnBtn, scrapBtn;
+    Button surveyBtn, researchBtn, colonizeBtn, returnBtn, scrapBtn, pauseBtn;
+    TMP_Text pauseLabel;
     Unit current;
 
     public static void Create(Transform parent)
@@ -52,7 +53,16 @@ public class UnitInfoPanel : MonoBehaviour
         UIFactory.Stretch(progressLabel.rectTransform);
 
         surveyBtn = UIFactory.Button(content, "Survey / Collect Samples", DoSurvey, 28);
-        colonizeBtn = UIFactory.Button(content, "Begin Colonization", DoColonize, 28);
+        researchBtn = UIFactory.Button(content, "Research Here", DoResearch, 28);
+        colonizeBtn = UIFactory.Button(content, "Found Colony", DoColonize, 28);
+
+        // Queue controls.
+        var qrow = UIFactory.NewUI(content, "QueueRow"); UIFactory.AddLayout(qrow, 30);
+        var qh = qrow.AddComponent<HorizontalLayoutGroup>(); qh.spacing = 6; qh.childControlWidth = true; qh.childControlHeight = true; qh.childForceExpandWidth = true;
+        pauseBtn = UIFactory.Button(qrow.transform, "Pause Queue", TogglePause, 28);
+        pauseLabel = pauseBtn.GetComponentInChildren<TMP_Text>();
+        UIFactory.Button(qrow.transform, "Stop", DoStop, 28);
+
         var row = UIFactory.NewUI(content, "Row"); UIFactory.AddLayout(row, 30);
         var h = row.AddComponent<HorizontalLayoutGroup>(); h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true;
         UIFactory.Button(row.transform, "Send…", DoSend, 28);
@@ -78,23 +88,28 @@ public class UnitInfoPanel : MonoBehaviour
         Refresh();
     }
 
+    // These issue ORDERS (so they travel-then-act if needed, and can be queued/interrupted).
     void DoSurvey()
     {
         if (current == null || current.location == null || !current.Info.canExplore) return;
-        current.status = UnitStatus.Exploring;
-        ResearchManager.AddPoints(10);
-        current.AddExperience(20f);
-        SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
-        NotificationManager.Instance?.Push($"{current.name} collecting samples", $"Surveying {current.location.name}.", null, NotifKind.Research);
+        UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Survey, current.location, false);
+    }
+
+    void DoResearch()
+    {
+        if (current == null || current.location == null || !current.Info.canResearch) return;
+        UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Research, current.location, false);
     }
 
     void DoColonize()
     {
         if (current == null || current.location == null || !current.Info.canColonize) return;
         if (current.location.owner == FactionManager.Player) return;
-        current.status = UnitStatus.Colonizing;
-        current.location.claimingFaction = FactionManager.Player;
+        UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Colonize, current.location, false);
     }
+
+    void DoStop() { if (current != null) UnitManager.Instance?.StopAll(current); }
+    void TogglePause() { if (current != null) UnitManager.Instance?.SetPaused(current, !current.queuePaused); }
 
     void DoSend()
     {
@@ -136,12 +151,24 @@ public class UnitInfoPanel : MonoBehaviour
                 prog = u.location != null ? u.location.claimProgress : 0f;
                 task = $"Colonizing {(u.location != null ? u.location.name : "?")}";
                 break;
+            case UnitStatus.Researching:
+                prog = u.location != null ? u.location.researchProgress : 0f;
+                task = $"Researching {(u.location != null ? u.location.name : "?")}";
+                break;
             case UnitStatus.Returning: task = "Returning home"; break;
             default: task = u.location != null ? $"Idle at {u.location.name}" : "Idle"; break;
         }
+        if (u.queuePaused) task += "  <color=#FFBF4D>(paused)</color>";
 
         progressFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(prog), 1f);
         progressLabel.text = prog > 0f ? $"{prog * 100f:F0}%" : "";
+
+        string queueLine = "";
+        if (u.orders != null && u.orders.Count > 1)
+            queueLine = $"\n<color=#9FB4C8>Queue:</color> {u.orders.Count - 1} more order(s)";
+        string sampleLine = u.samples != null && u.samples.Count > 0
+            ? $"\n<color=#8FD0FF>Carrying {u.samples.Count} ore sample(s)</color> (needs a research ship/centre)"
+            : "";
 
         body.text =
             $"<b>{u.Info.name}</b>  ·  <color=#FFD24D>{u.RankName}</color>\n" +
@@ -149,12 +176,15 @@ public class UnitInfoPanel : MonoBehaviour
             $"Health {u.EffectiveHealth}  Armor {u.Armor}  Speed {u.Speed}\n" +
             $"Research {u.EffectiveResearch}  Attack {u.EffectiveAttack}\n" +
             $"XP {u.experience:F0}  Worlds {u.worldsExplored}\n\n" +
-            $"<color=#8FD0FF>Task:</color> {task}";
+            $"<color=#8FD0FF>Task:</color> {task}{queueLine}{sampleLine}";
 
         bool atBody = u.location != null;
-        surveyBtn.interactable = atBody && u.Info.canExplore;
+        bool surveyed = atBody && u.location.Surveyed;
+        surveyBtn.interactable = atBody && u.Info.canExplore && !surveyed;
+        researchBtn.interactable = atBody && u.Info.canResearch && surveyed;
         colonizeBtn.interactable = atBody && u.Info.canColonize && u.location.owner != FactionManager.Player;
         returnBtn.interactable = atBody && u.location != UnitManager.Instance?.HomePlanet;
         scrapBtn.interactable = UnitManager.Instance != null && UnitManager.Instance.CanScrap(u);
+        if (pauseLabel != null) pauseLabel.text = u.queuePaused ? "Resume Queue" : "Pause Queue";
     }
 }

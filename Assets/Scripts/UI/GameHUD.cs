@@ -83,7 +83,16 @@ public class GameHUD : MonoBehaviour
 
     void OpenDetailed()
     {
-        if (PlanetUI.Selected != null) DetailedSurfaceWindow.Instance?.Open(PlanetUI.Selected);
+        var b = PlanetUI.Selected;
+        if (b == null) return;
+        if (!b.Surveyed)
+        {
+            SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
+            NotificationManager.Instance?.Push($"{b.name} not surveyed",
+                "Send a ship to survey this world to unlock its detailed map.", null, NotifKind.Info);
+            return;
+        }
+        DetailedSurfaceWindow.Instance?.Open(b);
     }
 
     void ToggleFollow()

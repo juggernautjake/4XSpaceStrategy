@@ -40,15 +40,27 @@ public class CelestialBody
     public Faction owner;               // null == unclaimed
 
     // --- Exploration / colonization ---
-    public float explorationProgress = 0f;   // 0..1 surveyed & researched
+    public bool visited = false;             // a friendly ship has arrived here at least once
+    public float explorationProgress = 0f;   // 0..1 survey completion
 
-    // Info (habitability, resources, ores, secrets) stays hidden until a ship surveys the body
-    // (or Dev Mode reveals everything).
-    public bool Surveyed => GameMode.DevMode || explorationProgress >= 0.5f || owner == FactionManager.Player;
+    // Reveal stages:
+    //  * Visited  (a ship has arrived) -> the low-res mini map becomes viewable.
+    //  * Surveyed (survey complete)    -> the detailed map, points of interest and full info unlock.
+    public bool Visited  => GameMode.DevMode || visited || owner == FactionManager.Player;
+    public bool Surveyed => GameMode.DevMode || explorationProgress >= 1f || owner == FactionManager.Player;
+
     public float claimProgress = 0f;         // 0..1 colonization toward full claim
     public Faction claimingFaction;          // who is colonizing (null if nobody)
     public int population = 0;
     public int cities = 0;
+
+    // --- Colony ---
+    public List<int> buildings = new List<int>();   // BuildingType ids constructed on this world
+
+    // --- Terraforming ---
+    public float terraformability = 0f;      // 0..100 potential to be made livable for the current species
+    public bool terraforming = false;        // an active terraforming project raising habitability
+    public float researchProgress = 0f;      // 0..1 deep-research completion (research ship / centre)
 
     [System.NonSerialized] public StarData hostStar;          // the star this body belongs to
     [System.NonSerialized] public StarSystemData system;      // the system this body belongs to

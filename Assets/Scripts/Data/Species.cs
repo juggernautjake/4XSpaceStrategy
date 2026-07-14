@@ -166,6 +166,7 @@ public static class SpeciesManager
             if (star == null) continue;
             b.isHabitable = Habitability.InZone(star, Current, b.distanceFromStar);
             b.habitability = Habitability.Rate(star, Current, b.type, b.distanceFromStar);
+            b.terraformability = Habitability.Terraformability(star, Current, b);
         }
 
         if (SystemContext.Zone != null) SystemContext.Zone.Refresh();

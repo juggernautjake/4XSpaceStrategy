@@ -55,6 +55,39 @@ public static class Habitability
         return Mathf.Clamp(positional * species.Affinity(type), 0f, 100f);
     }
 
+    // How feasible it is to TERRAFORM a body to livability for a species (0..100), separate from its
+    // current habitability. A world can be uninhabitable now yet very terraformable: what matters is
+    // whether it sits near the species' orbital band (right amount of starlight), whether its body
+    // type is amenable, and whether it has the water/volatiles to work with. Because it uses the
+    // species' shifted zone and type affinities, the same world is more terraformable for some races
+    // than others. This value is the ceiling that terraforming can raise habitability toward.
+    public static float Terraformability(StarData star, Species species, CelestialBody b)
+    {
+        if (star == null || species == null || b == null) return 0f;
+        if (!GetZone(star, species, out float inner, out float outer)) return 0f;
+
+        float center = (inner + outer) * 0.5f;
+        float half = Mathf.Max(0.001f, (outer - inner) * 0.5f);
+
+        // Starlight potential: terraforming can fix atmosphere/temperature, but not orbital distance.
+        // Worlds within ~2.5x the zone half-width can be warmed/cooled into range.
+        float posK = Mathf.Clamp01(1f - Mathf.Abs(b.distanceFromStar - center) / (half * 2.5f));
+
+        // Body type amenability (species biology weights this).
+        float typeK = Mathf.Clamp01(species.Affinity(b.type) * 0.75f + 0.25f);
+
+        // Available water/volatiles help enormously.
+        float waterK = 0f;
+        if (b.resources != null && b.resources.resources.TryGetValue(ResourceType.Water, out var w))
+            waterK = Mathf.Clamp01(w / 220f);
+
+        // A world already partly livable is of course easy to finish.
+        float currentK = Mathf.Clamp01(b.habitability / 100f);
+
+        float score = 0.42f * posK + 0.24f * typeK + 0.16f * waterK + 0.18f * currentK;
+        return Mathf.Clamp(score * 100f, 0f, 100f);
+    }
+
     public static string Label(float rating, bool inZone)
     {
         if (inZone) return "Habitable";
