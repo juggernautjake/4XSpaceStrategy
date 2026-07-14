@@ -150,8 +150,10 @@ public class ColonyWindow : MonoBehaviour
     void RebuildBuildings()
     {
         var b = body;
-        bool constructing = ColonyManager.Instance != null && ColonyManager.Instance.ConstructionFor(b) != null;
-        string sig = string.Join(",", b.buildings) + $"|yard{b.shipyardLevel}|hab{b.habitability >= Colony.FoundThreshold}|c{constructing}";
+        var mgr = ColonyManager.Instance;
+        string qsig = "";
+        if (mgr != null) foreach (var c in mgr.QueueFor(b)) qsig += (c.shipyardUpgrade ? "U" : c.establishCity ? "C" : c.type.ToString()) + ";";
+        string sig = string.Join(",", b.buildings) + $"|yard{b.shipyardLevel}|hab{b.habitability >= Colony.FoundThreshold}|q{qsig}";
         if (sig == lastBuildSig && buildList.childCount > 0) return;
         lastBuildSig = sig;
 
@@ -165,7 +167,25 @@ public class ColonyWindow : MonoBehaviour
             UIFactory.Label(buildList, sb.ToString(), UITheme.SmallSize, UITheme.SubText, 24);
         }
 
-        var mgr = ColonyManager.Instance;
+        // Construction queue (built one-by-one): the first entry is building, the rest wait. Each cancels
+        // for a refund.
+        if (mgr != null)
+        {
+            var q = mgr.QueueFor(b);
+            for (int i = 0; i < q.Count; i++)
+            {
+                var c = q[i];
+                string nm = c.shipyardUpgrade ? "Shipyard upgrade" : c.establishCity ? "City" : BuildingDatabase.Get(c.type).name;
+                string state = i == 0 ? "building" : $"queued #{i}";
+                string pfx = i == 0 ? "> " : $"{i + 1}. ";
+                var rowGo = UIFactory.NewUI(buildList, "QRow"); UIFactory.AddLayout(rowGo, 24);
+                var rh = rowGo.AddComponent<HorizontalLayoutGroup>(); rh.spacing = 6; rh.childControlWidth = true; rh.childControlHeight = true; rh.childForceExpandWidth = true;
+                UIFactory.Text(rowGo.transform, $"{pfx}{nm}  <color=#9FB4C8>({state})</color>", UITheme.SmallSize, i == 0 ? UITheme.Accent : UITheme.Text, TextAlignmentOptions.Left);
+                var cap = c;
+                var rm = UIFactory.Button(rowGo.transform, "X", () => { mgr.CancelConstruction(cap); lastBuildSig = ""; RebuildBuildings(); }, 22);
+                var le = rm.GetComponent<LayoutElement>(); if (le != null) le.preferredWidth = 30;
+            }
+        }
 
         // Owned world without a city yet (e.g. a home moon): let the player found one — once it's
         // habitable enough (terraform first if not). This is how birthright worlds get settled.
