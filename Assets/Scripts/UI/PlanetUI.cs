@@ -115,17 +115,11 @@ public class PlanetUI : MonoBehaviour
         if (titleText != null) titleText.text = body.name ?? body.type.ToString();
         if (infoText != null) infoText.text = BuildBodyInfo(body);
 
-        // Low-res mini map only appears once a ship has ARRIVED here (Visited). The detailed map needs
-        // a completed survey (handled by the Detailed window itself).
-        if (gridVisualizer != null && gridWindow != null)
-        {
-            if (body.Visited)
-            {
-                gridVisualizer.ShowSurface(body.surface);
-                gridWindow.SetActive(true);
-            }
-            else gridWindow.SetActive(false);
-        }
+        // The low-res mini map is retired. It showed the same continents as the detailed map at a
+        // quarter of the fidelity, and everything that used to need it — surveying, building, the index
+        // overlays — now lives on the detailed grid in the Planet View. Keeping both only split the
+        // player's attention between two views of one world.
+        if (gridWindow != null) gridWindow.SetActive(false);
 
         if (infoPanel != null) infoPanel.SetActive(true);
 

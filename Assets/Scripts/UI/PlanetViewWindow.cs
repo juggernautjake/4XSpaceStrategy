@@ -50,7 +50,10 @@ public class PlanetViewWindow : MonoBehaviour
     string lastSig = null;
     Texture2D overlayTex;
 
+    // The map is sized per body from MapMetrics (see ApplyMapSize) so one grid cell is always exactly a
+    // detailed-map tile. These are only the initial/fallback dimensions before a world is selected.
     const float MapW = 720f, MapH = 380f;
+    const float SidePanelW = 300f;
 
     public static void Create(Transform parent)
     {
@@ -63,7 +66,7 @@ public class PlanetViewWindow : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Planet View", new Vector2(MapW + 300, MapH + 190), out root, out titleText);
+        var content = UIFactory.Window(parent, "Planet View", new Vector2(MapW + SidePanelW + 60f, MapH + 190), out root, out titleText);
         root.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
 
         // Tabs.
@@ -107,10 +110,14 @@ public class PlanetViewWindow : MonoBehaviour
         probe.Init(this, mapRT);
 
         // Side panel: the tab's controls.
+        // Pinned to the RIGHT edge at a fixed width, rather than inset from the left by the map's size.
+        // The map now grows with the world (ApplyMapSize), so a left-inset panel would be shoved off
+        // the window by any world bigger than the old fixed 720px map.
         var sideHolder = UIFactory.NewUI(content, "SideHolder").GetComponent<RectTransform>();
-        sideHolder.anchorMin = new Vector2(0, 0); sideHolder.anchorMax = new Vector2(1, 1);
-        sideHolder.offsetMin = new Vector2(MapW + 8, 34);
-        sideHolder.offsetMax = new Vector2(0, -32);
+        sideHolder.anchorMin = new Vector2(1, 0); sideHolder.anchorMax = new Vector2(1, 1);
+        sideHolder.pivot = new Vector2(1, 0.5f);
+        sideHolder.sizeDelta = new Vector2(SidePanelW, -66f);   // 32 top chrome + 34 bottom status bar
+        sideHolder.anchoredPosition = new Vector2(0, -1f);
         UIFactory.ScrollView(sideHolder, out sidePanel);
 
         statusText = UIFactory.Text(content, "", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.TopLeft);
@@ -158,6 +165,30 @@ public class PlanetViewWindow : MonoBehaviour
         if (body == null) return;
         mapImage.texture = SurfaceTextureRenderer.Build(body);
         titleText.text = $"Planet View — {body.name}";
+        ApplyMapSize();
+    }
+
+    // Size the map from MapMetrics, exactly like the detailed viewer does, instead of stretching the
+    // surface across a fixed 720x380 rectangle.
+    //
+    // That fixed size was the bug behind "the tiles are too big": a 12x6 moon and a 48x24 world were
+    // both stretched to the same rectangle, so a tile was a different number of pixels on every body
+    // and matched the detailed viewer on none of them. Deriving width/height from tile count x
+    // DetailTile means one grid cell is ALWAYS 42px — the same cell, at the same size, as the detailed
+    // map — so a building footprint lands exactly on the tiles you can see.
+    void ApplyMapSize()
+    {
+        if (body?.surface == null) return;
+        float tile = MapMetrics.DetailTile(body.surfaceSize);
+        float w = body.surface.width * tile;
+        float h = body.surface.height * tile;
+
+        gridHolder.sizeDelta = new Vector2(w, h);
+
+        // Grow the window to fit the map plus the side panel and chrome, so a big world simply shows a
+        // bigger map rather than squashing it.
+        var rt = root.GetComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(w + SidePanelW + 60f, Mathf.Max(360f, h + 100f));
     }
 
     // Signature covers only the SHAPE of the window: which world, which tab, what's selected, what's
@@ -185,9 +216,12 @@ public class PlanetViewWindow : MonoBehaviour
         live.Tick();
         PollHover();
 
-        // Right-click rotates the held piece — before it snaps to the grid and after. Handled here
-        // rather than on the map so it works the moment you pick a building up, wherever the cursor is.
-        if (tab == Tab.Build && selected.HasValue && Input.GetMouseButtonDown(1))
+        // Rotate the held piece 90° — before it snaps to the grid and after. Handled here rather than on
+        // the map so it works the moment you pick a building up, wherever the cursor happens to be.
+        // R is offered alongside right-click because right-click is also the world's "send fleet" verb,
+        // so a keyboard rotate is never ambiguous.
+        if (tab == Tab.Build && selected.HasValue &&
+            (Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.R)))
         {
             rotation = (rotation + 1) % 4;
             RecomputeHoverValidity();   // a rotated piece may now fit (or stop fitting) where it is
@@ -224,7 +258,7 @@ public class PlanetViewWindow : MonoBehaviour
                     string valid = hoverCell.x < 0 ? "" :
                         hoverValid ? "   <color=#4DFF6E>Left-click to build</color>"
                                    : $"   <color=#FF6659>{HoverWhy()}</color>";
-                    statusText.text = $"<b>{info.name}</b> · rotation {rotation * 90}°  <color=#9FB4C8>(right-click to rotate)</color>{eff}{valid}";
+                    statusText.text = $"<b>{info.name}</b> · rotation {rotation * 90}°  <color=#9FB4C8>(right-click or R to rotate · Esc cancels)</color>{eff}{valid}";
                 }
                 break;
             case Tab.Survey:

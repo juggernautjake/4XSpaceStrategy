@@ -9,6 +9,11 @@ using UnityEngine;
 // forever; a mine on dead rock is a permanent mistake.
 public static class SurfaceBuildManager
 {
+    // While the surface economy is being tuned, a world may hold only one of each structure. Flip this
+    // off to allow duplicates (the genuinely unique ones — capitol, shipyard — stay capped either way
+    // via SurfaceBuildingInfo.uniquePerWorld).
+    public const bool OneOfEachPerWorld = true;
+
     // ---- Queries ----
     public static List<PlacedBuilding> On(CelestialBody b)
         => b != null && b.placedBuildings != null ? b.placedBuildings : new List<PlacedBuilding>();
@@ -68,8 +73,10 @@ public static class SurfaceBuildManager
         if (b.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
         if (!b.Surveyed) { why = "survey this world first"; return false; }
 
-        // One capitol, one shipyard per world — you upgrade what you have rather than stacking more.
-        if (info.uniquePerWorld && CountOf(b, t) > 0)
+        // ONE OF EACH per world, for now: place a second and it's refused. (Some types — the capitol,
+        // the shipyard — are inherently unique; the rest are capped here while the surface economy is
+        // still being tuned. Relax this by dropping the OneOfEachPerWorld check.)
+        if ((OneOfEachPerWorld || info.uniquePerWorld) && CountOf(b, t) > 0)
         { why = $"this world already has a {info.name.ToLower()}"; return false; }
 
         // A Planet Capitol isn't built from scratch: it's what a Colony Ship Base becomes. Placing one
