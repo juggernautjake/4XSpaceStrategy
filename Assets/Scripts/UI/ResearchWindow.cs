@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
@@ -206,7 +206,7 @@ public class ResearchWindow : MonoBehaviour
         frt.anchorMin = new Vector2(0, 0); frt.anchorMax = new Vector2(0, 1);
         frt.offsetMin = Vector2.zero; frt.offsetMax = Vector2.zero;
 
-        var pause = UIFactory.Button(card.transform, "❚❚", () => { TechManager.SetOrderPaused(order, !order.paused); }, 24);
+        var pause = UIFactory.Button(card.transform, "||", () => { TechManager.SetOrderPaused(order, !order.paused); }, 24);
         var ple = pause.GetComponent<LayoutElement>(); ple.preferredWidth = 34; ple.minWidth = 34; ple.flexibleWidth = 0;
 
         var cancel = UIFactory.Button(card.transform, "X", () => { TechManager.RemoveOrder(order); lastQueueSig = null; }, 24);
@@ -262,7 +262,7 @@ public class ResearchWindow : MonoBehaviour
             }
             r.fill.color = barColor;
             r.label.text = $"<b>{t.name}</b>  <size=10><color=#8FD0FF>{o.Cost}c</color></size>  <size=10>{state}</size>";
-            if (r.pauseLabel != null) r.pauseLabel.text = o.paused ? "▶" : "❚❚";
+            if (r.pauseLabel != null) r.pauseLabel.text = o.paused ? "»" : "||";
         }
     }
 

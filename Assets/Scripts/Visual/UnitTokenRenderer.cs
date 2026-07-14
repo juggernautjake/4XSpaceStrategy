@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 // Draws a small billboarded token for every ship: its class icon plus a faction emblem. Tokens
@@ -28,7 +28,7 @@ public class UnitTokenRenderer : MonoBehaviour
         redX = RedXTexture();
     }
 
-    // Brief red ✕ that lingers ~0.7s at a destroyed unit's position, then vanishes.
+    // Brief red × that lingers ~0.7s at a destroyed unit's position, then vanishes.
     public void FlashDestroy(Vector3 worldPos)
     {
         var q = GameObject.CreatePrimitive(PrimitiveType.Quad);
@@ -226,7 +226,7 @@ public class UnitToken : MonoBehaviour
     }
 }
 
-// A brief billboarded red ✕ that fades out then self-destructs (unit destruction feedback).
+// A brief billboarded red × that fades out then self-destructs (unit destruction feedback).
 public class DestroyFlash : MonoBehaviour
 {
     Camera cam;

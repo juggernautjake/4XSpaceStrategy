@@ -66,8 +66,21 @@ public class AmbientDrone : MonoBehaviour
     };
 
     const int Voices = 6;
-    const float RootHzBase = 55f;      // A1 — the bed sits around here
+
+    // E1 — a perfect fourth below the old A1. The bed sits deeper now, and the sub under it lands
+    // around 20Hz, which is past hearing and into the range you feel through the cups.
+    const float RootHzBase = 41.20f;
     const int RootMin = -5, RootMax = 5;  // semitone window the root wanders inside
+
+    // ---- Register plan ----
+    // Which octave each voice sits in, relative to the root. This exists because "make it deeper" and
+    // "keep it harmonic" pull against each other: at 41Hz, a minor third above the root is ~49Hz, and
+    // the ear cannot resolve two pitches that close together that low — it hears a beating rumble, not
+    // a chord. So the bottom carries only fundamentals (root and, when the chord has one, its perfect
+    // fifth), and every colour tone — thirds, sevenths, ninths — is voiced an octave or two up where
+    // it's actually legible as harmony. Spreading like this is why the chord still reads as a chord
+    // even though its floor dropped a fourth.
+    static readonly int[] VoiceOctave = { 0, 0, 1, 1, 1, 2 };
 
     // ---- Audio-thread state ----
     // Touched from OnAudioFilterRead. Only plain floats: no Unity API is legal on the audio thread.
@@ -89,7 +102,7 @@ public class AmbientDrone : MonoBehaviour
     float changeTimer;
 
     /// The chord currently sounding, in Hz. Read by AmbientChirps so its notes belong to this chord.
-    public static float[] CurrentTones = { 55f, 65.4f, 82.4f };
+    public static float[] CurrentTones = { 41.2f, 49.0f, 61.7f };   // E1 minor, until the first chord lands
     /// Semitone offsets of the current chord (root-relative), and the root's own offset from A.
     public static int[] CurrentSemitones = { 0, 3, 7 };
     public static int CurrentRootSemi;
@@ -198,6 +211,18 @@ public class AmbientDrone : MonoBehaviour
         return 0;
     }
 
+    /// The tone allowed to join the root at the very bottom of the chord: a PERFECT fifth, or nothing.
+    ///
+    /// Strict on purpose. A tritone (min7b5) or an augmented fifth voiced down at 60Hz is genuinely
+    /// unpleasant — those intervals are meant to be heard as colour up top, not as the foundation. When
+    /// the chord has no perfect fifth, the bottom just doubles the root and the chord's character comes
+    /// entirely from the upper voices.
+    static int LowCompanion(int[] tones)
+    {
+        foreach (var t in tones) if (t == 7) return 7;
+        return tones[0];
+    }
+
     // Write the new chord into the voices' TARGETS. The audio thread glides toward them; nothing is
     // re-triggered, so there's no edge to hear.
     void ApplyChord(bool instant)
@@ -205,10 +230,18 @@ public class AmbientDrone : MonoBehaviour
         float root = RootHzBase * Mathf.Pow(2f, rootSemi / 12f);
         var tones = current.tones;
 
+        int fifth = LowCompanion(tones);
+
         for (int v = 0; v < Voices; v++)
         {
-            int semi = tones[v % tones.Length];
-            float f = root * Mathf.Pow(2f, semi / 12f);
+            // Bottom two voices: root and its fifth (or the root doubled, when the chord hasn't got a
+            // clean fifth to lend). Everything above: the chord's own tones, cycled, up an octave or
+            // two. See VoiceOctave.
+            int semi = v == 0 ? tones[0]
+                     : v == 1 ? fifth
+                     : tones[(v - 2) % tones.Length];
+
+            float f = root * Mathf.Pow(2f, (semi + VoiceOctave[v] * 12) / 12f);
 
             // Detune every other voice very slightly. Two near-identical sines beat against each other
             // at their difference frequency — a slow, organic shimmer no LFO reproduces.
@@ -217,8 +250,10 @@ public class AmbientDrone : MonoBehaviour
             tgtFreq[v] = f;
             if (instant) curFreq[v] = f;
 
-            // Higher voices sit further back, so the chord reads as a bed rather than a pad.
-            amp[v] = Mathf.Lerp(1f, 0.28f, v / (float)(Voices - 1));
+            // Weighted hard toward the bottom: the two fundamentals carry the sound and the colour
+            // tones only tint it. This is the other half of "deeper on average" — the low voices are
+            // not merely lower than before, they're a bigger share of what you hear.
+            amp[v] = Mathf.Lerp(1f, 0.16f, Mathf.Pow(v / (float)(Voices - 1), 0.75f));
             tremRate[v] = 0.05f + v * 0.031f;     // mutually prime-ish: never lines up, never pulses
             tremDepth[v] = 0.10f + (v % 3) * 0.03f;
         }
@@ -269,10 +304,11 @@ public class AmbientDrone : MonoBehaviour
             }
 
             // A sub an octave below the root: felt more than heard, and the reason it works on headphones.
+            // Weightier than it was, to hold up the deeper bed above it.
             subPhase += (curFreq[0] * 0.5f) / sr;
             if (subPhase > 1.0) subPhase -= 1.0;
-            sample += Mathf.Sin((float)(subPhase * 6.2831853)) * 0.5f;
-            norm += 0.5f;
+            sample += Mathf.Sin((float)(subPhase * 6.2831853)) * 0.62f;
+            norm += 0.62f;
 
             sample = sample / Mathf.Max(0.001f, norm) * gain;
             // Gentle soft-clip: keeps a chord whose partials line up from ever spiking.

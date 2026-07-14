@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -136,9 +136,9 @@ public class TerraformWindow : MonoBehaviour
         summary.text =
             $"<b>{body.name}</b> · {TerraformDiagnosis.Pretty(body.type)} · viewed as <b>{s.name}</b>\n" +
             $"Habitable now <color={Habitability.ScoreColorHex(now)}><b>{now:F0}%</b></color>   " +
-            $"→ ceiling today <color={Habitability.ScoreColorHex(ceiling)}><b>{ceiling:F0}%</b></color>   " +
-            $"→ with every project you've researched <color={Habitability.ScoreColorHex(reachable)}><b>{reachable:F0}%</b></color>   " +
-            $"→ with all known science <color={Habitability.ScoreColorHex(potential)}><b>{potential:F0}%</b></color>\n" +
+            $"-> ceiling today <color={Habitability.ScoreColorHex(ceiling)}><b>{ceiling:F0}%</b></color>   " +
+            $"-> with every project you've researched <color={Habitability.ScoreColorHex(reachable)}><b>{reachable:F0}%</b></color>   " +
+            $"-> with all known science <color={Habitability.ScoreColorHex(potential)}><b>{potential:F0}%</b></color>\n" +
             $"<size=11><color=#9FB4C8>Colonizable at {Colony.FoundThreshold:F0}%. Projects raise the ceiling; terraformers then raise habitability toward it.</color></size>";
     }
 
@@ -285,7 +285,7 @@ public class TerraformWindow : MonoBehaviour
             if (id < 0 || id >= TerraformProjectDatabase.All.Length) continue;
             var info = TerraformProjectDatabase.All[id];
             if (info == null) continue;
-            UIFactory.WrapText(list, $"<color=#4DFF6E>✔ {info.name}</color>  <size=10><color=#9FB4C8>+{info.ceilingGain:F0}% ceiling</color></size>",
+            UIFactory.WrapText(list, $"<color=#4DFF6E>+ {info.name}</color>  <size=10><color=#9FB4C8>+{info.ceilingGain:F0}% ceiling</color></size>",
                 UITheme.SmallSize, UITheme.Good);
         }
     }

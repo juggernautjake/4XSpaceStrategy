@@ -11,11 +11,15 @@ public class CameraController : MonoBehaviour
     // The absolute floor. Low, because a moon is only ~0.35 world units across and filling the screen
     // with one genuinely needs the camera this close. It was 4, which is further away than some whole
     // planets are wide — you could never get near anything.
-    public float minHeight = 0.25f;
-    // The floor when nothing is selected. Free-look doesn't need to press its nose against the orbital
-    // plane, and letting it would just be disorienting — there's nothing there to look at.
-    public float freeLookMinHeight = 3f;
-    public float maxHeight = 9000f;        // Farthest view — pull right back to a galaxy-wide symbol map
+    public float minHeight = 0.08f;
+    // The floor when nothing is selected. Kept off the orbital plane so free-look never ends up inside
+    // it, but low enough to get right down among the bodies — it was 3, which is further away than a
+    // whole planet is wide, so free-look could never get close to anything.
+    public float freeLookMinHeight = 0.7f;
+    // Farthest view. Generous on purpose: this is a hard ceiling on how far back you can ever pull, and
+    // the only cost of headroom is a bigger far clip, which UpdateClipPlanes already tracks. The galaxy
+    // is framed by HeightToFrame, not by this — so this only ever needs to be comfortably beyond it.
+    public float maxHeight = 60000f;
 
     private float targetHeight;            // For smooth movement
 
@@ -112,8 +116,12 @@ public class CameraController : MonoBehaviour
         // the far plane the slant range plus the galaxy's own extent plus headroom.
         float slant = h / Mathf.Sin(Pitch * Mathf.Deg2Rad);
         cam.farClipPlane = Mathf.Max(MinFarClip, slant + GalaxyRadius() * 2.5f + 1000f);
-        // Near plane has to grow with distance or z-fighting sets in at galaxy scale.
-        cam.nearClipPlane = Mathf.Clamp(h * 0.002f, 0.03f, 5f);
+        // Near plane has to grow with distance or z-fighting sets in at galaxy scale. What matters for
+        // depth precision is the far:near RATIO, not either number, so the near plane has to keep pace
+        // as the ceiling rises — pinning it at 5 while the far plane runs to ~74,000 is a 15,000:1 ratio
+        // and the depth buffer starts tearing. Nothing is within 100 units of the camera when it's
+        // 60,000 up, so a near plane that far out clips nothing you can see.
+        cam.nearClipPlane = Mathf.Clamp(h * 0.002f, 0.02f, 120f);
     }
 
     // Recenters the view on a world position (used by notifications to jump to a discovery).
@@ -294,7 +302,10 @@ public class CameraController : MonoBehaviour
     {
         if (followTarget == null) return Mathf.Max(minHeight, freeLookMinHeight);
         float fill = FillHeight(WorldRadius(followTarget));
-        return Mathf.Max(minHeight, fill * 0.5f);   // half the fill height: right up against it
+        // A fifth of the fill height: close enough that the body overflows the screen and you're looking
+        // at its surface rather than at it. This was half, which stopped you at roughly "it fills the
+        // view" — the point you'd want to start zooming in FROM.
+        return Mathf.Max(minHeight, fill * 0.2f);
     }
 
     private void SmoothHeightMovement()

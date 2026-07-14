@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -74,7 +74,7 @@ public class FleetWindow : MonoBehaviour
                 UnitInfoPanel.Instance?.Show(captured);
             });
 
-            string loc = u.location != null ? u.location.name : (u.travelTarget != null ? $"→ {u.travelTarget.name}" : "—");
+            string loc = u.location != null ? u.location.name : (u.travelTarget != null ? $"-> {u.travelTarget.name}" : "—");
             var t = UIFactory.Text(row.transform, $"<b>{u.name}</b>  <color=#FFD24D>{u.RankName}</color>\n<size=11><color=#8FA4BE>{u.Info.name} · {u.status} · {loc}</color></size>",
                 UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
             UIFactory.Stretch(t.rectTransform, 8, 8, 0, 0);

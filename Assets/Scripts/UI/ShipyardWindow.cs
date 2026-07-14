@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -358,7 +358,7 @@ public class ShipyardWindow : MonoBehaviour
         frt.anchorMin = new Vector2(0, 0); frt.anchorMax = new Vector2(0, 1);
         frt.offsetMin = Vector2.zero; frt.offsetMax = Vector2.zero;
 
-        var pause = UIFactory.Button(card.transform, "❚❚", () =>
+        var pause = UIFactory.Button(card.transform, "||", () =>
         {
             UnitManager.Instance?.SetOrderPaused(order, !order.paused);
             MarkDirty();
@@ -439,7 +439,7 @@ public class ShipyardWindow : MonoBehaviour
             string text = $"<b>{info.name}</b>  <size=10><color=#8FD0FF>{o.Power}p</color></size>  <size=10>{state}</size>";
             if (text != r.lastLabel) { r.lastLabel = text; r.label.text = text; }
 
-            string pause = o.paused ? "▶" : "❚❚";
+            string pause = o.paused ? "»" : "||";
             if (r.pauseLabel != null && pause != r.lastPause) { r.lastPause = pause; r.pauseLabel.text = pause; }
         }
     }

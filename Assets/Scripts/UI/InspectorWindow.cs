@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -314,7 +314,7 @@ public partial class InspectorWindow : MonoBehaviour
         // Breadcrumb: how we got here, so a drill-down is never a one-way trip.
         if (trail.Count > 0)
         {
-            var back = UIFactory.Button(breadcrumbRow, "← " + TitleFor(trail[trail.Count - 1]), Back, 20);
+            var back = UIFactory.Button(breadcrumbRow, "<- " + TitleFor(trail[trail.Count - 1]), Back, 20);
             var le = back.GetComponent<LayoutElement>();
             le.preferredWidth = 190; le.minWidth = 120; le.flexibleWidth = 0;
         }
@@ -436,7 +436,7 @@ public partial class InspectorWindow : MonoBehaviour
         var card = Card(parent);
         var text = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
         live.Text(text, () => detail != null ? $"<b>{label}</b>  <size=10><color=#9FB4C8>{detail()}</color></size>" : $"<b>{label}</b>");
-        UIFactory.Button(card, "Open ▸", () => Drill(to), 22);
+        UIFactory.Button(card, "Open »", () => Drill(to), 22);
     }
 
     // A progress bar bound to live values.

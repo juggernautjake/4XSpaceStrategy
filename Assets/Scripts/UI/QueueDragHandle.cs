@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -70,7 +70,7 @@ public class QueueDragHandle : MonoBehaviour, IBeginDragHandler, IDragHandler, I
         if (Dragging) { Dragging = false; onDragStateChanged?.Invoke(); }
     }
 
-    // The "≡" grip itself: a raycast target so it can receive the drag, sized for a comfortable grab.
+    // The "=" grip itself: a raycast target so it can receive the drag, sized for a comfortable grab.
     public static QueueDragHandle Attach(Transform parent, RectTransform row, Func<int> index,
                                          Action<int, int> reorder, Action dragStateChanged)
     {
@@ -78,7 +78,7 @@ public class QueueDragHandle : MonoBehaviour, IBeginDragHandler, IDragHandler, I
         var img = go.AddComponent<Image>();
         img.color = new Color(UITheme.SubText.r, UITheme.SubText.g, UITheme.SubText.b, 0.18f);
         img.raycastTarget = true;
-        var t = UIFactory.Text(go.transform, "≡", UITheme.BodySize, UITheme.SubText, TMPro.TextAlignmentOptions.Center);
+        var t = UIFactory.Text(go.transform, "=", UITheme.BodySize, UITheme.SubText, TMPro.TextAlignmentOptions.Center);
         UIFactory.Stretch(t.rectTransform);
         var le = UIFactory.AddLayout(go, 0);
         le.preferredWidth = 22; le.minWidth = 22; le.flexibleWidth = 0;

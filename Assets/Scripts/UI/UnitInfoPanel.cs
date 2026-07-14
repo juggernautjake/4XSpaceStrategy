@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -332,7 +332,7 @@ public class UnitInfoPanel : MonoBehaviour
             var hl = rowGo.AddComponent<HorizontalLayoutGroup>();
             hl.spacing = 4; hl.childControlWidth = true; hl.childControlHeight = true; hl.childForceExpandWidth = false;
 
-            string tag = i == 0 ? "<color=#4DFF6E>▶</color>" : $"{i}.";
+            string tag = i == 0 ? "<color=#4DFF6E>»</color>" : $"{i}.";
             var lbl = UIFactory.Text(rowGo.transform, $"{tag} {o.Describe()}", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
             var le = lbl.gameObject.AddComponent<LayoutElement>(); le.flexibleWidth = 1;
 

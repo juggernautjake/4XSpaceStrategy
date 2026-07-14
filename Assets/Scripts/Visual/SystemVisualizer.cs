@@ -175,6 +175,13 @@ public class SystemVisualizer : MonoBehaviour
         }
         EnsureClickCollider(star, 1.8f);
 
+        // A star is NOT a planet. If starPrefab happens to carry a PlanetClick — which it does whenever
+        // it's the planet prefab, or a variant of it — that component has no CelestialBody to point at,
+        // so every click on a star logged "Planet has no data!" and then did nothing. Stars are handled
+        // by StarInteraction below; drop the planet handler rather than leave a dead one to warn.
+        var stray = star.GetComponent<PlanetClick>();
+        if (stray != null) Destroy(stray);
+
         var si = star.GetComponent<StarInteraction>() ?? star.AddComponent<StarInteraction>();
         si.star = combined;
 

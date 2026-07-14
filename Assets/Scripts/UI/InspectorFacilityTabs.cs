@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -146,14 +146,14 @@ public partial class InspectorWindow
             {
                 bool can = mgr.CanUpgradeShipyard(b, out string why, out _);
                 return (can, can
-                    ? $"Upgrade → Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {ColonyManager.ShipyardUpgradeTime(next):F0}s) → {BuildPower.ForLevel(next)} build power"
-                    : $"Upgrade → Lv{next} — {why}");
+                    ? $"Upgrade -> Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {ColonyManager.ShipyardUpgradeTime(next):F0}s) -> {BuildPower.ForLevel(next)} build power"
+                    : $"Upgrade -> Lv{next} — {why}");
             });
             Note(p, $"Level {next}: {Colony.ShipyardPerk(next)}.");
         }
 
         Header(p, "RESEARCH THAT HELPS");
-        Note(p, "The Industry branch's slipway line (Parallel Slipways → Robotic Assembly Swarms → Autonomous Drydocks) adds build power to EVERY shipyard you own — a well-researched Lv2 yard beats a neglected Lv4 one.");
+        Note(p, "The Industry branch's slipway line (Parallel Slipways -> Robotic Assembly Swarms -> Autonomous Drydocks) adds build power to EVERY shipyard you own — a well-researched Lv2 yard beats a neglected Lv4 one.");
     }
 
     // The compact catalogue: click a hull to lay one down here. Click again to queue another.
@@ -258,7 +258,7 @@ public partial class InspectorWindow
             UIFactory.Button(row.transform, "Cancel (refund)", () => { um.CancelOrder(cap); lastSig = null; }, 20);
         }
 
-        UIFactory.Button(p, "Open full Shipyard window ▸", () => ShipyardWindow.Instance?.Toggle(), 26);
+        UIFactory.Button(p, "Open full Shipyard window »", () => ShipyardWindow.Instance?.Toggle(), 26);
     }
 
     // ================= RESEARCH CENTRE =================
@@ -306,13 +306,13 @@ public partial class InspectorWindow
             {
                 bool can = mgr.CanUpgradeLab(b, out string why, out _);
                 return (can, can
-                    ? $"Upgrade → Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {ColonyManager.LabUpgradeTime(next):F0}s) → {ResearchCapacity.ForLevel(next)} capacity"
-                    : $"Upgrade → Lv{next} — {why}");
+                    ? $"Upgrade -> Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {ColonyManager.LabUpgradeTime(next):F0}s) -> {ResearchCapacity.ForLevel(next)} capacity"
+                    : $"Upgrade -> Lv{next} — {why}");
             });
         }
 
         Header(p, "RESEARCH THAT HELPS");
-        Note(p, "The Science branch's wing line (Parallel Research Wings → Distributed Cognition → Quantum Think-Tanks) adds capacity to EVERY research centre you own.");
+        Note(p, "The Science branch's wing line (Parallel Research Wings -> Distributed Cognition -> Quantum Think-Tanks) adds capacity to EVERY research centre you own.");
     }
 
     // Queue technologies straight from the laboratory.
@@ -432,7 +432,7 @@ public partial class InspectorWindow
             });
         }
 
-        UIFactory.Button(p, "Open full Research window ▸", () => ResearchWindow.Instance?.Toggle(), 26);
+        UIFactory.Button(p, "Open full Research window »", () => ResearchWindow.Instance?.Toggle(), 26);
     }
 
     // ================= PLAIN STRUCTURE (mine, farm, power plant) =================

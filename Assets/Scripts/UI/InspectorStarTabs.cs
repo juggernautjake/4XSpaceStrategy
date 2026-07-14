@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -110,11 +110,11 @@ public partial class InspectorWindow
             live.Text(t, () =>
             {
                 bool inZone = Habitability.InZone(s, SpeciesManager.Current, cap.distanceFromStar);
-                string mark = inZone ? "<color=#4DFF6E>● in band</color>" : "<color=#9FB4C8>○ outside</color>";
+                string mark = inZone ? "<color=#4DFF6E>• in band</color>" : "<color=#9FB4C8>· outside</color>";
                 return $"{mark}  <b>{cap.name}</b>  <size=10><color=#9FB4C8>{TerraformDiagnosis.Pretty(cap.type)} · " +
                        $"distance {cap.distanceFromStar:F1} · hab <color={Habitability.ScoreColorHex(cap.habitability)}>{cap.habitability:F0}%</color></color></size>";
             });
-            UIFactory.Button(row, "Inspect ▸", () => PlanetUI.Instance?.Show(cap), 22);
+            UIFactory.Button(row, "Inspect »", () => PlanetUI.Instance?.Show(cap), 22);
         }
     }
 
@@ -147,7 +147,7 @@ public partial class InspectorWindow
                        $"hab <color={Habitability.ScoreColorHex(cap.habitability)}>{cap.habitability:F0}%</color> · " +
                        $"{moons} moon(s) · {ships} ship(s)</color></size>";
             });
-            UIFactory.Button(card, "Inspect ▸", () => PlanetUI.Instance?.Show(cap), 22);
+            UIFactory.Button(card, "Inspect »", () => PlanetUI.Instance?.Show(cap), 22);
         }
     }
 
