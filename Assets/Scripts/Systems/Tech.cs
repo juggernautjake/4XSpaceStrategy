@@ -163,6 +163,106 @@ public static class TechManager
 
     public static bool IsResearched(string id) => researched.Contains(id);
 
+    // ---- Research queue (timed, pausable, editable — like the shipyard queue). The active tech fills
+    // by draining research points from your bank over time; pause it, or remove/reorder entries. ----
+    static readonly List<string> queue = new List<string>();
+    static float progress;                 // RP accumulated toward the front tech
+    static float drainCarry;               // fractional RP waiting to be spent as whole points
+    public static bool Paused { get; private set; }
+    const float DrainRate = 6f;            // base RP/sec funneled from the bank into active research
+
+    public static IReadOnlyList<string> Queue => queue;
+    public static string Active => queue.Count > 0 ? queue[0] : null;
+    public static bool IsQueued(string id) => queue.Contains(id);
+    public static int QueuePosition(string id) => queue.IndexOf(id);
+
+    public static float ActiveProgress01
+    {
+        get { var t = TechDatabase.Get(Active); return t != null && t.cost > 0 ? Mathf.Clamp01(progress / t.cost) : 0f; }
+    }
+    public static float ActiveProgressRP => progress;
+
+    public static bool CanQueue(Tech t, out string reason)
+    {
+        reason = null;
+        if (t == null) { reason = "unknown"; return false; }
+        if (researched.Contains(t.id)) { reason = "researched"; return false; }
+        if (queue.Contains(t.id)) { reason = "queued"; return false; }
+        if (EmpireTech.Level < t.minEmpireLevel) { reason = $"needs Empire Tech Level {t.minEmpireLevel}"; return false; }
+        foreach (var p in t.prereqs)                       // prereq must be researched OR queued ahead
+            if (!researched.Contains(p) && !queue.Contains(p)) { reason = "needs " + PrereqNames(t); return false; }
+        if (t.reqOre != OreType.None && !ResearchManager.IsDiscovered(t.reqOre))
+        { reason = $"discover {OreDatabase.Get(t.reqOre).displayName} first"; return false; }
+        return true;
+    }
+
+    public static bool Enqueue(string id)
+    {
+        var t = TechDatabase.Get(id);
+        if (t == null || !CanQueue(t, out _)) return false;
+        queue.Add(id);
+        OnChanged?.Invoke();
+        return true;
+    }
+
+    public static void RemoveFromQueue(int index)
+    {
+        if (index < 0 || index >= queue.Count) return;
+        if (index == 0) progress = 0f;
+        queue.RemoveAt(index);
+        PruneQueue();
+        OnChanged?.Invoke();
+    }
+
+    public static void SetPaused(bool p) { Paused = p; OnChanged?.Invoke(); }
+    public static void ClearQueue() { queue.Clear(); progress = 0f; OnChanged?.Invoke(); }
+
+    // Drop any queued tech whose prerequisites are no longer satisfied (e.g. after a removal).
+    static void PruneQueue()
+    {
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            for (int i = 0; i < queue.Count; i++)
+            {
+                var t = TechDatabase.Get(queue[i]); if (t == null) continue;
+                bool ok = true;
+                foreach (var p in t.prereqs)
+                {
+                    bool satisfied = researched.Contains(p);
+                    if (!satisfied) for (int j = 0; j < i; j++) if (queue[j] == p) { satisfied = true; break; }
+                    if (!satisfied) { ok = false; break; }
+                }
+                if (!ok) { if (i == 0) progress = 0f; queue.RemoveAt(i); changed = true; break; }
+            }
+        }
+    }
+
+    // Advance the active research each frame (called by ResearchTaskManager).
+    public static void Tick(float dt)
+    {
+        if (Paused || queue.Count == 0 || dt <= 0f) return;
+        var t = TechDatabase.Get(queue[0]);
+        if (t == null) { queue.RemoveAt(0); progress = 0f; return; }
+        foreach (var p in t.prereqs) if (!researched.Contains(p)) { queue.RemoveAt(0); progress = 0f; return; }
+
+        // Accumulate fractional research, then spend whole research points from the bank as they're earned.
+        float rate = DrainRate * TechEffects.ResearchRateMult;
+        drainCarry += rate * dt;
+        int spend = Mathf.Min(ResearchManager.ResearchPoints, Mathf.FloorToInt(drainCarry));
+        if (spend <= 0) return;                            // no whole RP available yet -> keep accumulating
+        drainCarry -= spend;
+        ResearchManager.AddPoints(-spend);
+        progress += spend;
+        if (progress >= t.cost)
+        {
+            progress -= t.cost;
+            queue.RemoveAt(0);
+            MarkResearched(t);
+        }
+    }
+
     public static bool PrereqsMet(Tech t)
     {
         foreach (var p in t.prereqs) if (!researched.Contains(p)) return false;
@@ -189,18 +289,23 @@ public static class TechManager
         return string.Join(", ", missing);
     }
 
-    public static bool Research(string id)
+    public static bool Research(string id)   // instant-complete (dev / fallback; the UI queues instead)
     {
         var t = TechDatabase.Get(id);
         if (t == null || !CanResearch(t, out _)) return false;
         ResearchManager.AddPoints(-t.cost);
-        researched.Add(id);
+        MarkResearched(t);
+        return true;
+    }
+
+    static void MarkResearched(Tech t)
+    {
+        researched.Add(t.id);
         Recompute();
         SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
         NotificationManager.Instance?.Push($"Researched: {t.name}",
             t.desc + (string.IsNullOrEmpty(t.unlockNote) ? "" : "  " + t.unlockNote), null, NotifKind.Research);
         OnChanged?.Invoke();
-        return true;
     }
 
     // Sum every researched node's effects into the live modifier tables.
@@ -226,6 +331,7 @@ public static class TechManager
     public static void Reset()
     {
         researched.Clear();
+        queue.Clear(); progress = 0f; drainCarry = 0f; Paused = false;
         Recompute();
         OnChanged?.Invoke();
     }
@@ -235,6 +341,7 @@ public static class TechManager
     public static void Import(List<string> ids)
     {
         researched.Clear();
+        queue.Clear(); progress = 0f; drainCarry = 0f; Paused = false;
         if (ids != null) foreach (var id in ids) researched.Add(id);
         Recompute();
         OnChanged?.Invoke();
