@@ -44,6 +44,8 @@ public static class GameBootstrap
         ShipyardWindow.Create(canvas.transform);
         BodyUnitsPanel.Create(canvas.transform);
         ColonyWindow.Create(canvas.transform);
+        SystemSummaryWindow.Create(canvas.transform);
+        GalaxyLOD.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);
         GenerationMenu.Create(canvas.transform);
         EscapeMenu.Create(canvas.transform);

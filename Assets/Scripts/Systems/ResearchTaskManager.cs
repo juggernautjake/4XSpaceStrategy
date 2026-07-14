@@ -53,7 +53,7 @@ public class ResearchTaskManager : MonoBehaviour
         for (int i = active.Count - 1; i >= 0; i--)
         {
             var t = active[i];
-            t.elapsed += Time.unscaledDeltaTime;   // consistent, independent of time-scale
+            t.elapsed += Time.deltaTime;   // scales with game speed like all other in-game loading
             if (t.elapsed >= t.duration)
             {
                 Complete(t);
