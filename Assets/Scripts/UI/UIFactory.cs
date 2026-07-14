@@ -93,6 +93,18 @@ public static class UIFactory
         // Content area
         var content = NewUI(rt, "Content").GetComponent<RectTransform>();
         Stretch(content, 10, 10, 40, 10);
+
+        // Resize grip (bottom-right corner) — drag to resize the window.
+        var grip = Panel(rt, "ResizeGrip", new Color(UITheme.Accent.r, UITheme.Accent.g, UITheme.Accent.b, 0.55f));
+        var grt = grip.rectTransform;
+        grt.anchorMin = grt.anchorMax = new Vector2(1, 0);
+        grt.pivot = new Vector2(1, 0);
+        grt.sizeDelta = new Vector2(18, 18);
+        grt.anchoredPosition = Vector2.zero;
+        var resize = grip.gameObject.AddComponent<ResizableWindow>();
+        resize.target = rt;
+        resize.minSize = new Vector2(Mathf.Min(size.x, 260f), Mathf.Min(size.y, 150f));
+
         return content;
     }
 
