@@ -384,7 +384,18 @@ public static class TechManager
     static readonly List<ResearchOrder> queue = new List<ResearchOrder>();
     // Each ResearchOrder carries its own fractional research (see ResearchOrder.carry).
     public static bool Paused { get; private set; }   // global pause (the whole research effort)
-    const float DrainRate = 6f;            // base RP/sec funneled from the bank into EACH active project
+    // Base RP/sec funnelled from the bank into EACH active project.
+    //
+    // This is a SPEED LIMIT, not the actual rate — a project can never absorb points faster than this,
+    // but it's usually your income that binds, not this. It was 6, which let a 60 RP opening tech
+    // resolve in ten seconds flat off the starting bank: the entire Foundations tier was gone before
+    // the first scout had finished surveying anything. At 2.5 an opening tech is ~24s of dedicated
+    // effort, a tier-2 node a minute or so, and the 480 RP precursor projects several minutes — long
+    // enough that queue ORDER is a decision rather than a formality.
+    //
+    // Science technologies raise it (ResearchRateMult), so an empire that invests in laboratories
+    // really does pull ahead rather than just banking points faster.
+    const float DrainRate = 2.5f;
 
     public static IReadOnlyList<ResearchOrder> Queue => queue;
     public static bool IsQueued(string id) => Find(id) != null;
