@@ -8,9 +8,10 @@ using UnityEngine.EventSystems;
 public class PlanetGridVisualizer : MonoBehaviour
 {
     public GameObject tilePrefab;
-    public float tileSize = 24f;       // preferred; auto-reduced to fit large maps
-    public float maxWindowWidth = 760f;
-    public float maxWindowHeight = 420f;
+    public float tileSize = 26f;       // preferred; auto-reduced to fit large maps
+    public float maxWindowWidth = 900f;
+    public float maxWindowHeight = 460f;
+    public float minTileSize = 7f;     // small bodies keep chunky, readable tiles
     public GameObject gridWindow;
 
     PlanetSurface surface;
@@ -34,7 +35,7 @@ public class PlanetGridVisualizer : MonoBehaviour
     {
         currentTileSize = Mathf.Clamp(
             Mathf.Min(tileSize, maxWindowWidth / surface.width, maxWindowHeight / surface.height),
-            4f, tileSize);
+            minTileSize, tileSize);
 
         GridLayoutGroup grid = GetComponent<GridLayoutGroup>();
         grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
