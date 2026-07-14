@@ -30,7 +30,7 @@ public class TerrainControlPanel : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Terrain Controls", new Vector2(320, 430), out root, out titleText);
+        var content = UIFactory.Window(parent, "Terrain Controls", new Vector2(400, 440), out root, out titleText);
         rootRT = root.GetComponent<RectTransform>();
         rootRT.anchorMin = rootRT.anchorMax = new Vector2(0f, 0.5f);
         rootRT.pivot = new Vector2(0f, 0.5f);

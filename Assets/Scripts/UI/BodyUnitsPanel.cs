@@ -25,7 +25,7 @@ public class BodyUnitsPanel : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Ships Here", new Vector2(320, 180), out root, out titleText);
+        var content = UIFactory.Window(parent, "Ships Here", new Vector2(380, 200), out root, out titleText);
         var rt = root.GetComponent<RectTransform>();
         rt.anchorMin = rt.anchorMax = new Vector2(0f, 0f);
         rt.pivot = new Vector2(0f, 0f);

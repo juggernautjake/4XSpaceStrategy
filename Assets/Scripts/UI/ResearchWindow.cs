@@ -23,7 +23,7 @@ public class ResearchWindow : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Ore Codex & Research", new Vector2(430, 620), out root, out _);
+        var content = UIFactory.Window(parent, "Ore Codex & Research", new Vector2(520, 640), out root, out _);
         var rt = root.GetComponent<RectTransform>();
         rt.anchoredPosition = Vector2.zero;
 

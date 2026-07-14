@@ -24,7 +24,7 @@ public class SpeciesWindow : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Species", new Vector2(460, 640), out root, out _);
+        var content = UIFactory.Window(parent, "Species", new Vector2(560, 660), out root, out _);
         root.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
 
         header = UIFactory.Text(content, "", UITheme.HeaderSize, UITheme.Accent, TextAlignmentOptions.Left);

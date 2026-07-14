@@ -24,7 +24,7 @@ public class SaveLoadMenu : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Save / Load", new Vector2(440, 560), out root, out _);
+        var content = UIFactory.Window(parent, "Save / Load", new Vector2(520, 560), out root, out _);
         root.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
 
         UIFactory.VerticalLayout(content, 8);

@@ -25,7 +25,7 @@ public class StarInfoPanel : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Star", new Vector2(320, 300), out root, out titleText);
+        var content = UIFactory.Window(parent, "Star", new Vector2(400, 320), out root, out titleText);
         var rt = root.GetComponent<RectTransform>();
         rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
         rt.anchoredPosition = new Vector2(-260, 60);
