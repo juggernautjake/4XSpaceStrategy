@@ -55,7 +55,7 @@ public class NotificationManager : MonoBehaviour
         toastContainer = holder;
 
         // History window (hidden until opened).
-        var content = UIFactory.Window(canvas, "Notifications", new Vector2(440, 460), out historyRoot, out _);
+        var content = UIFactory.Window(canvas, "Notifications", new Vector2(500, 470), out historyRoot, out _);
         historyRoot.GetComponent<RectTransform>().anchoredPosition = new Vector2(300, 0);
         var listHolder = UIFactory.NewUI(content, "Holder").GetComponent<RectTransform>();
         UIFactory.Stretch(listHolder);

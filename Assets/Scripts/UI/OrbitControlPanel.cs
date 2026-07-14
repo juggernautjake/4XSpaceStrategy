@@ -31,7 +31,7 @@ public class OrbitControlPanel : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Orbit Controls", new Vector2(320, 560), out root, out titleText);
+        var content = UIFactory.Window(parent, "Orbit Controls", new Vector2(400, 560), out root, out titleText);
         rootRT = root.GetComponent<RectTransform>();
         rootRT.anchorMin = rootRT.anchorMax = new Vector2(1f, 0.5f);
         rootRT.pivot = new Vector2(1f, 0.5f);

@@ -24,7 +24,7 @@ public class SettingsWindow : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Settings", new Vector2(360, 470), out root, out _);
+        var content = UIFactory.Window(parent, "Settings", new Vector2(440, 490), out root, out _);
         root.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
 
         var scroll = UIFactory.ScrollView(content, out RectTransform col);

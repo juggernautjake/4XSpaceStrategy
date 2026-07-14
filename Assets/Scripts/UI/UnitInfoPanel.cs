@@ -27,7 +27,7 @@ public class UnitInfoPanel : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Ship", new Vector2(330, 400), out root, out titleText);
+        var content = UIFactory.Window(parent, "Ship", new Vector2(400, 420), out root, out titleText);
         var rt = root.GetComponent<RectTransform>();
         rt.anchorMin = rt.anchorMax = new Vector2(1f, 0.5f);
         rt.pivot = new Vector2(1f, 0.5f);

@@ -28,7 +28,7 @@ public class GenerationMenu : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "New Game", new Vector2(400, 560), out root, out _);
+        var content = UIFactory.Window(parent, "New Game", new Vector2(480, 580), out root, out _);
         root.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
 
         var scroll = UIFactory.ScrollView(content, out RectTransform col);

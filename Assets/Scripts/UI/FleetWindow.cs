@@ -23,7 +23,7 @@ public class FleetWindow : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Fleet", new Vector2(400, 520), out root, out _);
+        var content = UIFactory.Window(parent, "Fleet", new Vector2(480, 520), out root, out _);
         root.GetComponent<RectTransform>().anchoredPosition = new Vector2(-200, 0);
 
         var holder = UIFactory.NewUI(content, "Holder").GetComponent<RectTransform>();

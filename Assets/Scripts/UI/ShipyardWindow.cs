@@ -24,7 +24,7 @@ public class ShipyardWindow : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Shipyard", new Vector2(420, 560), out root, out _);
+        var content = UIFactory.Window(parent, "Shipyard", new Vector2(500, 580), out root, out _);
         root.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
 
         resourceText = UIFactory.Text(content, "", UITheme.SmallSize, UITheme.Accent, TextAlignmentOptions.Left);
