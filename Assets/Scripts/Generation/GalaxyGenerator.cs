@@ -7,10 +7,6 @@ using UnityEngine;
 // by NPC factions or unclaimed.
 public static class GalaxyGenerator
 {
-    static readonly string[] SystemNames =
-    { "Kepler", "Cygnus", "Vega", "Tau Ceti", "Draconis", "Helios", "Orion", "Lyra", "Aquila",
-      "Nyx", "Erebus", "Rhea", "Ymir", "Talos", "Zephyr", "Kestrel", "Corvus", "Mensa", "Pavo", "Indus" };
-
     public static Galaxy Generate(SolarSystemGenerator gen, int systemCount, int avgPlanets, Species homeSpecies)
     {
         systemCount = Mathf.Clamp(systemCount, 1, 12);
@@ -18,9 +14,12 @@ public static class GalaxyGenerator
         gen.minBodies = Mathf.Max(1, avgPlanets - 1);
         gen.maxBodies = avgPlanets + 2;
 
+        NameGenerator.Reset();   // fresh unique-name registry for this galaxy
+
         var galaxy = new Galaxy();
         galaxy.center = StarDatabase.BlackHole();
         galaxy.center.visualScale = 6f;
+        galaxy.center.name = "Galactic Core";
         galaxy.centerPosition = Vector3.zero;
 
         for (int i = 0; i < systemCount; i++)
@@ -28,7 +27,7 @@ public static class GalaxyGenerator
             var bodies = gen.GenerateSystem();
             var sys = new StarSystemData
             {
-                name = SystemNames[i % SystemNames.Length] + (i >= SystemNames.Length ? "-" + i : ""),
+                name = gen.currentSystemName,
                 stars = new List<StarData>(gen.stars),
                 isBlackHole = gen.isBlackHole,
                 combinedStar = gen.currentStar,
@@ -75,8 +74,10 @@ public static class GalaxyGenerator
         // A pleasant single sun so the home always has a stable habitable zone.
         var starType = Random.value < 0.5f ? StarType.G : StarType.K;
         home.stars = new List<StarData> { StarDatabase.Get(starType) };
+        home.stars[0].name = home.name;
         home.isBlackHole = false;
         home.combinedStar = home.stars[0];
+        home.combinedStar.name = home.name;
         LinkBodies(home);
 
         if (home.bodies.Count == 0) home.bodies.Add(new CelestialBody(CelestialBodyType.RockyPlanet));
@@ -182,5 +183,6 @@ public static class GalaxyGenerator
     {
         body.terrainSeed = Random.Range(0f, 10000f);
         body.continentFrequency = Mathf.Clamp(body.surfaceSize * 0.32f, 2.5f, 8f);
+        TerrainVariance.Apply(body);
     }
 }

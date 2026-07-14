@@ -10,12 +10,7 @@ public class SolarSystemGenerator : MonoBehaviour
     public StarData currentStar;     // combined physical data for the cluster (light/heat/HZ/orbits)
     public List<StarData> stars = new List<StarData>();  // 1-3 suns (or a single black hole)
     public bool isBlackHole;
-
-    static readonly string[] NamePrefixes =
-    { "Kepler", "Cygnus", "Vega", "Tau Ceti", "Draconis", "Helios", "Orion", "Lyra",
-      "Aquila", "Nyx", "Erebus", "Rhea", "Ymir", "Talos", "Zephyr", "Kestrel" };
-
-    static readonly string[] Roman = { "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X" };
+    public string currentSystemName; // unique name of the most recently generated system
 
     int _idCounter;
 
@@ -30,7 +25,9 @@ public class SolarSystemGenerator : MonoBehaviour
         int lo = Mathf.Max(1, minBodies);
         int hi = Mathf.Max(lo, maxBodies);
         int bodyCount = Mathf.Clamp(Random.Range(lo, hi + 1), 1, 10);
-        string systemName = NamePrefixes[Random.Range(0, NamePrefixes.Length)];
+        string systemName = NameGenerator.UniqueSystemName();
+        currentSystemName = systemName;
+        NameStars(systemName);
 
         float currentRadius = Random.Range(7f, 10f);
 
@@ -40,7 +37,7 @@ public class SolarSystemGenerator : MonoBehaviour
             CelestialBodyType type = RollBodyByDistance(orbitPercent, currentStarType);
 
             CelestialBody body = MakeBody(type);
-            body.name = $"{systemName} {Roman[Mathf.Min(i, Roman.Length - 1)]}";
+            body.name = NameGenerator.PlanetName(systemName, i);
 
             // Orbital layout (data-authoritative so save/load & sandbox can round-trip it).
             body.distanceFromStar = currentRadius;
@@ -61,7 +58,7 @@ public class SolarSystemGenerator : MonoBehaviour
             for (int m = 0; m < moonCount; m++)
             {
                 CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
-                moon.name = $"{body.name}-{(char)('a' + m)}";
+                moon.name = NameGenerator.MoonName(body.name, m);
                 moon.surfaceSize = Random.Range(4, 9);
                 SeedTerrain(moon);
                 moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
@@ -152,6 +149,7 @@ public class SolarSystemGenerator : MonoBehaviour
     {
         body.terrainSeed = Random.Range(0f, 10000f);
         body.continentFrequency = Mathf.Clamp(body.surfaceSize * 0.32f, 2.5f, 8f);
+        TerrainVariance.Apply(body);   // give every world a distinct terrain character
     }
 
     void ApplyHabitability(CelestialBody body)
@@ -211,7 +209,7 @@ public class SolarSystemGenerator : MonoBehaviour
     {
         stars = new List<StarData>();
 
-        if (Random.value < 0.02f)   // very rare black hole
+        if (Random.value < 0.015f)   // very rare black hole
         {
             isBlackHole = true;
             stars.Add(StarDatabase.BlackHole());
@@ -222,11 +220,19 @@ public class SolarSystemGenerator : MonoBehaviour
 
         isBlackHole = false;
         float c = Random.value;
-        int count = c < 0.04f ? 3 : (c < 0.16f ? 2 : 1);   // ~4% ternary, ~12% binary, ~84% single
+        int count = c < 0.01f ? 3 : (c < 0.05f ? 2 : 1);   // ~1% ternary, ~4% binary, ~95% single
         for (int i = 0; i < count; i++) stars.Add(StarDatabase.Get(RollStarType()));
 
         currentStar = StarDatabase.Combine(stars);
         currentStarType = currentStar.type;
+    }
+
+    // Give every sun in the cluster (and the combined star) a unique name derived from the system.
+    void NameStars(string systemName)
+    {
+        for (int i = 0; i < stars.Count; i++)
+            stars[i].name = NameGenerator.StarName(systemName, i, stars.Count);
+        if (currentStar != null) currentStar.name = systemName;
     }
 
     StarType RollStarType()
