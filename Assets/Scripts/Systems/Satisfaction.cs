@@ -38,21 +38,32 @@ public static class Satisfaction
         });
 
         // ---- Food ----
-        bool farms = b.buildings.Contains((int)BuildingType.Farm);
+        // Counts farms from BOTH systems (see ColonyFacilities): this used to read only the abstract
+        // buildings list, so a world covered in surface farms still counted as having no food — its
+        // people went hungry on paper while standing in a wheat field.
+        int foodN = ColonyFacilities.FoodSources(b);
+        float foodLvl = ColonyFacilities.FoodLevel(b);
         list.Add(new SatisfactionFactor
         {
             label = "Food supply",
-            delta = farms ? 12f : -10f,
-            detail = farms ? "Farms feed the colony well" : "No farms — the colony lives on imported rations"
+            delta = foodN <= 0 ? -14f : Mathf.Lerp(4f, 16f, foodLvl),
+            detail = foodN <= 0 ? "No farms anywhere — the colony lives on imported rations"
+                   : foodN == 1 ? "One farm — the colony is fed, but only just"
+                   : $"{foodN} farms — a comfortable surplus"
         });
 
         // ---- Power ----
-        bool power = b.buildings.Contains((int)BuildingType.PowerPlant);
+        // Any generator counts: the abstract plant, or a solar array, wind farm, geothermal plant or
+        // hydro plant placed on the surface. They're all the same answer to "are the lights on?".
+        int powerN = ColonyFacilities.PowerSources(b);
+        float powerLvl = ColonyFacilities.PowerLevel(b);
         list.Add(new SatisfactionFactor
         {
             label = "Power",
-            delta = power ? 8f : -6f,
-            detail = power ? "Reliable power" : "No power plant — rolling blackouts"
+            delta = powerN <= 0 ? -9f : Mathf.Lerp(3f, 11f, powerLvl),
+            detail = powerN <= 0 ? "No generation of any kind — rolling blackouts"
+                   : powerN == 1 ? "One generator — the grid holds, mostly"
+                   : $"{powerN} generators — a solid grid"
         });
 
         // ---- Crowding ----
@@ -68,16 +79,35 @@ public static class Satisfaction
                 detail = $"{Population.Short(b.population)} of {Population.Short(target)} — housing is running out"
             });
 
-        // ---- Amenities: research centres and shipyards mean jobs and prospects ----
-        int amenities = 0;
-        if (b.researchCenterLevel >= 1) amenities += b.researchCenterLevel;
-        if (b.shipyardLevel >= 1) amenities += b.shipyardLevel;
+        // ---- Amenities: somewhere to work, and something to work on ----
+        // Counts surface industry (mines, factories, refineries, the spaceport, the shipyard) as well as
+        // the colony-level facilities — a world's whole economy, not half of it.
+        int amenities = ColonyFacilities.ResearchSources(b) + ColonyFacilities.IndustrySources(b);
         if (amenities > 0)
             list.Add(new SatisfactionFactor
             {
                 label = "Industry & science",
-                delta = Mathf.Min(14f, amenities * 2.5f),
-                detail = "Skilled work and somewhere to go in the evening"
+                delta = Mathf.Min(14f, amenities * 2f),
+                detail = $"{amenities} tier(s) of skilled work — jobs, and somewhere to go in the evening"
+            });
+
+        // ---- Housing ----
+        // Habitats, the capitol and the settlements the population grew for itself. A colony with more
+        // people than homes is a colony living in tents.
+        int housing = ColonyFacilities.HousingSources(b);
+        if (housing <= 0 && b.population > 0)
+            list.Add(new SatisfactionFactor
+            {
+                label = "Housing",
+                delta = -8f,
+                detail = "Nowhere proper to live — no capitol, habitats or settlements"
+            });
+        else if (housing > 1)
+            list.Add(new SatisfactionFactor
+            {
+                label = "Housing",
+                delta = Mathf.Min(9f, (housing - 1) * 2.5f),
+                detail = $"{housing} places to live"
             });
 
         // ---- Terraforming is disruptive to live through ----

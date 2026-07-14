@@ -331,8 +331,57 @@ public partial class InspectorWindow
             DrillRow(p, info.name, InspectorTarget.StructureOf(b, bt), () => "operating");
         }
 
-        if (b.shipyardLevel < 1 && b.researchCenterLevel < 1 && b.buildings.Count == 0)
+        // ---- Everything on the SURFACE ----
+        // The map and this tab are one colony. Structures placed on the surface grid used to be
+        // invisible here, which made the two systems feel like different games — and worse, they had no
+        // effect on the society readout next door. They're the same infrastructure; they belong here.
+        var surface = SurfaceBuildManager.On(b);
+        if (surface.Count > 0)
+        {
+            Header(p, "ON THE SURFACE");
+            foreach (var sp in new List<PlacedBuilding>(surface))
+            {
+                var cap = sp;
+                var card = Card(p);
+                var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
+                live.Text(t, () =>
+                {
+                    var info = cap.Info;
+                    string hex = ColorUtility.ToHtmlStringRGB(info.color);
+                    string eff = info.index == SurfaceIndexKind.None
+                        ? "<color=#9FB4C8>full output</color>"
+                        : $"<color=#{ColorUtility.ToHtmlStringRGB(SurfaceBuildManager.EfficiencyColor(cap.efficiency))}>" +
+                          $"{cap.efficiency * 100f:F0}% sited</color>";
+                    return $"<color=#{hex}>■</color> <b>{info.name}</b> <size=10><color=#9FB4C8>Lv{cap.level} · ({cap.x},{cap.y})</color> · {eff}</size>";
+                });
+            }
+        }
+
+        UIFactory.Button(p, "Open Planet View (build on the surface) ▸", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
+
+        if (ColonyFacilities.TotalStructures(b) == 0 && b.shipyardLevel < 1 && b.researchCenterLevel < 1)
             Note(p, "Nothing built here yet.");
+
+        // ---- What this colony can actually DO ----
+        // Reads both systems (ColonyFacilities), which is exactly what Satisfaction next door reads —
+        // so a surface farm visibly feeds the people rather than being decoration.
+        Header(p, "CAPABILITY");
+        var capCard = Card(p);
+        var ct = UIFactory.WrapText(capCard, "", UITheme.SmallSize, UITheme.Text);
+        live.Text(ct, () =>
+        {
+            int food = ColonyFacilities.FoodSources(b);
+            int power = ColonyFacilities.PowerSources(b);
+            int res = ColonyFacilities.ResearchSources(b);
+            int ind = ColonyFacilities.IndustrySources(b);
+            int hou = ColonyFacilities.HousingSources(b);
+            string F(int n, string good, string bad) =>
+                n > 0 ? $"<color=#4DFF6E>{good}</color>" : $"<color=#FF7A6E>{bad}</color>";
+            return $"{F(food, $"{food} food source(s)", "no food")}  ·  {F(power, $"{power} generator(s)", "no power")}\n" +
+                   $"{F(res, $"{res} research tier(s)", "no research")}  ·  {F(ind, $"{ind} industry tier(s)", "no industry")}  ·  " +
+                   $"{F(hou, $"{hou} housing", "no housing")}\n" +
+                   $"<size=10><color=#9FB4C8>Counts colony facilities AND surface structures together — both feed the Society tab.</color></size>";
+        });
 
         // The construction queue — one project at a time per world, cancellable for a refund.
         Header(p, "CONSTRUCTION");

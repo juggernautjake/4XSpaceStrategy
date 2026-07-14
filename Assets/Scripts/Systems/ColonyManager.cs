@@ -96,7 +96,10 @@ public static class Colony
         list.Add(new ColonyObjective { label = $"Habitable (>= {FoundThreshold:F0}%)", done = b.habitability >= FoundThreshold, detail = $"{b.habitability:F0}%" });
         int pt = PopTarget(b);
         list.Add(new ColonyObjective { label = "Grow the population", done = b.population >= pt, detail = $"{Population.Short(b.population)} of {Population.Short(pt)}" });
-        list.Add(new ColonyObjective { label = "Develop infrastructure", done = b.buildings.Count >= BuildingTarget, detail = $"{b.buildings.Count}/{BuildingTarget} buildings" });
+        // Counts BOTH systems: a world you developed entirely on the surface grid was previously
+        // considered to have no infrastructure at all and could never be fully established.
+        int structures = ColonyFacilities.TotalStructures(b);
+        list.Add(new ColonyObjective { label = "Develop infrastructure", done = structures >= BuildingTarget, detail = $"{structures}/{BuildingTarget} structures" });
         return list;
     }
 
