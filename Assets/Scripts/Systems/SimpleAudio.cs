@@ -21,6 +21,8 @@ public class SimpleAudio : MonoBehaviour
     AudioClip cDing, cClick, cTick, cSelect, cHum, cHover, cSave, cLoad;
     AudioClip cResearch, cDiscovery, cDanger, cVictory, cDefeat, cInfo;
     AudioClip[] cChatter;   // compound robot/space chatter for ambience (kept distinct from UI sounds)
+    AudioClip[] cUnitSelect; // per-unit-type selection cue
+    AudioClip cDestroyed;
 
     public float MasterVolume { get; private set; } = 0.8f;
     public bool Muted { get; private set; } = false;
@@ -77,6 +79,14 @@ public class SimpleAudio : MonoBehaviour
         // clean functional UI/alert tones.
         cChatter = new[] { Chatter(0), Chatter(1), Chatter(2), Chatter(3), Chatter(4) };
 
+        // Per-unit selection cues (distinct character per class) + a destruction sound.
+        cUnitSelect = new AudioClip[4];
+        cUnitSelect[(int)UnitType.Scout]       = Seq(new[] { 1200f, 1500f }, 0.05f, 0.01f, 20f, 0.4f);       // quick chirp
+        cUnitSelect[(int)UnitType.ResearchShip]= Sweep(760f, 1180f, 0.14f, 8f, 0.42f);                        // warble
+        cUnitSelect[(int)UnitType.Fighter]     = Seq(new[] { 320f, 260f }, 0.07f, 0.01f, 12f, 0.5f);          // low growl
+        cUnitSelect[(int)UnitType.ColonyShip]  = Chord(new[] { 300f, 400f, 500f }, 0.28f, 6f, 0.45f);         // deep swell
+        cDestroyed = Explosion(0.6f);
+
         hum.clip = cHum; hum.volume = 0.35f; hum.Play();
 
         ApplyVolume();
@@ -124,6 +134,14 @@ public class SimpleAudio : MonoBehaviour
     public void PlaySave() { sfx.pitch = 1f; sfx.PlayOneShot(cSave, 0.6f); }
     public void PlayLoad() { sfx.pitch = 1f; sfx.PlayOneShot(cLoad, 0.6f); }
     public void PlayNotify(NotifKind k) { sfx.pitch = 1f; sfx.PlayOneShot(NotifyClip(k), 0.6f); }
+
+    public void PlayUnitSelect(UnitType t)
+    {
+        if (cUnitSelect == null) return;
+        sfx.pitch = 1f;
+        sfx.PlayOneShot(cUnitSelect[(int)t], 0.55f);
+    }
+    public void PlayUnitDestroyed() { sfx.pitch = 1f; sfx.PlayOneShot(cDestroyed, 0.7f); }
 
     AudioClip NotifyClip(NotifKind k)
     {
@@ -226,6 +244,22 @@ public class SimpleAudio : MonoBehaviour
             idx += gapN; // silence between notes
         }
         var c = AudioClip.Create("seq", n, 1, sr, false); c.SetData(d, 0); return c;
+    }
+
+    // A noisy descending boom for ship destruction.
+    static AudioClip Explosion(float dur)
+    {
+        int sr = 44100, n = (int)(sr * dur); var d = new float[n];
+        var rng = new System.Random(4242);
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)sr;
+            float env = Mathf.Exp(-6f * t);
+            float noise = (float)(rng.NextDouble() * 2 - 1);
+            float rumble = Mathf.Sin(2f * Mathf.PI * Mathf.Lerp(120f, 40f, t / dur) * t);
+            d[i] = (noise * 0.6f + rumble * 0.5f) * env * 0.7f;
+        }
+        var c = AudioClip.Create("boom", n, 1, sr, false); c.SetData(d, 0); return c;
     }
 
     // A loopable low drone: a couple of detuned low sines + a slow tremolo.

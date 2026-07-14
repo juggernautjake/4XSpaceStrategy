@@ -101,6 +101,7 @@ public class TerrainControlPanel : MonoBehaviour
 
     public void ShowFor(CelestialBody body)
     {
+        if (!GameMode.DevMode) { Hide(); return; }   // sandbox tool: Dev Mode only
         current = body;
         titleText.text = $"Terrain — {body.name}";
         SyncSliders();

@@ -52,6 +52,28 @@ public class SystemVisualizer : MonoBehaviour
         SystemContext.Set(focus.bodies, focus.combinedStar, focus.pivot, systemParent, this);
     }
 
+    // Re-applies fog / reveal to every body based on current Surveyed state (called when Dev Mode
+    // toggles, so the reveal is correct in both directions).
+    public void RefreshFog()
+    {
+        if (SystemContext.Galaxy == null) return;
+        foreach (var sys in SystemContext.Galaxy.systems)
+            foreach (var b in sys.AllBodies())
+            {
+                if (b.visualObject == null) continue;
+                var fog = b.visualObject.GetComponent<BodyFog>();
+                if (b.Surveyed)
+                {
+                    if (fog != null) Destroy(fog);
+                    PlanetAppearance.Apply(b, b.visualObject);
+                }
+                else if (fog == null)
+                {
+                    b.visualObject.AddComponent<BodyFog>().Init(b);
+                }
+            }
+    }
+
     void RenderSystem(StarSystemData sys)
     {
         var pivot = new GameObject("System_" + sys.name);
@@ -98,7 +120,8 @@ public class SystemVisualizer : MonoBehaviour
 
             var oc = visual.AddComponent<OrbitController>();
             oc.SetupFromData(pivot.transform, body);
-            PlanetAppearance.Apply(body, visual);
+            if (body.Surveyed) PlanetAppearance.Apply(body, visual);
+            else visual.AddComponent<BodyFog>().Init(body);   // fog-of-war silhouette
             if (body.owner != null) oc.SetOwnerHighlight(FactionManager.OwnerColor(body.owner), true);
 
             // --- Moons ---
@@ -115,7 +138,8 @@ public class SystemVisualizer : MonoBehaviour
 
                 var moc = moonVisual.AddComponent<OrbitController>();
                 moc.SetupFromData(body.visualObject.transform, moon);
-                PlanetAppearance.Apply(moon, moonVisual);
+                if (moon.Surveyed) PlanetAppearance.Apply(moon, moonVisual);
+                else moonVisual.AddComponent<BodyFog>().Init(moon);
                 if (moon.owner != null) moc.SetOwnerHighlight(FactionManager.OwnerColor(moon.owner), true);
             }
         }

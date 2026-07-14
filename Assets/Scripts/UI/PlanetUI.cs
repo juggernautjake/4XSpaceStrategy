@@ -37,11 +37,16 @@ public class PlanetUI : MonoBehaviour
         if (gridWindow != null) gridWindow.SetActive(false);
         if (gridCloseButton != null) gridCloseButton.onClick.AddListener(CloseGridOnly);
 
-        // Live-refresh the open info panel when the viewing species changes.
+        // Live-refresh the open info panel when the viewing species or game mode changes.
         SpeciesManager.OnSpeciesChanged += RefreshInfo;
+        GameMode.OnChanged += RefreshInfo;
     }
 
-    void OnDestroy() { SpeciesManager.OnSpeciesChanged -= RefreshInfo; }
+    void OnDestroy()
+    {
+        SpeciesManager.OnSpeciesChanged -= RefreshInfo;
+        GameMode.OnChanged -= RefreshInfo;
+    }
 
     void RefreshInfo()
     {
@@ -109,27 +114,43 @@ public class PlanetUI : MonoBehaviour
         sb.AppendLine($"Type: {body.type}");
         string ownerHex = "#" + ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(body.owner));
         sb.AppendLine($"Owner: <color={ownerHex}>{FactionManager.OwnerLabel(body.owner)}</color>");
-        sb.AppendLine($"Surface: {body.surfaceSize * 2}x{body.surfaceSize}");
         sb.AppendLine($"Distance from star: {body.distanceFromStar:F1}");
-        sb.AppendLine($"Orbit: r={body.orbitRadius:F1}  period={period:F1}s  v={vel:F1}");
-        sb.AppendLine($"Spin: {body.spinSpeed:F1}°/s");
+        sb.AppendLine($"Orbit: r={body.orbitRadius:F1}  period={period:F1}s");
 
-        string habLabel = Habitability.Label(body.habitability, body.isHabitable);
-        string habColor = Habitability.ScoreColorHex(body.habitability);
-        sb.AppendLine($"Habitability ({SpeciesManager.Current.name}): <color={habColor}><b>{body.habitability:F0}/100</b> ({habLabel})</color>");
-
-        if (body.moons.Count > 0) sb.AppendLine($"Moons: {body.moons.Count}");
-
-        if (body.resources != null && body.resources.resources.Count > 0)
+        if (!body.Surveyed)
         {
-            sb.Append("Resources: ");
-            foreach (var kv in body.resources.resources) sb.Append($"{kv.Key} {kv.Value:F0}  ");
-            sb.AppendLine();
+            sb.AppendLine("\n<color=#FFBF4D>Unexplored.</color> Send an exploration ship to survey this world and reveal its habitability, resources and secrets.");
+            sb.AppendLine($"Survey: {body.explorationProgress * 100f:F0}%");
+        }
+        else
+        {
+            sb.AppendLine($"Surface: {body.surfaceSize * 2}x{body.surfaceSize}");
+            string habLabel = Habitability.Label(body.habitability, body.isHabitable);
+            string habColor = Habitability.ScoreColorHex(body.habitability);
+            sb.AppendLine($"Habitability ({SpeciesManager.Current.name}): <color={habColor}><b>{body.habitability:F0}/100</b> ({habLabel})</color>");
+            if (body.moons.Count > 0) sb.AppendLine($"Moons: {body.moons.Count}");
+
+            if (body.resources != null && body.resources.resources.Count > 0)
+            {
+                sb.Append("Resources: ");
+                foreach (var kv in body.resources.resources) sb.Append($"{kv.Key} {kv.Value:F0}  ");
+                sb.AppendLine();
+            }
+            var ores = OreGenerator.OresOnBody(body);
+            if (ores.Count > 0) sb.AppendLine($"<color=#8FD0FF>Ore deposits: {ores.Count} type(s)</color>");
+            if (body.pointsOfInterest.Count > 0) sb.AppendLine($"Points of interest: {body.pointsOfInterest.Count}");
         }
 
-        var ores = OreGenerator.OresOnBody(body);
-        if (ores.Count > 0) sb.AppendLine($"<color=#8FD0FF>Ore deposits detected: {ores.Count} type(s)</color>");
-        if (body.pointsOfInterest.Count > 0) sb.AppendLine($"Points of interest: {body.pointsOfInterest.Count}");
+        // Colonization progress.
+        if (body.claimProgress > 0f && body.owner != FactionManager.Player)
+            sb.AppendLine($"<color=#4DFF6E>Colonizing: {body.claimProgress * 100f:F0}%</color>");
+
+        // Units present.
+        if (body.units != null && body.units.Count > 0)
+        {
+            sb.AppendLine($"\n<color=#8FD0FF>Ships here ({body.units.Count}):</color>");
+            foreach (var u in body.units) sb.AppendLine($"  • {u.name} ({u.Info.name}, {u.RankName})");
+        }
 
         return sb.ToString();
     }
