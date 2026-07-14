@@ -13,6 +13,7 @@ public static class SystemContext
     public static Transform SystemParent;
     public static SystemVisualizer Visualizer;
     public static HabitableZoneVisualizer Zone;
+    public static Galaxy Galaxy;   // when set, spans multiple systems
 
     // Raised whenever a new system is generated or loaded.
     public static event Action OnSystemChanged;
@@ -27,9 +28,16 @@ public static class SystemContext
         OnSystemChanged?.Invoke();
     }
 
-    // Flattened list including moons — handy for iterating everything.
+    // Flattened list including moons — spans the whole galaxy when one is loaded.
     public static IEnumerable<CelestialBody> AllBodies()
     {
+        if (Galaxy != null)
+        {
+            foreach (var sys in Galaxy.systems)
+                foreach (var b in sys.AllBodies())
+                    yield return b;
+            yield break;
+        }
         foreach (var b in Bodies)
         {
             yield return b;

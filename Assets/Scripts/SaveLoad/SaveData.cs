@@ -10,12 +10,12 @@ public class SaveGame
     public string saveName;
     public string savedAtIso;
     public string summary;          // short human description for the load list
-    public int starType;
-    public List<int> starTypes = new List<int>();  // full cluster (1-3 suns)
-    public bool isBlackHole;
     public int speciesIndex = 0;
+    public int difficulty = 1;              // 0 easy, 1 medium, 2 hard
+    public string factionName = "Your Empire";
+    public int homeIndex = 0;
     public float timeScale = 1f;
-    public List<BodyDTO> bodies = new List<BodyDTO>();
+    public List<SystemDTO> galaxySystems = new List<SystemDTO>();
     public ResearchDTO research = new ResearchDTO();
 
     // Space background settings (kept constant per map).
@@ -26,11 +26,25 @@ public class SaveGame
 }
 
 [System.Serializable]
+public class SystemDTO
+{
+    public string name;
+    public float px, py, pz;                 // galaxy position
+    public List<int> starTypes = new List<int>();
+    public bool isBlackHole;
+    public int ownerId = -1;                 // -1 == unclaimed
+    public bool isHome;
+    public List<BodyDTO> bodies = new List<BodyDTO>();
+}
+
+[System.Serializable]
 public class BodyDTO
 {
     public int id;
     public string name;
     public int type;
+    public int ownerId = -1;                 // -1 == unclaimed
+    public bool habitabilityLocked;
     public int surfaceSize;
     public float terrainSeed;
     public float continentFrequency;

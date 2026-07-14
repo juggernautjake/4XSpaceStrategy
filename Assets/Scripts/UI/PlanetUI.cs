@@ -95,17 +95,20 @@ public class PlanetUI : MonoBehaviour
 
     string BuildBodyInfo(CelestialBody body)
     {
-        var star = GameManager.Instance != null ? GameManager.Instance.CurrentStar : null;
+        var star = body.hostStar != null ? body.hostStar
+            : (GameManager.Instance != null ? GameManager.Instance.CurrentStar : null);
         bool isMoon = body.parentBody != null;
         float primaryMass = isMoon
             ? Mathf.Max(0.2f, OrbitalMechanics.BodyMass(body.parentBody))
-            : (star != null ? OrbitalMechanics.StarMass(star.type) : 1f);
+            : (star != null ? star.mass : 1f);
 
         float period = OrbitalMechanics.PeriodSeconds(body.orbitSpeed);
         float vel = OrbitalMechanics.OrbitalVelocity(primaryMass, body.orbitRadius);
 
         var sb = new StringBuilder();
         sb.AppendLine($"Type: {body.type}");
+        string ownerHex = "#" + ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(body.owner));
+        sb.AppendLine($"Owner: <color={ownerHex}>{FactionManager.OwnerLabel(body.owner)}</color>");
         sb.AppendLine($"Surface: {body.surfaceSize * 2}x{body.surfaceSize}");
         sb.AppendLine($"Distance from star: {body.distanceFromStar:F1}");
         sb.AppendLine($"Orbit: r={body.orbitRadius:F1}  period={period:F1}s  v={vel:F1}");

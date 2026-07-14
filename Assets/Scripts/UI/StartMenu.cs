@@ -2,10 +2,11 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 
-// The pause / main menu. Opening it pauses the simulation; closing resumes the previous speed.
-public class EscapeMenu : MonoBehaviour
+// The main menu shown when the game launches (over the nebula backdrop, time paused):
+// New Game / Load Game / Options / Exit. Starting or loading a game closes it and resumes time.
+public class StartMenu : MonoBehaviour
 {
-    public static EscapeMenu Instance;
+    public static StartMenu Instance;
 
     GameObject root;
     Button firstButton;
@@ -15,41 +16,36 @@ public class EscapeMenu : MonoBehaviour
     public static void Create(Transform canvas)
     {
         if (Instance != null) return;
-        var go = new GameObject("EscapeMenu");
+        var go = new GameObject("StartMenu");
         go.transform.SetParent(canvas, false);
-        Instance = go.AddComponent<EscapeMenu>();
+        Instance = go.AddComponent<StartMenu>();
         Instance.Build(canvas);
     }
 
     void Build(Transform canvas)
     {
-        // Full-screen dim overlay that blocks the game while paused.
-        var dim = UIFactory.Panel(canvas, "EscapeMenu", new Color(0.01f, 0.02f, 0.04f, 0.72f));
+        var dim = UIFactory.Panel(canvas, "StartMenu", new Color(0.01f, 0.02f, 0.05f, 0.88f));
         root = dim.gameObject;
         UIFactory.Stretch(dim.rectTransform);
 
-        // Centred box of options.
         var box = UIFactory.Panel(dim.transform, "Box", UITheme.PanelBg);
         var brt = box.rectTransform;
         brt.anchorMin = brt.anchorMax = new Vector2(0.5f, 0.5f);
         brt.pivot = new Vector2(0.5f, 0.5f);
-        brt.sizeDelta = new Vector2(300, 380);
+        brt.sizeDelta = new Vector2(340, 360);
         box.gameObject.AddComponent<Outline>().effectColor = UITheme.AccentDim;
         var vlg = box.gameObject.AddComponent<VerticalLayoutGroup>();
-        vlg.padding = new RectOffset(18, 18, 18, 18); vlg.spacing = 10;
+        vlg.padding = new RectOffset(20, 20, 20, 20); vlg.spacing = 12;
         vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
         vlg.childAlignment = TextAnchor.UpperCenter;
 
-        UIFactory.Label(box.transform, "<b>PAUSED</b>", UITheme.TitleSize, UITheme.Accent, 30).alignment = TMPro.TextAlignmentOptions.Center;
-
+        UIFactory.Label(box.transform, "<b>4X SPACE STRATEGY</b>", UITheme.TitleSize, UITheme.Accent, 34).alignment = TMPro.TextAlignmentOptions.Center;
         BuildLights(box.transform);
 
-        firstButton = UIFactory.Button(box.transform, "Resume", Close, 40);
-        UIFactory.Button(box.transform, "New Game", NewGame, 40);
-        UIFactory.Button(box.transform, "Save", () => { SaveLoadMenu.Instance?.Toggle(); }, 40);
-        UIFactory.Button(box.transform, "Load", () => { SaveLoadMenu.Instance?.Toggle(); }, 40);
-        UIFactory.Button(box.transform, "Settings", () => { SettingsWindow.Instance?.Open(); }, 40);
-        UIFactory.Button(box.transform, "Exit", Exit, 40);
+        firstButton = UIFactory.Button(box.transform, "New Game", () => GenerationMenu.Instance?.Open(), 44);
+        UIFactory.Button(box.transform, "Load Game", () => SaveLoadMenu.Instance?.Toggle(), 44);
+        UIFactory.Button(box.transform, "Options", () => SettingsWindow.Instance?.Open(), 44);
+        UIFactory.Button(box.transform, "Exit", Exit, 44);
 
         root.SetActive(false);
     }
@@ -62,7 +58,7 @@ public class EscapeMenu : MonoBehaviour
         hl.spacing = 8; hl.childAlignment = TextAnchor.MiddleCenter;
         hl.childControlWidth = true; hl.childControlHeight = true; hl.childForceExpandWidth = false;
 
-        Color[] palette = { UITheme.Good, UITheme.Accent, UITheme.Warn, UITheme.Good, UITheme.Accent, UITheme.Bad, UITheme.Good };
+        Color[] palette = { UITheme.Accent, UITheme.Good, UITheme.Accent, UITheme.Warn, UITheme.Accent, UITheme.Good, UITheme.Accent };
         var dots = new Image[palette.Length];
         for (int i = 0; i < palette.Length; i++)
         {
@@ -71,28 +67,14 @@ public class EscapeMenu : MonoBehaviour
             le.preferredWidth = 10; le.preferredHeight = 10; le.minWidth = 10; le.minHeight = 10;
             dots[i] = d;
         }
-        var bl = row.AddComponent<BlinkingLights>();
-        bl.lights = dots;
+        row.AddComponent<BlinkingLights>().lights = dots;
     }
-
-    static bool GameRunning => GameManager.Instance != null && GameManager.Instance.Galaxy != null
-                               && !(StartMenu.Instance != null && StartMenu.Instance.IsOpen);
-
-    void Update()
-    {
-        // Esc opens the pause menu only once a game is actually running (the start menu handles launch).
-        if (Input.GetKeyDown(KeyCode.Escape) && (IsOpen || GameRunning)) Toggle();
-    }
-
-    public void Toggle() { if (root.activeSelf) Close(); else Open(); }
 
     public void Open()
     {
-        if (!GameRunning) return;   // no game yet -> the start menu is showing
         TimeControl.Pause();
         root.SetActive(true);
         root.GetComponent<RectTransform>().SetAsLastSibling();
-        // Give the menu keyboard focus so WASD / arrows navigate the options.
         if (firstButton != null && EventSystem.current != null)
             EventSystem.current.SetSelectedGameObject(firstButton.gameObject);
     }
@@ -100,14 +82,7 @@ public class EscapeMenu : MonoBehaviour
     public void Close()
     {
         root.SetActive(false);
-        TimeControl.Resume();
         if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
-    }
-
-    void NewGame()
-    {
-        // Open the galaxy generation menu (systems + avg planets).
-        GenerationMenu.Instance?.Open();
     }
 
     void Exit()

@@ -158,13 +158,15 @@ public static class SpeciesManager
     // habitable-zone visuals.
     public static void RecomputeWorld()
     {
-        var star = GameManager.Instance != null ? GameManager.Instance.CurrentStar : null;
-        if (star != null)
-            foreach (var b in SystemContext.AllBodies())
-            {
-                b.isHabitable = Habitability.InZone(star, Current, b.distanceFromStar);
-                b.habitability = Habitability.Rate(star, Current, b.type, b.distanceFromStar);
-            }
+        var fallback = GameManager.Instance != null ? GameManager.Instance.CurrentStar : null;
+        foreach (var b in SystemContext.AllBodies())
+        {
+            if (b.habitabilityLocked) continue;      // home world keeps its difficulty rating
+            var star = b.hostStar != null ? b.hostStar : fallback;
+            if (star == null) continue;
+            b.isHabitable = Habitability.InZone(star, Current, b.distanceFromStar);
+            b.habitability = Habitability.Rate(star, Current, b.type, b.distanceFromStar);
+        }
 
         if (SystemContext.Zone != null) SystemContext.Zone.Refresh();
     }

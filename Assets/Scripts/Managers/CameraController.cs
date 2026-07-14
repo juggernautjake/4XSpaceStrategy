@@ -9,7 +9,7 @@ public class CameraController : MonoBehaviour
 
     [Header("Limits")]
     public float minHeight = 4f;           // Closest to the system
-    public float maxHeight = 400f;         // Farthest view (room to zoom way out)
+    public float maxHeight = 900f;         // Farthest view (room to see the whole galaxy)
 
     private float targetHeight;            // For smooth movement
 
@@ -53,7 +53,8 @@ public class CameraController : MonoBehaviour
     private void Update()
     {
         bool overUI = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
-        bool menuOpen = EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen;
+        bool menuOpen = (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen)
+                     || (StartMenu.Instance != null && StartMenu.Instance.IsOpen);
         bool planetSelected = PlanetUI.Selected != null;
 
         // WASD pans the camera ONLY when nothing else wants the keys:

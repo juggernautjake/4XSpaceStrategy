@@ -12,54 +12,82 @@ public class SystemVisualizer : MonoBehaviour
     [Header("References")]
     public Transform systemParent;
 
-    // Preferred entry point: renders the star cluster (1-3 suns or a black hole) at the barycenter,
-    // then planets/moons orbiting it.
-    public void VisualizeSystem(List<CelestialBody> bodies, StarData star, List<StarData> stars, bool isBlackHole)
+    // Renders the whole galaxy: a central object plus every star system at its (static) galaxy
+    // position, each with its own orbiting bodies.
+    public void VisualizeGalaxy(Galaxy galaxy)
     {
         if (planetPrefab == null || systemParent == null)
         {
             Debug.LogError("Missing references in SystemVisualizer!");
             return;
         }
+        if (galaxy == null || galaxy.systems.Count == 0) return;
 
         foreach (Transform child in systemParent)
             Destroy(child.gameObject);
 
-        // Central pivot at the barycenter — planets orbit THIS (works for single & multi-star).
-        var pivot = new GameObject("StarSystem");
-        pivot.transform.SetParent(systemParent, false);
-        pivot.transform.localPosition = Vector3.zero;
-
-        if (isBlackHole)
+        // Central supermassive object.
+        if (galaxy.center != null)
         {
-            CreateBlackHole(pivot.transform, star);
+            var centerPivot = new GameObject("GalacticCenter");
+            centerPivot.transform.SetParent(systemParent, false);
+            centerPivot.transform.localPosition = galaxy.centerPosition;
+            CreateBlackHole(centerPivot.transform, galaxy.center, null);
+        }
+
+        foreach (var sys in galaxy.systems)
+            RenderSystem(sys);
+
+        // Habitable zone for the focused (home) system.
+        var focus = GameManager.Instance != null && GameManager.Instance.FocusedSystem != null
+            ? GameManager.Instance.FocusedSystem : galaxy.Home;
+
+        var zoneGo = new GameObject("HabitableZone");
+        zoneGo.transform.SetParent(systemParent, false);
+        var zone = zoneGo.AddComponent<HabitableZoneVisualizer>();
+        zone.Build(focus.combinedStar, focus.pivot, focus.bodies);
+
+        SystemContext.Galaxy = galaxy;
+        SystemContext.Zone = zone;
+        SystemContext.Set(focus.bodies, focus.combinedStar, focus.pivot, systemParent, this);
+    }
+
+    void RenderSystem(StarSystemData sys)
+    {
+        var pivot = new GameObject("System_" + sys.name);
+        pivot.transform.SetParent(systemParent, false);
+        pivot.transform.localPosition = sys.galaxyPosition;
+        sys.pivot = pivot.transform;
+
+        // --- Star cluster ---
+        if (sys.isBlackHole)
+        {
+            CreateBlackHole(pivot.transform, sys.combinedStar, sys);
+        }
+        else if (sys.stars.Count <= 1)
+        {
+            var s = sys.stars.Count > 0 ? sys.stars[0] : sys.combinedStar;
+            var go = CreateStarVisual(s, pivot.transform, sys.combinedStar);
+            SetStarSystem(go, sys);
         }
         else
         {
-            if (stars == null || stars.Count == 0) stars = new List<StarData> { star };
-            if (stars.Count == 1)
+            float radius = 2.6f + sys.stars.Count * 0.4f;
+            for (int i = 0; i < sys.stars.Count; i++)
             {
-                CreateStarVisual(stars[0], pivot.transform, star);
-            }
-            else
-            {
-                float radius = 2.6f + stars.Count * 0.4f;
-                for (int i = 0; i < stars.Count; i++)
-                {
-                    var sv = CreateStarVisual(stars[i], pivot.transform, star);
-                    var oc = sv.AddComponent<OrbitController>();
-                    oc.ringVisible = false;
-                    oc.Setup(pivot.transform, radius, 14f);
-                    oc.SetPhase(i * 360f / stars.Count);   // spread the suns around the barycenter
-                    oc.SetRingVisible(false);
-                }
+                var go = CreateStarVisual(sys.stars[i], pivot.transform, sys.combinedStar);
+                SetStarSystem(go, sys);
+                var oc = go.AddComponent<OrbitController>();
+                oc.ringVisible = false;
+                oc.Setup(pivot.transform, radius, 14f);
+                oc.SetPhase(i * 360f / sys.stars.Count);
+                oc.SetRingVisible(false);
             }
         }
 
-        // === Planets ===
-        for (int i = 0; i < bodies.Count; i++)
+        // --- Planets ---
+        foreach (var body in sys.bodies)
         {
-            var body = bodies[i];
             GameObject visual = Instantiate(planetPrefab, systemParent);
             visual.name = body.name;
             body.visualObject = visual;
@@ -70,14 +98,10 @@ public class SystemVisualizer : MonoBehaviour
 
             var oc = visual.AddComponent<OrbitController>();
             oc.SetupFromData(pivot.transform, body);
-
             PlanetAppearance.Apply(body, visual);
-        }
+            if (body.owner != null) oc.SetOwnerHighlight(FactionManager.OwnerColor(body.owner), true);
 
-        // === Moons ===
-        foreach (var body in bodies)
-        {
-            if (body.visualObject == null) continue;
+            // --- Moons ---
             foreach (var moon in body.moons)
             {
                 moon.parentBody = body;
@@ -91,27 +115,17 @@ public class SystemVisualizer : MonoBehaviour
 
                 var moc = moonVisual.AddComponent<OrbitController>();
                 moc.SetupFromData(body.visualObject.transform, moon);
-
                 PlanetAppearance.Apply(moon, moonVisual);
+                if (moon.owner != null) moc.SetOwnerHighlight(FactionManager.OwnerColor(moon.owner), true);
             }
         }
-
-        // === Habitable zone ===
-        var zoneGo = new GameObject("HabitableZone");
-        zoneGo.transform.SetParent(systemParent, false);
-        var zone = zoneGo.AddComponent<HabitableZoneVisualizer>();
-        zone.Build(star, pivot.transform, bodies);
-
-        SystemContext.Zone = zone;
-        SystemContext.Set(bodies, star, pivot.transform, systemParent, this);
     }
 
-    // Back-compat overloads.
-    public void VisualizeSystem(List<CelestialBody> bodies, StarData star)
-        => VisualizeSystem(bodies, star, new List<StarData> { star }, star != null && star.isBlackHole);
-
-    public void VisualizeSystem(List<CelestialBody> bodies, StarType starType)
-        => VisualizeSystem(bodies, StarDatabase.Get(starType));
+    static void SetStarSystem(GameObject starGo, StarSystemData sys)
+    {
+        var si = starGo.GetComponent<StarInteraction>();
+        if (si != null) si.system = sys;
+    }
 
     GameObject CreateStarVisual(StarData s, Transform parent, StarData combined)
     {
@@ -139,12 +153,12 @@ public class SystemVisualizer : MonoBehaviour
         light.type = LightType.Point;
         light.color = s.color;
         light.intensity = s.lightIntensity / Mathf.Max(1, combined.starCount);
-        light.range = 700f;
+        light.range = 160f;   // local to its own system so the whole galaxy isn't over-lit
 
         return star;
     }
 
-    void CreateBlackHole(Transform parent, StarData combined)
+    void CreateBlackHole(Transform parent, StarData combined, StarSystemData sys)
     {
         var bh = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         bh.name = "BlackHole";
@@ -157,8 +171,8 @@ public class SystemVisualizer : MonoBehaviour
 
         var si = bh.GetComponent<StarInteraction>() ?? bh.AddComponent<StarInteraction>();
         si.star = combined;
+        si.system = sys;
 
-        // Bright accretion ring.
         var ringGo = new GameObject("Accretion");
         ringGo.transform.SetParent(bh.transform, false);
         var lr = ringGo.AddComponent<LineRenderer>();
@@ -179,6 +193,6 @@ public class SystemVisualizer : MonoBehaviour
         light.type = LightType.Point;
         light.color = new Color(1f, 0.6f, 0.3f);
         light.intensity = combined.lightIntensity;
-        light.range = 500f;
+        light.range = 160f;
     }
 }

@@ -1,44 +1,32 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// Converts between the live game state and the serializable SaveGame DTO tree.
+// Converts between the live galaxy and the serializable SaveGame DTO tree.
 public static class GameStateSerializer
 {
     // ---- Capture ----
     public static SaveGame Capture(string saveName)
     {
         var gm = GameManager.Instance;
+        var galaxy = gm != null ? gm.Galaxy : null;
+
         var game = new SaveGame
         {
             saveName = saveName,
             savedAtIso = System.DateTime.UtcNow.ToString("o"),
-            starType = (int)(gm.CurrentStar != null ? gm.CurrentStar.type : StarType.G),
-            isBlackHole = gm.IsBlackHole,
             speciesIndex = SpeciesManager.CurrentIndex,
+            difficulty = (int)GameConfig.CurrentDifficulty,
+            factionName = FactionManager.Player != null ? FactionManager.Player.name : "Your Empire",
+            homeIndex = galaxy != null ? galaxy.homeIndex : 0,
             timeScale = Time.timeScale
         };
-
-        if (gm.Stars != null)
-            foreach (var s in gm.Stars) game.starTypes.Add((int)s.type);
 
         var bg = SpaceBackground.Instance;
         if (bg != null)
         {
-            game.bgSeed = bg.Seed;
-            game.bgEnabled = bg.Enabled;
-            game.bgSolid = bg.SolidMode;
+            game.bgSeed = bg.Seed; game.bgEnabled = bg.Enabled; game.bgSolid = bg.SolidMode;
             game.bgR = bg.SolidColor.r; game.bgG = bg.SolidColor.g; game.bgB = bg.SolidColor.b;
         }
-
-        int count = 0;
-        foreach (var body in gm.CurrentBodies)
-        {
-            game.bodies.Add(ToDTO(body));
-            count += 1 + body.moons.Count;
-        }
-
-        string starName = gm.CurrentStar != null ? gm.CurrentStar.type.ToString() : "?";
-        game.summary = $"{starName}-type star · {count} bodies";
 
         game.research = new ResearchDTO
         {
@@ -46,36 +34,51 @@ public static class GameStateSerializer
             researched = ResearchManager.ExportResearched(),
             points = ResearchManager.ResearchPoints
         };
+
+        int bodyCount = 0;
+        if (galaxy != null)
+            foreach (var sys in galaxy.systems)
+            {
+                game.galaxySystems.Add(SysToDTO(sys));
+                foreach (var _ in sys.AllBodies()) bodyCount++;
+            }
+
+        int sysCount = galaxy != null ? galaxy.systems.Count : 0;
+        game.summary = $"{sysCount} systems · {bodyCount} bodies · {GameConfig.CurrentDifficulty}";
         return game;
+    }
+
+    static SystemDTO SysToDTO(StarSystemData sys)
+    {
+        var sd = new SystemDTO
+        {
+            name = sys.name,
+            px = sys.galaxyPosition.x, py = sys.galaxyPosition.y, pz = sys.galaxyPosition.z,
+            isBlackHole = sys.isBlackHole,
+            ownerId = sys.owner != null ? sys.owner.id : -1,
+            isHome = sys.isHome
+        };
+        foreach (var s in sys.stars) sd.starTypes.Add((int)s.type);
+        foreach (var b in sys.bodies) sd.bodies.Add(ToDTO(b));
+        return sd;
     }
 
     static BodyDTO ToDTO(CelestialBody b)
     {
         var dto = new BodyDTO
         {
-            id = b.id,
-            name = b.name,
-            type = (int)b.type,
+            id = b.id, name = b.name, type = (int)b.type,
+            ownerId = b.owner != null ? b.owner.id : -1,
+            habitabilityLocked = b.habitabilityLocked,
             surfaceSize = b.surfaceSize,
             terrainSeed = b.terrainSeed,
             continentFrequency = b.continentFrequency,
-            tScale = b.terrainParams.scale,
-            tElev = b.terrainParams.elevation,
-            tMoist = b.terrainParams.moisture,
-            tHeat = b.terrainParams.heat,
-            tRidge = b.terrainParams.ridge,
-            orbitRadius = b.orbitRadius,
-            orbitSpeed = b.orbitSpeed,
-            orbitPhase = b.orbitPhase,
-            orbitDirection = b.orbitDirection,
-            inclination = b.inclination,
-            eccentricity = b.eccentricity,
-            verticalOffset = b.verticalOffset,
-            spinSpeed = b.spinSpeed,
-            showRing = b.showRing,
-            distanceFromStar = b.distanceFromStar,
-            habitability = b.habitability,
-            isHabitable = b.isHabitable
+            tScale = b.terrainParams.scale, tElev = b.terrainParams.elevation,
+            tMoist = b.terrainParams.moisture, tHeat = b.terrainParams.heat, tRidge = b.terrainParams.ridge,
+            orbitRadius = b.orbitRadius, orbitSpeed = b.orbitSpeed, orbitPhase = b.orbitPhase,
+            orbitDirection = b.orbitDirection, inclination = b.inclination, eccentricity = b.eccentricity,
+            verticalOffset = b.verticalOffset, spinSpeed = b.spinSpeed, showRing = b.showRing,
+            distanceFromStar = b.distanceFromStar, habitability = b.habitability, isHabitable = b.isHabitable
         };
 
         if (b.resources != null)
@@ -100,9 +103,7 @@ public static class GameStateSerializer
                 kind = p.kind, researchDuration = p.researchDuration, reportText = p.reportText
             });
 
-        foreach (var m in b.moons)
-            dto.moons.Add(ToDTO(m));
-
+        foreach (var m in b.moons) dto.moons.Add(ToDTO(m));
         return dto;
     }
 
@@ -111,44 +112,55 @@ public static class GameStateSerializer
     {
         if (game == null) return;
 
-        var bodies = new List<CelestialBody>();
-        foreach (var dto in game.bodies)
-            bodies.Add(FromDTO(dto, null));
+        GameConfig.CurrentDifficulty = (Difficulty)Mathf.Clamp(game.difficulty, 0, 2);
+        if (!string.IsNullOrEmpty(game.factionName) && FactionManager.Player != null)
+            FactionManager.Player.name = game.factionName;
 
-        // Rebuild the star cluster.
-        var starList = new List<StarData>();
-        StarData star;
-        if (game.isBlackHole)
+        var galaxy = new Galaxy { homeIndex = game.homeIndex };
+        galaxy.center = StarDatabase.BlackHole();
+        galaxy.center.visualScale = 6f;
+
+        foreach (var sd in game.galaxySystems)
         {
-            starList.Add(StarDatabase.BlackHole());
-            star = starList[0];
-        }
-        else
-        {
-            if (game.starTypes != null && game.starTypes.Count > 0)
-                foreach (var t in game.starTypes) starList.Add(StarDatabase.Get((StarType)t));
+            var sys = new StarSystemData
+            {
+                name = sd.name,
+                galaxyPosition = new Vector3(sd.px, sd.py, sd.pz),
+                isBlackHole = sd.isBlackHole,
+                isHome = sd.isHome,
+                owner = sd.ownerId >= 0 ? FactionManager.Get(sd.ownerId) : null
+            };
+
+            if (sd.isBlackHole)
+            {
+                sys.stars.Add(StarDatabase.BlackHole());
+                sys.combinedStar = sys.stars[0];
+            }
             else
-                starList.Add(StarDatabase.Get((StarType)game.starType));
-            star = StarDatabase.Combine(starList);
+            {
+                foreach (var t in sd.starTypes) sys.stars.Add(StarDatabase.Get((StarType)t));
+                if (sys.stars.Count == 0) sys.stars.Add(StarDatabase.Get(StarType.G));
+                sys.combinedStar = StarDatabase.Combine(sys.stars);
+            }
+
+            foreach (var bd in sd.bodies) sys.bodies.Add(FromDTO(bd, null));
+            foreach (var b in sys.AllBodies()) { b.hostStar = sys.combinedStar; b.system = sys; }
+
+            galaxy.systems.Add(sys);
         }
 
-        ResearchManager.Import(game.research?.discovered, game.research?.researched, game.research != null ? game.research.points : 0);
+        ResearchManager.Import(game.research?.discovered, game.research?.researched,
+                               game.research != null ? game.research.points : 0);
 
-        // Show the loaded system (fires OnSystemChanged → recompute + per-map sky).
-        GameManager.Instance.LoadSystem(bodies, star, starList, game.isBlackHole);
-
-        // Restore the viewing species (re-scores every body for that perspective).
+        GameManager.Instance.LoadGalaxy(galaxy);
         SpeciesManager.Select(game.speciesIndex);
 
-        // Restore the exact saved background (overrides the derived per-map reseed above).
         var bg = SpaceBackground.Instance;
         if (bg != null)
         {
-            bg.SetSeed(game.bgSeed);
-            bg.Rebuild();
+            bg.SetSeed(game.bgSeed); bg.Rebuild();
             bg.SetSolidColor(new Color(game.bgR, game.bgG, game.bgB));
-            bg.SetSolidMode(game.bgSolid);
-            bg.SetEnabled(game.bgEnabled);
+            bg.SetSolidMode(game.bgSolid); bg.SetEnabled(game.bgEnabled);
         }
 
         float ts = Mathf.Max(0f, game.timeScale <= 0f ? 1f : game.timeScale);
@@ -160,23 +172,15 @@ public static class GameStateSerializer
     {
         var b = new CelestialBody((CelestialBodyType)dto.type)
         {
-            id = dto.id,
-            name = dto.name,
-            surfaceSize = dto.surfaceSize,
-            terrainSeed = dto.terrainSeed,
-            continentFrequency = dto.continentFrequency,
-            orbitRadius = dto.orbitRadius,
-            orbitSpeed = dto.orbitSpeed,
-            orbitPhase = dto.orbitPhase,
+            id = dto.id, name = dto.name, surfaceSize = dto.surfaceSize,
+            terrainSeed = dto.terrainSeed, continentFrequency = dto.continentFrequency,
+            orbitRadius = dto.orbitRadius, orbitSpeed = dto.orbitSpeed, orbitPhase = dto.orbitPhase,
             orbitDirection = dto.orbitDirection == 0 ? 1 : dto.orbitDirection,
-            inclination = dto.inclination,
-            eccentricity = dto.eccentricity,
-            verticalOffset = dto.verticalOffset,
-            spinSpeed = dto.spinSpeed,
-            showRing = dto.showRing,
-            distanceFromStar = dto.distanceFromStar,
-            habitability = dto.habitability,
-            isHabitable = dto.isHabitable,
+            inclination = dto.inclination, eccentricity = dto.eccentricity,
+            verticalOffset = dto.verticalOffset, spinSpeed = dto.spinSpeed, showRing = dto.showRing,
+            distanceFromStar = dto.distanceFromStar, habitability = dto.habitability,
+            isHabitable = dto.isHabitable, habitabilityLocked = dto.habitabilityLocked,
+            owner = dto.ownerId >= 0 ? FactionManager.Get(dto.ownerId) : null,
             parentBody = parent
         };
 
@@ -189,10 +193,7 @@ public static class GameStateSerializer
             ridge = dto.tRidge <= 0f ? 1f : dto.tRidge
         };
 
-        // Terrain regenerates deterministically from the seed + params (matches the saved game).
         b.surface = PlanetTerrainGenerator.GenerateSurface(b);
-
-        // Re-apply stored ore deposits.
         if (b.surface != null)
             foreach (var o in dto.ores)
                 if (o.x >= 0 && o.x < b.surface.width && o.y >= 0 && o.y < b.surface.height)
@@ -201,8 +202,7 @@ public static class GameStateSerializer
                     if (t != null) { t.ore = (OreType)o.ore; t.oreRichness = o.richness; }
                 }
 
-        foreach (var r in dto.resources)
-            b.resources.Add((ResourceType)r.type, r.amount);
+        foreach (var r in dto.resources) b.resources.Add((ResourceType)r.type, r.amount);
 
         foreach (var p in dto.pois)
             b.pointsOfInterest.Add(new PointOfInterest
@@ -214,9 +214,7 @@ public static class GameStateSerializer
                 reportText = p.reportText
             });
 
-        foreach (var m in dto.moons)
-            b.moons.Add(FromDTO(m, b));
-
+        foreach (var m in dto.moons) b.moons.Add(FromDTO(m, b));
         return b;
     }
 }

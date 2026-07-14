@@ -36,7 +36,9 @@ public static class GameBootstrap
         SpeciesWindow.Create(canvas.transform);
         DetailedSurfaceWindow.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);
+        GenerationMenu.Create(canvas.transform);
         EscapeMenu.Create(canvas.transform);
+        StartMenu.Create(canvas.transform);
 
         var hud = new GameObject("GameHUD").AddComponent<GameHUD>();
         hud.Build(canvas.transform);

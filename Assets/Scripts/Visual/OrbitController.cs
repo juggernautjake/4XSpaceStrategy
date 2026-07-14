@@ -31,6 +31,7 @@ public class OrbitController : MonoBehaviour
     float currentAngle;
     LineRenderer orbitRing;
     LineRenderer habitableRing;
+    LineRenderer ownerRing;
     Transform Container => transform.parent; // unscaled system container
 
     // ---- Setup ----
@@ -127,9 +128,11 @@ public class OrbitController : MonoBehaviour
             orbitRing.transform.position = parentBody.position + Vector3.up * verticalOffset;
             orbitRing.transform.rotation = tilt;
         }
-        // Green habitability highlight sits on the body itself.
+        // Highlight rings sit on the body itself.
         if (habitableRing != null)
             habitableRing.transform.position = transform.position;
+        if (ownerRing != null)
+            ownerRing.transform.position = transform.position;
     }
 
     // ---- Live setters (used by the orbit control panel for real-time editing) ----
@@ -189,9 +192,39 @@ public class OrbitController : MonoBehaviour
         }
     }
 
+    // Coloured ring showing which faction owns this body (kept slightly larger than the green
+    // habitable ring so they can both show).
+    public void SetOwnerHighlight(Color c, bool on)
+    {
+        if (on)
+        {
+            if (ownerRing == null)
+            {
+                var go = new GameObject(gameObject.name + "_OwnerRing");
+                go.transform.SetParent(Container, false);
+                ownerRing = go.AddComponent<LineRenderer>();
+                ownerRing.useWorldSpace = false;
+                ownerRing.loop = true;
+                ownerRing.material = new Material(Shader.Find("Sprites/Default"));
+                ownerRing.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                float r = Mathf.Max(1.6f, transform.lossyScale.x * 1.9f);
+                ownerRing.startWidth = ownerRing.endWidth = 0.14f;
+                DrawEllipse(ownerRing, r, r);
+            }
+            ownerRing.startColor = ownerRing.endColor = c;
+            ownerRing.enabled = true;
+            UpdatePosition();
+        }
+        else if (ownerRing != null)
+        {
+            ownerRing.enabled = false;
+        }
+    }
+
     void OnDestroy()
     {
         if (orbitRing != null) Destroy(orbitRing.gameObject);
         if (habitableRing != null) Destroy(habitableRing.gameObject);
+        if (ownerRing != null) Destroy(ownerRing.gameObject);
     }
 }
