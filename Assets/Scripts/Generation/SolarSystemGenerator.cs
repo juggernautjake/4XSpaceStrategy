@@ -29,7 +29,7 @@ public class SolarSystemGenerator : MonoBehaviour
         currentSystemName = systemName;
         NameStars(systemName);
 
-        float currentRadius = Random.Range(7f, 10f);
+        float currentRadius = Random.Range(9f, 12f);   // clear the star + inner-moon reach
 
         for (int i = 0; i < bodyCount; i++)
         {
@@ -83,8 +83,11 @@ public class SolarSystemGenerator : MonoBehaviour
 
             system.Add(body);
 
-            // Step outward, with a little jitter so systems don't look uniform.
-            currentRadius += 5f + body.surfaceSize * 0.25f + Random.Range(0f, 3.5f);
+            // Step outward far enough that nothing clips: clear this planet's own radius AND the reach
+            // of its moon system, plus a margin for the NEXT planet's body/inner moons, plus jitter.
+            float planetRadius = Mathf.Max(0.6f, body.surfaceSize * 0.08f);
+            float moonExtent = moonCount > 0 ? moonR + 1f : 0f;     // outer reach of the moon orbits
+            currentRadius += planetRadius + moonExtent + 8f + body.surfaceSize * 0.12f + Random.Range(0f, 3f);
         }
 
         // Lean towards a living world: make sure at least one planet sits in the habitable zone.

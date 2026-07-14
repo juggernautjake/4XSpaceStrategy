@@ -9,7 +9,7 @@ public class CameraController : MonoBehaviour
 
     [Header("Limits")]
     public float minHeight = 4f;           // Closest to the system
-    public float maxHeight = 3500f;        // Farthest view — zoom way out to reach distant systems
+    public float maxHeight = 9000f;        // Farthest view — pull right back to a galaxy-wide symbol map
 
     private float targetHeight;            // For smooth movement
 
@@ -35,7 +35,9 @@ public class CameraController : MonoBehaviour
         Vector3 pos = worldPos - f * d;
         pos.y = h;
         transform.position = pos;
-        targetHeight = h;
+        // NOTE: do NOT touch targetHeight here. While following, this runs every frame; resetting the
+        // zoom target would fight the scroll wheel and make zooming feel janky/stuck when a body is
+        // selected. Zoom is owned solely by HandleHeightChange/SmoothHeightMovement.
     }
 
     // Convenience: focus whatever camera controller exists (or the main camera as a fallback).
