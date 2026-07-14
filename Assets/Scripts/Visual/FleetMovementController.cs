@@ -117,10 +117,6 @@ public class FleetMovementController : MonoBehaviour
         line.SetPosition(0, origin);
         line.SetPosition(1, endPoint);
 
-        TooltipManager.Instance.ShowAtCursor(
-            $"Send to <b>{hovered.name}</b>\nTravel: {dur:F0}s" +
-            (predict ? "\n<color=#4DFF6E>predicted arrival point</color>" : "\n<size=10>hold Shift for predicted intercept</size>"));
-
         if (Input.GetMouseButtonDown(0) &&
             !(UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()))
         {
@@ -187,11 +183,7 @@ public class FleetMovementController : MonoBehaviour
         line.enabled = true;
         line.SetPosition(0, origin);
         line.SetPosition(1, endPoint);
-
-        string dest = hovered != null ? $"<b>{hovered.name}</b>" : "deep space";
-        TooltipManager.Instance.ShowAtCursor(
-            $"Right-click to send {sel.Count} ship(s) to {dest}\nTravel: {dur:F0}s" +
-            (predict ? "\n<color=#4DFF6E>predicted arrival point</color>" : "\n<size=10>hold Shift for predicted intercept</size>"));
+        // No cursor-following tooltip: just the dashed trajectory. Right-click brings up the confirm menu.
     }
 
     List<Unit> SelectableFleet()

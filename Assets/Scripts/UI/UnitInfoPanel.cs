@@ -14,8 +14,14 @@ public class UnitInfoPanel : MonoBehaviour
     TMP_InputField nameInput;
     Image progressFill;
     Button surveyBtn, researchBtn, colonizeBtn, returnBtn, scrapBtn, pauseBtn;
-    TMP_Text pauseLabel;
+    TMP_Text pauseLabel, colonizeLabel;
+    Toggle queueModeToggle;
+    RectTransform queueList;
+    TMP_Text queueHeader;
+    string lastQueueSig = "";
     Unit current;
+
+    bool QueueMode => queueModeToggle != null && queueModeToggle.isOn;
 
     public static void Create(Transform parent)
     {
@@ -28,7 +34,7 @@ public class UnitInfoPanel : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Ship", new Vector2(400, 420), out root, out titleText);
+        var content = UIFactory.Window(parent, "Ship", new Vector2(400, 580), out root, out titleText);
         var rt = root.GetComponent<RectTransform>();
         rt.anchorMin = rt.anchorMax = new Vector2(1f, 0.5f);
         rt.pivot = new Vector2(1f, 0.5f);
@@ -64,21 +70,31 @@ public class UnitInfoPanel : MonoBehaviour
         progressLabel = UIFactory.Text(barHolder.transform, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Center);
         UIFactory.Stretch(progressLabel.rectTransform);
 
+        // When Queue mode is ON, the action buttons ADD to the queue instead of replacing; when OFF
+        // they do it now. (Right-clicking the map with Ctrl also queues.)
+        queueModeToggle = UIFactory.Toggle(content, "Queue mode (add to end instead of doing now)", false, null);
+
         surveyBtn = UIFactory.Button(content, "Survey / Collect Samples", DoSurvey, 28);
         researchBtn = UIFactory.Button(content, "Research Here", DoResearch, 28);
         colonizeBtn = UIFactory.Button(content, "Found Colony", DoColonize, 28);
-
-        // Queue controls.
-        var qrow = UIFactory.NewUI(content, "QueueRow"); UIFactory.AddLayout(qrow, 30);
-        var qh = qrow.AddComponent<HorizontalLayoutGroup>(); qh.spacing = 6; qh.childControlWidth = true; qh.childControlHeight = true; qh.childForceExpandWidth = true;
-        pauseBtn = UIFactory.Button(qrow.transform, "Pause Queue", TogglePause, 28);
-        pauseLabel = pauseBtn.GetComponentInChildren<TMP_Text>();
-        UIFactory.Button(qrow.transform, "Stop", DoStop, 28);
+        colonizeLabel = colonizeBtn.GetComponentInChildren<TMP_Text>();
 
         var row = UIFactory.NewUI(content, "Row"); UIFactory.AddLayout(row, 30);
         var h = row.AddComponent<HorizontalLayoutGroup>(); h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true;
         UIFactory.Button(row.transform, "Send…", DoSend, 28);
         returnBtn = UIFactory.Button(row.transform, "Return Home", DoReturn, 28);
+
+        // Queue controls + a live list of queued orders (each removable).
+        var qrow = UIFactory.NewUI(content, "QueueRow"); UIFactory.AddLayout(qrow, 30);
+        var qh = qrow.AddComponent<HorizontalLayoutGroup>(); qh.spacing = 6; qh.childControlWidth = true; qh.childControlHeight = true; qh.childForceExpandWidth = true;
+        pauseBtn = UIFactory.Button(qrow.transform, "Pause Queue", TogglePause, 28);
+        pauseLabel = pauseBtn.GetComponentInChildren<TMP_Text>();
+        UIFactory.Button(qrow.transform, "Stop All", DoStop, 28);
+
+        queueHeader = UIFactory.Label(content, "Orders", UITheme.SmallSize, UITheme.Accent, 16);
+        var qholder = UIFactory.NewUI(content, "QueueHolder").GetComponent<RectTransform>();
+        UIFactory.AddLayout(qholder.gameObject, 110);
+        UIFactory.ScrollView(qholder, out queueList);
 
         var row2 = UIFactory.NewUI(content, "Row2"); UIFactory.AddLayout(row2, 30);
         var h2 = row2.AddComponent<HorizontalLayoutGroup>(); h2.spacing = 6; h2.childControlWidth = true; h2.childControlHeight = true; h2.childForceExpandWidth = true;
@@ -101,23 +117,39 @@ public class UnitInfoPanel : MonoBehaviour
     }
 
     // These issue ORDERS (so they travel-then-act if needed, and can be queued/interrupted).
+    // Actions target the ship's current location, or — in Queue mode — the destination of its last
+    // queued order (so you can chain "go to X, then survey X").
+    CelestialBody ActionTarget()
+    {
+        if (current == null) return null;
+        if (QueueMode && current.orders != null && current.orders.Count > 0)
+        {
+            for (int i = current.orders.Count - 1; i >= 0; i--)
+                if (current.orders[i].target != null) return current.orders[i].target;
+        }
+        return current.location;
+    }
+
     void DoSurvey()
     {
-        if (current == null || current.location == null || !current.Info.canExplore) return;
-        UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Survey, current.location, false);
+        var t = ActionTarget();
+        if (current == null || t == null || !current.Info.canExplore) return;
+        UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Survey, t, QueueMode);
     }
 
     void DoResearch()
     {
-        if (current == null || current.location == null || !current.Info.canResearch) return;
-        UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Research, current.location, false);
+        var t = ActionTarget();
+        if (current == null || t == null || !current.Info.canResearch) return;
+        UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Research, t, QueueMode);
     }
 
     void DoColonize()
     {
-        if (current == null || current.location == null || !current.Info.canColonize) return;
-        if (current.location.owner == FactionManager.Player) return;
-        UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Colonize, current.location, false);
+        var t = ActionTarget();
+        if (current == null || t == null || !current.Info.canColonize) return;
+        if (t.owner == FactionManager.Player) return;
+        UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Colonize, t, QueueMode);
     }
 
     void DoStop() { if (current != null) UnitManager.Instance?.StopAll(current); }
@@ -190,13 +222,69 @@ public class UnitInfoPanel : MonoBehaviour
             $"XP {u.experience:F0}  Worlds {u.worldsExplored}\n\n" +
             $"<color=#8FD0FF>Task:</color> {task}{queueLine}{sampleLine}";
 
-        bool atBody = u.location != null;
-        bool surveyed = atBody && u.location.Surveyed;
-        surveyBtn.interactable = atBody && u.Info.canExplore && !surveyed;
-        researchBtn.interactable = atBody && u.Info.canResearch && surveyed;
-        colonizeBtn.interactable = atBody && u.Info.canColonize && u.location.owner != FactionManager.Player;
-        returnBtn.interactable = atBody && u.location != UnitManager.Instance?.HomePlanet;
+        // Button availability. In Queue mode the target is the ship's last queued destination (so you
+        // can chain "go to X, then survey/research/colonize X" even before it arrives).
+        var t = ActionTarget();
+        bool q = QueueMode;
+        surveyBtn.interactable = t != null && u.Info.canExplore && (q || !t.Surveyed);
+        researchBtn.interactable = t != null && u.Info.canResearch && (q || t.Surveyed);
+        returnBtn.interactable = u.location != null && u.location != UnitManager.Instance?.HomePlanet;
         scrapBtn.interactable = UnitManager.Instance != null && UnitManager.Instance.CanScrap(u);
         if (pauseLabel != null) pauseLabel.text = u.queuePaused ? "Resume Queue" : "Pause Queue";
+
+        UpdateColonizeButton(u, t);
+        RefreshQueue(u);
+    }
+
+    // The Found Colony button is locked with a plain-language reason when it can't be used, so it's
+    // always clear WHY colonization isn't available.
+    void UpdateColonizeButton(Unit u, CelestialBody t)
+    {
+        string reason = null;
+        if (!u.Info.canColonize) reason = "colony ship only";
+        else if (t == null) reason = QueueMode ? "queue a destination first" : "travel to a world first";
+        else if (t.owner == FactionManager.Player) reason = "already yours";
+        else if (t.habitability < UnitManager.ColonizeMinHabitability)
+            reason = $"needs {UnitManager.ColonizeMinHabitability:F0}% hab (this: {t.habitability:F0}%)";
+
+        colonizeBtn.interactable = reason == null;
+        if (colonizeLabel != null)
+            colonizeLabel.text = reason == null ? "Found Colony (consumes ship)" : $"Found Colony — {reason}";
+    }
+
+    // Rebuilds the visible order list only when it actually changes (so it's not recreated per frame).
+    void RefreshQueue(Unit u)
+    {
+        string sig = u.queuePaused ? "P" : "";
+        if (u.orders != null) foreach (var o in u.orders) sig += $"|{(int)o.kind}:{(o.target != null ? o.target.name : (o.isPoint ? "space" : "?"))}";
+        if (sig == lastQueueSig) return;
+        lastQueueSig = sig;
+
+        for (int i = queueList.childCount - 1; i >= 0; i--) Destroy(queueList.GetChild(i).gameObject);
+
+        int count = u.orders != null ? u.orders.Count : 0;
+        queueHeader.text = count == 0 ? "Orders — none" : $"Orders ({count})" + (u.queuePaused ? "  <color=#FFBF4D>PAUSED</color>" : "");
+        if (count == 0)
+        {
+            UIFactory.Label(queueList, "<color=#7C8CA0>Idle. Use Queue mode or Ctrl+right-click to line up orders.</color>", UITheme.SmallSize, UITheme.SubText, 30);
+            return;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            int idx = i;
+            var o = u.orders[i];
+            var rowGo = UIFactory.NewUI(queueList, "Order");
+            UIFactory.AddLayout(rowGo, 26);
+            var hl = rowGo.AddComponent<HorizontalLayoutGroup>();
+            hl.spacing = 4; hl.childControlWidth = true; hl.childControlHeight = true; hl.childForceExpandWidth = false;
+
+            string tag = i == 0 ? "<color=#4DFF6E>▶</color>" : $"{i}.";
+            var lbl = UIFactory.Text(rowGo.transform, $"{tag} {o.Describe()}", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
+            var le = lbl.gameObject.AddComponent<LayoutElement>(); le.flexibleWidth = 1;
+
+            var rm = UIFactory.Button(rowGo.transform, "✕", () => UnitManager.Instance?.RemoveOrder(current, idx), 22);
+            var rmle = rm.GetComponent<LayoutElement>(); if (rmle != null) { rmle.minWidth = 26; rmle.preferredWidth = 26; }
+        }
     }
 }

@@ -289,6 +289,10 @@ public class SystemVisualizer : MonoBehaviour
         float sl = Mathf.Max(0.0001f, go.transform.lossyScale.x);
         sc.center = Vector3.zero;
         sc.radius = Mathf.Max(0.5f, minWorldRadius / sl);
+
+        // Keep it clickable when zoomed out (grows the pick radius with camera height).
+        var scaler = go.GetComponent<ClickColliderScaler>() ?? go.AddComponent<ClickColliderScaler>();
+        scaler.baseRadius = sc.radius;
     }
 }
 

@@ -33,9 +33,8 @@ public class PlanetGridVisualizer : MonoBehaviour
 
     void BuildGrid()
     {
-        currentTileSize = Mathf.Clamp(
-            Mathf.Min(tileSize, maxWindowWidth / surface.width, maxWindowHeight / surface.height),
-            minTileSize, tileSize);
+        // Shared metric so the detailed map stays a consistent multiple of this mini map.
+        currentTileSize = MapMetrics.MiniTile(surface.height);
 
         GridLayoutGroup grid = GetComponent<GridLayoutGroup>();
         grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;

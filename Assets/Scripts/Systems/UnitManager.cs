@@ -35,6 +35,9 @@ public class UnitManager : MonoBehaviour
     // XP is earned by COMPLETING tasks (not by idling). Travel gives a little; missions give more.
     const float XpTravel = 8f, XpSample = 5f, XpSurvey = 30f, XpResearch = 45f, XpColonize = 60f;
 
+    // A colony ship can found a city on a world at least this habitable for the current species.
+    public const float ColonizeMinHabitability = 45f;
+
     public static void Create()
     {
         if (Instance != null) return;
@@ -307,6 +310,15 @@ public class UnitManager : MonoBehaviour
         OnUnitsChanged?.Invoke();
     }
 
+    // Remove a specific order from the queue (index 0 = the active one).
+    public void RemoveOrder(Unit u, int index)
+    {
+        if (u == null || index < 0 || index >= u.orders.Count) return;
+        if (index == 0) { SkipCurrent(u); return; }
+        u.orders.RemoveAt(index);
+        OnUnitsChanged?.Invoke();
+    }
+
     // Halt just the current order (skip to the next queued one).
     public void SkipCurrent(Unit u)
     {
@@ -551,51 +563,56 @@ public class UnitManager : MonoBehaviour
         PlanetAppearance.Apply(b, b.visualObject);
     }
 
+    // A colony ship founds a city on a habitable-enough, unowned world, then is CONSUMED (it becomes
+    // the city). If the world isn't habitable enough it says so and stops — terraform it first.
     bool Colonize(Unit u, float dt)
     {
         var b = u.location;
-        if (b == null || b.owner == FactionManager.Player) { FinishAction(u, OrderKind.Colonize, b); return false; }
+        if (b == null || !u.Info.canColonize || b.owner == FactionManager.Player)
+        { FinishAction(u, OrderKind.Colonize, b); return false; }
 
-        bool habMet = b.habitability >= 80f;
-
-        // Explore alongside colonizing.
-        b.explorationProgress = Mathf.Clamp01(b.explorationProgress + 0.01f * dt);
-
-        if (habMet)
+        if (b.habitability < ColonizeMinHabitability)
         {
-            int popTarget = 50 + b.surfaceSize * 5;
-            int cityTarget = 2 + b.surfaceSize / 6;
-            b.population = Mathf.Min(popTarget, b.population + Mathf.RoundToInt(4f * dt) + 1);
-            if (b.population > b.cities * (popTarget / Mathf.Max(1, cityTarget))) b.cities = Mathf.Min(cityTarget, b.cities + 1);
-
-            float popF = Mathf.Clamp01(b.population / (float)popTarget);
-            float cityF = Mathf.Clamp01(b.cities / (float)cityTarget);
-            float exF = Mathf.Clamp01(b.explorationProgress / 0.6f);
-            b.claimProgress = 0.25f + 0.25f * popF + 0.25f * cityF + 0.25f * exF;
-        }
-        else
-        {
-            // Stalls until the world is habitable enough for the species.
-            b.claimProgress = Mathf.Min(b.claimProgress, 0.24f);
-        }
-
-        if (b.claimProgress >= 1f)
-        {
-            b.owner = FactionManager.Player;
-            b.claimingFaction = null;
-            b.claimProgress = 1f;
-            foreach (var m in b.moons) m.owner = FactionManager.Player;
-            u.AddExperience(XpColonize);
+            NotificationManager.Instance?.Push($"Can't colonize {b.name}",
+                $"Habitability {b.habitability:F0}% is below the {ColonizeMinHabitability:F0}% needed. " +
+                (Colony.CanReachLivable(b) ? "Terraform it first." : "This world can't be made livable for your species."),
+                FlyTo(b), NotifKind.Danger);
             FinishAction(u, OrderKind.Colonize, b);
-            SimpleAudio.Instance?.PlayNotify(NotifKind.Victory);
-            NotificationManager.Instance?.Push($"{b.name} claimed!",
-                $"{FactionManager.Player.name} has fully colonized {b.name}.",
-                () => { if (b.visualObject != null) CameraController.Focus(b.visualObject.transform.position); PlanetUI.Instance?.Show(b); },
-                NotifKind.Victory);
-            RefreshOwnerRing(b);
-            return true;
+            return false;
         }
+
+        // Founding takes a little time (bigger worlds take longer) and shows a loading bar.
+        b.claimingFaction = FactionManager.Player;
+        b.claimProgress = Mathf.Clamp01(b.claimProgress + (1f / (8f + b.surfaceSize * 1.2f)) * dt);
+        if (b.claimProgress >= 1f) { FoundColony(u, b); return true; }
         return false;
+    }
+
+    void FoundColony(Unit u, CelestialBody b)
+    {
+        b.owner = FactionManager.Player;
+        b.claimingFaction = null;
+        b.visited = true;
+        b.explorationProgress = Mathf.Max(b.explorationProgress, 1f);   // owning fully reveals it
+        b.cities = 1;
+        b.population = Mathf.Max(20, b.surfaceSize * 3);
+        if (!b.buildings.Contains((int)BuildingType.City)) b.buildings.Add((int)BuildingType.City);
+        b.claimProgress = Colony.ClaimProgress(b);
+        u.AddExperience(XpColonize);
+
+        RevealBodyVisual(b);
+
+        // Consume the colony ship — it becomes the city.
+        if (b.units != null) b.units.Remove(u);
+        units.Remove(u);
+        if (UnitSelection.IsSelected(u)) UnitSelection.Clear();
+
+        SimpleAudio.Instance?.PlayNotify(NotifKind.Victory);
+        NotificationManager.Instance?.Push($"City founded on {b.name}!",
+            $"{FactionManager.Player.name} settled {b.name}. The colony ship became your first city — build it up and develop the world to fully establish it.",
+            FlyTo(b), NotifKind.Victory);
+        RefreshOwnerRing(b);
+        OnUnitsChanged?.Invoke();
     }
 
     void RefreshOwnerRing(CelestialBody b)

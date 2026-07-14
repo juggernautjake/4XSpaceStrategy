@@ -109,12 +109,14 @@ public class DetailedSurfaceWindow : MonoBehaviour
         rootRT.SetAsLastSibling();
     }
 
-    // The detailed map (and its window) scale with the body's size, so a small moon shows a small map
-    // and a giant world a large one. Markers use normalized anchors, so they scale automatically.
+    // The detailed map is exactly MapMetrics.DetailFactor times the mini map (same pixels-per-tile
+    // ratio for every body), so a small moon shows a small map and a giant world a large one — and the
+    // two views stay proportionate. Markers use normalized anchors, so they scale automatically.
     void ApplySize(CelestialBody b)
     {
-        float scale = Mathf.Clamp((b != null ? b.surfaceSize : 12) / 13f, 0.55f, 1.6f);
-        float w = MapW * scale, h = MapH * scale;
+        int size = b != null ? b.surfaceSize : 12;
+        float tile = MapMetrics.DetailTile(size);
+        float w = MapMetrics.SurfW(size) * tile, h = MapMetrics.SurfH(size) * tile;
         mapRT.sizeDelta = new Vector2(w, h);
         rootRT.sizeDelta = new Vector2(w + 40f, h + 156f);
     }
