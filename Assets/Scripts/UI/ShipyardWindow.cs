@@ -63,10 +63,12 @@ public class ShipyardWindow : MonoBehaviour
     void Refresh()
     {
         if (root == null || !root.activeSelf) return;
-        resourceText.text = PlayerEconomy.Summary();
+        int level = Colony.PlayerMaxShipyardLevel();
+        resourceText.text = PlayerEconomy.Summary() + $"    <color=#9FB4C8>Shipyard Lv {level}/{Colony.MaxShipyardLevel}</color>";
 
         for (int i = list.childCount - 1; i >= 0; i--) Destroy(list.GetChild(i).gameObject);
 
+        var um = UnitManager.Instance;
         foreach (var info in UnitDatabase.All)
         {
             var card = UIFactory.Panel(list, "Card", UITheme.RowBg);
@@ -74,14 +76,16 @@ public class ShipyardWindow : MonoBehaviour
             vlg.padding = new RectOffset(8, 8, 6, 6); vlg.spacing = 2; vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
             var fit = card.gameObject.AddComponent<ContentSizeFitter>(); fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-            UIFactory.WrapText(card.transform, $"<b>{info.name}</b>  <size=11><color=#9FB4C8>{info.costMetal} metal · {info.costEnergy} energy · {info.buildTime:F0}s</color></size>", UITheme.BodySize, new Color(info.iconColor.r, info.iconColor.g, info.iconColor.b));
+            string tier = info.minShipyardLevel > 1 ? $"  <size=11><color=#C9A94D>[Lv{info.minShipyardLevel} shipyard]</color></size>" : "";
+            UIFactory.WrapText(card.transform, $"<b>{info.name}</b>{tier}  <size=11><color=#9FB4C8>{info.costMetal} metal · {info.costEnergy} energy · {info.buildTime:F0}s</color></size>", UITheme.BodySize, new Color(info.iconColor.r, info.iconColor.g, info.iconColor.b));
             UIFactory.WrapText(card.transform, $"HP {info.health}  Armor {info.armor}  Speed {info.speed}  Research {info.research}  Attack {info.attack}", UITheme.SmallSize, UITheme.SubText);
             UIFactory.WrapText(card.transform, info.description, UITheme.SmallSize, UITheme.Text);
 
-            bool afford = PlayerEconomy.CanAfford(info.costMetal, info.costEnergy);
             var t = info.type;
-            var btn = UIFactory.Button(card.transform, afford ? "Build" : "Not enough resources", () => { UnitManager.Instance?.QueueBuild(t); Refresh(); }, 26);
-            btn.interactable = afford;
+            string why = "no shipyard";
+            bool can = um != null && um.CanBuildShip(t, out why);
+            var btn = UIFactory.Button(card.transform, can ? "Build" : why, () => { UnitManager.Instance?.QueueBuild(t); Refresh(); }, 26);
+            btn.interactable = can;
         }
     }
 

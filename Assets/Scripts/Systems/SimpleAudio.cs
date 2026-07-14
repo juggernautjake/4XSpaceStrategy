@@ -84,12 +84,17 @@ public class SimpleAudio : MonoBehaviour
         // clean functional UI/alert tones.
         cChatter = new[] { Chatter(0), Chatter(1), Chatter(2), Chatter(3), Chatter(4) };
 
-        // Per-unit selection cues (distinct character per class) + a destruction sound.
-        cUnitSelect = new AudioClip[4];
-        cUnitSelect[(int)UnitType.Scout]       = Seq(new[] { 1200f, 1500f }, 0.05f, 0.01f, 20f, 0.4f);       // quick chirp
-        cUnitSelect[(int)UnitType.ResearchShip]= Sweep(760f, 1180f, 0.14f, 8f, 0.42f);                        // warble
-        cUnitSelect[(int)UnitType.Fighter]     = Seq(new[] { 320f, 260f }, 0.07f, 0.01f, 12f, 0.5f);          // low growl
-        cUnitSelect[(int)UnitType.ColonyShip]  = Chord(new[] { 300f, 400f, 500f }, 0.28f, 6f, 0.45f);         // deep swell
+        // Per-unit selection cues (distinct character per class) + a destruction sound. Sized to the
+        // enum so newer classes (Mk II variants, Terraformer) always have an entry.
+        cUnitSelect = new AudioClip[System.Enum.GetValues(typeof(UnitType)).Length];
+        cUnitSelect[(int)UnitType.Scout]        = Seq(new[] { 1200f, 1500f }, 0.05f, 0.01f, 20f, 0.4f);      // quick chirp
+        cUnitSelect[(int)UnitType.ResearchShip] = Sweep(760f, 1180f, 0.14f, 8f, 0.42f);                       // warble
+        cUnitSelect[(int)UnitType.Fighter]      = Seq(new[] { 320f, 260f }, 0.07f, 0.01f, 12f, 0.5f);         // low growl
+        cUnitSelect[(int)UnitType.ColonyShip]   = Chord(new[] { 300f, 400f, 500f }, 0.28f, 6f, 0.45f);        // deep swell
+        cUnitSelect[(int)UnitType.ScoutII]        = cUnitSelect[(int)UnitType.Scout];
+        cUnitSelect[(int)UnitType.ResearchShipII] = cUnitSelect[(int)UnitType.ResearchShip];
+        cUnitSelect[(int)UnitType.FighterII]      = cUnitSelect[(int)UnitType.Fighter];
+        cUnitSelect[(int)UnitType.Terraformer]    = Sweep(420f, 700f, 0.2f, 5f, 0.45f);                       // deep rising engineering tone
         cDestroyed = Explosion(0.6f);
 
         hum.clip = cHum; hum.volume = 0.5f; hum.Play();   // louder, but still a background bed
@@ -143,8 +148,10 @@ public class SimpleAudio : MonoBehaviour
     public void PlayUnitSelect(UnitType t)
     {
         if (cUnitSelect == null) return;
+        int i = (int)t;
+        if (i < 0 || i >= cUnitSelect.Length || cUnitSelect[i] == null) return;
         sfx.pitch = 1f;
-        sfx.PlayOneShot(cUnitSelect[(int)t], 0.55f);
+        sfx.PlayOneShot(cUnitSelect[i], 0.55f);
     }
     public void PlayUnitDestroyed() { sfx.pitch = 1f; sfx.PlayOneShot(cDestroyed, 0.7f); }
 

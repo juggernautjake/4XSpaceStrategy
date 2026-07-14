@@ -74,7 +74,7 @@ public class UnitTokenRenderer : MonoBehaviour
     {
         var go = new GameObject("Token_" + u.name);
         go.transform.SetParent(transform, false);
-        go.transform.localScale = Vector3.one * 1.6f;
+        go.transform.localScale = Vector3.one * 0.8f;   // ship symbols 50% smaller relative to the view
 
         var icon = MakeQuad(go.transform, UnitIconRenderer.Get(u.type), Color.white, new Vector3(0, 0, 0), 1f);
         var em = MakeQuad(go.transform, emblem, FactionManager.OwnerColor(u.owner), new Vector3(0.55f, 0.55f, -0.01f), 0.5f);

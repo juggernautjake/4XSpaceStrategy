@@ -127,12 +127,20 @@ public static class GalaxyGenerator
             moon.parentBody = planet;
             moon.hostStar = home.combinedStar;
             moon.system = home;
+            // Claimed by BIRTHRIGHT — ours from the start, and fully surveyed — but NOT yet settled
+            // (no city). They may or may not be habitable; you terraform them (easier here) then found
+            // a city to develop them.
             moon.owner = FactionManager.Player;
+            moon.birthrightClaim = true;
+            moon.visited = true;
+            moon.explorationProgress = 1f;
             planet.moons.Add(moon);
             moonR += Random.Range(1.6f, 2.6f);
         }
 
         planet.owner = FactionManager.Player;
+        planet.birthrightClaim = true;
+        planet.shipyardLevel = 1;          // the capital always has a working (level-1) shipyard
         planet.explorationProgress = 1f;   // home world is fully known from the start
 
         // Extra starting resources by difficulty.
@@ -182,6 +190,11 @@ public static class GalaxyGenerator
                 b.isHabitable = Habitability.IsHabitable(b.hostStar, species, b.type, b.distanceFromStar);
                 b.habitability = Habitability.Rate(b.hostStar, species, b.type, b.distanceFromStar);
                 b.terraformability = Habitability.Terraformability(b.hostStar, species, b);
+
+                // Home moons are "easier to terraform": guarantee their ceiling reaches livability so
+                // you can always make them habitable and settle them.
+                if (b.birthrightClaim)
+                    b.terraformability = Mathf.Max(b.terraformability, UnitManager.ColonizeMinHabitability + 20f);
             }
     }
 

@@ -39,6 +39,15 @@ public class CelestialBody
     // --- Ownership ---
     public Faction owner;               // null == unclaimed
 
+    // Claimed purely by BIRTHRIGHT (the home world and its moons). Such bodies count as fully claimed
+    // just for being ours from the start — they bypass the usual survey/habitability/population/
+    // building objectives that other worlds must satisfy to be fully established.
+    public bool birthrightClaim = false;
+
+    // Shipyard tier on this world (0 = none, 1-3). Building a Shipyard sets it to 1; it can be upgraded
+    // to 2 (unlocks Mk II ships) and 3 (unlocks the Terraformer). Higher tiers build ships faster.
+    public int shipyardLevel = 0;
+
     // --- Exploration / colonization ---
     public bool visited = false;             // a friendly ship has arrived here at least once
     public float explorationProgress = 0f;   // 0..1 survey completion

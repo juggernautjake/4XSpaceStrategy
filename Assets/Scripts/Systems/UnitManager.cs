@@ -74,13 +74,45 @@ public class UnitManager : MonoBehaviour
     }
 
     // ---- Building (timed queue) ----
+    public void NotifyBuildChanged() => OnBuildChanged?.Invoke();
+
+    // Whether the player's shipyards are advanced enough to build this class right now.
+    public bool CanBuildShip(UnitType type, out string reason)
+    {
+        reason = null;
+        var info = UnitDatabase.Get(type);
+        int level = GameMode.DevMode ? Colony.MaxShipyardLevel : Colony.PlayerMaxShipyardLevel();
+        if (level < info.minShipyardLevel)
+        {
+            reason = $"needs a level-{info.minShipyardLevel} shipyard (yours: {Colony.PlayerMaxShipyardLevel()})";
+            return false;
+        }
+        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(info.costMetal, info.costEnergy))
+        { reason = $"need {info.costMetal} metal, {info.costEnergy} energy"; return false; }
+        return true;
+    }
+
     public bool QueueBuild(UnitType type)
     {
         var info = UnitDatabase.Get(type);
+        if (!CanBuildShip(type, out _)) return false;
         if (!GameMode.DevMode && !PlayerEconomy.Spend(info.costMetal, info.costEnergy)) return false;  // free in Dev Mode
-        buildQueue.Add(new BuildOrder { type = type, duration = info.buildTime });
+        // Higher-tier shipyards build faster (~15% per level above 1).
+        int level = Mathf.Max(1, Colony.PlayerMaxShipyardLevel());
+        float speed = 1f + 0.15f * (level - 1);
+        buildQueue.Add(new BuildOrder { type = type, duration = info.buildTime / speed });
         OnBuildChanged?.Invoke();
         return true;
+    }
+
+    // Ships roll out at your most advanced shipyard (falling back to the home world).
+    CelestialBody BestShipyardBody()
+    {
+        CelestialBody best = HomePlanet; int bestLevel = HomePlanet != null ? HomePlanet.shipyardLevel : 0;
+        if (SystemContext.Galaxy != null)
+            foreach (var b in SystemContext.AllBodies())
+                if (b.owner == FactionManager.Player && b.shipyardLevel > bestLevel) { best = b; bestLevel = b.shipyardLevel; }
+        return best != null ? best : HomePlanet;
     }
 
     // The order currently under construction (front of the queue), or null.
@@ -94,10 +126,11 @@ public class UnitManager : MonoBehaviour
         if (order.elapsed >= order.duration)
         {
             buildQueue.RemoveAt(0);
-            CreateUnit(order.type, FactionManager.Player, HomePlanet);
+            var yard = BestShipyardBody();
+            CreateUnit(order.type, FactionManager.Player, yard);
             SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
             NotificationManager.Instance?.Push($"{UnitDatabase.Get(order.type).name} built",
-                $"Ready at {(HomePlanet != null ? HomePlanet.name : "home")}.", null, NotifKind.Info);
+                $"Ready at {(yard != null ? yard.name : "home")}.", null, NotifKind.Info);
             OnBuildChanged?.Invoke();
         }
     }
@@ -390,6 +423,19 @@ public class UnitManager : MonoBehaviour
                 { u.status = UnitStatus.Colonizing; b.claimingFaction = FactionManager.Player; }
                 else FinishAction(u, OrderKind.Colonize, b);
                 break;
+            case OrderKind.Terraform:
+                // A terraformer starts the project then idles here — staying present keeps it running
+                // and doubles its pace (see ColonyManager.TickTerraform).
+                if (b != null && u.Info.canTerraform)
+                {
+                    if (!b.terraforming && ColonyManager.Instance != null && !ColonyManager.Instance.ToggleTerraform(b))
+                    { /* couldn't start (already at ceiling / not terraformable) — message already shown */ }
+                    else
+                        NotificationManager.Instance?.Push($"{u.name} is terraforming {b.name}",
+                            "The terraformer will keep the project running (and twice as fast) while it stays here.", FlyTo(b), NotifKind.Info);
+                }
+                FinishAction(u, OrderKind.Terraform, b);
+                break;
         }
     }
 
@@ -632,6 +678,9 @@ public class UnitManager : MonoBehaviour
         units.Clear();
         nextId = 1;
         HomePlanet = homePlanet;
+        // Saves made before shipyard tiers existed have shipyardLevel 0 on the capital — guarantee the
+        // home world always has at least its level-1 shipyard (and birthright claim) so ships can build.
+        if (homePlanet != null) { homePlanet.shipyardLevel = Mathf.Max(1, homePlanet.shipyardLevel); homePlanet.birthrightClaim = true; }
         foreach (var u in loaded)
         {
             units.Add(u);
