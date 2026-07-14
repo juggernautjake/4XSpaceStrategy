@@ -97,7 +97,10 @@ public class SimpleAudio : MonoBehaviour
         cUnitSelect[(int)UnitType.Terraformer]    = Sweep(420f, 700f, 0.2f, 5f, 0.45f);                       // deep rising engineering tone
         cDestroyed = Explosion(0.6f);
 
-        hum.clip = cHum; hum.volume = 0.5f; hum.Play();   // louder, but still a background bed
+        // The old fixed-partial hum loop is retired: AmbientDrone replaces it with a live synth whose
+        // voices glide between chords. Keeping both would just muddy the bed with a second, static
+        // chord that never moves — and the whole point is that the harmony breathes.
+        AmbientDrone.Create();
 
         ApplyVolume();
         ambientTimer = Random.Range(5f, 9f);
@@ -105,9 +108,6 @@ public class SimpleAudio : MonoBehaviour
 
     void Update()
     {
-        // Very slowly waver the drone so the deep tones shift now and then.
-        hum.pitch = 1f + Mathf.Sin(Time.unscaledTime * 0.15f) * 0.02f + Mathf.Sin(Time.unscaledTime * 0.06f) * 0.012f;
-
         ambientTimer -= Time.unscaledDeltaTime;
         if (ambientTimer <= 0f)
         {
@@ -118,10 +118,38 @@ public class SimpleAudio : MonoBehaviour
                 bool near = Random.value < 0.3f;
                 ambientLP.cutoffFrequency = near ? Random.Range(3500f, 5500f) : Random.Range(1100f, 2400f);
                 float vol = near ? Random.Range(0.20f, 0.28f) : Random.Range(0.09f, 0.16f);
-                ambient.pitch = Random.Range(0.8f, 1.15f);
+                ambient.pitch = ChordPitch();
                 ambient.PlayOneShot(cChatter[Random.Range(0, cChatter.Length)], vol);
             }
         }
+    }
+
+    // Tune a chirp to the chord the drone is currently holding.
+    //
+    // This used to be Random.Range(0.8f, 1.15f) — a random detune, harmonically unrelated to anything,
+    // which is why the chirps read as noise over the top of the bed rather than as part of it. Now the
+    // pitch is a real musical interval: a tone of the current chord, transposed by the drone's current
+    // root. So when the drone slides to a new chord, the chirps move with it into the new key.
+    //
+    // Shifting by SEMITONES rather than to an absolute frequency keeps this independent of whatever
+    // pitch the chatter clips were synthesised at — each keeps its own character and simply lands on a
+    // consonant interval.
+    float ChordPitch()
+    {
+        var semis = AmbientDrone.CurrentSemitones;
+        if (semis == null || semis.Length == 0) return Random.Range(0.9f, 1.1f);
+
+        int tone = semis[Random.Range(0, semis.Length)];
+        int semitone = ((AmbientDrone.CurrentRootSemi + tone) % 12 + 12) % 12;   // fold into one octave
+
+        // Octave placement: mostly up, because high and thin is what makes a chirp sound otherworldly
+        // rather than like a foghorn.
+        float r = Random.value;
+        float octave = r < 0.15f ? 0.5f : r < 0.6f ? 1f : 2f;
+
+        // A few cents of drift so repeated chirps on the same tone aren't machine-identical.
+        float cents = Random.Range(-0.012f, 0.012f);
+        return Mathf.Pow(2f, semitone / 12f + cents) * octave;
     }
 
     // ---- Public triggers ----
@@ -182,7 +210,9 @@ public class SimpleAudio : MonoBehaviour
     {
         AudioListener.volume = Muted ? 0f : MasterVolume;
         if (sfx != null) sfx.volume = EffectsVolume;
-        if (hum != null) hum.volume = HumBase * HumVolume;
+        // The drone reads HumVolume itself each frame (it's synthesised, not a clip), so there's no
+        // source volume to set here. The legacy hum source stays silent.
+        if (hum != null) hum.volume = 0f;
         if (ambient != null) ambient.volume = AmbientVolume;
     }
 

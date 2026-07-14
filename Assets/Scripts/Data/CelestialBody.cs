@@ -82,6 +82,10 @@ public class CelestialBody
     // where the geothermal vents are takes someone on the ground.
     public bool deepSurveyed = false;
 
+    // Seconds accumulated toward this world's next organic settlement (see CityGrowth). Per-body so a
+    // paradise and a marginal world grow on their own clocks.
+    public float cityGrowthTimer = 0f;
+
     // --- Terraforming ---
     public float terraformability = 0f;      // 0..100 potential to be made livable for the current species
 

@@ -86,6 +86,11 @@ public static class SurfaceBuildManager
         if (t == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode)
         { why = "a colony ship becomes this when it settles a world"; return false; }
 
+        // Settlements/towns/cities are GROWN by the population (CityGrowth), never placed. You get one
+        // capital; the rest is people housing themselves.
+        if (CityGrowth.IsSettlement(t) && !GameMode.DevMode)
+        { why = "settlements grow on their own as the colony's population rises"; return false; }
+
         // A world's shipyard already exists (the capital's birthright yard, say) — don't allow a second.
         if (t == SurfaceBuildingType.SurfaceShipyard && b.shipyardLevel >= 1)
         { why = "this world already has a shipyard — upgrade its tier from the Production tab"; return false; }

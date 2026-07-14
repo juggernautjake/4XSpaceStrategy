@@ -443,6 +443,33 @@ public class PlanetViewWindow : MonoBehaviour
             return $"<b>{n}</b> structure(s) on the surface\nLand developed: <b>{dens * 100f:F0}%</b> of buildable ground";
         });
 
+        Header("URBANISATION");
+        Bar(d, () =>
+        {
+            float f = CityGrowth.UrbanFraction(body);
+            return (f, $"{CityGrowth.UrbanLabel(body)} — {f * 100f:F0}% of the land is settled", UITheme.Accent);
+        });
+        var ut = UIFactory.WrapText(d, "", UITheme.SmallSize, UITheme.SubText);
+        live.Text(ut, () =>
+        {
+            if (!GameConfig.OrganicCityGrowth)
+                return "<color=#9FB4C8>Organic city growth is off — this world holds only what you place on it.</color>";
+            if (body.owner != FactionManager.Player) return "";
+
+            float live01 = CityGrowth.Liveability(body);
+            if (live01 <= 0.01f)
+                return $"<color=#FFBF4D>At {body.habitability:F0}% habitability nobody will settle here on their own.</color> " +
+                       $"Terraform it past {Colony.FoundThreshold:F0}% and the population will start spreading.";
+
+            int have = CityGrowth.CountSettlements(body);
+            int cap = CityGrowth.MaxSettlements(body);
+            string ceiling = CityGrowth.MaxTier(body) == 3 ? "full cities"
+                           : CityGrowth.MaxTier(body) == 2 ? "towns" : "small settlements";
+            return $"{have}/{cap} settlements · this world can grow <b>{ceiling}</b>\n" +
+                   $"<size=10><color=#9FB4C8>At {body.habitability:F0}% habitability, a new one roughly every " +
+                   $"{CityGrowth.SpawnInterval(body):F0}s once there are people to fill it.</color></size>";
+        });
+
         Header("SURVEY STATE");
         var s = Card();
         var st = UIFactory.WrapText(s, "", UITheme.SmallSize, UITheme.Text);
@@ -503,6 +530,8 @@ public class PlanetViewWindow : MonoBehaviour
                 // the colony, and the capitol is what it becomes. Listing them here would only confuse.
                 if (info.type == SurfaceBuildingType.PlanetCapitol) continue;
                 if (info.type == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode) continue;
+                // Settlements/towns/cities are grown by the population, never placed.
+                if (CityGrowth.IsSettlement(info.type) && !GameMode.DevMode) continue;
                 if (!headerAdded) { Header(CategoryName(cat)); headerAdded = true; }
                 BuildStructureCard(info);
             }

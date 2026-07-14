@@ -45,6 +45,7 @@ public static class GameStateSerializer
         game.buildQueue = UnitManager.Instance != null ? UnitManager.Instance.ExportBuildQueue() : new List<BuildOrderDTO>();
         game.researchQueue = TechManager.ExportQueue();
         game.researchPaused = TechManager.Paused;
+        game.organicCityGrowth = GameConfig.OrganicCityGrowth;
         game.terraformJobs = TerraformManager.Instance != null ? TerraformManager.Instance.Export() : new List<TerraformJobDTO>();
         game.controlGroups = ControlGroups.Export();
 
@@ -109,7 +110,7 @@ public static class GameStateSerializer
             terraforming = b.terraforming, terraformability = b.terraformability,
             terraformProjects = b.terraformProjects != null ? new List<int>(b.terraformProjects) : new List<int>(),
             placedBuildings = b.placedBuildings != null ? new List<PlacedBuilding>(b.placedBuildings) : new List<PlacedBuilding>(),
-            deepSurveyed = b.deepSurveyed,
+            deepSurveyed = b.deepSurveyed, cityGrowthTimer = b.cityGrowthTimer,
             birthrightClaim = b.birthrightClaim, visited = b.visited, explorationProgress = b.explorationProgress
         };
 
@@ -233,6 +234,7 @@ public static class GameStateSerializer
         // read the facility levels off the restored bodies to work out the available power/capacity.
         UnitManager.Instance?.ImportBuildQueue(game.buildQueue);
         TechManager.ImportQueue(game.researchQueue, game.researchPaused);
+        GameConfig.SetOrganicCityGrowth(game.organicCityGrowth);
         TerraformManager.Instance?.Import(game.terraformJobs, byId);
         ControlGroups.Import(game.controlGroups);   // after the fleet exists, so members resolve
 
@@ -272,6 +274,7 @@ public static class GameStateSerializer
         if (dto.buildings != null) b.buildings = new List<int>(dto.buildings);
         if (dto.terraformProjects != null) b.terraformProjects = new List<int>(dto.terraformProjects);
         b.deepSurveyed = dto.deepSurveyed;
+        b.cityGrowthTimer = dto.cityGrowthTimer;
         if (dto.placedBuildings != null) b.placedBuildings = new List<PlacedBuilding>(dto.placedBuildings);
         // JsonUtility fills MISSING fields with 0, so a save written before tech levels and health
         // existed comes back with every structure at level 0 and 0 HP — a dead, non-existent tier.
