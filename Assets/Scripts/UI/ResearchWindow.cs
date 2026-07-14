@@ -38,6 +38,7 @@ public class ResearchWindow : MonoBehaviour
 
         ResearchManager.OnChanged += Refresh;
         EmpireTech.OnChanged += Refresh;
+        TechManager.OnChanged += Refresh;
         root.SetActive(false);
     }
 
@@ -56,9 +57,77 @@ public class ResearchWindow : MonoBehaviour
         for (int i = list.childCount - 1; i >= 0; i--) Destroy(list.GetChild(i).gameObject);
 
         BuildEmpireCard();
+        BuildTechTree();
 
+        UIFactory.WrapText(list, "<b>ORE CODEX</b>", UITheme.SmallSize, UITheme.Accent);
         foreach (var info in OreDatabase.All())
             BuildCard(info);
+    }
+
+    // ---- Tech tree ----
+    static string BranchName(TechBranch b) => b == TechBranch.Expansion ? "Expansion & Terraforming" : b.ToString();
+
+    static Color BranchColor(TechBranch b)
+    {
+        switch (b)
+        {
+            case TechBranch.Foundations: return new Color(0.62f, 0.69f, 0.77f);
+            case TechBranch.Warfare:     return new Color(1f, 0.42f, 0.34f);
+            case TechBranch.Science:     return new Color(0.35f, 0.69f, 1f);
+            case TechBranch.Expansion:   return new Color(0.30f, 0.82f, 0.54f);
+            case TechBranch.Exploration: return new Color(0.88f, 0.66f, 0.30f);
+            case TechBranch.Industry:    return new Color(0.82f, 0.52f, 0.30f);
+            default: return UITheme.Text;
+        }
+    }
+
+    static string EffectSummary(Tech t)
+    {
+        var p = new System.Collections.Generic.List<string>();
+        if (t.researchRate != 0f) p.Add($"+{t.researchRate * 100f:F0}% research");
+        if (t.buildCostCut != 0f) p.Add($"-{t.buildCostCut * 100f:F0}% build cost");
+        if (t.buildTimeCut != 0f) p.Add($"-{t.buildTimeCut * 100f:F0}% build time");
+        if (t.terraCeiling != 0f) p.Add($"+{t.terraCeiling:F0} terraform ceiling");
+        if (t.terraSpeed != 0f) p.Add($"+{t.terraSpeed * 100f:F0}% terraform speed");
+        if (t.rangeMult != 0f) p.Add($"+{t.rangeMult * 100f:F0}% ship range");
+        if (t.oreYield != 0f) p.Add($"+{t.oreYield * 100f:F0}% ore yield");
+        return string.Join(" · ", p);
+    }
+
+    void BuildTechTree()
+    {
+        UIFactory.WrapText(list, "<b>TECHNOLOGY</b>", UITheme.SmallSize, UITheme.Accent);
+        foreach (TechBranch br in System.Enum.GetValues(typeof(TechBranch)))
+        {
+            UIFactory.WrapText(list, $"<b>{BranchName(br)}</b>", UITheme.SmallSize, BranchColor(br));
+            foreach (var t in TechDatabase.InBranch(br)) BuildTechCard(t, BranchColor(br));
+        }
+    }
+
+    void BuildTechCard(Tech t, Color branchColor)
+    {
+        bool done = TechManager.IsResearched(t.id);
+
+        var card = UIFactory.Panel(list, "Tech", UITheme.RowBg);
+        var vlg = card.gameObject.AddComponent<VerticalLayoutGroup>();
+        vlg.padding = new RectOffset(8, 8, 5, 5); vlg.spacing = 2;
+        vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
+        var fit = card.gameObject.AddComponent<ContentSizeFitter>(); fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        string head = $"<b>{t.name}</b>  <size=11><color=#9FB4C8>T{t.tier} · {t.cost} RP</color></size>";
+        UIFactory.WrapText(card.transform, head, UITheme.SmallSize, done ? UITheme.Good : branchColor);
+
+        string eff = EffectSummary(t);
+        if (!string.IsNullOrEmpty(eff)) UIFactory.WrapText(card.transform, eff, UITheme.SmallSize, UITheme.Text);
+        if (!string.IsNullOrEmpty(t.unlockNote)) UIFactory.WrapText(card.transform, $"<color=#C9A94D>{t.unlockNote}</color>", UITheme.SmallSize, UITheme.SubText);
+
+        if (done) { UIFactory.WrapText(card.transform, "<color=#4DFF6E>Researched</color>", UITheme.SmallSize, UITheme.Good); return; }
+
+        bool can = TechManager.CanResearch(t, out string reason);
+        var id = t.id;
+        var btn = UIFactory.Button(card.transform, can ? $"Research ({t.cost} RP)" : $"Locked — {reason}",
+            () => TechManager.Research(id), 26);
+        btn.interactable = can;
     }
 
     // The empire-wide Tech Level: the hybrid progression track that gates the big milestones
@@ -136,5 +205,5 @@ public class ResearchWindow : MonoBehaviour
         }
     }
 
-    void OnDestroy() { ResearchManager.OnChanged -= Refresh; EmpireTech.OnChanged -= Refresh; }
+    void OnDestroy() { ResearchManager.OnChanged -= Refresh; EmpireTech.OnChanged -= Refresh; TechManager.OnChanged -= Refresh; }
 }

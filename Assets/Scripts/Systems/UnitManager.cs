@@ -93,8 +93,9 @@ public class UnitManager : MonoBehaviour
             reason = "reach Empire Tech Level 2 to build probes";
             return false;
         }
-        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(info.costMetal, info.costEnergy))
-        { reason = $"need {info.costMetal} metal, {info.costEnergy} energy"; return false; }
+        int cm = ColonyManager.DiscCost(info.costMetal), ce = ColonyManager.DiscCost(info.costEnergy);
+        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(cm, ce))
+        { reason = $"need {cm} metal, {ce} energy"; return false; }
         return true;
     }
 
@@ -102,11 +103,11 @@ public class UnitManager : MonoBehaviour
     {
         var info = UnitDatabase.Get(type);
         if (!CanBuildShip(type, out _)) return false;
-        if (!GameMode.DevMode && !PlayerEconomy.Spend(info.costMetal, info.costEnergy)) return false;  // free in Dev Mode
-        // Higher-tier shipyards build faster (~15% per level above 1).
+        if (!GameMode.DevMode && !PlayerEconomy.Spend(ColonyManager.DiscCost(info.costMetal), ColonyManager.DiscCost(info.costEnergy))) return false;  // free in Dev Mode
+        // Higher-tier shipyards build faster (~15% per level above 1); Industry tech cuts time further.
         int level = Mathf.Max(1, Colony.PlayerMaxShipyardLevel());
         float speed = 1f + 0.15f * (level - 1);
-        buildQueue.Add(new BuildOrder { type = type, duration = info.buildTime / speed });
+        buildQueue.Add(new BuildOrder { type = type, duration = info.buildTime * TechEffects.BuildTimeMult / speed });
         OnBuildChanged?.Invoke();
         return true;
     }

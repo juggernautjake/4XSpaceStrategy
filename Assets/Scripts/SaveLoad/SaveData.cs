@@ -102,4 +102,5 @@ public class ResearchDTO
     public List<int> researched = new List<int>();
     public int points;
     public int empireLevel = 1;
+    public List<string> tech = new List<string>();   // researched tech-tree node ids
 }

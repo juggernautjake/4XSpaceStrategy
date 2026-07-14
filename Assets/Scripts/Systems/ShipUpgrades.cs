@@ -1,15 +1,22 @@
-// Global, empire-wide ship modifiers raised by drive/range technologies and by relay networks.
-// Base ship stats live in UnitDatabase; these multipliers scale them at runtime so a fresh empire is
-// range-limited to (roughly) its home system and expands its reach as it researches better drives or
-// builds relays. Reset at the start of every new game.
+using UnityEngine;
+
+// Global, empire-wide ship modifiers. Travel range is the product of two factors: the empire Tech
+// Level milestone bonus (EmpireRange) and the sum of drive technologies researched (TechRange). So
+// leveling the empire AND researching better drives both extend how far your ships can go. Reset at
+// the start of every new game.
 public static class ShipUpgrades
 {
-    public static float RangeMult = 1f;   // multiplies every ship's base travel range
-    public static float SpeedMult = 1f;   // multiplies every ship's speed (reserved for drive tech)
+    public static float EmpireRange = 1f;   // set by EmpireTech milestones (level-based)
+    public static float TechRange = 1f;     // set by drive technologies (Ion/Warp/Jump…)
+    public static float SpeedMult = 1f;     // reserved for drive tech
+
+    // What every ship's base range is multiplied by.
+    public static float RangeMult => Mathf.Max(0.1f, EmpireRange) * Mathf.Max(0.1f, TechRange);
 
     public static void Reset()
     {
-        RangeMult = 1f;
+        EmpireRange = 1f;
+        TechRange = 1f;
         SpeedMult = 1f;
     }
 }
