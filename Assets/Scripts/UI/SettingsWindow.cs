@@ -9,7 +9,7 @@ public class SettingsWindow : MonoBehaviour
 
     GameObject root;
     Toggle muteT, spaceT;
-    Slider volS, rS, gS, bS;
+    Slider volS, effS, ambS, rS, gS, bS;
     Image swatch;
     bool suppress;
 
@@ -32,6 +32,8 @@ public class SettingsWindow : MonoBehaviour
         UIFactory.Label(col, "SOUND", UITheme.SmallSize, UITheme.Accent, 18);
         muteT = UIFactory.Toggle(col, "Mute all sound", false, on => { if (!suppress) SimpleAudio.Instance?.SetMuted(on); });
         volS = UIFactory.LabeledSlider(col, "Master Volume", 0f, 1f, 0.8f, v => { if (!suppress) SimpleAudio.Instance?.SetVolume(v); }, "F2");
+        effS = UIFactory.LabeledSlider(col, "Effects Volume (clicks, selection, alerts)", 0f, 1f, 0.9f, v => { if (!suppress) SimpleAudio.Instance?.SetEffectsVolume(v); }, "F2");
+        ambS = UIFactory.LabeledSlider(col, "Ambient Volume (hum, space chatter)", 0f, 1f, 0.8f, v => { if (!suppress) SimpleAudio.Instance?.SetAmbientVolume(v); }, "F2");
 
         UIFactory.Label(col, "BACKGROUND / VIEW", UITheme.SmallSize, UITheme.Accent, 18);
         spaceT = UIFactory.Toggle(col, "Show space background", true, on => { if (!suppress) SpaceBackground.Instance?.SetEnabled(on); });
@@ -74,7 +76,7 @@ public class SettingsWindow : MonoBehaviour
     {
         suppress = true;
         var a = SimpleAudio.Instance;
-        if (a != null) { muteT.isOn = a.Muted; volS.value = a.MasterVolume; }
+        if (a != null) { muteT.isOn = a.Muted; volS.value = a.MasterVolume; effS.value = a.EffectsVolume; ambS.value = a.AmbientVolume; }
         var bg = SpaceBackground.Instance;
         if (bg != null)
         {
