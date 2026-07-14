@@ -273,6 +273,9 @@ public static class GameStateSerializer
         if (dto.terraformProjects != null) b.terraformProjects = new List<int>(dto.terraformProjects);
         b.deepSurveyed = dto.deepSurveyed;
         if (dto.placedBuildings != null) b.placedBuildings = new List<PlacedBuilding>(dto.placedBuildings);
+        // JsonUtility fills MISSING fields with 0, so a save written before tech levels and health
+        // existed comes back with every structure at level 0 and 0 HP — a dead, non-existent tier.
+        foreach (var pb in b.placedBuildings) pb.NormalizeAfterLoad();
         // Saves from before research-centre tiers existed record only that the building is there, so
         // give any existing centre its base tier rather than leaving it at level 0 (= no laboratory).
         if (b.researchCenterLevel < 1 && b.buildings.Contains((int)BuildingType.ResearchCenter))

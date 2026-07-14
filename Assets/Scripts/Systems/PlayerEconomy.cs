@@ -28,7 +28,9 @@ public static class PlayerEconomy
             foreach (var b in SystemContext.AllBodies())
             {
                 if (b == null || b.owner != FactionManager.Player || b.placedBuildings == null) continue;
-                foreach (var p in b.placedBuildings) cap += p.Info.storageCapacity;
+                // Scales with tech level, like every other surface output. A depot's siting is
+                // irrelevant (storageCapacity has no index), so this is purely its tier.
+                foreach (var p in b.placedBuildings) cap += p.Info.storageCapacity * p.LevelMult;
             }
         capCache = cap; capFrame = Time.frameCount;
         return cap;
