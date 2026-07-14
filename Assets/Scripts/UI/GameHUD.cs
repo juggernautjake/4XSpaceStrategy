@@ -89,10 +89,14 @@ public class GameHUD : MonoBehaviour
     void ToggleFollow()
     {
         var cam = CameraController.Instance;
+        bool newFollow = !(cam != null && cam.IsFollowing);
+        CameraController.AutoFollow = newFollow;   // persists as the default for future selections
         var sel = PlanetUI.Selected;
-        if (cam == null || sel == null || sel.visualObject == null) return;
-        if (cam.IsFollowing) cam.ClearFocus();
-        else cam.FocusAndZoom(sel.visualObject.transform, sel.surfaceSize, true);
+        if (cam != null && sel != null && sel.visualObject != null)
+        {
+            if (newFollow) cam.FocusAndZoom(sel.visualObject.transform, sel.surfaceSize, true);
+            else cam.ClearFocus();
+        }
         UpdateContext();
     }
 

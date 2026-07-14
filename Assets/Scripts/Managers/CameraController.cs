@@ -50,6 +50,9 @@ public class CameraController : MonoBehaviour
     public Transform followTarget;
     public bool following;
 
+    // Default preference: clicking a planet auto-follows it. Turned off if the user unfollows.
+    public static bool AutoFollow = true;
+
     private void Update()
     {
         bool overUI = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
@@ -68,18 +71,15 @@ public class CameraController : MonoBehaviour
         // doesn't also zoom the world) and while the menu is open.
         if (!overUI && !menuOpen) HandleHeightChange();
 
-        if (!following) SmoothHeightMovement();
+        SmoothHeightMovement();   // identical zoom smoothing whether following or not
         KeepCameraAngle();
     }
 
     private void LateUpdate()
     {
-        // Keep the camera centred on (and zooming toward) the followed body as it orbits.
+        // Recenter on the followed body after orbits move it (zoom is already smoothed in Update).
         if (following && followTarget != null)
         {
-            Vector3 p = transform.position;
-            p.y = Mathf.Lerp(p.y, targetHeight, 8f * Time.unscaledDeltaTime);
-            transform.position = p;
             FocusOn(followTarget.position);
             KeepCameraAngle();
         }
@@ -100,8 +100,9 @@ public class CameraController : MonoBehaviour
 
     private void HandlePanning()
     {
-        float h = Input.GetAxis("Horizontal");
-        float v = Input.GetAxis("Vertical");
+        // Raw (no built-in smoothing) so the speed depends only on our unscaled multiplier.
+        float h = Input.GetAxisRaw("Horizontal");
+        float v = Input.GetAxisRaw("Vertical");
 
         // Unscaled time so panning speed is constant regardless of the simulation speed (and works
         // while paused). Scale with height so panning stays usable when zoomed far out.

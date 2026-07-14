@@ -41,6 +41,7 @@ public static class GameBootstrap
         UnitInfoPanel.Create(canvas.transform);
         FleetWindow.Create(canvas.transform);
         ShipyardWindow.Create(canvas.transform);
+        BodyUnitsPanel.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);
         GenerationMenu.Create(canvas.transform);
         EscapeMenu.Create(canvas.transform);

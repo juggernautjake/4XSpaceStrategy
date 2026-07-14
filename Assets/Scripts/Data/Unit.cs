@@ -24,9 +24,11 @@ public class Unit
     public float serviceTime;               // seconds in service
 
     // Travel state.
-    public CelestialBody travelTarget;
+    public CelestialBody travelTarget;      // null when moving to a point in empty space
     public float travelElapsed, travelDuration;
     public Vector3 travelFrom, travelTo;    // world positions for the moving token
+    public Vector3 parkPosition;            // where it sits when idling in deep space
+    public bool inSpace;                    // true when parked in space (no body)
 
     // Mission progress on the current world.
     public float missionTimer;              // limited stay on hostile worlds

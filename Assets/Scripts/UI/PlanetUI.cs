@@ -40,6 +40,43 @@ public class PlanetUI : MonoBehaviour
         // Live-refresh the open info panel when the viewing species or game mode changes.
         SpeciesManager.OnSpeciesChanged += RefreshInfo;
         GameMode.OnChanged += RefreshInfo;
+
+        RestyleSceneUI();
+    }
+
+    // Brings the old scene-wired info panel + grid window in line with the runtime UI theme.
+    void RestyleSceneUI()
+    {
+        if (infoPanel != null)
+        {
+            var img = infoPanel.GetComponent<Image>();
+            if (img != null) img.color = UITheme.PanelBg;
+            if (infoPanel.GetComponent<Outline>() == null)
+            {
+                var o = infoPanel.AddComponent<Outline>();
+                o.effectColor = UITheme.AccentDim; o.effectDistance = new Vector2(1.5f, -1.5f);
+            }
+        }
+        if (titleText != null)
+        {
+            titleText.color = UITheme.Accent; titleText.fontStyle = FontStyles.Bold;
+            if (titleText.fontSize < 18) titleText.fontSize = 18;
+        }
+        if (infoText != null)
+        {
+            infoText.color = UITheme.Text; infoText.richText = true;
+            if (infoText.fontSize < 13) infoText.fontSize = 13;
+        }
+        if (gridWindow != null)
+        {
+            var gimg = gridWindow.GetComponent<Image>();
+            if (gimg != null) gimg.color = UITheme.PanelBg;
+            if (gridWindow.GetComponent<Outline>() == null)
+            {
+                var o = gridWindow.AddComponent<Outline>();
+                o.effectColor = UITheme.AccentDim;
+            }
+        }
     }
 
     void OnDestroy()
@@ -91,8 +128,9 @@ public class PlanetUI : MonoBehaviour
 
         // Zoom in on the selection (smaller bodies zoom closer) and float its labels.
         if (CameraController.Instance != null && body.visualObject != null)
-            CameraController.Instance.FocusAndZoom(body.visualObject.transform, body.surfaceSize, CameraController.Instance.IsFollowing);
+            CameraController.Instance.FocusAndZoom(body.visualObject.transform, body.surfaceSize, CameraController.AutoFollow);
         ObjectLabelManager.Instance?.ShowForBody(body);
+        BodyUnitsPanel.Instance?.ShowFor(body);   // ships present here, as selectable icons
 
         // Runtime tools (orbit + terrain panels) react to this.
         OnBodySelected?.Invoke(body);
@@ -186,6 +224,7 @@ public class PlanetUI : MonoBehaviour
         if (gridWindow != null) gridWindow.SetActive(false);
         TooltipManager.Instance.Hide();
         ObjectLabelManager.Instance?.Hide();
+        BodyUnitsPanel.Instance?.ShowFor(null);
         CameraController.Instance?.ClearFocus();
         Selected = null;
         OnClosed?.Invoke();
