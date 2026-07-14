@@ -8,6 +8,7 @@ public class Construction
     public BuildingType type;
     public bool establishCity;     // founding the first city on an owned-but-empty world
     public bool shipyardUpgrade;   // raising this world's shipyard tier
+    public bool labUpgrade;        // raising this world's research-centre tier
     public float elapsed, duration;
     public string Label;           // what to show while it builds
     public float Progress => duration > 0f ? Mathf.Clamp01(elapsed / duration) : 1f;
@@ -25,18 +26,53 @@ public static class Colony
     public static int PopTarget(CelestialBody b) => 40 + b.surfaceSize * 6;
     public const int BuildingTarget = 4;   // city + 3 more
 
-    // Shipyard tiers.
-    public const int MaxShipyardLevel = 3;
+    // Facility tiers. Tiers 1-3 gate WHICH ships a yard can build; every tier (including 4 and 5) also
+    // grants build power — how many hulls it can work on at once (see BuildPower).
+    public const int MaxShipyardLevel = 5;
+    public const int MaxResearchCenterLevel = 5;
 
     // Your best shipyard tier across all owned worlds (0 if you have none). Gates which ships you can
     // build and how fast. The home world always provides at least tier 1.
+    //
+    // Memoized per frame. This walks EVERY body in the galaxy through a yield iterator, and the build
+    // menus ask for it once or twice per hull per frame — dozens of full galaxy walks (and enumerator
+    // allocations) every frame, which showed up as game-wide stutter. It can only change on a build or
+    // an upgrade, never twice within one frame.
+    static int yardLvlCache = -1, yardLvlFrame = -1;
     public static int PlayerMaxShipyardLevel()
     {
+        if (yardLvlFrame == Time.frameCount && yardLvlCache >= 0) return yardLvlCache;
         int best = 0;
         if (SystemContext.Galaxy != null)
             foreach (var b in SystemContext.AllBodies())
                 if (b.owner == FactionManager.Player && b.shipyardLevel > best) best = b.shipyardLevel;
+        yardLvlCache = best; yardLvlFrame = Time.frameCount;
         return best;
+    }
+
+    static int labLvlCache = -1, labLvlFrame = -1;
+    public static int PlayerMaxResearchCenterLevel()
+    {
+        if (labLvlFrame == Time.frameCount && labLvlCache >= 0) return labLvlCache;
+        int best = 0;
+        if (SystemContext.Galaxy != null)
+            foreach (var b in SystemContext.AllBodies())
+                if (b.owner == FactionManager.Player && b.researchCenterLevel > best) best = b.researchCenterLevel;
+        labLvlCache = best; labLvlFrame = Time.frameCount;
+        return best;
+    }
+
+    // What a shipyard tier buys you, for the upgrade button and the level-up notification.
+    public static string ShipyardPerk(int level)
+    {
+        switch (level)
+        {
+            case 2:  return "Mk II ships unlocked";
+            case 3:  return "Terraformers and capital hulls unlocked";
+            case 4:  return "a wider yard — more hulls at once";
+            case 5:  return "the largest yard your engineers can build";
+            default: return "basic hulls";
+        }
     }
 
     // The objectives that must ALL be met for a colony to be "fully established" (a full claim).
@@ -70,10 +106,15 @@ public static class Colony
 
     public static bool IsFullyEstablished(CelestialBody b) => ClaimProgress(b) >= 1f;
 
-    // The highest habitability terraforming could reach for the current species (its ceiling), including
-    // any bonus from researched Expansion technologies.
+    // The highest habitability terraforming could reach for the current species (its ceiling): the
+    // world's natural potential, plus researched Expansion technologies, plus every planetary
+    // engineering PROJECT already completed here (melted ice caps, orbital shades, a restarted core).
+    // This is why a world's ceiling rises as you work on it — see TerraformProjects.
     public static float TerraformCeiling(CelestialBody b)
-        => Mathf.Min(100f, Mathf.Max(b.habitability, b.terraformability) + TechEffects.TerraformCeilingBonus);
+        => b == null ? 0f
+         : Mathf.Min(100f, Mathf.Max(b.habitability, b.terraformability)
+                         + TechEffects.TerraformCeilingBonus
+                         + TerraformProjects.CeilingBonus(b));
 
     // Can terraforming ever make this world colonizable for us?
     public static bool CanReachLivable(CelestialBody b) => TerraformCeiling(b) >= FoundThreshold;
@@ -122,13 +163,31 @@ public class ColonyManager : MonoBehaviour
     // ---- Construction ----
     public bool IsUnique(BuildingType t) => true;   // one of each per world (keeps colonies readable)
 
+    // A world gets ONE shipyard and ONE research centre — you upgrade the one you have rather than
+    // stacking more. Both track their tier in a level field rather than the buildings list (the capital
+    // starts with a level-1 yard and lab it never "built"), so the level is the real test of existence.
+    // Checking only `buildings` would let you build a second yard on your own home world.
+    public static bool HasFacility(CelestialBody b, BuildingType t)
+    {
+        if (b == null) return false;
+        if (t == BuildingType.Shipyard) return b.shipyardLevel >= 1 || b.buildings.Contains((int)t);
+        if (t == BuildingType.ResearchCenter) return b.researchCenterLevel >= 1 || b.buildings.Contains((int)t);
+        return b.buildings.Contains((int)t);
+    }
+
     public bool CanBuild(CelestialBody b, BuildingType t, out string reason)
     {
         reason = null;
         if (b == null || b.owner != FactionManager.Player) { reason = "colony not yours"; return false; }
         if (!b.buildings.Contains((int)BuildingType.City)) { reason = "found a city first"; return false; }
         if (t == BuildingType.City) { reason = "already the city"; return false; }
-        if (b.buildings.Contains((int)t)) { reason = "already built"; return false; }
+        if (HasFacility(b, t))
+        {
+            reason = t == BuildingType.Shipyard ? "this world already has a shipyard — upgrade it instead"
+                   : t == BuildingType.ResearchCenter ? "this world already has a research centre — upgrade it instead"
+                   : "already built";
+            return false;
+        }
         if (IsConstructing(b, t)) { reason = "under construction"; return false; }
         var info = BuildingDatabase.Get(t);
         int cm = DiscCost(info.costMetal), ce = DiscCost(info.costEnergy);
@@ -179,10 +238,16 @@ public class ColonyManager : MonoBehaviour
         return true;
     }
 
-    // ---- Shipyard upgrades (level 2 unlocks Mk II ships, level 3 the Terraformer) ----
-    public static int ShipyardUpgradeMetal(int toLevel) => toLevel == 2 ? 200 : 350;
-    public static int ShipyardUpgradeEnergy(int toLevel) => toLevel == 2 ? 150 : 280;
-    public static float ShipyardUpgradeTime(int toLevel) => toLevel == 2 ? 30f : 45f;
+    // ---- Shipyard upgrades ----
+    // Level 2 unlocks Mk II ships and level 3 the Terraformer; every tier (2-5) also widens the yard,
+    // adding a point of build power. The later tiers are a serious industrial investment.
+    static readonly int[] YardMetal  = { 0, 0, 200, 350, 550, 850 };
+    static readonly int[] YardEnergy = { 0, 0, 150, 280, 450, 700 };
+    static readonly float[] YardTime = { 0, 0, 30f, 45f, 65f, 90f };
+
+    public static int ShipyardUpgradeMetal(int toLevel) => YardMetal[Mathf.Clamp(toLevel, 0, Colony.MaxShipyardLevel)];
+    public static int ShipyardUpgradeEnergy(int toLevel) => YardEnergy[Mathf.Clamp(toLevel, 0, Colony.MaxShipyardLevel)];
+    public static float ShipyardUpgradeTime(int toLevel) => YardTime[Mathf.Clamp(toLevel, 0, Colony.MaxShipyardLevel)];
 
     public bool CanUpgradeShipyard(CelestialBody b, out string reason, out int nextLevel)
     {
@@ -212,9 +277,50 @@ public class ColonyManager : MonoBehaviour
         return true;
     }
 
+    // ---- Research-centre upgrades ----
+    // The research-side twin of the shipyard ladder: every tier adds a point of research capacity, so a
+    // bigger laboratory can study more technologies at once — or one much larger project.
+    static readonly int[] LabMetal  = { 0, 0, 180, 320, 500, 780 };
+    static readonly int[] LabEnergy = { 0, 0, 170, 300, 480, 760 };
+    static readonly float[] LabTime = { 0, 0, 28f, 42f, 60f, 85f };
+
+    public static int LabUpgradeMetal(int toLevel) => LabMetal[Mathf.Clamp(toLevel, 0, Colony.MaxResearchCenterLevel)];
+    public static int LabUpgradeEnergy(int toLevel) => LabEnergy[Mathf.Clamp(toLevel, 0, Colony.MaxResearchCenterLevel)];
+    public static float LabUpgradeTime(int toLevel) => LabTime[Mathf.Clamp(toLevel, 0, Colony.MaxResearchCenterLevel)];
+
+    public bool CanUpgradeLab(CelestialBody b, out string reason, out int nextLevel)
+    {
+        reason = null; nextLevel = 0;
+        if (b == null || b.owner != FactionManager.Player) { reason = "world not yours"; return false; }
+        if (b.researchCenterLevel < 1) { reason = "build a research centre first"; return false; }
+        if (b.researchCenterLevel >= Colony.MaxResearchCenterLevel) { reason = "already max level"; return false; }
+        nextLevel = b.researchCenterLevel + 1;
+        if (IsLabUpgrading(b)) { reason = "upgrade under way"; return false; }
+        int m = LabUpgradeMetal(nextLevel), e = LabUpgradeEnergy(nextLevel);
+        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { reason = $"need {m} metal, {e} energy"; return false; }
+        return true;
+    }
+
+    public bool IsLabUpgrading(CelestialBody b)
+    {
+        foreach (var c in building) if (c.body == b && c.labUpgrade) return true;
+        return false;
+    }
+
+    public bool StartLabUpgrade(CelestialBody b)
+    {
+        if (!CanUpgradeLab(b, out _, out int next)) return false;
+        int m = LabUpgradeMetal(next), e = LabUpgradeEnergy(next);
+        if (!GameMode.DevMode && !PlayerEconomy.Spend(m, e)) return false;
+        building.Add(new Construction { body = b, labUpgrade = true, duration = LabUpgradeTime(next), Label = $"Upgrading research centre to Lv{next}" });
+        return true;
+    }
+
+    // Only real building projects count. Facility upgrades leave `type` at its default (City), so they
+    // must be excluded or they read as "a city is being founded here".
     public bool IsConstructing(CelestialBody b, BuildingType t)
     {
-        foreach (var c in building) if (c.body == b && c.type == t) return true;
+        foreach (var c in building) if (c.body == b && !c.shipyardUpgrade && !c.labUpgrade && c.type == t) return true;
         return false;
     }
 
@@ -247,6 +353,7 @@ public class ColonyManager : MonoBehaviour
         if (!GameMode.DevMode)
         {
             if (c.shipyardUpgrade) { int nl = c.body.shipyardLevel + 1; PlayerEconomy.Add(ResourceType.Metal, ShipyardUpgradeMetal(nl)); PlayerEconomy.Add(ResourceType.Energy, ShipyardUpgradeEnergy(nl)); }
+            else if (c.labUpgrade) { int nl = c.body.researchCenterLevel + 1; PlayerEconomy.Add(ResourceType.Metal, LabUpgradeMetal(nl)); PlayerEconomy.Add(ResourceType.Energy, LabUpgradeEnergy(nl)); }
             else if (c.establishCity) { PlayerEconomy.Add(ResourceType.Metal, CityMetal); PlayerEconomy.Add(ResourceType.Energy, CityEnergy); }
             else { var info = BuildingDatabase.Get(c.type); PlayerEconomy.Add(ResourceType.Metal, DiscCost(info.costMetal)); PlayerEconomy.Add(ResourceType.Energy, DiscCost(info.costEnergy)); }
         }
@@ -265,10 +372,21 @@ public class ColonyManager : MonoBehaviour
             if (c.shipyardUpgrade)
             {
                 c.body.shipyardLevel = Mathf.Clamp(c.body.shipyardLevel + 1, 1, Colony.MaxShipyardLevel);
-                string perk = c.body.shipyardLevel == 2 ? "Mk II ships unlocked." : "Terraformers unlocked.";
+                int lvl = c.body.shipyardLevel;
                 SimpleAudio.Instance?.PlayNotify(NotifKind.Discovery);
-                NotificationManager.Instance?.Push($"Shipyard on {c.body.name} is now Lv{c.body.shipyardLevel}", perk, Fly(c.body), NotifKind.Discovery);
+                NotificationManager.Instance?.Push($"Shipyard on {c.body.name} is now Lv{lvl}",
+                    $"{Colony.ShipyardPerk(lvl)}. This yard now contributes {BuildPower.ForLevel(lvl)} build power.", Fly(c.body), NotifKind.Discovery);
                 UnitManager.Instance?.NotifyBuildChanged();
+            }
+            else if (c.labUpgrade)
+            {
+                c.body.researchCenterLevel = Mathf.Clamp(c.body.researchCenterLevel + 1, 1, Colony.MaxResearchCenterLevel);
+                int lvl = c.body.researchCenterLevel;
+                SimpleAudio.Instance?.PlayNotify(NotifKind.Discovery);
+                NotificationManager.Instance?.Push($"Research centre on {c.body.name} is now Lv{lvl}",
+                    $"This laboratory now contributes {ResearchCapacity.ForLevel(lvl)} research capacity — more projects at once, or one much larger one.",
+                    Fly(c.body), NotifKind.Discovery);
+                TechManager.NotifyChanged();
             }
             else if (c.establishCity)
             {
@@ -284,10 +402,12 @@ public class ColonyManager : MonoBehaviour
             {
                 if (!c.body.buildings.Contains((int)c.type)) c.body.buildings.Add((int)c.type);
                 if (c.type == BuildingType.Shipyard) c.body.shipyardLevel = Mathf.Max(1, c.body.shipyardLevel);
+                if (c.type == BuildingType.ResearchCenter) c.body.researchCenterLevel = Mathf.Max(1, c.body.researchCenterLevel);
                 var info = BuildingDatabase.Get(c.type);
                 SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
                 NotificationManager.Instance?.Push($"{info.name} built on {c.body.name}", info.description, Fly(c.body), NotifKind.Info);
                 if (c.type == BuildingType.Shipyard) UnitManager.Instance?.NotifyBuildChanged();
+                if (c.type == BuildingType.ResearchCenter) TechManager.NotifyChanged();
             }
         }
     }
@@ -311,20 +431,46 @@ public class ColonyManager : MonoBehaviour
             researchAccum += info.researchPerSec * popMult * TechEffects.ResearchRateMult * dt;   // Science tech speeds research
             growth += info.popGrowthPerSec;
         }
+        // Structures physically placed on the surface grid produce on top of the abstract colony
+        // buildings, each scaled by how well it was SITED (see SurfaceBuildManager.EfficiencyAt) —
+        // a mine on a rich seam earns its keep, one on dead rock never will.
+        SurfaceBuildManager.TickOutput(b, dt);
+        researchAccum += SurfaceBuildManager.ResearchPerSec(b) * TechEffects.ResearchRateMult * dt;
+        growth += SurfaceBuildManager.PopGrowthPerSec(b);
+
         if (researchAccum >= 1f) { int p = Mathf.FloorToInt(researchAccum); researchAccum -= p; ResearchManager.AddPoints(p); }
 
+        // Population growth is gated by how content the colony is: a miserable world stops having
+        // children entirely, a thriving one booms (see Satisfaction.GrowthMultiplier).
         int target = Colony.PopTarget(b);
-        if (b.habitability >= Colony.FoundThreshold && b.population < target)
-            b.population = Mathf.Min(target, b.population + Mathf.Max(1, Mathf.RoundToInt(growth * dt)));
+        float happy = Satisfaction.GrowthMultiplier(b);
+        if (b.habitability >= Colony.FoundThreshold && b.population < target && happy > 0f)
+        {
+            float grown = growth * happy * dt;
+            if (grown > 0f) b.population = Mathf.Min(target, b.population + Mathf.Max(1, Mathf.RoundToInt(grown)));
+        }
 
-        // A research centre processes ore samples that ships have brought to this world.
-        if (b.buildings.Contains((int)BuildingType.ResearchCenter) && b.units != null)
+        // A research centre analyses ore samples that ships have brought to this world. The analysis
+        // COSTS research points, and a bigger laboratory can work through more of them at once — a
+        // level-1 centre chews through one sample per tick, a level-5 one clears a backlog quickly.
+        // Samples it can't afford stay in the ship's hold rather than being silently consumed.
+        if (b.researchCenterLevel >= 1 && b.units != null)
+        {
+            int budget = b.researchCenterLevel;
             foreach (var u in b.units)
             {
+                if (budget <= 0) break;
                 if (u.samples.Count == 0) continue;
-                foreach (var id in u.samples) ResearchManager.ForceResearch((OreType)id);
+                var kept = new List<int>();
+                foreach (var id in u.samples)
+                {
+                    if (budget > 0 && ResearchManager.TryResearchSample((OreType)id)) budget--;
+                    else kept.Add(id);
+                }
                 u.samples.Clear();
+                u.samples.AddRange(kept);
             }
+        }
 
         b.claimProgress = Colony.ClaimProgress(b);
     }
@@ -349,7 +495,9 @@ public class ColonyManager : MonoBehaviour
         int tformers = CountTerraformers(b);
         float stationAura = StationEffects.TerraformAuraAt(b);   // terraforming stations add huge speed on top
         float rate = Mathf.Min(1f + tformers, 6f) + stationAura; // 1× baseline, +1× per terraformer (capped ~5), + stations
-        float gain = 1.1f * rate * TechEffects.TerraformSpeedMult * dt;   // Expansion tech speeds it further
+        // Empire level and Expansion research together decide how fast a world can be reshaped at all —
+        // slow and grinding early, near-immediate for a mature empire (see TerraformProjects.SpeedFactor).
+        float gain = 1.1f * rate * TerraformProjects.SpeedFactor() * dt;
         float water = gain * 4f, energy = gain * 3f, metal = gain * 2f;   // hauled water + power + materials
         if (PlayerEconomy.Get(ResourceType.Water) >= water &&
             PlayerEconomy.Get(ResourceType.Energy) >= energy &&

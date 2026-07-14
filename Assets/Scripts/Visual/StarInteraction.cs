@@ -24,6 +24,8 @@ public class StarInteraction : MonoBehaviour
         }
 
         if (StarInfoPanel.Instance != null) StarInfoPanel.Instance.Show(star);
+        // The tabbed Inspector is the primary readout for anything you click, stars included.
+        InspectorWindow.Instance?.Inspect(InspectorTarget.Of(star, system), resetTrail: true);
 
         if (CameraController.Instance != null)
             CameraController.Instance.FocusAndZoom(transform, transform.lossyScale.x, CameraController.Instance.IsFollowing);

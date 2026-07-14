@@ -2,11 +2,27 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-// One in-progress ship being built.
+// Why a queued ship isn't currently being worked on — drives the label on its queue widget.
+public enum BuildState { Building, Paused, WaitingForPower, Impossible }
+
+// One ship in the build queue. Several can be Building at once: each occupies its hull's build power
+// for as long as it is under construction and releases it the moment it rolls out.
 public class BuildOrder
 {
+    public int id;
     public UnitType type;
     public float elapsed, duration;
+    public bool paused;
+
+    // What was actually paid for this hull, so cancelling refunds exactly that (costs shift as Industry
+    // technologies land, so re-deriving the price at cancel time would refund the wrong amount).
+    public int metalPaid, energyPaid;
+
+    // Set by the scheduler each tick; the UI reads it rather than recomputing the allocation.
+    public BuildState state = BuildState.WaitingForPower;
+    public bool Active => state == BuildState.Building;
+
+    public int Power => UnitDatabase.Get(type).buildPower;
     public float Progress => duration > 0f ? Mathf.Clamp01(elapsed / duration) : 1f;
     public float Remaining => Mathf.Max(0f, duration - elapsed);
 }
@@ -21,6 +37,7 @@ public class UnitManager : MonoBehaviour
     readonly List<Unit> units = new List<Unit>();
     readonly List<BuildOrder> buildQueue = new List<BuildOrder>();
     int nextId = 1;
+    int nextOrderId = 1;
 
     public IReadOnlyList<BuildOrder> BuildQueue => buildQueue;
     public event Action OnBuildChanged;
@@ -56,7 +73,10 @@ public class UnitManager : MonoBehaviour
     public void NewGame(CelestialBody homePlanet)
     {
         units.Clear();
+        buildQueue.Clear();
+        ControlGroups.Clear();
         nextId = 1;
+        nextOrderId = 1;
         HomePlanet = homePlanet;
         ShipUpgrades.Reset();
         StationEffects.Reset();
@@ -104,6 +124,11 @@ public class UnitManager : MonoBehaviour
             reason = $"reach Empire Tech Level {info.minEmpireLevel} to {what} (yours: {EmpireTech.Level})";
             return false;
         }
+        // Build power gates SIZE, not availability: your yards must be able to hold the hull on the
+        // stocks at all. Upgrade a shipyard or research the slipway technologies to make room.
+        int power = BuildPower.PlayerTotal();
+        if (info.buildPower > power)
+        { reason = $"needs {info.buildPower} build power (your yards total {power})"; return false; }
         int cm = ColonyManager.DiscCost(info.costMetal), ce = ColonyManager.DiscCost(info.costEnergy);
         if (!GameMode.DevMode && !PlayerEconomy.CanAfford(cm, ce))
         { reason = $"need {cm} metal, {ce} energy"; return false; }
@@ -114,13 +139,91 @@ public class UnitManager : MonoBehaviour
     {
         var info = UnitDatabase.Get(type);
         if (!CanBuildShip(type, out _)) return false;
-        if (!GameMode.DevMode && !PlayerEconomy.Spend(ColonyManager.DiscCost(info.costMetal), ColonyManager.DiscCost(info.costEnergy))) return false;  // free in Dev Mode
+        int cm = ColonyManager.DiscCost(info.costMetal), ce = ColonyManager.DiscCost(info.costEnergy);
+        if (!GameMode.DevMode && !PlayerEconomy.Spend(cm, ce)) return false;  // free in Dev Mode
         // Higher-tier shipyards build faster (~15% per level above 1); Industry tech cuts time further.
         int level = Mathf.Max(1, Colony.PlayerMaxShipyardLevel());
         float speed = 1f + 0.15f * (level - 1);
-        buildQueue.Add(new BuildOrder { type = type, duration = info.buildTime * TechEffects.BuildTimeMult / speed });
+        buildQueue.Add(new BuildOrder
+        {
+            id = nextOrderId++,
+            type = type,
+            duration = info.buildTime * TechEffects.BuildTimeMult / speed,
+            metalPaid = GameMode.DevMode ? 0 : cm,
+            energyPaid = GameMode.DevMode ? 0 : ce
+        });
+        Schedule();
         OnBuildChanged?.Invoke();
         return true;
+    }
+
+    // ---- Queue editing ----
+    // Pausing freezes a hull's progress bar where it is and hands its build power to the next ship in
+    // line; resuming picks up exactly where it left off (once power is free again).
+    public void SetOrderPaused(BuildOrder o, bool paused)
+    {
+        if (o == null || o.paused == paused) return;
+        o.paused = paused;
+        Schedule();
+        OnBuildChanged?.Invoke();
+    }
+
+    // Cancel a queued or half-built ship. Its resources come straight back — an unfinished hull is
+    // stripped for parts, so nothing is lost but the time.
+    public void CancelOrder(BuildOrder o)
+    {
+        if (o == null || !buildQueue.Remove(o)) return;
+        if (o.metalPaid > 0) PlayerEconomy.Add(ResourceType.Metal, o.metalPaid);
+        if (o.energyPaid > 0) PlayerEconomy.Add(ResourceType.Energy, o.energyPaid);
+        Schedule();
+        OnBuildChanged?.Invoke();
+    }
+
+    // Drag-to-reorder. Moving a ship up the queue can start it immediately (and stall whatever was
+    // using its power), which is the whole point of being able to reprioritize.
+    public void MoveOrder(int from, int to)
+    {
+        if (from < 0 || from >= buildQueue.Count) return;
+        to = Mathf.Clamp(to, 0, buildQueue.Count - 1);
+        if (from == to) return;
+        var o = buildQueue[from];
+        buildQueue.RemoveAt(from);
+        buildQueue.Insert(to, o);
+        Schedule();
+        OnBuildChanged?.Invoke();
+    }
+
+    public int IndexOfOrder(BuildOrder o) => buildQueue.IndexOf(o);
+
+    // ---- Build power ----
+    public int TotalBuildPower => BuildPower.PlayerTotal();
+
+    public int UsedBuildPower
+    {
+        get { int n = 0; foreach (var o in buildQueue) if (o.Active) n += o.Power; return n; }
+    }
+
+    public int FreeBuildPower => Mathf.Max(0, TotalBuildPower - UsedBuildPower);
+
+    // Decide which ships are being worked on right now. Walks the queue IN ORDER and gives each ship the
+    // power it needs; the first ship that doesn't fit stops the walk, so a big hull waiting on power
+    // holds its place rather than being leapfrogged by cheaper ships behind it. Two exceptions keep the
+    // queue from deadlocking: paused ships are skipped (that's what pausing is for), and a hull that
+    // costs more than your entire empire could ever supply is skipped rather than blocking forever.
+    void Schedule()
+    {
+        int total = TotalBuildPower;
+        int free = total;
+        bool blocked = false;
+
+        foreach (var o in buildQueue)
+        {
+            if (o.paused) { o.state = BuildState.Paused; continue; }
+            if (o.Power > total) { o.state = BuildState.Impossible; continue; }
+            if (blocked) { o.state = BuildState.WaitingForPower; continue; }
+            if (o.Power <= free) { o.state = BuildState.Building; free -= o.Power; }
+            else { o.state = BuildState.WaitingForPower; blocked = true; }
+        }
     }
 
     // Ships roll out at your most advanced shipyard (falling back to the home world).
@@ -133,24 +236,38 @@ public class UnitManager : MonoBehaviour
         return best != null ? best : HomePlanet;
     }
 
-    // The order currently under construction (front of the queue), or null.
-    public BuildOrder CurrentBuild => buildQueue.Count > 0 ? buildQueue[0] : null;
+    // The first ship actually under construction (for compact readouts), or null.
+    public BuildOrder CurrentBuild
+    {
+        get { foreach (var o in buildQueue) if (o.Active) return o; return null; }
+    }
 
     void AdvanceBuild(float dt)
     {
         if (buildQueue.Count == 0) return;
-        var order = buildQueue[0];
-        order.elapsed += dt;
-        if (order.elapsed >= order.duration)
+
+        // Re-run the allocation every tick: shipyards can be built, upgraded, lost or gained at any time,
+        // and every completion frees power that the ships behind it should pick up immediately.
+        Schedule();
+
+        bool completed = false;
+        for (int i = buildQueue.Count - 1; i >= 0; i--)
         {
-            buildQueue.RemoveAt(0);
+            var o = buildQueue[i];
+            if (!o.Active) continue;               // paused, waiting for power, or unbuildable: frozen
+            o.elapsed += dt;
+            if (o.elapsed < o.duration) continue;
+
+            buildQueue.RemoveAt(i);
             var yard = BestShipyardBody();
-            CreateUnit(order.type, FactionManager.Player, yard);
+            CreateUnit(o.type, FactionManager.Player, yard);
             SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
-            NotificationManager.Instance?.Push($"{UnitDatabase.Get(order.type).name} built",
-                $"Ready at {(yard != null ? yard.name : "home")}.", null, NotifKind.Info);
-            OnBuildChanged?.Invoke();
+            NotificationManager.Instance?.Push($"{UnitDatabase.Get(o.type).name} built",
+                $"Ready at {(yard != null ? yard.name : "home")}. {o.Power} build power freed.", null, NotifKind.Info);
+            completed = true;
         }
+
+        if (completed) { Schedule(); OnBuildChanged?.Invoke(); }   // freed power starts the next ships now
     }
 
     // ---- Movement ----
@@ -625,13 +742,23 @@ public class UnitManager : MonoBehaviour
         return true;
     }
 
-    // Survey: reveals the world. Bigger and LESS habitable worlds take longer; scouts get a survey
-    // bonus. Surveying only DISCOVERS ores (collects samples) — it does NOT research them.
+    // Survey: reveals the world, one PASS at a time.
+    //
+    // A ship can only map so much of a world before it has exhausted what its sensors know how to look
+    // at (UnitInfo.surveyDepth). A basic Scout maps just over half of a world and then its pass is
+    // done — send it round again for the next slice. A Mk III or a Science Vessel maps the whole thing
+    // in one go, which is what reveals the points of interest.
+    //
+    // Surveying only DISCOVERS ores (and collects a sample to carry); it never researches them. That
+    // happens at a research ship, station or centre, and it costs research points.
     void Explore(Unit u, float dt)
     {
         var b = u.location;
         if (b == null) { u.status = UnitStatus.Idle; return; }
         if (b.Surveyed) { FinishAction(u, OrderKind.Survey, b); return; }   // already done
+
+        // A pass begins the first frame this ship starts surveying this world.
+        if (u.surveyPassBody != b) { u.surveyPassBody = b; u.surveyPassStart = b.explorationProgress; }
 
         float before = b.explorationProgress;
         float sizeFactor = Mathf.Max(0.5f, b.surfaceSize / 8f);                                   // bigger = slower
@@ -649,8 +776,25 @@ public class UnitManager : MonoBehaviour
             }
         }
 
+        // Pass exhausted before the world is finished: stop here and say so. The ship keeps what it
+        // mapped — another pass (or a better hull) picks up exactly where this one left off.
+        float mapped = b.explorationProgress - u.surveyPassStart;
+        if (b.explorationProgress < 1f && mapped >= u.Info.surveyDepth)
+        {
+            u.AddExperience(XpSample);
+            u.surveyPassBody = null;
+            SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
+            NotificationManager.Instance?.Push($"{b.name} — survey pass complete",
+                $"{u.name} mapped {mapped * 100f:F0}% this pass ({b.explorationProgress * 100f:F0}% total). " +
+                $"A {u.Info.name} can only map {u.Info.surveyDepth * 100f:F0}% at a time — send it round again, or bring a better sensor suite, to finish the map and reveal this world's points of interest.",
+                FlyTo(b), NotifKind.Info);
+            FinishAction(u, OrderKind.Survey, b);
+            return;
+        }
+
         if (b.explorationProgress >= 1f)
         {
+            u.surveyPassBody = null;
             u.AddExperience(XpSurvey);
             SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
             NotificationManager.Instance?.Push($"{b.name} surveyed", "Survey complete — map revealed.",
@@ -704,23 +848,76 @@ public class UnitManager : MonoBehaviour
 
     // Convert discovered ores here (and carried samples of all ships present) into researched tech,
     // award research points, and resolve any points of interest.
+    // A research ship finishing a deep study of a world. Every ore it cracks COSTS research points —
+    // the ship does the legwork, but the analysis is paid for out of the empire's research bank. Ores
+    // it can't afford stay merely discovered (and any samples stay in the hold) until you can pay.
     public void DoDeepResearch(Unit researcher, CelestialBody b)
     {
+        int studied = 0, unaffordable = 0;
+
+        // A deep study is what puts people on the ground long enough to chart the geothermal vents, the
+        // soil and the weather — it unlocks the Heat, Fertile and Weather survey overlays used when
+        // siting surface buildings. Mapping a world from orbit only ever shows you its mineral seams.
+        if (!b.deepSurveyed)
+        {
+            b.deepSurveyed = true;
+            NotificationManager.Instance?.Push($"Deep survey complete on {b.name}",
+                "Heat, Fertile and Weather index overlays are now available for this world — use them in the Planet View's Survey tab to site geothermal plants, farms and solar arrays where they'll actually pay.",
+                FlyTo(b), NotifKind.Research);
+        }
+
         foreach (var ore in OreGenerator.OresOnBody(b))
         {
             ResearchManager.Discover(ore);
-            ResearchManager.ForceResearch(ore);
+            if (ResearchManager.IsResearched(ore)) continue;
+            if (ResearchManager.TryResearchSample(ore)) studied++;
+            else unaffordable++;
         }
+
+        // Samples carried by any ship parked here get analysed too — that's the whole point of hauling
+        // them to a research vessel. Ones you can't afford stay in the hold rather than being lost.
         if (b.units != null)
             foreach (var unit in b.units)
             {
                 if (unit.samples.Count == 0) continue;
-                foreach (var id in unit.samples) ResearchManager.ForceResearch((OreType)id);
+                var kept = new List<int>();
+                foreach (var id in unit.samples)
+                {
+                    if (ResearchManager.TryResearchSample((OreType)id)) studied++;
+                    else { kept.Add(id); unaffordable++; }
+                }
                 unit.samples.Clear();
+                unit.samples.AddRange(kept);
             }
-        ResearchManager.AddPoints(25);
+
+        // Resolving a world's anomalies is the PAYOFF of exploring: it hands points back.
         if (b.pointsOfInterest != null)
-            foreach (var poi in b.pointsOfInterest) poi.explored = true;
+            foreach (var poi in b.pointsOfInterest)
+            {
+                if (poi.explored) continue;
+                poi.explored = true;
+                ResearchManager.AddPoints(POIReward(poi));
+            }
+
+        if (unaffordable > 0)
+            NotificationManager.Instance?.Push($"Research stalled at {b.name}",
+                $"{studied} sample(s) analysed. {unaffordable} could not be afforded — the samples are being held until you have the research points.",
+                null, NotifKind.Info);
+    }
+
+    // What resolving a point of interest is worth. Ancient ruins are the prize — they're what open the
+    // precursor tech tree — while a settlement is mostly context and a special-resource site pays out
+    // in the ore itself rather than in points.
+    public static int POIReward(PointOfInterest poi)
+    {
+        switch (poi.type)
+        {
+            case POIType.AncientRuins: return 60;
+            case POIType.Mystery: return 45;
+            case POIType.SpecialResource: return 20;
+            case POIType.Settlement: return 30;
+            default: return 15;
+        }
     }
 
     void RevealBodyVisual(CelestialBody b)
@@ -820,6 +1017,35 @@ public class UnitManager : MonoBehaviour
         return list;
     }
 
+    // Serialize the build queue: which hulls are on the stocks, how far along, what they cost and
+    // whether they're paused. Order matters — it's the power-allocation order.
+    public List<BuildOrderDTO> ExportBuildQueue()
+    {
+        var list = new List<BuildOrderDTO>();
+        foreach (var o in buildQueue)
+            list.Add(new BuildOrderDTO
+            {
+                type = (int)o.type, elapsed = o.elapsed, duration = o.duration,
+                paused = o.paused, metalPaid = o.metalPaid, energyPaid = o.energyPaid
+            });
+        return list;
+    }
+
+    public void ImportBuildQueue(List<BuildOrderDTO> dtos)
+    {
+        buildQueue.Clear();
+        nextOrderId = 1;
+        if (dtos != null)
+            foreach (var d in dtos)
+                buildQueue.Add(new BuildOrder
+                {
+                    id = nextOrderId++, type = (UnitType)d.type, elapsed = d.elapsed, duration = d.duration,
+                    paused = d.paused, metalPaid = d.metalPaid, energyPaid = d.energyPaid
+                });
+        Schedule();
+        OnBuildChanged?.Invoke();
+    }
+
     // Rebuild the fleet from DTOs, resolving body references by id. Does NOT touch ShipUpgrades range
     // factors (those are restored by EmpireTech/TechManager before this runs).
     public void ImportUnitDTOs(List<UnitDTO> dtos, Dictionary<int, CelestialBody> byId, CelestialBody homePlanet)
@@ -827,7 +1053,12 @@ public class UnitManager : MonoBehaviour
         units.Clear();
         nextId = 1;
         HomePlanet = homePlanet;
-        if (homePlanet != null) { homePlanet.shipyardLevel = Mathf.Max(1, homePlanet.shipyardLevel); homePlanet.birthrightClaim = true; }
+        if (homePlanet != null)
+        {
+            homePlanet.shipyardLevel = Mathf.Max(1, homePlanet.shipyardLevel);
+            homePlanet.researchCenterLevel = Mathf.Max(1, homePlanet.researchCenterLevel);   // pre-tier saves
+            homePlanet.birthrightClaim = true;
+        }
 
         if (dtos != null)
             foreach (var d in dtos)

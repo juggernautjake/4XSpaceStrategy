@@ -152,8 +152,8 @@ public class ColonyWindow : MonoBehaviour
         var b = body;
         var mgr = ColonyManager.Instance;
         string qsig = "";
-        if (mgr != null) foreach (var c in mgr.QueueFor(b)) qsig += (c.shipyardUpgrade ? "U" : c.establishCity ? "C" : c.type.ToString()) + ";";
-        string sig = string.Join(",", b.buildings) + $"|yard{b.shipyardLevel}|hab{b.habitability >= Colony.FoundThreshold}|q{qsig}";
+        if (mgr != null) foreach (var c in mgr.QueueFor(b)) qsig += (c.shipyardUpgrade ? "U" : c.labUpgrade ? "L" : c.establishCity ? "C" : c.type.ToString()) + ";";
+        string sig = string.Join(",", b.buildings) + $"|yard{b.shipyardLevel}|lab{b.researchCenterLevel}|hab{b.habitability >= Colony.FoundThreshold}|q{qsig}";
         if (sig == lastBuildSig && buildList.childCount > 0) return;
         lastBuildSig = sig;
 
@@ -175,7 +175,7 @@ public class ColonyWindow : MonoBehaviour
             for (int i = 0; i < q.Count; i++)
             {
                 var c = q[i];
-                string nm = c.shipyardUpgrade ? "Shipyard upgrade" : c.establishCity ? "City" : BuildingDatabase.Get(c.type).name;
+                string nm = c.shipyardUpgrade ? "Shipyard upgrade" : c.labUpgrade ? "Research centre upgrade" : c.establishCity ? "City" : BuildingDatabase.Get(c.type).name;
                 string state = i == 0 ? "building" : $"queued #{i}";
                 string pfx = i == 0 ? "> " : $"{i + 1}. ";
                 var rowGo = UIFactory.NewUI(buildList, "QRow"); UIFactory.AddLayout(rowGo, 24);
@@ -199,21 +199,41 @@ public class ColonyWindow : MonoBehaviour
             cityBtn.interactable = canCity;
         }
 
-        // Shipyard tier + upgrade.
+        // Shipyard tier + upgrade. The headline perk of a tier is BUILD POWER: how many hulls this yard
+        // can hold on the stocks at once, pooled with every other yard you own.
         if (b.shipyardLevel >= 1)
         {
-            UIFactory.Label(buildList, $"Shipyard: <b>Level {b.shipyardLevel}</b>" +
-                (b.shipyardLevel >= Colony.MaxShipyardLevel ? "  (max — builds Terraformers)"
-                 : b.shipyardLevel == 2 ? "  (builds Mk II ships)" : ""), UITheme.SmallSize, UITheme.SubText, 22);
+            UIFactory.Label(buildList, $"Shipyard: <b>Level {b.shipyardLevel}</b>  " +
+                $"<color=#8FD0FF>{BuildPower.ForBody(b)} build power</color>  <color=#9FB4C8>({Colony.ShipyardPerk(b.shipyardLevel)})</color>",
+                UITheme.SmallSize, UITheme.SubText, 22);
             if (mgr != null && b.shipyardLevel < Colony.MaxShipyardLevel)
             {
-                bool canUp = mgr.CanUpgradeShipyard(b, out string upWhy, out int next);
-                if (!canUp) mgr.CanUpgradeShipyard(b, out upWhy, out next);
-                int m = ColonyManager.ShipyardUpgradeMetal(b.shipyardLevel + 1), e = ColonyManager.ShipyardUpgradeEnergy(b.shipyardLevel + 1);
+                int next = b.shipyardLevel + 1;
+                bool canUp = mgr.CanUpgradeShipyard(b, out string upWhy, out _);
+                int m = ColonyManager.ShipyardUpgradeMetal(next), e = ColonyManager.ShipyardUpgradeEnergy(next);
                 var upBtn = UIFactory.Button(buildList,
-                    canUp ? $"Upgrade Shipyard → Lv{b.shipyardLevel + 1}  ({m}m {e}e, {ColonyManager.ShipyardUpgradeTime(b.shipyardLevel + 1):F0}s)"
-                          : $"Upgrade Shipyard → Lv{b.shipyardLevel + 1} — {upWhy}",
+                    canUp ? $"Upgrade Shipyard → Lv{next}  ({m}m {e}e, {ColonyManager.ShipyardUpgradeTime(next):F0}s) → {BuildPower.ForLevel(next)} build power"
+                          : $"Upgrade Shipyard → Lv{next} — {upWhy}",
                     () => { if (mgr.StartShipyardUpgrade(b)) { lastBuildSig = ""; RebuildBuildings(); } }, 30);
+                upBtn.interactable = canUp;
+            }
+        }
+
+        // Research-centre tier + upgrade — the laboratory twin of the shipyard ladder.
+        if (b.researchCenterLevel >= 1)
+        {
+            UIFactory.Label(buildList, $"Research Centre: <b>Level {b.researchCenterLevel}</b>  " +
+                $"<color=#8FD0FF>{ResearchCapacity.ForBody(b)} research capacity</color>",
+                UITheme.SmallSize, UITheme.SubText, 22);
+            if (mgr != null && b.researchCenterLevel < Colony.MaxResearchCenterLevel)
+            {
+                int next = b.researchCenterLevel + 1;
+                bool canUp = mgr.CanUpgradeLab(b, out string upWhy, out _);
+                int m = ColonyManager.LabUpgradeMetal(next), e = ColonyManager.LabUpgradeEnergy(next);
+                var upBtn = UIFactory.Button(buildList,
+                    canUp ? $"Upgrade Research Centre → Lv{next}  ({m}m {e}e, {ColonyManager.LabUpgradeTime(next):F0}s) → {ResearchCapacity.ForLevel(next)} capacity"
+                          : $"Upgrade Research Centre → Lv{next} — {upWhy}",
+                    () => { if (mgr.StartLabUpgrade(b)) { lastBuildSig = ""; RebuildBuildings(); } }, 30);
                 upBtn.interactable = canUp;
             }
         }

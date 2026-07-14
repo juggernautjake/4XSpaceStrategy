@@ -114,8 +114,17 @@ Enum `OreType` (None + 14 ores from Ferralite → Xenocryst).
 - **`LoadSystem(bodies, star)`** — display a loaded/deserialized system.
 - `Visualize()` — hands bodies+star to the `SystemVisualizer`.
 
-### CameraController.cs  *(unchanged legacy)*
-WASD pan + mouse-wheel height, fixed pitch, ignores input over UI.
+### CameraController.cs
+WASD pan + mouse-wheel height, fixed 55° pitch, ignores input over UI.
+- **`UpdateClipPlanes()`** — drives the far/near planes from the current height every frame. The scene
+  shipped with Unity's default 1000 far plane, which silently clipped the whole galaxy away and made
+  zooming out look broken; this is what actually lets you pull back to the full map.
+- **Proportional zoom** — each scroll notch scales height by a percentage, so one notch feels the same
+  at a 4-unit moon close-up and a 2,500-unit galaxy view. A fixed step can't serve both.
+- **`ViewWholeGalaxy()`** (HUD "Galaxy" / **Home** key) — centres on the galaxy and frames every system.
+- **`GalaxyRadius()` / `HeightToFrame(r)` / `ZoomCeiling()`** — the zoom-out limit is derived from the
+  galaxy's real extent, so you can always reach the whole map and never further.
+- Panning stays enabled at wide zoom even with a planet selected (the mini-map cursor only owns WASD up close).
 
 ---
 
@@ -140,6 +149,36 @@ Global handle to the current system.
 - **`NewGame()`**, `IsDiscovered/IsResearched`, **`Discover(ore)`**, **`CanResearch/Research(ore)`**,
   `AwardExploration`, `AddPoints`, `ResearchPoints`, event `OnChanged`.
 - `ExportDiscovered/ExportResearched/Import` — save/load bridge.
+
+### FacilityPower.cs  *(the two parallelism pools)*
+A facility's LEVEL buys **parallelism**, not just speed.
+- **`BuildPower.ForLevel(level)`** — `level + 1 + TechEffects.ShipyardPowerBonus` (Lv1 = 2, Lv3 = 4, Lv5 = 6).
+  `ForBody(b)`, **`PlayerTotal()`** (every owned shipyard pools; memoized per frame), `PlayerYardCount()`.
+- **`ResearchCapacity.*`** — the identical curve for research centres.
+Each hull costs `UnitInfo.buildPower` while on the stocks; each tech costs `Tech.CapacityCost` while studied.
+
+### Terraforming.cs  *(what's wrong with a world, and what fixes it)*
+Two layers: **projects raise a world's CEILING**; terraformer ships then grind habitability toward it.
+- `enum TerraformProblem` — TooHot/TooCold, NoWater/**TooMuchWater**, NoAtmosphere/AtmosphereTooThick,
+  ToxicAtmosphere, NoBiosphere, NoMagnetosphere, Day too long/short, Orbit too close/far, NoSurface,
+  UnstableAxis, LowGravity, **WrongWorldType**.
+- **`TerraformDiagnosis.Analyze(body, species)`** — the species-relative fault list. This is why an ocean
+  world reads 86% to the Aquarii and 24% to the Pyrothians. `SeverityOf`, `Describe`, `Pretty`.
+- **`TerraformProjectDatabase.All / Get / For(body, species, techGated)`** — ~23 projects (haul water,
+  melt caps, tap aquifers, comet bombardment, processors, scrubbers, forests, mirrors/shades, core
+  cooling/ignition, spin up/down, orbit migration, moon capture/disassembly, hydrosphere venting,
+  shellworlds, **planetary remodelling**). Each gates on a tech and fixes one problem.
+- **`TerraformProjects.CeilingBonus / ReachableCeiling / PotentialCeiling`**, **`SpeedFactor()`**
+  (empire level × Expansion tech — slow early, ~a minute late), cost/duration scale by size × severity.
+
+### TerraformManager.cs
+- **`CanStart/Start(body, type)`**, `SetPaused`, `Cancel` (full refund), `JobsFor`, `Export/Import`.
+- `ApplyPhysicalEffect` — projects really change the world (water added/vented, spin, orbit, and
+  **`Reshape`** converts the body TYPE and re-scores habitability).
+
+### ControlGroups.cs
+- **`Assign(g, units)` / `Members(g)` / `GroupOf(unit)`**, `Export/Import`.
+- **`ControlGroupInput`** — `Ctrl+1..9` bind, `1..9` select + fly camera, `Shift+1..9` add.
 
 ---
 
@@ -216,6 +255,14 @@ Shared palette + font sizes for all runtime UI.
 ### UIFactory.cs  *(builds all UI in code)*
 `CreateCanvas, EnsureEventSystem, Panel, Window` (draggable shell), `VerticalLayout, Text, Label,
 Button, Toggle, LabeledSlider, Slider, InputField, ScrollView`, plus `Stretch/AddLayout` helpers.
+> **Buttons sit at their normal colour and only light up while pressed.** Hover and post-click
+> selection deliberately do not tint, and navigation is off. Windows rebuild as the economy ticks, and
+> a hover/selected tint restarts its fade on every rebuild — which read as a blue strobe.
+
+### QueueDragHandle.cs
+The "≡" grip on a queue widget. Drag it to reorder the build/research queue; dragging the row body
+still scrolls the list. Reordering moves the MODEL then re-sorts existing rows by sibling index — it
+never destroys them, because destroying the row under the cursor would cancel the drag.
 
 ### DraggableWindow.cs
 Drag a window by its title bar; brings it to front on click.
@@ -232,9 +279,64 @@ Drag a window by its title bar; brings it to front on click.
 ### StarInfoPanel.cs
 - **`Show(star)`** — star attributes + a **Show Habitable Zone** toggle (disabled if the star has none).
 
-### ResearchWindow.cs  *(Ore Codex)*
-- **`Toggle()`**, `Refresh`, `BuildCard(ore)` — undiscovered "???", discovered → Research button,
-  researched → uses + refining. Header shows research points.
+### PlanetViewWindow.cs  *(HUD "Surface" — the world you develop)*
+Three tabs over one shared surface grid:
+- **Info** — name, type, size class, climate/weather prose, development density, survey state.
+- **Build** — click a structure to pick it up; it rides the mouse as a loose ghost, then SNAPS to the
+  grid over the map (green = fits, red = doesn't). **Right-click rotates** at any point; left-click
+  commits; Esc drops it. Footprints are tetromino-like, so packing a dense city is a real puzzle.
+- **Survey** — the index overlays, each with its own colour ramp, plus a live per-tile readout.
+
+Drawing: overlays are ONE point-filtered texture the size of the grid (a texel per cell), not a
+GameObject per tile — a 40×20 world is 800 cells. Structures and the ghost are a few quads on top.
+Hover is POLLED (`ScreenToCell`), not `IPointerMoveHandler`, whose dispatch depends on the input module.
+
+### SurfaceIndex.cs
+Per-tile survey overlays, **derived not stored** — a stable hash of the terrain seed + position means
+they cost nothing to save and survive a reload untouched (the same guarantee terrain already makes).
+- `SurfaceIndexKind` — Mineral · Heat · Fertile · Weather. `Get / Ramp / Name / Describe`.
+- **`Unlocked(b, kind)`** — Mineral needs a survey (you see seams from orbit); Heat/Fertile/Weather
+  need `body.deepSurveyed`, set when a research ship studies the world. That's the reason to go back.
+- Ramps: brown (mineral), orange→red (heat), dark→vibrant green (fertile), blue→white (weather).
+
+### SurfaceBuilding.cs + SurfaceBuildManager.cs
+- `SurfaceBuildingType` / `SurfaceBuildingInfo` — footprint `shape`, driving `index`, cost, output.
+  Mine = L, Farm = 2×3, Geothermal = O, Solar = I, Wind = T, Habitat = S, Factory/Spaceport = blocks.
+- **`Rotated / CellsOf / Footprint`** — 90° rotation, re-normalized so the piece stays under the cursor.
+- **`CanPlace / Place / Demolish`** (60% refund), `Occupied`, `Density`.
+- **`EfficiencyAt`** — the average of the driving index across the footprint, **locked in at placement**.
+  A mine on a seam pays forever; one on dead rock is a permanent mistake. `TickOutput` scales by it.
+
+### InspectorWindow.cs + InspectorBodyTabs / InspectorUnitTabs / InspectorFacilityTabs / InspectorStarTabs
+**One tabbed window for everything you can click on.** `partial class InspectorWindow`.
+- `InspectorTarget` — a tagged union: Body · Unit · Fleet · City · Shipyard · ResearchCenter · Structure · Star.
+- **`Inspect(target)` / `Drill(target)` / `Back()`** — drilling into a planet's shipyard re-targets the
+  window and leaves a breadcrumb, so a facility is a subject in its own right, not a sub-panel.
+- Tabs — Planet: Overview · Climate · Ores · Society · Production · Objects · Terraform.
+  Ship: Overview · Orders · Stats · Effects. Fleet: Ships · Orders. Star: Overview · Zone · Worlds.
+  Shipyard: Overview · Build · Stocks. Research Centre: Overview · Research · Projects.
+- Rebuilds ONLY when `Signature()` changes (subject, tab, structural facts); every value refreshes in
+  place through a `LiveSet`. Values are deliberately absent from the signature — that's the strobe fix.
+- Shared helpers: `Card / Header / Stat / Note / DrillRow / Bar / UnitRow`.
+
+### UILive.cs
+`LiveSet` — the "refresh in place" half of the rebuild rule. `Text / Button / Bar / Custom` bindings,
+`Tick()` once per frame. A `Button` binding dims and re-captions itself when it can't be used.
+
+### ResearchWindow.cs  *(Ore Codex, tech tree + research queue)*
+- **`Toggle()`**, `Signature()`/`Rebuild()`, `BuildResearchQueuePanel`, `BuildTechTree`, `BuildCard(ore)`.
+- The **research queue** is the laboratory twin of the shipyard stocks: capacity readout, per-project
+  drag-reorder / pause / abandon (refunds sunk RP), progress bars. Several technologies study at once.
+- Rebuilds only on a **signature** change (researched set, empire level, capacity, discovered ores).
+  Point-dependent captions refresh in place via `dynamics` — this is what stops the button strobe.
+
+### ShipyardWindow.cs  *(catalogue + live stocks)*
+- Top: stockpile, pooled **build power** (free/total) and the selected yard's own contribution.
+- **Catalogue** — icon, name, resources, build power, time. Bright + clickable when affordable, dimmed
+  and inert when not, with the reason on the button. Clicking queues one; click again to queue another.
+- **On the stocks** — every ship building or queued, each with a progress bar, a drag grip, pause
+  (hands its power to the next ship) and cancel (full refund).
+- Same rebuild discipline as ResearchWindow: signature-gated structure, per-frame values in place.
 
 ### SaveLoadMenu.cs
 - **`Toggle()`**, `DoSave` (named), `RefreshList`, `BuildRow`, `DoLoad`, `DoDelete`. Multiple saves supported.

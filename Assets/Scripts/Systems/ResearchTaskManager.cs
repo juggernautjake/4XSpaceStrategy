@@ -41,9 +41,24 @@ public class ResearchTaskManager : MonoBehaviour
         return null;
     }
 
+    /// Whether this site can be studied right now, and why not if it can't.
+    public bool CanStart(CelestialBody body, PointOfInterest poi, out string reason)
+    {
+        reason = null;
+        if (body == null || poi == null) { reason = "nothing here"; return false; }
+        if (!poi.IsResearchable) { reason = "already studied"; return false; }
+        if (IsResearching(poi)) { reason = "already under study"; return false; }
+        if (!GameMode.DevMode && ResearchManager.ResearchPoints < poi.researchPointCost)
+        { reason = $"needs {poi.researchPointCost} research points (have {ResearchManager.ResearchPoints})"; return false; }
+        return true;
+    }
+
+    // Studying a site COSTS research points up front — the field team, the equipment, the analysis —
+    // and pays back more than it cost when it completes. That's what makes exploring worth doing.
     public void StartResearch(CelestialBody body, PointOfInterest poi)
     {
-        if (body == null || poi == null || !poi.IsResearchable || IsResearching(poi)) return;
+        if (!CanStart(body, poi, out _)) return;
+        if (!GameMode.DevMode) ResearchManager.AddPoints(-poi.researchPointCost);
         float duration = Mathf.Max(3f, poi.researchDuration) * GameConfig.ResearchTimeMult; // difficulty
         active.Add(new ResearchTask { body = body, poi = poi, duration = duration });
     }
@@ -73,10 +88,22 @@ public class ResearchTaskManager : MonoBehaviour
         string extra = "";
         if (poi.relatedOre != OreType.None)
         {
+            // The site's own ore comes free: the excavation IS the research, and it was paid for up front.
             ResearchManager.ForceResearch(poi.relatedOre);
             extra = $"  Unlocked ore: {OreDatabase.Get(poi.relatedOre).displayName}.";
         }
-        if (poi.type == POIType.Mystery) ResearchManager.AwardExploration();
+
+        // The payoff. Each site pays back more than the points it cost to study — that margin is the
+        // entire economic reason to explore rather than sit at home.
+        ResearchManager.AddPoints(poi.researchReward);
+        extra += $"  <color=#8FD0FF>+{poi.researchReward} research points</color> (cost {poi.researchPointCost}).";
+
+        // Precursor ruins are the only source of ancient schematics, which gate the Ancients tree.
+        if (poi.yieldsSchematic)
+        {
+            AncientLore.Recover(1);
+            extra += $"  <color=#4DE8D8>Recovered an ancient schematic ({AncientLore.SchematicsFound} total)</color> — precursor technology is opening up.";
+        }
 
         string title = poi.type == POIType.Mystery
             ? (string.IsNullOrEmpty(poi.revealTitle) ? "Anomaly" : poi.revealTitle)

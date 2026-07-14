@@ -32,6 +32,27 @@ public class Species
 
     public void SetAffinity(CelestialBodyType t, float v) { typeAffinity[(int)t] = v; }
 
+    // The kind of world this species would build for itself if it could — the target that planetary
+    // remodelling converts a world toward. Terrans want temperate rock, Aquarii want ocean, Pyrothians
+    // want a furnace, Cryithn want ice.
+    public CelestialBodyType BestType()
+    {
+        CelestialBodyType best = CelestialBodyType.RockyPlanet;
+        float bestV = -1f;
+        foreach (CelestialBodyType t in System.Enum.GetValues(typeof(CelestialBodyType)))
+        {
+            // Only real planets are remodelling targets — nobody converts a world into an asteroid.
+            if (t == CelestialBodyType.Asteroid || t == CelestialBodyType.Moon || t == CelestialBodyType.GasGiant) continue;
+            float v = Affinity(t);
+            if (v > bestV) { bestV = v; best = t; }
+        }
+        return best;
+    }
+
+    // Does this species want a wet world or a dry one? This is what makes the same ocean planet an
+    // 86% paradise for the Aquarii and a 24% drowning hazard for the silicate Pyrothians.
+    public bool PrefersDry => Affinity(CelestialBodyType.OceanPlanet) < 0.35f;
+
     public string AttributeLine()
         => $"IQ {iq} · Longevity {longevity} · Fertility {fertility} · Durability {durability} · Adaptability {adaptability}";
 }

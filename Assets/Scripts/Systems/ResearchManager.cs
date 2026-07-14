@@ -63,7 +63,9 @@ public static class ResearchManager
         return true;
     }
 
-    // Complete research for free (e.g. finishing a timed field-research task).
+    // Complete research for free. Reserve this for things the player has genuinely already paid for in
+    // another currency — finishing a timed field-research task at an anomaly, say. Facilities studying
+    // ore samples must go through TryResearchSample instead, so their work costs points.
     public static void ForceResearch(OreType ore)
     {
         if (ore == OreType.None) return;
@@ -71,6 +73,34 @@ public static class ResearchManager
         researched.Add(ore);
         OnChanged?.Invoke();
     }
+
+    // A research facility (a research ship, an orbital laboratory, or a colony's research centre)
+    // studying an ore sample brought back from the field. This is REAL work and it is charged for:
+    // the facility spends research points, and if the bank can't cover this ore's cost the sample sits
+    // in the hold until it can. Rarer, higher-tier ores cost far more to crack.
+    //
+    // Returns false when it couldn't be afforded, so the caller can keep hold of the sample.
+    public static bool TryResearchSample(OreType ore)
+    {
+        if (ore == OreType.None) return true;          // nothing to do; don't strand the sample
+        discovered.Add(ore);
+        if (researched.Contains(ore)) return true;     // already known — the sample is redundant
+
+        int cost = OreDatabase.Get(ore).researchCost;
+        if (ResearchPoints < cost) return false;       // can't afford it yet; hold the sample
+
+        ResearchPoints -= cost;
+        researched.Add(ore);
+        var info = OreDatabase.Get(ore);
+        NotificationManager.Instance?.Push($"Researched: {info.displayName}",
+            $"{cost} research points spent. {info.uses}", null, NotifKind.Research);
+        OnChanged?.Invoke();
+        return true;
+    }
+
+    /// Can a facility afford to study this ore right now?
+    public static bool CanAffordSample(OreType ore)
+        => ore == OreType.None || researched.Contains(ore) || ResearchPoints >= OreDatabase.Get(ore).researchCost;
 
     public static void AwardExploration()
     {
