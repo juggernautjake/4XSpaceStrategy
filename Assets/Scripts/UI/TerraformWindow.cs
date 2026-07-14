@@ -254,7 +254,7 @@ public class TerraformWindow : MonoBehaviour
             var costLine = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.SubText);
 
             var t = p.type;
-            var btn = UIFactory.Button(card, "", () => { TerraformManager.Instance?.Start(body, t); lastSig = null; }, 26);
+            var btn = UIFactory.Button(card, "", () => { TerraformManager.Instance?.Begin(body, t); lastSig = null; }, 26);
 
             // Costs and gating are all live values, so they update in place rather than forcing a rebuild.
             dynamics.Add(new DynRow

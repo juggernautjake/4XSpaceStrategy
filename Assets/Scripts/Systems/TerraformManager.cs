@@ -85,7 +85,10 @@ public class TerraformManager : MonoBehaviour
         return true;
     }
 
-    public bool Start(CelestialBody b, TerraformProjectType t)
+    // NOT named Start: MonoBehaviour reserves Start/Awake/Update/etc. as magic methods, and Unity
+    // reflects over them at load — finding one with parameters logs
+    // "Script error (TerraformManager): Start() can not take parameters." and the component is broken.
+    public bool Begin(CelestialBody b, TerraformProjectType t)
     {
         if (!CanStart(b, t, out _)) return false;
         var p = TerraformProjectDatabase.Get(t);
