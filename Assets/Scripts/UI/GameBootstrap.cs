@@ -17,6 +17,7 @@ public static class GameBootstrap
         SimpleAudio.Create();
         ResearchTaskManager.Create();
         UnitManager.Create();               // before the token renderer subscribes to it
+        ColonyManager.Create();             // colony economy, growth, terraforming, construction
         FleetMovementController.Create();
         UnitTokenRenderer.Create();
         SpaceBackground.Create();
@@ -42,6 +43,7 @@ public static class GameBootstrap
         FleetWindow.Create(canvas.transform);
         ShipyardWindow.Create(canvas.transform);
         BodyUnitsPanel.Create(canvas.transform);
+        ColonyWindow.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);
         GenerationMenu.Create(canvas.transform);
         EscapeMenu.Create(canvas.transform);
