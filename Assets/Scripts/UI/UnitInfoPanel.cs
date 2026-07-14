@@ -35,8 +35,20 @@ public class UnitInfoPanel : MonoBehaviour
         rt.anchoredPosition = new Vector2(-16, -60);
         UIFactory.VerticalLayout(content, 7);
 
+        // Name is read-only until you press Edit Name (so a stray click can't rename a ship).
         nameInput = UIFactory.InputField(content, "Ship name…");
-        nameInput.onEndEdit.AddListener(v => { if (current != null && !string.IsNullOrWhiteSpace(v)) { current.name = v.Trim(); Refresh(); } });
+        nameInput.interactable = false;
+        nameInput.onEndEdit.AddListener(v =>
+        {
+            if (current != null && !string.IsNullOrWhiteSpace(v)) { current.name = v.Trim(); Refresh(); }
+            nameInput.interactable = false;
+        });
+        UIFactory.Button(content, "Edit Name", () =>
+        {
+            if (current == null) return;
+            nameInput.interactable = true;
+            nameInput.ActivateInputField();
+        }, 24);
 
         body = UIFactory.Label(content, "", UITheme.SmallSize, UITheme.Text, 168);
         body.alignment = TextAlignmentOptions.TopLeft;

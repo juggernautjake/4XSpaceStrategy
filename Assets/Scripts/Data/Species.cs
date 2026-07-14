@@ -164,7 +164,7 @@ public static class SpeciesManager
             if (b.habitabilityLocked) continue;      // home world keeps its difficulty rating
             var star = b.hostStar != null ? b.hostStar : fallback;
             if (star == null) continue;
-            b.isHabitable = Habitability.InZone(star, Current, b.distanceFromStar);
+            b.isHabitable = Habitability.IsHabitable(star, Current, b.type, b.distanceFromStar);
             b.habitability = Habitability.Rate(star, Current, b.type, b.distanceFromStar);
             b.terraformability = Habitability.Terraformability(star, Current, b);
         }

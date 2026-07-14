@@ -174,6 +174,12 @@ public class PlanetUI : MonoBehaviour
             string habLabel = Habitability.Label(body.habitability, body.isHabitable);
             string habColor = Habitability.ScoreColorHex(body.habitability);
             sb.AppendLine($"Habitability ({SpeciesManager.Current.name}): <color={habColor}><b>{body.habitability:F0}/100</b> ({habLabel})</color>");
+            if (!body.isHabitable && body.type != CelestialBodyType.GasGiant)
+            {
+                string tColor = Habitability.ScoreColorHex(body.terraformability);
+                string tNote = body.terraformability >= 55f ? "could be made livable" : body.terraformability >= 30f ? "hard to terraform" : "near-impossible to terraform";
+                sb.AppendLine($"Terraformability ({SpeciesManager.Current.name}): <color={tColor}>{body.terraformability:F0}/100</color> — {tNote}");
+            }
             if (body.moons.Count > 0) sb.AppendLine($"Moons: {body.moons.Count}");
 
             if (body.resources != null && body.resources.resources.Count > 0)

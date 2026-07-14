@@ -155,8 +155,9 @@ public class SolarSystemGenerator : MonoBehaviour
     void ApplyHabitability(CelestialBody body)
     {
         var species = SpeciesManager.Current;
-        body.isHabitable = Habitability.InZone(currentStar, species, body.distanceFromStar);
+        body.isHabitable = Habitability.IsHabitable(currentStar, species, body.type, body.distanceFromStar);
         body.habitability = Habitability.Rate(currentStar, species, body.type, body.distanceFromStar);
+        body.terraformability = Habitability.Terraformability(currentStar, species, body);
     }
 
     int RollMoonCount(CelestialBodyType type)
