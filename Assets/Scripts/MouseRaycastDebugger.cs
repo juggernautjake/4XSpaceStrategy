@@ -13,8 +13,12 @@ public class MouseRaycastDebugger : MonoBehaviour
         if (cam == null) return;
 
         Ray ray = cam.ScreenPointToRay(Input.mousePosition);
-        Debug.Log(Physics.Raycast(ray, out RaycastHit hit)
-            ? "Raycast hit: " + hit.collider.gameObject.name
-            : "Raycast hit NOTHING");
+
+        // Only HITS are worth a line. Logging every miss too meant that clicking empty space — which is
+        // most clicks, since the map is mostly empty space — printed "Raycast hit NOTHING" over and
+        // over, drowning the console in a non-event. A miss is the absence of information; if nothing
+        // is logged for a click, nothing was under it.
+        if (Physics.Raycast(ray, out RaycastHit hit))
+            Debug.Log("Raycast hit: " + hit.collider.gameObject.name);
     }
 }

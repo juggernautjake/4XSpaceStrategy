@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
@@ -56,9 +56,25 @@ public class PlanetViewWindow : MonoBehaviour
     float markerRingBase, markerArrowBaseY;
     PlacedBuilding lastMarkedSelection;
 
-    // The map is sized per body from MapMetrics (see ApplyMapSize) so one grid cell is always exactly a
-    // detailed-map tile. These are only the initial/fallback dimensions before a world is selected.
-    const float MapW = 720f, MapH = 380f;
+    // A FIXED window, a quarter of the screen BY AREA — which is half the screen on each axis, not a
+    // quarter on each axis (that would be a sixteenth). Measured from the live canvas rather than
+    // assuming the 1920x1080 reference resolution, so it's a quarter of the actual screen.
+    //
+    // It never resizes with the world — the map zooms inside its viewport instead. The resize grip and
+    // the draggable title bar still work, so it can be moved and sized by hand afterwards.
+    const float ScreenFraction = 0.5f;     // per axis -> 0.25 of the area
+    static Vector2 WindowSize(Transform parent)
+    {
+        var canvas = parent != null ? parent.GetComponentInParent<Canvas>() : null;
+        var crt = canvas != null ? canvas.GetComponent<RectTransform>() : null;
+        Vector2 screen = crt != null && crt.rect.width > 1f
+            ? crt.rect.size
+            : new Vector2(1920f, 1080f);   // fallback: the canvas reference resolution
+        return new Vector2(
+            Mathf.Clamp(screen.x * ScreenFraction, 640f, 1600f),
+            Mathf.Clamp(screen.y * ScreenFraction, 400f, 900f));
+    }
+
     const float SidePanelW = 300f;
 
     public static void Create(Transform parent)
@@ -72,7 +88,7 @@ public class PlanetViewWindow : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Planet View", new Vector2(MapW + SidePanelW + 60f, MapH + 190), out root, out titleText);
+        var content = UIFactory.Window(parent, "Planet View", WindowSize(parent), out root, out titleText);
         root.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
 
         // Tabs.
@@ -82,18 +98,26 @@ public class PlanetViewWindow : MonoBehaviour
         var th = tabStrip.gameObject.AddComponent<HorizontalLayoutGroup>();
         th.spacing = 4; th.childControlWidth = true; th.childControlHeight = true; th.childForceExpandWidth = false;
 
-        // The map: terrain texture, an overlay texture on top, then the structure and ghost layers.
-        gridHolder = UIFactory.NewUI(content, "GridHolder").GetComponent<RectTransform>();
-        gridHolder.anchorMin = new Vector2(0, 1); gridHolder.anchorMax = new Vector2(0, 1);
-        gridHolder.pivot = new Vector2(0, 1);
-        gridHolder.sizeDelta = new Vector2(MapW, MapH);
-        gridHolder.anchoredPosition = new Vector2(0, -32);
+        // The VIEWPORT: a fixed window onto the surface. It never changes size — zooming scales the map
+        // INSIDE it, which is what a map window should do. It used to resize the window itself, so
+        // zooming in on a big world grew the panel off the edge of the screen.
+        gridHolder = UIFactory.NewUI(content, "Viewport").GetComponent<RectTransform>();
+        gridHolder.anchorMin = new Vector2(0, 0); gridHolder.anchorMax = new Vector2(1, 1);
+        gridHolder.offsetMin = new Vector2(0, 34);                 // clear the status line
+        gridHolder.offsetMax = new Vector2(-(SidePanelW + 8f), -32); // clear the tabs and the side panel
+        var vpImg = gridHolder.gameObject.AddComponent<Image>();
+        vpImg.color = new Color(0.02f, 0.03f, 0.05f, 1f);          // letterbox behind a small map
+        gridHolder.gameObject.AddComponent<RectMask2D>();          // the map is clipped to the viewport
 
         var mapGO = UIFactory.NewUI(gridHolder, "Map");
         mapImage = mapGO.AddComponent<RawImage>();
         mapRT = mapImage.rectTransform;
-        UIFactory.Stretch(mapRT);
-        mapGO.AddComponent<Outline>().effectColor = UITheme.AccentDim;
+        // Centre-anchored and free-floating inside the viewport: its size is the zoom, its position is
+        // the pan. Everything on the map (pieces, ghost, markers) is anchored in ITS normalised space,
+        // so they all follow for free.
+        mapRT.anchorMin = mapRT.anchorMax = new Vector2(0.5f, 0.5f);
+        mapRT.pivot = new Vector2(0.5f, 0.5f);
+        mapRT.anchoredPosition = Vector2.zero;
 
         var ovGO = UIFactory.NewUI(mapRT, "Overlay");
         overlayImage = ovGO.AddComponent<RawImage>();
@@ -154,8 +178,17 @@ public class PlanetViewWindow : MonoBehaviour
         body = b;
         selected = null; rotation = 0;
         lastSig = null;
+        // Open showing the WHOLE world, centred — the zoom of the last planet you looked at means
+        // nothing on this one.
+        tilePx = 0f;            // ApplyMapSize resolves this to the fit-everything zoom
+        mapPan = Vector2.zero;
         root.SetActive(true);
-        root.GetComponent<RectTransform>().SetAsLastSibling();
+
+        // Always open centred. If you dragged it into a corner last time, that was for last time — a
+        // window that opens off where you left it is a window you have to go find.
+        var rrt = root.GetComponent<RectTransform>();
+        rrt.anchoredPosition = Vector2.zero;
+        rrt.SetAsLastSibling();
         RefreshMapTexture();
     }
 
@@ -176,9 +209,14 @@ public class PlanetViewWindow : MonoBehaviour
     {
         if (body == null) return;
 
-        // GRID resolution, not the 6x detail render: one texel per buildable cell, so a terrain tile
-        // and a building tile are the same tile. Anything else and footprints look oversized because
-        // the terrain under them is finer than the grid they actually occupy.
+        // The SAME map the detailed world viewer draws, at its full resolution, unchanged. Build(), not
+        // BuildGrid(): this is the detailed map, used here as the surface you build on.
+        //
+        // A 1x1 building covers exactly one grid cell, which is one terrain tile — one to one, and
+        // always has been. The thing that made buildings look oversized was never the footprint, it was
+        // the on-screen SCALE: a small world's grid was stretched to fill the window, so a tile could be
+        // 67 screen pixels. That's the zoom's job to bound, and DetailTilePx now bounds it at exactly
+        // the size the detailed map draws a tile — so the two views are the same map at the same scale.
         //
         // Rebuilt on every open rather than cached by body id, because terraforming can remodel a
         // world's terrain outright and a cache keyed only on identity would show the planet it used
@@ -189,7 +227,7 @@ public class PlanetViewWindow : MonoBehaviour
         // This used to post-process a second copy of the texture here, which both duplicated the tone
         // (letting the two maps drift apart) and doubled the allocation.
         if (mapTex != null) Destroy(mapTex);
-        mapTex = SurfaceTextureRenderer.BuildGrid(body, pastel: true);
+        mapTex = SurfaceTextureRenderer.Build(body, pastel: true);
         mapImage.texture = mapTex;
         titleText.text = $"Planet View — {body.name}";
         ApplyMapSize();
@@ -207,31 +245,72 @@ public class PlanetViewWindow : MonoBehaviour
     // second post-processed copy to keep in step.
     Texture2D mapTex;
 
-    // Size the map from MapMetrics, exactly like the detailed viewer does, instead of stretching the
-    // surface across a fixed 720x380 rectangle.
+    // ---- Zoom ----
+    // Expressed as PIXELS PER TILE, because that's what both limits are naturally about.
     //
-    // That fixed size was the bug behind "the tiles are too big": a 12x6 moon and a 48x24 world were
-    // both stretched to the same rectangle, so a tile was a different number of pixels on every body
-    // and matched the detailed viewer on none of them. Deriving width/height from tile count x
-    // DetailTile means one grid cell is ALWAYS 42px — the same cell, at the same size, as the detailed
-    // map — so a building footprint lands exactly on the tiles you can see.
-    // Scroll-to-zoom over the map. 1 = one grid cell is exactly a detailed-map tile (42px).
-    float mapZoom = 1f;
-    const float MapZoomMin = 0.35f, MapZoomMax = 3f;
+    //   Zoomed OUT  = the whole surface fits the viewport, whatever size the world is.
+    //   Zoomed IN   = about MaxVisibleTiles cells fill it, so the closest view is the same "how much
+    //                 can I see" on every world rather than depending on how big the planet happens
+    //                 to be.
+    //
+    // The window never changes size. Only the map inside it does.
+    const int MaxVisibleTiles = 200;
+
+    float tilePx;                  // current zoom
+    Vector2 mapPan;                // map offset within the viewport
+    Vector2 lastViewportSize;      // re-fit when the window is laid out or resized
+
+    /// The size a tile is drawn at on the detailed world map. NOTHING here is ever allowed to draw a
+    /// tile bigger than this, so the build grid and the detailed map are the same map at the same
+    /// resolution — which is the whole point of building on it.
+    ///
+    /// Without this ceiling, "fit the surface to the viewport" makes tile size depend on how small the
+    /// world is: a 12x6 moon fitted to an 812x554 viewport is 67px per tile, three times the detailed
+    /// map's. Small worlds got the biggest tiles, which is exactly backwards.
+    float DetailTilePx() => MapMetrics.DetailTile(body != null ? body.surfaceSize : 12);
+
+    /// Pixels per tile at which the entire surface is visible — never above detail resolution, so a
+    /// small world simply letterboxes inside the window instead of being blown up to fill it.
+    float FitTilePx()
+    {
+        if (body?.surface == null) return 8f;
+        var vp = gridHolder.rect;
+        float fit = Mathf.Min(vp.width / body.surface.width, vp.height / body.surface.height);
+        return Mathf.Min(fit, DetailTilePx());
+    }
+
+    /// Pixels per tile at which roughly MaxVisibleTiles cells fill the viewport.
+    /// visibleTiles = (w/px) * (h/px) = area / px^2  ->  px = sqrt(area / visibleTiles)
+    float MaxTilePx()
+    {
+        var vp = gridHolder.rect;
+        float area = Mathf.Max(1f, vp.width * vp.height);
+        return Mathf.Min(Mathf.Sqrt(area / MaxVisibleTiles), DetailTilePx());
+    }
 
     void ApplyMapSize()
     {
         if (body?.surface == null) return;
-        float tile = MapMetrics.DetailTile(body.surfaceSize) * mapZoom;
-        float w = body.surface.width * tile;
-        float h = body.surface.height * tile;
 
-        gridHolder.sizeDelta = new Vector2(w, h);
+        float fit = FitTilePx();
+        float max = Mathf.Max(fit, MaxTilePx());     // a tiny world may already show <200 tiles when fitted
+        tilePx = Mathf.Clamp(tilePx <= 0f ? fit : tilePx, fit, max);
 
-        // Grow the window to fit the map plus the side panel and chrome, so a big world simply shows a
-        // bigger map rather than squashing it.
-        var rt = root.GetComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(w + SidePanelW + 60f, Mathf.Max(360f, h + 100f));
+        mapRT.sizeDelta = new Vector2(body.surface.width * tilePx, body.surface.height * tilePx);
+        ClampPan();
+    }
+
+    // Keep the viewport covered: you can never drag the map so far that you're looking at the letterbox
+    // instead of the world. When the map is smaller than the viewport on an axis, it centres on it.
+    void ClampPan()
+    {
+        var vp = gridHolder.rect;
+        Vector2 size = mapRT.sizeDelta;
+        float slackX = Mathf.Max(0f, (size.x - vp.width) * 0.5f);
+        float slackY = Mathf.Max(0f, (size.y - vp.height) * 0.5f);
+        mapPan.x = Mathf.Clamp(mapPan.x, -slackX, slackX);
+        mapPan.y = Mathf.Clamp(mapPan.y, -slackY, slackY);
+        mapRT.anchoredPosition = mapPan;
     }
 
     // Signature covers only the SHAPE of the window: which world, which tab, what's selected, what's
@@ -256,9 +335,21 @@ public class PlanetViewWindow : MonoBehaviour
         string sig = Signature();
         if (sig != lastSig) { lastSig = sig; Rebuild(); }
 
+        // The zoom limits are derived from the VIEWPORT'S size, which isn't known until Unity has laid
+        // the window out — so the first ApplyMapSize (from ShowFor) can run against a zero rect. Re-fit
+        // once it's real, and again whenever the window is resized by its grip.
+        if (gridHolder != null && gridHolder.rect.size != lastViewportSize)
+        {
+            lastViewportSize = gridHolder.rect.size;
+            ApplyMapSize();
+            DrawSelectionMarker();
+        }
+
         live.Tick();
         PollHover();
         PollMapZoom();
+        PollMapPan();
+        PollClickAway();
 
         // The selection marker is rebuilt only when the SELECTION changes — not on the signature, since
         // clicking a building must move the ring instantly without tearing down the whole side panel.
@@ -725,11 +816,11 @@ public class PlanetViewWindow : MonoBehaviour
         {
             var info = cap.Info;
             string hex = ColorUtility.ToHtmlStringRGB(info.color);
-            string mark = SurfaceSelection.IsSelected(cap) ? "<color=#FFF266>▸ </color>" : "";
+            string mark = SurfaceSelection.IsSelected(cap) ? "<color=#FFF266>» </color>" : "";
             string lvl = cap.CanUpgrade
                 ? $"<color=#9FB4C8>Tech Lv {cap.level}/{PlacedBuilding.MaxLevel}</color>"
                 : $"<color=#4DFF6E>Tech Lv {cap.level} (max)</color>";
-            return $"{mark}<color=#{hex}>■</color> <b>{info.name}</b>  <size=10>{lvl}</size>";
+            return $"{mark}<color=#{hex}>•</color> <b>{info.name}</b>  <size=10>{lvl}</size>";
         });
 
         // Health bar — real data, not a label.
@@ -765,7 +856,7 @@ public class PlanetViewWindow : MonoBehaviour
             if (!cap.CanUpgrade) return (false, "Max tech level");
             bool can = SurfaceBuildManager.CanUpgradeLevel(body, cap, out string why);
             SurfaceBuildManager.LevelUpCost(cap, out int m, out int e);
-            return (can, can ? $"Upgrade → Lv{cap.level + 1} ({m}m {e}e)" : $"Upgrade — {why}");
+            return (can, can ? $"Upgrade -> Lv{cap.level + 1} ({m}m {e}e)" : $"Upgrade — {why}");
         });
 
         UIFactory.Button(row.transform, "Demolish", () =>
@@ -833,9 +924,9 @@ public class PlanetViewWindow : MonoBehaviour
         live.Button(btn, () =>
         {
             string nm = labelOverride ?? SurfaceIndex.Name(k);
-            if (k == SurfaceIndexKind.None) return (true, activeIndex == k ? $"● {nm}" : nm);
+            if (k == SurfaceIndexKind.None) return (true, activeIndex == k ? $"• {nm}" : nm);
             if (!SurfaceIndex.Unlocked(body, k)) return (false, $"{nm} — {SurfaceIndex.LockReason(body, k)}");
-            return (true, activeIndex == k ? $"● {nm} (showing)" : $"Show {nm}");
+            return (true, activeIndex == k ? $"• {nm} (showing)" : $"Show {nm}");
         }, group);
     }
 
@@ -1122,9 +1213,9 @@ public class PlanetViewWindow : MonoBehaviour
         return true;
     }
 
-    // Scroll over the map to zoom it. Proportional, like the world camera, so one notch feels the same
-    // at every scale. Only when the cursor is actually over the map, so scrolling the side panel still
-    // scrolls the side panel.
+    // Scroll over the viewport to zoom the MAP inside it — the window itself never moves or resizes.
+    // Proportional, like the world camera, so one notch feels the same at every scale. Only when the
+    // cursor is over the viewport, so scrolling the side panel still scrolls the side panel.
     void PollMapZoom()
     {
         if (body?.surface == null || mapRT == null) return;
@@ -1132,14 +1223,71 @@ public class PlanetViewWindow : MonoBehaviour
         if (Mathf.Approximately(scroll, 0f)) return;
         if (!RectTransformUtility.RectangleContainsScreenPoint(gridHolder, Input.mousePosition, null)) return;
 
-        float next = Mathf.Clamp(mapZoom * Mathf.Exp(scroll * 4f), MapZoomMin, MapZoomMax);
-        if (Mathf.Approximately(next, mapZoom)) return;
-        mapZoom = next;
+        float fit = FitTilePx();
+        float max = Mathf.Max(fit, MaxTilePx());
+        float next = Mathf.Clamp(tilePx * Mathf.Exp(scroll * 4f), fit, max);
+        if (Mathf.Approximately(next, tilePx)) return;
 
+        // Zoom TOWARD THE CURSOR: keep whatever is under the pointer pinned there, rather than
+        // zooming to the middle and making the player chase what they were looking at.
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                gridHolder, Input.mousePosition, null, out Vector2 vpPoint))
+        {
+            Vector2 mapPoint = vpPoint - mapPan;          // cursor, in map space, before the zoom
+            float ratio = next / tilePx;
+            mapPan = vpPoint - mapPoint * ratio;          // ...still under the cursor after it
+        }
+
+        tilePx = next;
         ApplyMapSize();
-        // The markers and pieces are anchored in the map's normalised space, so they follow the resize
-        // for free — but the ring's size is in pixels, so it has to be rebuilt at the new scale.
+        // Pieces and the ghost are anchored in the map's normalised space and follow for free, but the
+        // selection ring's size is in pixels, so it has to be rebuilt at the new scale.
         DrawSelectionMarker();
+    }
+
+    // Drag the map with the middle or right mouse button to pan. (Right-click also rotates a held
+    // piece, so panning with it only starts once you've actually moved — a click stays a rotate.)
+    Vector2 panGrabScreen;
+    Vector2 panGrabOffset;
+    bool panning;
+
+    void PollMapPan()
+    {
+        if (body?.surface == null) return;
+
+        if (!panning && (Input.GetMouseButtonDown(2) || Input.GetMouseButtonDown(1)) &&
+            RectTransformUtility.RectangleContainsScreenPoint(gridHolder, Input.mousePosition, null))
+        {
+            panning = true;
+            panGrabScreen = Input.mousePosition;
+            panGrabOffset = mapPan;
+        }
+
+        if (panning)
+        {
+            if (!Input.GetMouseButton(2) && !Input.GetMouseButton(1)) { panning = false; return; }
+            Vector2 delta = (Vector2)Input.mousePosition - panGrabScreen;
+            if (delta.sqrMagnitude < 9f) return;          // still a click, not yet a drag
+            mapPan = panGrabOffset + delta;
+            ClampPan();
+        }
+    }
+
+    // Click outside the window to dismiss it.
+    //
+    // Only a click that lands on NO UI at all counts: clicking another window is working with that
+    // window, not dismissing this one, and closing it out from under the player would be obnoxious.
+    // A piece held for placement swallows the click too — Esc drops it first.
+    void PollClickAway()
+    {
+        if (!Input.GetMouseButtonDown(0)) return;
+        if (selected.HasValue) return;
+        if (panning) return;
+
+        var es = UnityEngine.EventSystems.EventSystem.current;
+        if (es != null && es.IsPointerOverGameObject()) return;   // over some UI — not a click-away
+
+        root.SetActive(false);
     }
 
     // Polled every frame. Cheap, and independent of which input module is installed.

@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -212,8 +212,8 @@ public class ColonyWindow : MonoBehaviour
                 bool canUp = mgr.CanUpgradeShipyard(b, out string upWhy, out _);
                 int m = ColonyManager.ShipyardUpgradeMetal(next), e = ColonyManager.ShipyardUpgradeEnergy(next);
                 var upBtn = UIFactory.Button(buildList,
-                    canUp ? $"Upgrade Shipyard → Lv{next}  ({m}m {e}e, {ColonyManager.ShipyardUpgradeTime(next):F0}s) → {BuildPower.ForLevel(next)} build power"
-                          : $"Upgrade Shipyard → Lv{next} — {upWhy}",
+                    canUp ? $"Upgrade Shipyard -> Lv{next}  ({m}m {e}e, {ColonyManager.ShipyardUpgradeTime(next):F0}s) -> {BuildPower.ForLevel(next)} build power"
+                          : $"Upgrade Shipyard -> Lv{next} — {upWhy}",
                     () => { if (mgr.StartShipyardUpgrade(b)) { lastBuildSig = ""; RebuildBuildings(); } }, 30);
                 upBtn.interactable = canUp;
             }
@@ -231,8 +231,8 @@ public class ColonyWindow : MonoBehaviour
                 bool canUp = mgr.CanUpgradeLab(b, out string upWhy, out _);
                 int m = ColonyManager.LabUpgradeMetal(next), e = ColonyManager.LabUpgradeEnergy(next);
                 var upBtn = UIFactory.Button(buildList,
-                    canUp ? $"Upgrade Research Centre → Lv{next}  ({m}m {e}e, {ColonyManager.LabUpgradeTime(next):F0}s) → {ResearchCapacity.ForLevel(next)} capacity"
-                          : $"Upgrade Research Centre → Lv{next} — {upWhy}",
+                    canUp ? $"Upgrade Research Centre -> Lv{next}  ({m}m {e}e, {ColonyManager.LabUpgradeTime(next):F0}s) -> {ResearchCapacity.ForLevel(next)} capacity"
+                          : $"Upgrade Research Centre -> Lv{next} — {upWhy}",
                     () => { if (mgr.StartLabUpgrade(b)) { lastBuildSig = ""; RebuildBuildings(); } }, 30);
                 upBtn.interactable = canUp;
             }

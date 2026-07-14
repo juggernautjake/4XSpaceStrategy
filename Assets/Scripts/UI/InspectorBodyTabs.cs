@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -352,12 +352,12 @@ public partial class InspectorWindow
                         ? "<color=#9FB4C8>full output</color>"
                         : $"<color=#{ColorUtility.ToHtmlStringRGB(SurfaceBuildManager.EfficiencyColor(cap.efficiency))}>" +
                           $"{cap.efficiency * 100f:F0}% sited</color>";
-                    return $"<color=#{hex}>■</color> <b>{info.name}</b> <size=10><color=#9FB4C8>Lv{cap.level} · ({cap.x},{cap.y})</color> · {eff}</size>";
+                    return $"<color=#{hex}>•</color> <b>{info.name}</b> <size=10><color=#9FB4C8>Lv{cap.level} · ({cap.x},{cap.y})</color> · {eff}</size>";
                 });
             }
         }
 
-        UIFactory.Button(p, "Open Planet View (build on the surface) ▸", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
+        UIFactory.Button(p, "Open Planet View (build on the surface) »", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
 
         if (ColonyFacilities.TotalStructures(b) == 0 && b.shipyardLevel < 1 && b.researchCenterLevel < 1)
             Note(p, "Nothing built here yet.");
@@ -459,7 +459,7 @@ public partial class InspectorWindow
                 var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
                 live.Text(t, () => $"<b>{captured.name}</b>  <size=10><color=#9FB4C8>{TerraformDiagnosis.Pretty(captured.type)} · " +
                                    $"hab {captured.habitability:F0}% · {(captured.units != null ? captured.units.Count : 0)} ship(s)</color></size>");
-                UIFactory.Button(card, "Inspect ▸", () => { PlanetUI.Instance?.Show(captured); }, 22);
+                UIFactory.Button(card, "Inspect »", () => { PlanetUI.Instance?.Show(captured); }, 22);
             }
 
         // Ships and stations are listed separately — a deployed station is infrastructure, not a fleet.
@@ -491,7 +491,7 @@ public partial class InspectorWindow
                 var card = Card(p);
                 var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.SubText);
                 live.Text(t, () => $"<b>{cap.name}</b> — arriving in {Mathf.Max(0f, cap.travelDuration - cap.travelElapsed):F0}s");
-                UIFactory.Button(card, "Select ▸", () => { UnitSelection.SelectOnly(cap); }, 22);
+                UIFactory.Button(card, "Select »", () => { UnitSelection.SelectOnly(cap); }, 22);
             }
         }
     }
@@ -522,7 +522,7 @@ public partial class InspectorWindow
             return $"{badge}<b>{cap.name}</b>  <size=10><color=#9FB4C8>{cap.Info.name} · {cap.RankName} · {cap.status}</color></size>";
         });
 
-        UIFactory.Button(card, "Select ▸", () => { UnitSelection.SelectOnly(cap); }, 22);
+        UIFactory.Button(card, "Select »", () => { UnitSelection.SelectOnly(cap); }, 22);
     }
 
     // ---------------- Terraform ----------------
@@ -538,9 +538,9 @@ public partial class InspectorWindow
         {
             float now = b.habitability, ceiling = Colony.TerraformCeiling(b);
             float reach = TerraformProjects.ReachableCeiling(b, s), pot = TerraformProjects.PotentialCeiling(b, s);
-            return $"Now <color={Habitability.ScoreColorHex(now)}><b>{now:F0}%</b></color>  →  " +
-                   $"ceiling today <color={Habitability.ScoreColorHex(ceiling)}><b>{ceiling:F0}%</b></color>  →  " +
-                   $"with researched projects <color={Habitability.ScoreColorHex(reach)}><b>{reach:F0}%</b></color>  →  " +
+            return $"Now <color={Habitability.ScoreColorHex(now)}><b>{now:F0}%</b></color>  ->  " +
+                   $"ceiling today <color={Habitability.ScoreColorHex(ceiling)}><b>{ceiling:F0}%</b></color>  ->  " +
+                   $"with researched projects <color={Habitability.ScoreColorHex(reach)}><b>{reach:F0}%</b></color>  ->  " +
                    $"with all known science <color={Habitability.ScoreColorHex(pot)}><b>{pot:F0}%</b></color>\n" +
                    $"<color=#9FB4C8>Colonizable at {Colony.FoundThreshold:F0}%.</color>";
         });
@@ -578,6 +578,6 @@ public partial class InspectorWindow
 
         Header(p, "PROJECTS");
         Note(p, "Projects raise this world's ceiling permanently. The full console has costs, durations and progress.");
-        UIFactory.Button(p, "Open Terraforming Console ▸", () => TerraformWindow.Instance?.ShowFor(b), 26);
+        UIFactory.Button(p, "Open Terraforming Console »", () => TerraformWindow.Instance?.ShowFor(b), 26);
     }
 }

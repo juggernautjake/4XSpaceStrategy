@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -128,7 +128,7 @@ public partial class InspectorWindow
         // Where it is, so you can jump to the world it's sitting at.
         var locBtn = UIFactory.Button(p, "", () => { if (u.location != null) PlanetUI.Instance?.Show(u.location); }, 24);
         live.Button(locBtn, () => u.location != null
-            ? (true, $"Inspect {u.location.name} ▸")
+            ? (true, $"Inspect {u.location.name} »")
             : (false, u.inSpace ? "Holding position in deep space" : "In transit"));
 
         // Disposal.
@@ -202,7 +202,7 @@ public partial class InspectorWindow
             var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
             live.Text(t, () =>
             {
-                string tag = idx == 0 ? "<color=#4DFF6E>▶ now</color>" : $"<color=#9FB4C8>{idx}.</color>";
+                string tag = idx == 0 ? "<color=#4DFF6E>» now</color>" : $"<color=#9FB4C8>{idx}.</color>";
                 return $"{tag}  {o.Describe()}";
             });
             UIFactory.Button(card, "Remove", () => { UnitManager.Instance?.RemoveOrder(u, idx); lastSig = null; }, 22);

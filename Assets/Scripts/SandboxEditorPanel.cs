@@ -156,12 +156,12 @@ public class SandboxEditorPanel : MonoBehaviour
         // Radius
         float newRadius = radiusSlider.value;
         currentOrbit.SetRadius(newRadius);
-        currentBody.orbitRadius = newRadius;   // ← Sync to data
+        currentBody.orbitRadius = newRadius;   // <- Sync to data
 
         // Speed
         float newSpeed = speedSlider.value;
         currentOrbit.SetSpeed(newSpeed);
-        currentBody.orbitSpeed = newSpeed;     // ← Sync to data
+        currentBody.orbitSpeed = newSpeed;     // <- Sync to data
 
         currentOrbit.ForceRingRedraw();
         currentOrbit.UpdatePosition();
@@ -171,7 +171,7 @@ public class SandboxEditorPanel : MonoBehaviour
         if (PlanetUI.Instance != null)
             PlanetUI.Instance.Show(currentBody);
 
-        Debug.Log($"Applied → {currentBody.type}: Size={newSize}, Radius={newRadius:F1}, Speed={newSpeed:F1}");
+        Debug.Log($"Applied -> {currentBody.type}: Size={newSize}, Radius={newRadius:F1}, Speed={newSpeed:F1}");
     }
 
     public void Hide()
