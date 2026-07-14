@@ -94,6 +94,11 @@ public static class GalaxyGenerator
         planet.orbitPhase = Random.Range(0f, 360f);
         planet.spinSpeed = OrbitalMechanics.Spin(planet, Random.Range(0.7f, 1.3f));
         SeedTerrain(planet);
+        // The home world's climate matches the species' preferred temperature, so a Pyrothian home
+        // reads hot and a Cryithn home reads frozen — the race's biology visibly shapes its cradle.
+        var htp = planet.terrainParams;
+        htp.heat = Mathf.Lerp(0.55f, 1.7f, Mathf.Clamp01(species.idealTemp));
+        planet.terrainParams = htp;
         planet.surface = PlanetTerrainGenerator.GenerateSurface(planet);
         OreGenerator.Populate(planet);
         planet.resources = new ResourceDeposit();

@@ -345,6 +345,12 @@ public static class UIFactory
         content = NewUI(viewport, "Content").GetComponent<RectTransform>();
         content.anchorMin = new Vector2(0, 1); content.anchorMax = new Vector2(1, 1);
         content.pivot = new Vector2(0.5f, 1); content.anchoredPosition = Vector2.zero;
+        // Force the content to be EXACTLY the viewport width (left/right offsets = 0). Without this a
+        // nonzero default horizontal offset makes the content wider than the viewport and centred, so
+        // left-aligned rows spill off the left edge and get clipped — the root cause of the text-cutoff
+        // seen across scrolling menus (Fleet, New Game, Settings, Species, Save/Load, etc.).
+        content.offsetMin = new Vector2(0f, content.offsetMin.y);
+        content.offsetMax = new Vector2(0f, content.offsetMax.y);
         var fitter = content.gameObject.AddComponent<ContentSizeFitter>();
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         var vlg = content.gameObject.AddComponent<VerticalLayoutGroup>();

@@ -29,7 +29,7 @@ public class SimpleAudio : MonoBehaviour
     public float AmbientVolume { get; private set; } = 0.8f;   // hum + distant chatter
     public bool Muted { get; private set; } = false;
 
-    const float HumBase = 0.5f;   // hum's own mix level before the ambient slider scales it
+    const float HumBase = 0.75f;   // hum's own mix level before the ambient slider scales it (louder, comforting bed)
 
     float lastTick;
     float lastHover;
