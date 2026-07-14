@@ -105,6 +105,9 @@ public static class UIFactory
         resize.target = rt;
         resize.minSize = new Vector2(Mathf.Min(size.x, 260f), Mathf.Min(size.y, 150f));
 
+        // Keep the window within the screen at any resolution.
+        rootGO.AddComponent<WindowFit>();
+
         return content;
     }
 
