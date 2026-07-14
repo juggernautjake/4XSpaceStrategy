@@ -25,7 +25,11 @@ public class SimpleAudio : MonoBehaviour
     AudioClip cDestroyed;
 
     public float MasterVolume { get; private set; } = 0.8f;
+    public float EffectsVolume { get; private set; } = 0.9f;   // UI clicks/selection/notifications
+    public float AmbientVolume { get; private set; } = 0.8f;   // hum + distant chatter
     public bool Muted { get; private set; } = false;
+
+    const float HumBase = 0.5f;   // hum's own mix level before the ambient slider scales it
 
     float lastTick;
     float lastHover;
@@ -157,10 +161,20 @@ public class SimpleAudio : MonoBehaviour
     }
 
     // ---- Volume control ----
+    // Master scales everything (via AudioListener). Effects scales the clean UI/selection/alert
+    // one-shots. Ambient scales the hum + distant chatter. Mute overrides all.
     public void SetVolume(float v) { MasterVolume = Mathf.Clamp01(v); ApplyVolume(); }
+    public void SetEffectsVolume(float v) { EffectsVolume = Mathf.Clamp01(v); ApplyVolume(); }
+    public void SetAmbientVolume(float v) { AmbientVolume = Mathf.Clamp01(v); ApplyVolume(); }
     public void ToggleMute() { Muted = !Muted; ApplyVolume(); }
     public void SetMuted(bool m) { Muted = m; ApplyVolume(); }
-    void ApplyVolume() { AudioListener.volume = Muted ? 0f : MasterVolume; }
+    void ApplyVolume()
+    {
+        AudioListener.volume = Muted ? 0f : MasterVolume;
+        if (sfx != null) sfx.volume = EffectsVolume;
+        if (hum != null) hum.volume = HumBase * AmbientVolume;
+        if (ambient != null) ambient.volume = AmbientVolume;
+    }
 
     // ---- Clip generation ----
     static AudioClip Tone(float freq, float dur, float decay, float amp)

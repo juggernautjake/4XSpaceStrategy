@@ -5,11 +5,11 @@ public class CameraController : MonoBehaviour
 {
     [Header("Movement")]
     public float panSpeed = 30f;           // WASD panning speed
-    public float heightSpeed = 80f;        // Mouse wheel height change speed
+    public float heightSpeed = 130f;       // Mouse wheel height change speed
 
     [Header("Limits")]
     public float minHeight = 4f;           // Closest to the system
-    public float maxHeight = 900f;         // Farthest view (room to see the whole galaxy)
+    public float maxHeight = 3500f;        // Farthest view — zoom way out to reach distant systems
 
     private float targetHeight;            // For smooth movement
 
@@ -106,7 +106,7 @@ public class CameraController : MonoBehaviour
 
         // Unscaled time so panning speed is constant regardless of the simulation speed (and works
         // while paused). Scale with height so panning stays usable when zoomed far out.
-        float heightFactor = Mathf.Clamp(transform.position.y / 20f, 1f, 20f);
+        float heightFactor = Mathf.Clamp(transform.position.y / 20f, 1f, 60f);
         Vector3 move = new Vector3(h, 0, v) * panSpeed * heightFactor * Time.unscaledDeltaTime;
         transform.Translate(move, Space.World);
     }

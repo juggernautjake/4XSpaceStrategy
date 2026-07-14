@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -62,11 +63,37 @@ public class SaveLoadMenu : MonoBehaviour
     void DoSave()
     {
         string name = string.IsNullOrWhiteSpace(nameInput.text) ? DefaultName() : nameInput.text.Trim();
+
+        // If a save with this name already exists, confirm before overwriting it.
+        if (SaveExists(name))
+        {
+            status.text = $"'{name}' already exists — confirm overwrite.";
+            SimpleAudio.Instance?.PlayNotify(NotifKind.Danger);
+            ContextMenu.Instance?.Show(Input.mousePosition, new List<ContextMenu.Option>
+            {
+                new ContextMenu.Option($"Overwrite '{name}'", () => WriteSave(name)),
+                new ContextMenu.Option("Cancel", () => { status.text = "Save cancelled."; })
+            });
+            return;
+        }
+
+        WriteSave(name);
+    }
+
+    void WriteSave(string name)
+    {
         var game = GameStateSerializer.Capture(name);
         SaveSystem.Save(game);
         SimpleAudio.Instance?.PlaySave();
         status.text = $"Saved '{name}'.";
         RefreshList();
+    }
+
+    bool SaveExists(string name)
+    {
+        foreach (var g in SaveSystem.ListSaves())
+            if (string.Equals(g.saveName, name, System.StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 
     void RefreshList()
