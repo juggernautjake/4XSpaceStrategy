@@ -373,9 +373,40 @@ public class PlanetViewWindow : MonoBehaviour
 
         Note("Click a structure to pick it up, then click the map to place it. <b>Right-click rotates.</b> Esc cancels. Footprints interlock — pack them tightly.");
 
-        foreach (var info in SurfaceBuildingDatabase.All)
+        // Grouped by what a structure is FOR, so a growing catalogue stays navigable.
+        foreach (SurfaceBuildingCategory cat in System.Enum.GetValues(typeof(SurfaceBuildingCategory)))
         {
-            if (info == null) continue;
+            bool headerAdded = false;
+            foreach (var info in SurfaceBuildingDatabase.All)
+            {
+                if (info == null || info.category != cat) continue;
+                // The capitol and the grounded ship aren't placed from the tray — the ship arrives with
+                // the colony, and the capitol is what it becomes. Listing them here would only confuse.
+                if (info.type == SurfaceBuildingType.PlanetCapitol) continue;
+                if (info.type == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode) continue;
+                if (!headerAdded) { Header(CategoryName(cat)); headerAdded = true; }
+                BuildStructureCard(info);
+            }
+        }
+
+        BuildPlacedList();
+    }
+
+    static string CategoryName(SurfaceBuildingCategory c)
+    {
+        switch (c)
+        {
+            case SurfaceBuildingCategory.Government: return "GOVERNMENT";
+            case SurfaceBuildingCategory.Harvesting: return "HARVESTING";
+            case SurfaceBuildingCategory.Industry: return "INDUSTRY";
+            case SurfaceBuildingCategory.Military: return "MILITARY";
+            default: return c.ToString().ToUpper();
+        }
+    }
+
+    void BuildStructureCard(SurfaceBuildingInfo info)
+    {
+        {
             var t = info.type;
             var card = Card();
             var group = card.gameObject.AddComponent<CanvasGroup>();
@@ -420,8 +451,11 @@ public class PlanetViewWindow : MonoBehaviour
                 return (afford, afford ? "Select" : $"Need {m}m {e}e");
             }, group);
         }
+    }
 
-        // What's already down, with demolish.
+    // What's already down, with upgrade and demolish.
+    void BuildPlacedList()
+    {
         Header("BUILT HERE");
         var placed = SurfaceBuildManager.On(body);
         if (placed.Count == 0) Note("Nothing built on the surface yet.");
@@ -437,8 +471,26 @@ public class PlanetViewWindow : MonoBehaviour
                 string eff = info.index == SurfaceIndexKind.None
                     ? "<color=#9FB4C8>full output</color>"
                     : $"<color=#{hex}>{cap.efficiency * 100f:F0}% — {SurfaceBuildManager.EfficiencyLabel(cap.efficiency)}</color>";
-                return $"<b>{info.name}</b> at ({cap.x},{cap.y})  <size=10>{eff}</size>";
+                string adj = SurfaceBuildManager.AdjacencyBonus(body, cap) > 0f
+                    ? $"  <color=#F5F58C>+{SurfaceBuildManager.AdjacencyBonus(body, cap) * 100f:F0}% grid</color>" : "";
+                return $"<b>{info.name}</b> at ({cap.x},{cap.y})  <size=10>{eff}{adj}</size>";
             });
+
+            // The Colony Ship Base's one job: become a real capitol.
+            if (cap.Info.upgradesTo.HasValue)
+            {
+                var up = UIFactory.Button(card, "", () => { SurfaceBuildManager.Upgrade(body, cap); lastSig = null; }, 22);
+                live.Button(up, () =>
+                {
+                    var info = cap.Info;
+                    if (!info.upgradesTo.HasValue) return (false, "—");
+                    var target = SurfaceBuildingDatabase.Get(info.upgradesTo.Value);
+                    bool can = SurfaceBuildManager.CanUpgrade(body, cap, out string why);
+                    int m = ColonyManager.DiscCost(info.upgradeMetal), e = ColonyManager.DiscCost(info.upgradeEnergy);
+                    return (can, can ? $"Upgrade to {target.name} ({m}m {e}e)" : $"Upgrade to {target.name} — {why}");
+                });
+            }
+
             UIFactory.Button(card, "Demolish (60% back)", () =>
             {
                 SurfaceBuildManager.Demolish(body, cap);
