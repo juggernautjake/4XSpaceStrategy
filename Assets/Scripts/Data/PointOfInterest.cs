@@ -24,7 +24,17 @@ public class PointOfInterest
     public float researchDuration = 12f;  // seconds to research (varies per opportunity)
     public string reportText;       // full report shown when research completes
 
+    // What studying this site COSTS in research points, and what it PAYS BACK on completion. Both vary
+    // enormously by what it is: a rich ore seam is cheap to confirm and pays little, while precursor
+    // ruins are a serious investment that can hand back an ancient schematic — the only way into the
+    // Ancients tech tree.
+    public int researchPointCost = 20;
+    public int researchReward = 25;
+    public bool yieldsSchematic = false;   // precursor ruins can recover a schematic
+
+    // Ruins are researchable until studied; settlements are context, not a project.
     public bool IsResearchable => (type == POIType.Mystery && !explored)
+                                  || (type == POIType.AncientRuins && !explored)
                                   || (type == POIType.SpecialResource && relatedOre != OreType.None && !ResearchManager.IsResearched(relatedOre));
 
     public string HoverText()

@@ -22,11 +22,57 @@ public class SaveGame
     public float ecoMetal, ecoEnergy, ecoWater;
     public List<UnitDTO> units = new List<UnitDTO>();
 
+    // In-progress work: hulls on the stocks and technologies under study, with their progress, order
+    // and pause state, so a reload resumes exactly where it left off.
+    public List<BuildOrderDTO> buildQueue = new List<BuildOrderDTO>();
+    public List<ResearchOrderDTO> researchQueue = new List<ResearchOrderDTO>();
+    public bool researchPaused = false;
+    public List<TerraformJobDTO> terraformJobs = new List<TerraformJobDTO>();
+    public List<ControlGroupDTO> controlGroups = new List<ControlGroupDTO>();
+
     // Space background settings (kept constant per map).
     public int bgSeed = 12345;
     public bool bgEnabled = true;
     public bool bgSolid = false;
     public float bgR = 0.02f, bgG = 0.03f, bgB = 0.06f;
+}
+
+// One ship on the shipyard stocks (see BuildOrder). Order in the list is the power-allocation order.
+[System.Serializable]
+public class BuildOrderDTO
+{
+    public int type;
+    public float elapsed, duration;
+    public bool paused;
+    public int metalPaid, energyPaid;   // exact refund if the player cancels it
+}
+
+// One technology under study (see ResearchOrder). Order in the list is the capacity-allocation order.
+[System.Serializable]
+public class ResearchOrderDTO
+{
+    public string id;
+    public float progress;
+    public bool paused;
+}
+
+// One numbered fleet control group (see ControlGroups): the unit ids bound to Ctrl+N.
+[System.Serializable]
+public class ControlGroupDTO
+{
+    public int group;
+    public List<int> unitIds = new List<int>();
+}
+
+// One planetary-engineering project under way on a world (see TerraformJob).
+[System.Serializable]
+public class TerraformJobDTO
+{
+    public int bodyId;
+    public int type;
+    public float elapsed, duration;
+    public bool paused;
+    public int metalPaid, energyPaid, waterPaid;
 }
 
 [System.Serializable]
@@ -65,10 +111,14 @@ public class BodyDTO
     // Colony / development state.
     public List<int> buildings = new List<int>();
     public int shipyardLevel;
+    public int researchCenterLevel;
     public int population;
     public int cities;
     public bool terraforming;
     public float terraformability;
+    public List<int> terraformProjects = new List<int>();   // completed TerraformProjectType ids
+    public List<PlacedBuilding> placedBuildings = new List<PlacedBuilding>();   // surface-grid structures
+    public bool deepSurveyed;                               // unlocks the Heat/Fertile/Weather indexes
     public bool birthrightClaim;
     public bool visited;
     public float explorationProgress;

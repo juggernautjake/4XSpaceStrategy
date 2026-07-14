@@ -37,6 +37,11 @@ public class GameHUD : MonoBehaviour
         followBtn = BarButton(bar.transform, "Follow", 66, ToggleFollow);
         BarButton(bar.transform, "Fleet", 56, () => FleetWindow.Instance?.Toggle());
         BarButton(bar.transform, "Build", 56, () => ShipyardWindow.Instance?.Toggle());
+        BarButton(bar.transform, "Terraform", 84, () => TerraformWindow.Instance?.Toggle());
+        BarButton(bar.transform, "Inspect", 68, () => InspectorWindow.Instance?.Toggle());
+        BarButton(bar.transform, "Surface", 72, () => PlanetViewWindow.Instance?.Toggle());
+        // Pull all the way back to the whole generated map in one click (Home also does it).
+        BarButton(bar.transform, "Galaxy", 64, () => CameraController.Instance?.ViewWholeGalaxy());
         devBtn = BarButton(bar.transform, "Dev: OFF", 78, () => GameMode.Toggle());
 
         Spacer(bar.transform, 10);

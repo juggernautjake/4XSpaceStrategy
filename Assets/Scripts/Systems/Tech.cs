@@ -30,7 +30,14 @@ public class Tech
     public float terraSpeed;     // +fractional terraforming speed
     public float rangeMult;      // +fractional travel range (multiplies with the empire level bonus)
     public float oreYield;       // +fractional ore/metal yield
+    public int shipyardPower;    // +build power on EVERY shipyard you own
+    public int researchCap;      // +research capacity on EVERY research centre you own
     public string unlockNote;    // human-readable "this also enables …" (hulls/stations land later)
+
+    // Research capacity this project occupies while it is being studied — the research-side twin of a
+    // hull's build power. Derived from its point cost, so a cheap node is something a single small lab
+    // can take on while a 480 RP precursor project needs most of your laboratories at once.
+    public int CapacityCost => Mathf.Clamp(Mathf.CeilToInt(cost / 90f), 1, 6);
 
     public Tech(string id, string name, TechBranch branch, int tier, int cost, int minEmpireLevel, string[] prereqs, string desc)
     { this.id = id; this.name = name; this.branch = branch; this.tier = tier; this.cost = cost; this.minEmpireLevel = minEmpireLevel; this.prereqs = prereqs ?? new string[0]; this.desc = desc; }
@@ -46,10 +53,15 @@ public static class TechEffects
     public static float TerraformSpeedMult = 1f;
     public static float OreYieldMult = 1f;
 
+    // Per-facility parallelism bonuses: added to EVERY shipyard / research centre the player owns.
+    public static int ShipyardPowerBonus = 0;
+    public static int ResearchCapacityBonus = 0;
+
     public static void Reset()
     {
         ResearchRateMult = 1f; BuildCostMult = 1f; BuildTimeMult = 1f;
         TerraformCeilingBonus = 0f; TerraformSpeedMult = 1f; OreYieldMult = 1f;
+        ShipyardPowerBonus = 0; ResearchCapacityBonus = 0;
     }
 }
 
@@ -92,6 +104,16 @@ public static class TechDatabase
             "Ablative hull armour for your warships.").With(unlock: "Enables the Fighter Mk II."));
         _all.Add(T("W3", "Energy Shields", TechBranch.Warfare, 2, 140, 2, new[] { "W2", "F2" },
             "Deflector shields absorb incoming fire.").With(unlock: "Enables the Cruiser."));
+        _all.Add(T("W4", "Point-Defence Grids", TechBranch.Warfare, 2, 160, 2, new[] { "W3" },
+            "Automated close-in batteries swat down strike craft and missiles before they land, and the fire-control computers make every hull cheaper to fit out.")
+            .With(buildCostCut: 0.06f, unlock: "Hardens warships and stations against strike craft."));
+        var w5 = T("W5", "Antimatter Warheads", TechBranch.Warfare, 3, 300, 4, new[] { "W3" },
+            "Warheads that annihilate rather than explode. Fearsomely expensive, and nothing survives contact with them.");
+        w5.reqOre = OreType.Helium3;
+        _all.Add(w5.With(unlock: "Enables the Dreadnought's main battery."));
+        _all.Add(T("W6", "Adaptive Damage Control", TechBranch.Warfare, 3, 260, 3, new[] { "W4", "I3" },
+            "Self-sealing hulls and drone repair swarms — your fleet stops needing a drydock for every scratch.")
+            .With(buildTimeCut: 0.08f, unlock: "Warships repair themselves in the field."));
 
         // ---- Science ----
         _all.Add(T("S1", "Deep Sensors", TechBranch.Science, 1, 70, 1, new[] { "F3" },
@@ -103,6 +125,20 @@ public static class TechDatabase
         var s4 = T("S4", "Exotic Matter Studies", TechBranch.Science, 3, 220, 3, new[] { "S2" },
             "Harness exotic ores — enables level-3 research facilities."); s4.reqOre = OreType.Neutronium;
         _all.Add(s4.With(researchRate: 0.40f));
+
+        // ---- Research capacity (parallel projects) ----
+        // The research-side twin of the shipyard slipway line: each adds a wing to EVERY research centre,
+        // letting you study more small technologies at once — or take on one genuinely enormous project.
+        _all.Add(T("S5", "Parallel Research Wings", TechBranch.Science, 2, 170, 2, new[] { "S2" },
+            "A second research wing in every laboratory — study another technology alongside the first.")
+            .With(researchCap: 1, unlock: "+1 research capacity at every research centre you own."));
+        _all.Add(T("S6", "Distributed Cognition", TechBranch.Science, 3, 280, 3, new[] { "S5" },
+            "Your laboratories think as one mind across the empire, dividing a problem between every wing at once.")
+            .With(researchCap: 1, researchRate: 0.10f, unlock: "+1 research capacity at every research centre you own."));
+        var s7 = T("S7", "Quantum Think-Tanks", TechBranch.Science, 3, 400, 4, new[] { "S6", "S4" },
+            "Laboratories that reason in superposition — enough capacity to attempt the largest projects your species can conceive of.");
+        s7.reqOre = OreType.Neutronium;
+        _all.Add(s7.With(researchCap: 1, researchRate: 0.15f, unlock: "+1 research capacity at every research centre you own."));
 
         // ---- Expansion & Terraforming ----
         _all.Add(T("X1", "Closed-Loop Life Support", TechBranch.Expansion, 1, 80, 1, new[] { "F2" },
@@ -117,6 +153,69 @@ public static class TechDatabase
         _all.Add(T("X5", "Xeno-Adaptation", TechBranch.Expansion, 3, 260, 3, new[] { "X3", "X4" },
             "Adapt your colonists to harsher worlds.").With(terraCeiling: 10f, terraSpeed: 0.35f, unlock: "Enables the Colony Ship Mk II."));
 
+        // ---- Terraforming projects ----
+        // Each node below unlocks specific PLANETARY ENGINEERING PROJECTS (see Terraforming.cs). A
+        // project fixes one diagnosed fault on one world — its ice caps, its poisoned sky, its dead
+        // core, its orbit — and permanently raises that world's habitability ceiling. This is the line
+        // that turns "this planet can never be settled" into "this planet is expensive but possible".
+        _all.Add(T("X6", "Orbital Solar Management", TechBranch.Expansion, 2, 150, 2, new[] { "X2" },
+            "Gossamer mirrors and statite shades let you dial how much starlight a world receives.")
+            .With(terraCeiling: 6f, unlock: "PROJECTS: Orbital Mirror Swarm (warm a frozen world) · Orbital Shade Array (cool a scorched one)."));
+
+        _all.Add(T("X7", "Cometary Redirection", TechBranch.Expansion, 2, 180, 2, new[] { "X3" },
+            "Tugs and mass drivers to steer ice bodies wherever you want them — including down.")
+            .With(terraSpeed: 0.15f, unlock: "PROJECTS: Water Convoy · Cometary Bombardment (water and atmosphere in one blow)."));
+
+        var x8 = T("X8", "Deep Crust Engineering", TechBranch.Expansion, 2, 210, 3, new[] { "X4" },
+            "Drill through a planet's crust to reach what is trapped beneath it: fossil water, or the heat of the mantle itself.");
+        x8.reqOre = OreType.Adamantine;
+        _all.Add(x8.With(terraCeiling: 6f, unlock: "PROJECTS: Tap the Deep Aquifers · Core Heat Extraction (calm a volcanic world)."));
+
+        _all.Add(T("X14", "Directed Ecopoiesis", TechBranch.Expansion, 2, 230, 3, new[] { "X2", "S1" },
+            "Purpose-built life — bacteria that make soil out of rock, algae that flood a sky with oxygen, forests that hold a climate steady without any help from you.")
+            .With(terraCeiling: 8f, terraSpeed: 0.20f, unlock: "PROJECTS: Microbial Seeding · Oxygen Cascade · Forest Seeding."));
+
+        var x10 = T("X10", "Rotational Engineering", TechBranch.Expansion, 3, 300, 4, new[] { "X8" },
+            "Equatorial mass drivers big enough to change how fast a planet turns — ending the tidally-locked world's baked face and frozen back.");
+        x10.reqOre = OreType.Neutronium;
+        _all.Add(x10.With(terraCeiling: 8f, unlock: "PROJECTS: Rotational Acceleration · Rotational Braking · Axial Correction."));
+
+        var x11 = T("X11", "Magnetospheric Engineering", TechBranch.Expansion, 3, 340, 4, new[] { "X8", "F2" },
+            "Give a dead world a magnetic field again — either by restarting its core or by hanging an artificial one in front of it. Without this, every atmosphere you build is eventually stripped away.");
+        x11.reqOre = OreType.Neutronium;
+        _all.Add(x11.With(terraCeiling: 10f, unlock: "PROJECTS: Core Ignition · Magnetospheric Shield."));
+
+        var x13 = T("X13", "Moon Engineering", TechBranch.Expansion, 3, 380, 5, new[] { "X10" },
+            "Moons are tools. Capture one to steady a wobbling world's axis and stir its oceans — or take a troublesome one apart entirely.");
+        x13.reqSchematics = 1;
+        _all.Add(x13.With(terraCeiling: 6f, unlock: "PROJECTS: Capture a Moon · Lunar Disassembly."));
+
+        var x9 = T("X9", "Stellar Engineering", TechBranch.Expansion, 3, 520, 7, new[] { "X10", "E3" },
+            "Move the planet. Centuries of asteroid slingshots walk a whole world along its orbit, into the light or out of the fire. There is no other answer for a world in the wrong place.");
+        x9.reqOre = OreType.Neutronium; x9.reqSchematics = 2;
+        _all.Add(x9.With(terraCeiling: 14f, terraSpeed: 0.25f, unlock: "PROJECTS: Orbital Migration, inward and outward."));
+
+        // Terraforming is not only about ADDING. Half the galaxy's worlds are wrong for your species in
+        // the opposite direction — drowned when you want arid, thick-skied when you need to stand up in
+        // it. This node is the "take it away" counterpart to Hydrosphere Seeding.
+        _all.Add(T("X15", "Planetary Desiccation", TechBranch.Expansion, 3, 280, 4, new[] { "X7", "X4" },
+            "Crack an ocean into gas and let the solar wind take it, or drive it down into the crust as hydrates. To a species that needs dry ground, a water world is a problem to be solved — and the water you strip off it is worth having.")
+            .With(terraCeiling: 8f, unlock: "PROJECTS: Hydrosphere Venting · Crustal Sequestration · Atmospheric Thinning."));
+
+        // The answer to the deepest terraforming problem there is: the world is simply the wrong KIND
+        // of place. No amount of shades or scrubbers changes a species' affinity for a world type —
+        // only rebuilding the world does.
+        var x16 = T("X16", "Planetary Remodelling", TechBranch.Expansion, 3, 560, 7, new[] { "X15", "X11", "X14" },
+            "Stop adjusting worlds and start rebuilding them. Boil off a sea or fill a basin, ignite a dead world's volcanism or quench a furnace, thaw a glacier world or freeze a temperate one — until the planet is the kind of place your species was made for. The difference between a 24% world and an 88% one is no longer luck; it is budget.");
+        x16.reqSchematics = 2;
+        _all.Add(x16.With(terraCeiling: 16f, terraSpeed: 0.30f,
+            unlock: "PROJECT: Planetary Remodelling — convert a world to your species' ideal type."));
+
+        var x12 = T("X12", "Shellworld Architecture", TechBranch.Expansion, 3, 620, 9, new[] { "X9", "I4" },
+            "Wrap a solid shell around a gas giant and live on the outside of it; sink degenerate-matter anchors into a pebble to give it real gravity. The point at which your species stops looking for worlds and starts making them.");
+        x12.reqSchematics = 3;
+        _all.Add(x12.With(terraCeiling: 15f, unlock: "PROJECTS: Shellworld Construction (settle a gas giant) · Gravity Anchors."));
+
         // ---- Exploration (drives that extend travel range, stacking with empire level) ----
         _all.Add(T("E1", "Ion Drives", TechBranch.Exploration, 1, 60, 1, new[] { "F2" },
             "Efficient ion propulsion — more range on every ship.").With(rangeMult: 0.12f, unlock: "Enables the Scout Mk II."));
@@ -127,6 +226,16 @@ public static class TechDatabase
         var e4 = T("E4", "Jump Drives", TechBranch.Exploration, 3, 280, 3, new[] { "E3" },
             "Near-instant jumps across vast distances."); e4.reqOre = OreType.Helium3;
         _all.Add(e4.With(rangeMult: 0.60f));
+        _all.Add(T("E5", "Autonomous Survey Drones", TechBranch.Exploration, 2, 140, 2, new[] { "E2", "S1" },
+            "Every scout carries a swarm of drones that fan out and map a world in a fraction of the time a crew would need.")
+            .With(researchRate: 0.08f, unlock: "Surveys finish markedly faster."));
+        _all.Add(T("E6", "Self-Sufficient Hulls", TechBranch.Exploration, 2, 190, 3, new[] { "E3", "X1" },
+            "Closed-loop life support and fuel scoops aboard every ship — your fleet stops needing to come home.")
+            .With(rangeMult: 0.22f, unlock: "Ships endure far longer on hostile worlds."));
+        var e7 = T("E7", "Wormhole Cartography", TechBranch.Exploration, 3, 420, 6, new[] { "E4" },
+            "Chart the natural folds in space that were always there, and step between stars through them.");
+        e7.reqOre = OreType.Neutronium;
+        _all.Add(e7.With(rangeMult: 0.80f, unlock: "The galaxy stops being a place you cross and becomes a place you step through."));
 
         // ---- Industry ----
         _all.Add(T("I1", "Automated Mining", TechBranch.Industry, 1, 70, 1, new[] { "F1" },
@@ -138,6 +247,20 @@ public static class TechDatabase
         var i4 = T("I4", "Nanofabrication", TechBranch.Industry, 3, 240, 3, new[] { "I3" },
             "Atom-precise fabrication makes even capital hulls cheap."); i4.reqOre = OreType.Adamantine;
         _all.Add(i4.With(buildCostCut: 0.15f, buildTimeCut: 0.10f, unlock: "Enables Mk III refits."));
+
+        // ---- Shipyard build power (parallel construction) ----
+        // These are the "extra power here and there" line: each adds a slipway to EVERY shipyard you own,
+        // so a well-researched level-2 yard can out-build a neglected level-4 one.
+        _all.Add(T("I5", "Parallel Slipways", TechBranch.Industry, 2, 160, 2, new[] { "I3" },
+            "A second construction cradle on every shipyard — lay down another hull alongside the first.")
+            .With(shipyardPower: 1, unlock: "+1 build power at every shipyard you own."));
+        _all.Add(T("I6", "Robotic Assembly Swarms", TechBranch.Industry, 3, 260, 3, new[] { "I5" },
+            "Self-directing construction swarms work several hulls at once without getting in each other's way.")
+            .With(shipyardPower: 1, buildTimeCut: 0.05f, unlock: "+1 build power at every shipyard you own."));
+        var i7 = T("I7", "Autonomous Drydocks", TechBranch.Industry, 3, 380, 4, new[] { "I6", "I4" },
+            "Shipyards that run themselves — a yard becomes a fleet factory able to hold the largest hulls on the stocks.");
+        i7.reqOre = OreType.Adamantine;
+        _all.Add(i7.With(shipyardPower: 1, unlock: "+1 build power at every shipyard you own. Enough power for the biggest hulls."));
 
         // ---- Doctrines (strategic paths — commit resources toward a way of playing) ----
         // Each doctrine is a strong, focused investment. They are deliberately expensive; you can afford
@@ -211,13 +334,38 @@ public static class TechDatabase
 public static class TechExtensions
 {
     public static Tech With(this Tech t, float researchRate = 0f, float buildCostCut = 0f, float buildTimeCut = 0f,
-        float terraCeiling = 0f, float terraSpeed = 0f, float rangeMult = 0f, float oreYield = 0f, string unlock = null)
+        float terraCeiling = 0f, float terraSpeed = 0f, float rangeMult = 0f, float oreYield = 0f,
+        int shipyardPower = 0, int researchCap = 0, string unlock = null)
     {
         t.researchRate = researchRate; t.buildCostCut = buildCostCut; t.buildTimeCut = buildTimeCut;
         t.terraCeiling = terraCeiling; t.terraSpeed = terraSpeed; t.rangeMult = rangeMult; t.oreYield = oreYield;
+        t.shipyardPower = shipyardPower; t.researchCap = researchCap;
         t.unlockNote = unlock;
         return t;
     }
+}
+
+// Why a queued project isn't currently being studied — drives the label on its queue widget.
+public enum ResearchState { Researching, Paused, WaitingForCapacity, WaitingForPrereq, Impossible }
+
+// One technology in the research queue. Several can be Researching at once, each occupying its
+// CapacityCost of the empire's pooled research capacity.
+public class ResearchOrder
+{
+    public string id;
+    public float progress;      // research points banked into this project so far
+    public bool paused;
+    public ResearchState state = ResearchState.WaitingForCapacity;
+
+    // Fractional research waiting to become a whole point. PER PROJECT, not shared: with one shared
+    // accumulator whichever project happened to tick first would swallow the points meant for the
+    // others, and parallel research would crawl on every project but one.
+    [System.NonSerialized] public float carry;
+
+    public bool Active => state == ResearchState.Researching;
+    public Tech Def => TechDatabase.Get(id);
+    public int Cost => Def != null ? Def.CapacityCost : 1;
+    public float Progress01 { get { var t = Def; return t != null && t.cost > 0 ? Mathf.Clamp01(progress / t.cost) : 0f; } }
 }
 
 // Tracks researched technologies, gates what can be researched next, and pushes the aggregated effects
@@ -229,34 +377,75 @@ public static class TechManager
 
     public static bool IsResearched(string id) => researched.Contains(id);
 
-    // ---- Research queue (timed, pausable, editable — like the shipyard queue). The active tech fills
-    // by draining research points from your bank over time; pause it, or remove/reorder entries. ----
-    static readonly List<string> queue = new List<string>();
-    static float progress;                 // RP accumulated toward the front tech
-    static float drainCarry;               // fractional RP waiting to be spent as whole points
-    public static bool Paused { get; private set; }
-    const float DrainRate = 6f;            // base RP/sec funneled from the bank into active research
+    // ---- Research queue (parallel, timed, pausable, editable — the twin of the shipyard queue) ----
+    // Your research centres pool their RESEARCH CAPACITY (see ResearchCapacity); each project occupies
+    // its CapacityCost while it is being studied and releases it on completion. So a big laboratory can
+    // study several small technologies at once, or commit everything to one enormous project.
+    static readonly List<ResearchOrder> queue = new List<ResearchOrder>();
+    // Each ResearchOrder carries its own fractional research (see ResearchOrder.carry).
+    public static bool Paused { get; private set; }   // global pause (the whole research effort)
+    const float DrainRate = 6f;            // base RP/sec funneled from the bank into EACH active project
 
-    public static IReadOnlyList<string> Queue => queue;
-    public static string Active => queue.Count > 0 ? queue[0] : null;
-    public static bool IsQueued(string id) => queue.Contains(id);
-    public static int QueuePosition(string id) => queue.IndexOf(id);
+    public static IReadOnlyList<ResearchOrder> Queue => queue;
+    public static bool IsQueued(string id) => Find(id) != null;
+    public static int QueuePosition(string id) { for (int i = 0; i < queue.Count; i++) if (queue[i].id == id) return i; return -1; }
 
-    public static float ActiveProgress01
+    public static ResearchOrder Find(string id)
+    { foreach (var o in queue) if (o.id == id) return o; return null; }
+
+    // The first project actually being studied (for compact readouts), or null.
+    public static ResearchOrder ActiveOrder
+    { get { foreach (var o in queue) if (o.Active) return o; return null; } }
+
+    public static string Active => ActiveOrder?.id;
+
+    // ---- Research capacity ----
+    public static int TotalCapacity => ResearchCapacity.PlayerTotal();
+
+    public static int UsedCapacity
+    { get { int n = 0; foreach (var o in queue) if (o.Active) n += o.Cost; return n; } }
+
+    public static int FreeCapacity => Mathf.Max(0, TotalCapacity - UsedCapacity);
+
+    // Same allocation rule as the shipyard: walk the queue in order, hand out capacity, and let the
+    // first project that doesn't fit hold its place rather than be leapfrogged. Paused projects and
+    // ones that outsize the whole empire are skipped so the queue can't deadlock; a project whose
+    // prerequisites haven't landed yet also waits without blocking the projects behind it.
+    static void Schedule()
     {
-        get { var t = TechDatabase.Get(Active); return t != null && t.cost > 0 ? Mathf.Clamp01(progress / t.cost) : 0f; }
+        int total = TotalCapacity;
+        int free = total;
+        bool blocked = false;
+
+        foreach (var o in queue)
+        {
+            var t = TechDatabase.Get(o.id);
+            if (t == null) { o.state = ResearchState.Impossible; continue; }
+            if (o.paused || Paused) { o.state = ResearchState.Paused; continue; }
+            if (!PrereqsMet(t)) { o.state = ResearchState.WaitingForPrereq; continue; }
+            if (t.CapacityCost > total) { o.state = ResearchState.Impossible; continue; }
+            if (blocked) { o.state = ResearchState.WaitingForCapacity; continue; }
+            if (t.CapacityCost <= free) { o.state = ResearchState.Researching; free -= t.CapacityCost; }
+            else { o.state = ResearchState.WaitingForCapacity; blocked = true; }
+        }
     }
-    public static float ActiveProgressRP => progress;
+
+    public static void Reschedule() => Schedule();
+
+    public static float ActiveProgress01 => ActiveOrder != null ? ActiveOrder.Progress01 : 0f;
+    public static float ActiveProgressRP => ActiveOrder != null ? ActiveOrder.progress : 0f;
 
     public static bool CanQueue(Tech t, out string reason)
     {
         reason = null;
         if (t == null) { reason = "unknown"; return false; }
         if (researched.Contains(t.id)) { reason = "researched"; return false; }
-        if (queue.Contains(t.id)) { reason = "queued"; return false; }
+        if (IsQueued(t.id)) { reason = "queued"; return false; }
         if (EmpireTech.Level < t.minEmpireLevel) { reason = $"needs Empire Tech Level {t.minEmpireLevel}"; return false; }
+        if (t.CapacityCost > TotalCapacity)
+        { reason = $"needs {t.CapacityCost} research capacity (your labs total {TotalCapacity})"; return false; }
         foreach (var p in t.prereqs)                       // prereq must be researched OR queued ahead
-            if (!researched.Contains(p) && !queue.Contains(p)) { reason = "needs " + PrereqNames(t); return false; }
+            if (!researched.Contains(p) && !IsQueued(p)) { reason = "needs " + PrereqNames(t); return false; }
         if (t.reqOre != OreType.None && !ResearchManager.IsDiscovered(t.reqOre))
         { reason = $"discover {OreDatabase.Get(t.reqOre).displayName} first"; return false; }
         if (t.reqSchematics > 0 && AncientLore.SchematicsFound < t.reqSchematics)
@@ -270,24 +459,62 @@ public static class TechManager
     {
         var t = TechDatabase.Get(id);
         if (t == null || !CanQueue(t, out _)) return false;
-        queue.Add(id);
+        queue.Add(new ResearchOrder { id = id });
+        Schedule();
         OnChanged?.Invoke();
         return true;
     }
 
-    public static void RemoveFromQueue(int index)
+    // Pausing a project freezes its progress where it is and hands its capacity to the next project in
+    // line; resuming picks it up exactly where it left off.
+    public static void SetOrderPaused(ResearchOrder o, bool paused)
     {
-        if (index < 0 || index >= queue.Count) return;
-        if (index == 0) progress = 0f;
-        queue.RemoveAt(index);
-        PruneQueue();
+        if (o == null || o.paused == paused) return;
+        o.paused = paused;
+        Schedule();
         OnChanged?.Invoke();
     }
 
-    public static void SetPaused(bool p) { Paused = p; OnChanged?.Invoke(); }
-    public static void ClearQueue() { queue.Clear(); progress = 0f; OnChanged?.Invoke(); }
+    // Abandoning a project refunds the research points already sunk into it — the work isn't wasted,
+    // it just goes back into the bank (mirrors scrapping a half-built hull for its resources).
+    public static void RemoveFromQueue(int index)
+    {
+        if (index < 0 || index >= queue.Count) return;
+        var o = queue[index];
+        int refund = Mathf.FloorToInt(o.progress);
+        if (refund > 0) ResearchManager.AddPoints(refund);
+        queue.RemoveAt(index);
+        PruneQueue();
+        Schedule();
+        OnChanged?.Invoke();
+    }
 
-    // Drop any queued tech whose prerequisites are no longer satisfied (e.g. after a removal).
+    public static void RemoveOrder(ResearchOrder o) { int i = queue.IndexOf(o); if (i >= 0) RemoveFromQueue(i); }
+
+    // Drag-to-reorder, so a project you suddenly need can be pulled to the front of the labs.
+    public static void MoveOrder(int from, int to)
+    {
+        if (from < 0 || from >= queue.Count) return;
+        to = Mathf.Clamp(to, 0, queue.Count - 1);
+        if (from == to) return;
+        var o = queue[from];
+        queue.RemoveAt(from);
+        queue.Insert(to, o);
+        Schedule();
+        OnChanged?.Invoke();
+    }
+
+    public static void SetPaused(bool p) { Paused = p; Schedule(); OnChanged?.Invoke(); }
+
+    public static void ClearQueue()
+    {
+        for (int i = queue.Count - 1; i >= 0; i--) RemoveFromQueue(i);
+        queue.Clear();
+        OnChanged?.Invoke();
+    }
+
+    // Drop any queued tech whose prerequisites can no longer ever be satisfied from the queue (e.g.
+    // after its prerequisite was removed), refunding what had been sunk into it.
     static void PruneQueue()
     {
         bool changed = true;
@@ -296,40 +523,73 @@ public static class TechManager
             changed = false;
             for (int i = 0; i < queue.Count; i++)
             {
-                var t = TechDatabase.Get(queue[i]); if (t == null) continue;
+                var t = TechDatabase.Get(queue[i].id); if (t == null) continue;
                 bool ok = true;
                 foreach (var p in t.prereqs)
                 {
                     bool satisfied = researched.Contains(p);
-                    if (!satisfied) for (int j = 0; j < i; j++) if (queue[j] == p) { satisfied = true; break; }
+                    if (!satisfied) for (int j = 0; j < queue.Count; j++) if (queue[j].id == p) { satisfied = true; break; }
                     if (!satisfied) { ok = false; break; }
                 }
-                if (!ok) { if (i == 0) progress = 0f; queue.RemoveAt(i); changed = true; break; }
+                if (!ok)
+                {
+                    int refund = Mathf.FloorToInt(queue[i].progress);
+                    if (refund > 0) ResearchManager.AddPoints(refund);
+                    queue.RemoveAt(i); changed = true; break;
+                }
             }
         }
     }
 
-    // Advance the active research each frame (called by ResearchTaskManager).
+    // Advance every project being studied (called each frame by ResearchTaskManager). Each active
+    // project draws its own stream of research points from the bank, so running several at once really
+    // does cost several times as much per second — capacity lets you do it, income decides if you can.
     public static void Tick(float dt)
     {
-        if (Paused || queue.Count == 0 || dt <= 0f) return;
-        var t = TechDatabase.Get(queue[0]);
-        if (t == null) { queue.RemoveAt(0); progress = 0f; return; }
-        foreach (var p in t.prereqs) if (!researched.Contains(p)) { queue.RemoveAt(0); progress = 0f; return; }
+        if (queue.Count == 0 || dt <= 0f) return;
+        Schedule();
 
-        // Accumulate fractional research, then spend whole research points from the bank as they're earned.
         float rate = DrainRate * TechEffects.ResearchRateMult;
-        drainCarry += rate * dt;
-        int spend = Mathf.Min(ResearchManager.ResearchPoints, Mathf.FloorToInt(drainCarry));
-        if (spend <= 0) return;                            // no whole RP available yet -> keep accumulating
-        drainCarry -= spend;
-        ResearchManager.AddPoints(-spend);
-        progress += spend;
-        if (progress >= t.cost)
+
+        // Walk FORWARD so that when the bank is too thin to feed everything, the front of the queue is
+        // served first — that is what the player's ordering means. (Walking backwards quietly handed a
+        // scarce bank to whatever was queued last.) Completions are collected and applied afterwards so
+        // the list isn't mutated mid-walk.
+        List<Tech> finished = null;
+
+        foreach (var o in queue)
         {
-            progress -= t.cost;
-            queue.RemoveAt(0);
-            MarkResearched(t);
+            if (!o.Active) continue;
+            var t = o.Def;
+            if (t == null) continue;
+
+            // Each project accumulates its OWN fractional research, then spends whole points from the
+            // shared bank as they're earned. Running N projects really does drain N times as fast:
+            // capacity decides what you MAY study at once, income decides what you CAN afford to.
+            // Each also keeps its own progress toward its own cost, so two bars started together
+            // finish at their own separate times — a cheap tech never rides in on an expensive one.
+            o.carry += rate * dt;
+            int want = Mathf.FloorToInt(o.carry);
+            if (want <= 0) continue;
+            int spend = Mathf.Min(ResearchManager.ResearchPoints, want);
+            if (spend <= 0) continue;                      // bank is dry -> this project just waits
+            o.carry -= spend;
+            ResearchManager.AddPoints(-spend);
+            o.progress += spend;
+
+            if (o.progress >= t.cost) (finished ??= new List<Tech>()).Add(t);
+        }
+
+        if (finished != null)
+        {
+            foreach (var t in finished)
+            {
+                var done = Find(t.id);
+                if (done != null) queue.Remove(done);
+                MarkResearched(t);
+            }
+            PruneQueue();
+            Schedule();
         }
     }
 
@@ -385,12 +645,16 @@ public static class TechManager
     {
         TechEffects.Reset();
         float rr = 0f, bc = 0f, bt = 0f, tc = 0f, ts = 0f, rm = 0f, oy = 0f;
+        int sp = 0, rc = 0;
         foreach (var id in researched)
         {
             var t = TechDatabase.Get(id); if (t == null) continue;
             rr += t.researchRate; bc += t.buildCostCut; bt += t.buildTimeCut;
             tc += t.terraCeiling; ts += t.terraSpeed; rm += t.rangeMult; oy += t.oreYield;
+            sp += t.shipyardPower; rc += t.researchCap;
         }
+        TechEffects.ShipyardPowerBonus = sp;
+        TechEffects.ResearchCapacityBonus = rc;
         TechEffects.ResearchRateMult = 1f + rr;
         TechEffects.BuildCostMult = Mathf.Clamp(1f - bc, 0.4f, 1f);
         TechEffects.BuildTimeMult = Mathf.Clamp(1f - bt, 0.4f, 1f);
@@ -403,7 +667,7 @@ public static class TechManager
     public static void Reset()
     {
         researched.Clear();
-        queue.Clear(); progress = 0f; drainCarry = 0f; Paused = false;
+        queue.Clear(); Paused = false;
         Recompute();
         OnChanged?.Invoke();
     }
@@ -413,9 +677,30 @@ public static class TechManager
     public static void Import(List<string> ids)
     {
         researched.Clear();
-        queue.Clear(); progress = 0f; drainCarry = 0f; Paused = false;
+        queue.Clear(); Paused = false;
         if (ids != null) foreach (var id in ids) researched.Add(id);
         Recompute();
+        OnChanged?.Invoke();
+    }
+
+    // The in-progress research queue is saved separately from the researched set, so a reload resumes
+    // half-finished projects exactly where they were (progress, order and pause state intact).
+    public static List<ResearchOrderDTO> ExportQueue()
+    {
+        var list = new List<ResearchOrderDTO>();
+        foreach (var o in queue) list.Add(new ResearchOrderDTO { id = o.id, progress = o.progress, paused = o.paused });
+        return list;
+    }
+
+    public static void ImportQueue(List<ResearchOrderDTO> dtos, bool paused)
+    {
+        queue.Clear();
+        Paused = paused;
+        if (dtos != null)
+            foreach (var d in dtos)
+                if (TechDatabase.Get(d.id) != null && !researched.Contains(d.id))
+                    queue.Add(new ResearchOrder { id = d.id, progress = d.progress, paused = d.paused });
+        Schedule();
         OnChanged?.Invoke();
     }
 }

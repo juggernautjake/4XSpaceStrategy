@@ -44,9 +44,15 @@ public class CelestialBody
     // building objectives that other worlds must satisfy to be fully established.
     public bool birthrightClaim = false;
 
-    // Shipyard tier on this world (0 = none, 1-3). Building a Shipyard sets it to 1; it can be upgraded
-    // to 2 (unlocks Mk II ships) and 3 (unlocks the Terraformer). Higher tiers build ships faster.
+    // Shipyard tier on this world (0 = none, 1-5). Building a Shipyard sets it to 1; it can be upgraded
+    // to 2 (unlocks Mk II ships) and 3 (unlocks the Terraformer). Higher tiers build ships faster and,
+    // above all, grant more BUILD POWER — how many ships this yard can work on at once (see BuildPower).
     public int shipyardLevel = 0;
+
+    // Research centre tier on this world (0 = none, 1-5). Building a Research Centre sets it to 1.
+    // Higher tiers grant more RESEARCH CAPACITY — how many technologies can be studied at once, or how
+    // big a single project can be (see ResearchCapacity).
+    public int researchCenterLevel = 0;
 
     // --- Exploration / colonization ---
     public bool visited = false;             // a friendly ship has arrived here at least once
@@ -66,8 +72,23 @@ public class CelestialBody
     // --- Colony ---
     public List<int> buildings = new List<int>();   // BuildingType ids constructed on this world
 
+    // Structures physically placed on the surface GRID (see SurfaceBuildManager) — mines, farms,
+    // geothermal plants and so on, each occupying a tetromino-like footprint of tiles. Distinct from
+    // `buildings` above, which are the abstract colony-wide facilities.
+    public List<PlacedBuilding> placedBuildings = new List<PlacedBuilding>();
+
+    // A DEEP survey (a research ship actually studying the world, not just mapping it from orbit) is
+    // what unlocks the Heat, Fertile and Weather indexes. Minerals you can see from orbit; knowing
+    // where the geothermal vents are takes someone on the ground.
+    public bool deepSurveyed = false;
+
     // --- Terraforming ---
     public float terraformability = 0f;      // 0..100 potential to be made livable for the current species
+
+    // Completed TerraformProjectType ids. Each finished project permanently raises this world's
+    // habitability CEILING (see TerraformProjects) — melting its ice caps, hanging orbital shades,
+    // restarting its core. Terraformers then raise habitability toward that ceiling.
+    public List<int> terraformProjects = new List<int>();
     public bool terraforming = false;        // an active terraforming project raising habitability
     public float researchProgress = 0f;      // 0..1 deep-research completion (research ship / centre)
 

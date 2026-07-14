@@ -40,6 +40,7 @@ public class BodyUnitsPanel : MonoBehaviour
 
         if (UnitManager.Instance != null) UnitManager.Instance.OnUnitsChanged += RefreshIfShowing;
         UnitSelection.OnChanged += RefreshIfShowing;
+        ControlGroups.OnChanged += RefreshIfShowing;   // re-stamp the badges when a group is rebound
 
         root.SetActive(false);
     }
@@ -88,6 +89,8 @@ public class BodyUnitsPanel : MonoBehaviour
         lrt.anchorMin = new Vector2(0, 0); lrt.anchorMax = new Vector2(1, 0.28f);
         lrt.offsetMin = Vector2.zero; lrt.offsetMax = Vector2.zero;
 
+        AddGroupBadge(item.transform, u);
+
         var btn = item.AddComponent<Button>();
         btn.targetGraphic = img;
         var captured = u;
@@ -102,10 +105,30 @@ public class BodyUnitsPanel : MonoBehaviour
         item.AddComponent<UnitIconHover>().Init(captured);
     }
 
+    // The little number in the corner showing which control group this ship belongs to. Bind a group
+    // with Ctrl+N and every one of its ships is stamped here, so you can see at a glance what "3" is.
+    public static void AddGroupBadge(Transform parent, Unit u)
+    {
+        int g = ControlGroups.GroupOf(u);
+        if (g <= 0) return;
+
+        var badge = UIFactory.Panel(parent, "GroupBadge", new Color(0.10f, 0.45f, 0.75f, 0.95f));
+        var brt = badge.rectTransform;
+        brt.anchorMin = brt.anchorMax = new Vector2(0f, 1f);
+        brt.pivot = new Vector2(0f, 1f);
+        brt.sizeDelta = new Vector2(14, 14);
+        brt.anchoredPosition = new Vector2(1, -1);
+        badge.raycastTarget = false;
+
+        var t = UIFactory.Text(badge.transform, g.ToString(), 9, Color.white, TextAlignmentOptions.Center);
+        UIFactory.Stretch(t.rectTransform);
+    }
+
     void OnDestroy()
     {
         if (UnitManager.Instance != null) UnitManager.Instance.OnUnitsChanged -= RefreshIfShowing;
         UnitSelection.OnChanged -= RefreshIfShowing;
+        ControlGroups.OnChanged -= RefreshIfShowing;
     }
 }
 

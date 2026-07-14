@@ -260,14 +260,25 @@ public class POIMarker : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
         if (e.button == PointerEventData.InputButton.Right)
         {
             var opts = new List<ContextMenu.Option>();
-            bool inProg = ResearchTaskManager.Instance != null && ResearchTaskManager.Instance.IsResearching(poi);
+            var rtm = ResearchTaskManager.Instance;
+            bool inProg = rtm != null && rtm.IsResearching(poi);
             if (poi.IsResearchable)
-                opts.Add(new ContextMenu.Option(
-                    inProg ? "Researching..." : $"Research (~{poi.researchDuration:F0}s)",
-                    () => ResearchTaskManager.Instance?.StartResearch(window.Body, poi),
-                    !inProg));
+            {
+                // Say what the dig costs and what it pays, and why it's unavailable when it is —
+                // an anomaly you can't afford should say so rather than ignore the click.
+                bool can = false;
+                string why = "unavailable";
+                if (rtm != null) can = rtm.CanStart(window.Body, poi, out why);
+                string label = inProg
+                    ? "Researching…"
+                    : can
+                        ? $"Research — {poi.researchPointCost} pts, ~{poi.researchDuration:F0}s (+{poi.researchReward} pts" +
+                          (poi.yieldsSchematic ? ", may recover a schematic)" : ")")
+                        : $"Research — {why}";
+                opts.Add(new ContextMenu.Option(label, () => rtm?.StartResearch(window.Body, poi), can && !inProg));
+            }
             else
-                opts.Add(new ContextMenu.Option("Already surveyed", null, false));
+                opts.Add(new ContextMenu.Option("Already studied", null, false));
 
             opts.Add(new ContextMenu.Option("View info", () =>
                 TooltipManager.Instance.ShowAboveRect(window.RootRect, poi.HoverText())));

@@ -42,6 +42,11 @@ public static class GameStateSerializer
         game.ecoEnergy = PlayerEconomy.Get(ResourceType.Energy);
         game.ecoWater = PlayerEconomy.Get(ResourceType.Water);
         game.units = UnitManager.Instance != null ? UnitManager.Instance.ExportUnitDTOs() : new List<UnitDTO>();
+        game.buildQueue = UnitManager.Instance != null ? UnitManager.Instance.ExportBuildQueue() : new List<BuildOrderDTO>();
+        game.researchQueue = TechManager.ExportQueue();
+        game.researchPaused = TechManager.Paused;
+        game.terraformJobs = TerraformManager.Instance != null ? TerraformManager.Instance.Export() : new List<TerraformJobDTO>();
+        game.controlGroups = ControlGroups.Export();
 
         int bodyCount = 0;
         if (galaxy != null)
@@ -88,8 +93,12 @@ public static class GameStateSerializer
             verticalOffset = b.verticalOffset, spinSpeed = b.spinSpeed, showRing = b.showRing,
             distanceFromStar = b.distanceFromStar, habitability = b.habitability, isHabitable = b.isHabitable,
             buildings = new List<int>(b.buildings),
-            shipyardLevel = b.shipyardLevel, population = b.population, cities = b.cities,
+            shipyardLevel = b.shipyardLevel, researchCenterLevel = b.researchCenterLevel,
+            population = b.population, cities = b.cities,
             terraforming = b.terraforming, terraformability = b.terraformability,
+            terraformProjects = b.terraformProjects != null ? new List<int>(b.terraformProjects) : new List<int>(),
+            placedBuildings = b.placedBuildings != null ? new List<PlacedBuilding>(b.placedBuildings) : new List<PlacedBuilding>(),
+            deepSurveyed = b.deepSurveyed,
             birthrightClaim = b.birthrightClaim, visited = b.visited, explorationProgress = b.explorationProgress
         };
 
@@ -191,6 +200,13 @@ public static class GameStateSerializer
         AncientLore.Import(game.research != null ? game.research.schematics : 0);
         UnitManager.Instance?.ImportUnitDTOs(game.units, byId, home);
 
+        // Resume in-progress work. Both run after the galaxy and fleet exist, because their schedulers
+        // read the facility levels off the restored bodies to work out the available power/capacity.
+        UnitManager.Instance?.ImportBuildQueue(game.buildQueue);
+        TechManager.ImportQueue(game.researchQueue, game.researchPaused);
+        TerraformManager.Instance?.Import(game.terraformJobs, byId);
+        ControlGroups.Import(game.controlGroups);   // after the fleet exists, so members resolve
+
         var bg = SpaceBackground.Instance;
         if (bg != null)
         {
@@ -218,12 +234,20 @@ public static class GameStateSerializer
             isHabitable = dto.isHabitable, habitabilityLocked = dto.habitabilityLocked,
             owner = dto.ownerId >= 0 ? FactionManager.Get(dto.ownerId) : null,
             parentBody = parent,
-            shipyardLevel = dto.shipyardLevel, population = dto.population, cities = dto.cities,
+            shipyardLevel = dto.shipyardLevel, researchCenterLevel = dto.researchCenterLevel,
+            population = dto.population, cities = dto.cities,
             terraforming = dto.terraforming, terraformability = dto.terraformability,
             birthrightClaim = dto.birthrightClaim, visited = dto.visited,
             explorationProgress = dto.explorationProgress
         };
         if (dto.buildings != null) b.buildings = new List<int>(dto.buildings);
+        if (dto.terraformProjects != null) b.terraformProjects = new List<int>(dto.terraformProjects);
+        b.deepSurveyed = dto.deepSurveyed;
+        if (dto.placedBuildings != null) b.placedBuildings = new List<PlacedBuilding>(dto.placedBuildings);
+        // Saves from before research-centre tiers existed record only that the building is there, so
+        // give any existing centre its base tier rather than leaving it at level 0 (= no laboratory).
+        if (b.researchCenterLevel < 1 && b.buildings.Contains((int)BuildingType.ResearchCenter))
+            b.researchCenterLevel = 1;
 
         b.terrainParams = new PlanetTerrainGenerator.NoiseParams
         {
@@ -235,6 +259,16 @@ public static class GameStateSerializer
         };
 
         b.surface = PlanetTerrainGenerator.GenerateSurface(b);
+
+        // The surface regenerates from its seed, so its `occupied` flags come back cleared. Re-stamp
+        // them from the structures that are standing — otherwise the grid would happily let you build
+        // straight on top of your own city. Must run AFTER the surface exists.
+        if (b.surface != null && b.placedBuildings != null)
+            foreach (var pb in b.placedBuildings)
+                foreach (var c in SurfaceBuildingDatabase.Footprint(pb))
+                    if (c.x >= 0 && c.y >= 0 && c.x < b.surface.width && c.y < b.surface.height)
+                        b.surface.tiles[c.x, c.y].occupied = true;
+
         if (b.surface != null)
             foreach (var o in dto.ores)
                 if (o.x >= 0 && o.x < b.surface.width && o.y >= 0 && o.y < b.surface.height)

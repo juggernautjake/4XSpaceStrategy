@@ -11,8 +11,30 @@ public class ResearchWindow : MonoBehaviour
     GameObject root;
     TMP_Text header;
     RectTransform list;
-    Image activeFill;        // live progress bar for the active research
-    TMP_Text activeLabel;
+
+    // One project on the queue, bound to its ResearchOrder (not to an index — orders move when dragged).
+    class QueueRow
+    {
+        public ResearchOrder order;
+        public RectTransform rt;
+        public Image fill;
+        public TMP_Text label;
+        public TMP_Text pauseLabel;
+    }
+
+    // A button whose enabled state and caption depend on live values (points, capacity, affordability).
+    // Re-evaluated in place each frame so the list never has to be rebuilt just because RP ticked up.
+    class DynamicButton
+    {
+        public UnityEngine.UI.Button button;
+        public TMP_Text label;
+        public System.Func<(bool can, string text)> evaluate;
+    }
+
+    readonly System.Collections.Generic.List<QueueRow> rows = new System.Collections.Generic.List<QueueRow>();
+    readonly System.Collections.Generic.List<DynamicButton> dynamics = new System.Collections.Generic.List<DynamicButton>();
+    RectTransform queueHolder;
+    string lastSig = null, lastQueueSig = null;
 
     public static void Create(Transform parent)
     {
@@ -38,9 +60,6 @@ public class ResearchWindow : MonoBehaviour
         UIFactory.Stretch(listHolder, 0, 0, 30, 0);
         UIFactory.ScrollView(listHolder, out list);
 
-        ResearchManager.OnChanged += Refresh;
-        EmpireTech.OnChanged += Refresh;
-        TechManager.OnChanged += Refresh;
         root.SetActive(false);
     }
 
@@ -48,14 +67,36 @@ public class ResearchWindow : MonoBehaviour
     {
         bool show = !root.activeSelf;
         root.SetActive(show);
-        if (show) { Refresh(); root.GetComponent<RectTransform>().SetAsLastSibling(); }
+        if (show) { lastSig = null; lastQueueSig = null; root.GetComponent<RectTransform>().SetAsLastSibling(); }
     }
 
-    void Refresh()
+    // What the window's SHAPE depends on. Research points are deliberately absent: they tick constantly,
+    // and rebuilding the whole list on every tick is what made the buttons strobe. Point-dependent
+    // captions are refreshed in place instead (see dynamics).
+    string Signature()
     {
-        if (root == null || !root.activeSelf) return;
-        header.text = $"Research Points: <b>{ResearchManager.ResearchPoints}</b>";
+        var sb = new System.Text.StringBuilder();
+        sb.Append(EmpireTech.Level).Append('|').Append(AncientLore.SchematicsFound).Append('|');
+        sb.Append(TechManager.TotalCapacity).Append('|');
+        foreach (var t in TechDatabase.All) if (TechManager.IsResearched(t.id)) sb.Append(t.id).Append(',');
+        sb.Append('|');
+        foreach (var info in OreDatabase.All())
+            sb.Append(ResearchManager.IsDiscovered(info.type) ? '1' : '0')
+              .Append(ResearchManager.IsResearched(info.type) ? '1' : '0');
+        return sb.ToString();
+    }
 
+    static string QueueSig()
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var o in TechManager.Queue) sb.Append(o.id).Append(',');
+        return sb.ToString();
+    }
+
+    void Rebuild()
+    {
+        rows.Clear();
+        dynamics.Clear();
         for (int i = list.childCount - 1; i >= 0; i--) Destroy(list.GetChild(i).gameObject);
 
         BuildEmpireCard();
@@ -65,13 +106,15 @@ public class ResearchWindow : MonoBehaviour
         UIFactory.WrapText(list, "<b>ORE CODEX</b>", UITheme.SmallSize, UITheme.Accent);
         foreach (var info in OreDatabase.All())
             BuildCard(info);
+
+        lastQueueSig = QueueSig();
     }
 
-    // ---- Research queue (timed, pausable, editable — like the shipyard queue) ----
+    // ---- Research queue: the laboratory twin of the shipyard stocks ----
+    // Your research centres pool their capacity; each project occupies its own share while it's being
+    // studied. So several small technologies can run side by side, or one huge project can take the lot.
     void BuildResearchQueuePanel()
     {
-        activeFill = null; activeLabel = null;
-
         var card = UIFactory.Panel(list, "ResQueue", new Color(0.09f, 0.15f, 0.22f, 0.98f));
         var vlg = card.gameObject.AddComponent<VerticalLayoutGroup>();
         vlg.padding = new RectOffset(9, 9, 7, 7); vlg.spacing = 4;
@@ -80,57 +123,171 @@ public class ResearchWindow : MonoBehaviour
 
         UIFactory.WrapText(card.transform, "<b>RESEARCH QUEUE</b>", UITheme.SmallSize, UITheme.Accent);
 
-        if (TechManager.Active == null)
+        // Capacity readout — the research-side twin of the shipyard's build power line.
+        var cap = UIFactory.WrapText(card.transform, "", UITheme.SmallSize, UITheme.Text);
+        dynamics.Add(new DynamicButton
         {
-            UIFactory.WrapText(card.transform, "Nothing queued. Research is funded by your Research Points over time — queue a technology below.", UITheme.SmallSize, UITheme.SubText);
+            button = null, label = cap,
+            evaluate = () =>
+            {
+                int total = TechManager.TotalCapacity, used = TechManager.UsedCapacity;
+                string hex = ColorUtility.ToHtmlStringRGB(used >= total ? UITheme.Warn : UITheme.Good);
+                int labs = ResearchCapacity.PlayerLabCount();
+                return (true, $"Research Capacity: <color=#{hex}><b>{total - used}</b> free</color> of <b>{total}</b>" +
+                              $"   <color=#9FB4C8>({used} in use · {labs} research centre(s) pooling)</color>");
+            }
+        });
+
+        // Global pause / clear.
+        var row = UIFactory.NewUI(card.transform, "Row"); UIFactory.AddLayout(row, 28);
+        var h = row.AddComponent<HorizontalLayoutGroup>(); h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true;
+        var pauseAll = UIFactory.Button(row.transform, "Pause All", () => { TechManager.SetPaused(!TechManager.Paused); }, 26);
+        dynamics.Add(new DynamicButton
+        {
+            button = pauseAll, label = pauseAll.GetComponentInChildren<TMP_Text>(),
+            evaluate = () => (true, TechManager.Paused ? "Resume All" : "Pause All")
+        });
+        UIFactory.Button(row.transform, "Clear Queue (refunds RP)", () => { TechManager.ClearQueue(); lastQueueSig = null; }, 26);
+
+        queueHolder = UIFactory.NewUI(card.transform, "QueueRows").GetComponent<RectTransform>();
+        var qv = queueHolder.gameObject.AddComponent<VerticalLayoutGroup>();
+        qv.spacing = 4; qv.childControlWidth = true; qv.childControlHeight = true; qv.childForceExpandWidth = true;
+        var qfit = queueHolder.gameObject.AddComponent<ContentSizeFitter>(); qfit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        BuildQueueRows();
+    }
+
+    void BuildQueueRows()
+    {
+        if (queueHolder == null) return;
+        rows.Clear();
+        for (int i = queueHolder.childCount - 1; i >= 0; i--) Destroy(queueHolder.GetChild(i).gameObject);
+
+        if (TechManager.Queue.Count == 0)
+        {
+            UIFactory.WrapText(queueHolder, "Nothing queued. Research is funded by your Research Points over time — queue a technology below.", UITheme.SmallSize, UITheme.SubText);
             return;
         }
 
-        // Live progress bar for the active research.
-        var barHolder = UIFactory.NewUI(card.transform, "Bar"); UIFactory.AddLayout(barHolder, 20);
-        var track = UIFactory.Panel(barHolder.transform, "Track", UITheme.TrackBg); UIFactory.Stretch(track.rectTransform);
-        activeFill = UIFactory.Panel(track.transform, "Fill", UITheme.Good);
-        var frt = activeFill.rectTransform;
-        frt.anchorMin = new Vector2(0, 0); frt.anchorMax = new Vector2(TechManager.ActiveProgress01, 1); frt.offsetMin = Vector2.zero; frt.offsetMax = Vector2.zero;
-        activeLabel = UIFactory.Text(barHolder.transform, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Center);
-        UIFactory.Stretch(activeLabel.rectTransform);
-
-        // Pause / clear controls.
-        var row = UIFactory.NewUI(card.transform, "Row"); UIFactory.AddLayout(row, 28);
-        var h = row.AddComponent<HorizontalLayoutGroup>(); h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true;
-        UIFactory.Button(row.transform, TechManager.Paused ? "Resume" : "Pause", () => TechManager.SetPaused(!TechManager.Paused), 26);
-        UIFactory.Button(row.transform, "Clear Queue", () => TechManager.ClearQueue(), 26);
-
-        // The ordered queue with remove buttons.
-        var q = TechManager.Queue;
-        for (int i = 0; i < q.Count; i++)
-        {
-            var tq = TechDatabase.Get(q[i]); if (tq == null) continue;
-            int idx = i;
-            var rowGo = UIFactory.NewUI(card.transform, "QRow"); UIFactory.AddLayout(rowGo, 24);
-            var rh = rowGo.AddComponent<HorizontalLayoutGroup>(); rh.spacing = 6; rh.childControlWidth = true; rh.childControlHeight = true; rh.childForceExpandWidth = true;
-            string pfx = i == 0 ? "> " : $"{i + 1}. ";
-            UIFactory.Text(rowGo.transform, $"{pfx}{tq.name}", UITheme.SmallSize, i == 0 ? UITheme.Accent : UITheme.Text, TextAlignmentOptions.Left);
-            var rm = UIFactory.Button(rowGo.transform, "X", () => TechManager.RemoveFromQueue(idx), 22);
-            var le = rm.GetComponent<LayoutElement>(); if (le != null) le.preferredWidth = 30;
-        }
-
-        UpdateActiveBar();
+        foreach (var o in TechManager.Queue) BuildQueueRow(o);
+        lastQueueSig = QueueSig();
     }
 
-    void UpdateActiveBar()
+    void BuildQueueRow(ResearchOrder order)
     {
-        if (activeFill == null) return;
-        var at = TechDatabase.Get(TechManager.Active);
-        activeFill.rectTransform.anchorMax = new Vector2(TechManager.ActiveProgress01, 1f);
-        if (activeLabel != null)
-            activeLabel.text = at == null ? "" :
-                $"{at.name}: {TechManager.ActiveProgress01 * 100f:F0}%  ({TechManager.ActiveProgressRP:F0}/{at.cost} RP)" + (TechManager.Paused ? "  <color=#FFBF4D>(paused)</color>" : "");
+        var t = order.Def; if (t == null) return;
+
+        var card = UIFactory.Panel(queueHolder, "QRow", UITheme.RowBg);
+        var rt = card.rectTransform;
+        UIFactory.AddLayout(card.gameObject, 44);
+        var hl = card.gameObject.AddComponent<HorizontalLayoutGroup>();
+        hl.padding = new RectOffset(4, 4, 4, 4); hl.spacing = 6;
+        hl.childControlWidth = true; hl.childControlHeight = true;
+        hl.childForceExpandWidth = false; hl.childAlignment = TextAnchor.MiddleLeft;
+
+        QueueDragHandle.Attach(card.transform, rt,
+            () => TechManager.QueuePosition(order.id),
+            (from, to) => { TechManager.MoveOrder(from, to); ResyncRowOrder(); },
+            () => { });
+
+        var mid = UIFactory.NewUI(card.transform, "Mid");
+        var mle = mid.AddComponent<LayoutElement>(); mle.flexibleWidth = 1;
+        var mv = mid.AddComponent<VerticalLayoutGroup>();
+        mv.spacing = 2; mv.childControlWidth = true; mv.childControlHeight = true; mv.childForceExpandWidth = true;
+
+        var label = UIFactory.Text(mid.transform, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
+        UIFactory.AddLayout(label.gameObject, 16);
+
+        var barHolder = UIFactory.NewUI(mid.transform, "Bar"); UIFactory.AddLayout(barHolder, 12);
+        var track = UIFactory.Panel(barHolder.transform, "Track", UITheme.TrackBg);
+        UIFactory.Stretch(track.rectTransform);
+        var fill = UIFactory.Panel(track.transform, "Fill", UITheme.Good);
+        var frt = fill.rectTransform;
+        frt.anchorMin = new Vector2(0, 0); frt.anchorMax = new Vector2(0, 1);
+        frt.offsetMin = Vector2.zero; frt.offsetMax = Vector2.zero;
+
+        var pause = UIFactory.Button(card.transform, "❚❚", () => { TechManager.SetOrderPaused(order, !order.paused); }, 24);
+        var ple = pause.GetComponent<LayoutElement>(); ple.preferredWidth = 34; ple.minWidth = 34; ple.flexibleWidth = 0;
+
+        var cancel = UIFactory.Button(card.transform, "X", () => { TechManager.RemoveOrder(order); lastQueueSig = null; }, 24);
+        var cle = cancel.GetComponent<LayoutElement>(); cle.preferredWidth = 28; cle.minWidth = 28; cle.flexibleWidth = 0;
+
+        rows.Add(new QueueRow
+        {
+            order = order, rt = rt, fill = fill, label = label,
+            pauseLabel = pause.GetComponentInChildren<TMP_Text>()
+        });
+    }
+
+    // After a drag reorders the model, re-sort the existing row objects instead of rebuilding them —
+    // destroying the row under the cursor would kill the drag.
+    void ResyncRowOrder()
+    {
+        foreach (var r in rows)
+        {
+            int idx = TechManager.QueuePosition(r.order.id);
+            if (idx >= 0) r.rt.SetSiblingIndex(idx);
+        }
+        lastQueueSig = QueueSig();
+    }
+
+    void UpdateQueueRows()
+    {
+        foreach (var r in rows)
+        {
+            var o = r.order;
+            var t = o.Def; if (t == null) continue;
+
+            r.fill.rectTransform.anchorMax = new Vector2(o.Progress01, 1f);
+
+            string state;
+            Color barColor;
+            switch (o.state)
+            {
+                case ResearchState.Researching:
+                    state = $"<color=#4DFF6E>Researching</color> — {o.progress:F0}/{t.cost} RP";
+                    barColor = UITheme.Good; break;
+                case ResearchState.Paused:
+                    state = $"<color=#FFBF4D>Paused</color> at {o.Progress01 * 100f:F0}% — its {o.Cost} capacity went to the next project";
+                    barColor = UITheme.Warn; break;
+                case ResearchState.WaitingForPrereq:
+                    state = "<color=#9FB4C8>Waiting</color> — its prerequisite is still being researched";
+                    barColor = UITheme.SubText; break;
+                case ResearchState.Impossible:
+                    state = $"<color=#FF6659>Needs {o.Cost} capacity</color> — more than your laboratories can supply";
+                    barColor = UITheme.Bad; break;
+                default:
+                    state = $"<color=#9FB4C8>Queued</color> — waiting for {o.Cost} research capacity";
+                    barColor = UITheme.SubText; break;
+            }
+            r.fill.color = barColor;
+            r.label.text = $"<b>{t.name}</b>  <size=10><color=#8FD0FF>{o.Cost}c</color></size>  <size=10>{state}</size>";
+            if (r.pauseLabel != null) r.pauseLabel.text = o.paused ? "▶" : "❚❚";
+        }
     }
 
     void Update()
     {
-        if (root != null && root.activeSelf) UpdateActiveBar();
+        if (root == null || !root.activeSelf) return;
+
+        header.text = $"Research Points: <b>{ResearchManager.ResearchPoints}</b>";
+
+        if (!QueueDragHandle.Dragging)
+        {
+            string sig = Signature();
+            if (sig != lastSig) { lastSig = sig; Rebuild(); }
+            else if (QueueSig() != lastQueueSig) BuildQueueRows();
+        }
+
+        // Live captions and enabled states, updated in place — never a rebuild.
+        foreach (var d in dynamics)
+        {
+            var (can, text) = d.evaluate();
+            if (d.button != null) d.button.interactable = can;
+            if (d.label != null) d.label.text = text;
+        }
+
+        UpdateQueueRows();
     }
 
     // ---- Tech tree ----
@@ -171,6 +328,8 @@ public class ResearchWindow : MonoBehaviour
         if (t.terraSpeed != 0f) p.Add($"+{t.terraSpeed * 100f:F0}% terraform speed");
         if (t.rangeMult != 0f) p.Add($"+{t.rangeMult * 100f:F0}% ship range");
         if (t.oreYield != 0f) p.Add($"+{t.oreYield * 100f:F0}% ore yield");
+        if (t.shipyardPower != 0) p.Add($"+{t.shipyardPower} build power per shipyard");
+        if (t.researchCap != 0) p.Add($"+{t.researchCap} research capacity per centre");
         return string.Join(" · ", p);
     }
 
@@ -198,7 +357,10 @@ public class ResearchWindow : MonoBehaviour
         vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
         var fit = card.gameObject.AddComponent<ContentSizeFitter>(); fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        string head = $"<b>{t.name}</b>  <size=11><color=#9FB4C8>T{t.tier} · {t.cost} RP</color></size>";
+        // Capacity cost sits alongside the point cost: it's what decides whether this can run beside
+        // your other projects or needs the laboratories to itself.
+        string head = $"<b>{t.name}</b>  <size=11><color=#9FB4C8>T{t.tier} · {t.cost} RP</color>" +
+                      $" · <color=#8FD0FF>{t.CapacityCost} capacity</color></size>";
         UIFactory.WrapText(card.transform, head, UITheme.SmallSize, done ? UITheme.Good : branchColor);
 
         string eff = EffectSummary(t);
@@ -207,23 +369,34 @@ public class ResearchWindow : MonoBehaviour
 
         if (done) { UIFactory.WrapText(card.transform, "<color=#4DFF6E>Researched</color>", UITheme.SmallSize, UITheme.Good); return; }
 
+        // One button per tech whose caption follows the live state: queue it, or (once queued) drop it.
+        // Evaluated every frame in place, so a ticking research bank never rebuilds the tree.
         var id = t.id;
-        if (TechManager.Active == id)
+        var group = card.gameObject.AddComponent<CanvasGroup>();
+        var qbtn = UIFactory.Button(card.transform, "", () =>
         {
-            UIFactory.WrapText(card.transform, "<color=#8FD0FF>Researching now…</color>", UITheme.SmallSize, UITheme.Accent);
-        }
-        else if (TechManager.IsQueued(id))
+            if (TechManager.IsQueued(id)) TechManager.RemoveFromQueue(TechManager.QueuePosition(id));
+            else TechManager.Enqueue(id);
+            lastQueueSig = null;
+        }, 26);
+
+        dynamics.Add(new DynamicButton
         {
-            UIFactory.Button(card.transform, $"Queued (#{TechManager.QueuePosition(id) + 1}) — remove",
-                () => TechManager.RemoveFromQueue(TechManager.QueuePosition(id)), 26);
-        }
-        else
-        {
-            bool can = TechManager.CanQueue(t, out string reason);
-            var btn = UIFactory.Button(card.transform, can ? $"Queue ({t.cost} RP)" : $"Locked — {reason}",
-                () => TechManager.Enqueue(id), 26);
-            btn.interactable = can;
-        }
+            button = qbtn, label = qbtn.GetComponentInChildren<TMP_Text>(),
+            evaluate = () =>
+            {
+                var order = TechManager.Find(id);
+                if (order != null)
+                {
+                    group.alpha = 1f;
+                    int pos = TechManager.QueuePosition(id) + 1;
+                    return (true, order.Active ? $"Researching now (#{pos}) — abandon" : $"Queued (#{pos}) — remove");
+                }
+                bool can = TechManager.CanQueue(t, out string reason);
+                group.alpha = can ? 1f : 0.45f;
+                return (can, can ? $"Queue ({t.cost} RP · {t.CapacityCost} capacity)" : $"Locked — {reason}");
+            }
+        });
     }
 
     // The empire-wide Tech Level: the hybrid progression track that gates the big milestones
@@ -252,12 +425,18 @@ public class ResearchWindow : MonoBehaviour
 
         UIFactory.WrapText(card.transform, $"<color=#8FD0FF>Next (Lv {EmpireTech.Level + 1}):</color> {EmpireTech.MilestoneFor(EmpireTech.Level + 1)}", UITheme.SmallSize, UITheme.Text);
 
-        bool can = EmpireTech.CanAdvance;
-        var btn = UIFactory.Button(card.transform,
-            can ? $"Advance to Level {EmpireTech.Level + 1}  ({EmpireTech.NextCost} RP)"
-                : $"Advance to Level {EmpireTech.Level + 1} — need {EmpireTech.NextCost} RP (have {ResearchManager.ResearchPoints})",
-            () => { EmpireTech.Advance(); }, 30);
-        btn.interactable = can;
+        var btn = UIFactory.Button(card.transform, "", () => { EmpireTech.Advance(); }, 30);
+        dynamics.Add(new DynamicButton
+        {
+            button = btn, label = btn.GetComponentInChildren<TMP_Text>(),
+            evaluate = () =>
+            {
+                bool can = EmpireTech.CanAdvance;
+                return (can, can
+                    ? $"Advance to Level {EmpireTech.Level + 1}  ({EmpireTech.NextCost} RP)"
+                    : $"Advance to Level {EmpireTech.Level + 1} — need {EmpireTech.NextCost} RP (have {ResearchManager.ResearchPoints})");
+            }
+        });
     }
 
     void BuildCard(OreInfo info)
@@ -294,12 +473,17 @@ public class ResearchWindow : MonoBehaviour
         }
         else
         {
-            bool can = ResearchManager.CanResearch(info.type);
-            var btn = UIFactory.Button(card.transform, can ? $"Research ({info.researchCost} pts)" : $"Need {info.researchCost} pts",
-                () => ResearchManager.Research(info.type), 28);
-            btn.interactable = can;
+            var ore = info.type;
+            var btn = UIFactory.Button(card.transform, "", () => ResearchManager.Research(ore), 28);
+            dynamics.Add(new DynamicButton
+            {
+                button = btn, label = btn.GetComponentInChildren<TMP_Text>(),
+                evaluate = () =>
+                {
+                    bool can = ResearchManager.CanResearch(ore);
+                    return (can, can ? $"Research ({info.researchCost} pts)" : $"Need {info.researchCost} pts");
+                }
+            });
         }
     }
-
-    void OnDestroy() { ResearchManager.OnChanged -= Refresh; EmpireTech.OnChanged -= Refresh; TechManager.OnChanged -= Refresh; }
 }

@@ -9,6 +9,7 @@ using UnityEngine;
 public static class UnitIconRenderer
 {
     static readonly Dictionary<UnitType, Texture2D> cache = new Dictionary<UnitType, Texture2D>();
+    static readonly Dictionary<UnitType, Sprite> spriteCache = new Dictionary<UnitType, Sprite>();
 
     public static Texture2D Get(UnitType t)
     {
@@ -17,6 +18,17 @@ public static class UnitIconRenderer
         tex = Build(info.iconShape, info.iconColor);
         cache[t] = tex;
         return tex;
+    }
+
+    // The same token as a UI sprite, cached so the build menus can show an icon per row without
+    // allocating a fresh Sprite every time a list is rebuilt.
+    public static Sprite Sprite(UnitType t)
+    {
+        if (spriteCache.TryGetValue(t, out var s)) return s;
+        var tex = Get(t);
+        s = UnityEngine.Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f));
+        spriteCache[t] = s;
+        return s;
     }
 
     static Texture2D Build(int shape, Color c)

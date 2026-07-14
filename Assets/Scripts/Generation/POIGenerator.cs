@@ -87,7 +87,11 @@ public static class POIGenerator
                     description = "A concentration far above normal background levels.",
                     relatedOre = tile.ore,
                     explored = true,
-                    researchDuration = 10f + oi.tier * 4f,
+                    // Confirming an ore seam scales with how exotic the ore is: common metal is a quick
+                    // assay, a tier-5 exotic is a serious piece of analysis.
+                    researchDuration = (10f + oi.tier * 7f) * Random.Range(0.85f, 1.2f),
+                    researchPointCost = 10 + oi.tier * 12,
+                    researchReward = 15 + oi.tier * 10,
                     reportText = $"Survey confirmed a rich, workable {oi.displayName} deposit. {oi.uses}"
                 });
             }
@@ -117,12 +121,22 @@ public static class POIGenerator
             for (int i = 0; i < ruins; i++)
             {
                 if (!TryFindLand(body, out float u, out float v)) break;
+                // Ruins are the single most valuable thing you can find in the field: a long, expensive
+                // excavation that can recover a precursor schematic — the only key to the Ancients tree.
+                bool major = Random.value < 0.35f;
                 pois.Add(new PointOfInterest
                 {
                     type = POIType.AncientRuins, u = u, v = v, kind = "Ruins",
                     title = $"Ruins of {AncientNames[Random.Range(0, AncientNames.Length)]}",
-                    description = "Weathered structures of a civilization long gone. Study may recover lost knowledge.",
-                    explored = true
+                    description = "Weathered structures of a civilization long gone. A full excavation may recover lost knowledge — or a precursor schematic.",
+                    explored = false,
+                    researchDuration = (major ? 55f : 30f) * Random.Range(0.85f, 1.25f),
+                    researchPointCost = major ? 90 : 45,
+                    researchReward = major ? 140 : 70,
+                    yieldsSchematic = major,
+                    reportText = major
+                        ? "The excavation reached an intact vault. Among the wreckage: a precursor schematic, still readable after all this time."
+                        : "The dig recovered fragments of tooling and inscription. Enough to learn from, not enough to rebuild."
                 });
             }
         }
@@ -142,7 +156,11 @@ public static class POIGenerator
                 title = "Unknown Anomaly", explored = false,
                 revealTitle = m.title, revealText = m.blurb,
                 reportText = m.report,
+                // An anomaly's cost and payoff track how long it takes to crack: the strange ones that
+                // take an age to understand are the ones worth understanding.
                 researchDuration = m.dur * Random.Range(0.8f, 1.3f),
+                researchPointCost = Mathf.RoundToInt(m.dur * 2.2f),
+                researchReward = Mathf.RoundToInt(m.dur * 4f) + 20,
                 relatedOre = m.ore
             });
         }

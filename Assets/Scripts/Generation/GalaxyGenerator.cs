@@ -141,6 +141,7 @@ public static class GalaxyGenerator
         planet.owner = FactionManager.Player;
         planet.birthrightClaim = true;
         planet.shipyardLevel = 1;          // the capital always has a working (level-1) shipyard
+        planet.researchCenterLevel = 1;    // ...and its founding laboratory, so research can start at all
         planet.explorationProgress = 1f;   // home world is fully known from the start
 
         // Extra starting resources by difficulty.

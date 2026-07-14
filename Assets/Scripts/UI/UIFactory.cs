@@ -185,17 +185,26 @@ public static class UIFactory
         var img = go.AddComponent<Image>();
         img.color = UITheme.ButtonBg;
         var btn = go.AddComponent<UnityEngine.UI.Button>();
+        // A button sits at its normal colour and only lights up while it is actually being pressed.
+        // Hover and post-click selection deliberately do NOT tint: windows rebuild their contents as
+        // the economy ticks, and a hover/selected tint restarts its fade on every rebuild, which reads
+        // as a blue strobe rather than as feedback.
         var colors = btn.colors;
         colors.normalColor = UITheme.ButtonBg;
-        colors.highlightedColor = UITheme.ButtonHover;
+        colors.highlightedColor = UITheme.ButtonBg;
         colors.pressedColor = UITheme.ButtonActive;
         colors.selectedColor = UITheme.ButtonBg;
         colors.disabledColor = new Color(0.1f, 0.12f, 0.15f, 0.6f);
+        colors.fadeDuration = 0.06f;
         btn.colors = colors;
+        // No keyboard/gamepad navigation: nothing can leave a button sitting in the selected state.
+        btn.navigation = new Navigation { mode = Navigation.Mode.None };
 
         var t = Text(go.transform, label, UITheme.BodySize, UITheme.Text, TextAlignmentOptions.Center);
         Stretch(t.rectTransform);
         btn.onClick.AddListener(() => SimpleAudio.Instance?.PlayClick());
+        // Drop focus after a click so the EventSystem can't hold this button highlighted.
+        btn.onClick.AddListener(() => { if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null); });
         if (onClick != null) btn.onClick.AddListener(() => onClick());
         go.AddComponent<ButtonHoverSound>();   // soft hover cue
         AddLayout(go, height);

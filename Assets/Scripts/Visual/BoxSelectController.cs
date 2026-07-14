@@ -17,6 +17,7 @@ public class BoxSelectController : MonoBehaviour
     RectTransform box;
     Vector2 startScreen;
     bool down, dragging;
+    bool startedOnCollider;   // the press began on a token/body, so a plain click belongs to that object
 
     public static void Create(Transform canvas)
     {
@@ -61,9 +62,12 @@ public class BoxSelectController : MonoBehaviour
         if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
         if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;
 
-        // If the click starts on a collider (token/body), let that object handle it.
+        // Track the press wherever it starts — including on a token or a planet. A drag is unambiguously
+        // a box-select, and requiring it to begin on empty space made the box impossible to start in a
+        // busy system, where most of the screen is covered by a body or its collider. A plain CLICK that
+        // began on a collider is still left to that object's own handler (see OnUp).
         var ray = cam.ScreenPointToRay(Input.mousePosition);
-        if (Physics.Raycast(ray, out _, 5000f)) return;
+        startedOnCollider = Physics.Raycast(ray, out _, 5000f);
 
         down = true; dragging = false; startScreen = Input.mousePosition;
     }
@@ -86,11 +90,11 @@ public class BoxSelectController : MonoBehaviour
             SelectInBox(startScreen, Input.mousePosition);
             box.gameObject.SetActive(false);
         }
-        else if (UnitSelection.Selected.Count > 0)
+        else if (!startedOnCollider && UnitSelection.Selected.Count > 0)
         {
             UnitSelection.Clear();   // plain click on empty space -> deselect
         }
-        down = false; dragging = false;
+        down = false; dragging = false; startedOnCollider = false;
     }
 
     void UpdateBox(Vector2 a, Vector2 b)

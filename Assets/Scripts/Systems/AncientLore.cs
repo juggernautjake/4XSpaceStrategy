@@ -11,7 +11,19 @@ public static class AncientLore
 
     static readonly HashSet<int> countedBodies = new HashSet<int>();
 
-    // Called when a world's survey completes; awards any ancient schematics it holds (once per world).
+    // Recovering a schematic. This now happens by EXCAVATING ruins (a paid, timed research project on
+    // the site — see ResearchTaskManager), not merely by flying past and surveying the world. Finding
+    // ruins tells you they're there; digging them up is what gets you the precursor technology.
+    public static void Recover(int count)
+    {
+        if (count <= 0) return;
+        SchematicsFound += count;
+        TechManager.NotifyChanged();   // refresh the Ancients gates in the research UI
+        OnChanged?.Invoke();
+    }
+
+    // Called when a world's survey completes: it REVEALS the ruins and tells you what they might hold,
+    // but hands over nothing. The schematics are in the ground until someone digs them out.
     public static void SurveyBody(CelestialBody b)
     {
         if (b == null || b.pointsOfInterest == null) return;
@@ -19,15 +31,14 @@ public static class AncientLore
         countedBodies.Add(b.id);
 
         int found = 0;
-        foreach (var poi in b.pointsOfInterest) if (poi.type == POIType.AncientRuins) found++;
+        foreach (var poi in b.pointsOfInterest) if (poi.type == POIType.AncientRuins && !poi.explored) found++;
         if (found <= 0) return;
 
-        SchematicsFound += found;
         SimpleAudio.Instance?.PlayNotify(NotifKind.Discovery);
-        NotificationManager.Instance?.Push($"Ancient schematics recovered on {b.name}",
-            $"You uncovered {found} precursor schematic(s) in the ruins. Total recovered: {SchematicsFound}. " +
-            "New secrets are within reach in the Ancients research branch.", null, NotifKind.Discovery);
-        TechManager.NotifyChanged();   // refresh research-window gates
+        NotificationManager.Instance?.Push($"Precursor ruins found on {b.name}",
+            $"The survey located {found} set(s) of ancient ruins. Excavating them on the surface map is slow and costs research points — " +
+            "but a major dig is the only way to recover a precursor schematic and open the Ancients research branch.",
+            null, NotifKind.Discovery);
         OnChanged?.Invoke();
     }
 

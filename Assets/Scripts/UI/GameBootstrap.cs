@@ -18,6 +18,8 @@ public static class GameBootstrap
         ResearchTaskManager.Create();
         UnitManager.Create();               // before the token renderer subscribes to it
         ColonyManager.Create();             // colony economy, growth, terraforming, construction
+        TerraformManager.Create();          // planetary-engineering projects that raise world ceilings
+        ControlGroupInput.Create();         // Ctrl+1..9 to bind fleets, 1..9 to recall them
         FleetMovementController.Create();
         TargetIndicator.Create();           // pulsing lock-on ring for right-click sends
         UnitTokenRenderer.Create();
@@ -43,6 +45,9 @@ public static class GameBootstrap
         UnitInfoPanel.Create(canvas.transform);
         FleetWindow.Create(canvas.transform);
         ShipyardWindow.Create(canvas.transform);
+        TerraformWindow.Create(canvas.transform);
+        InspectorWindow.Create(canvas.transform);   // the tabbed panel for whatever you click on
+        PlanetViewWindow.Create(canvas.transform);  // surface grid: info / build / survey overlays
         BodyUnitsPanel.Create(canvas.transform);
         AssociatedObjectsWindow.Create(canvas.transform);
         ColonyWindow.Create(canvas.transform);

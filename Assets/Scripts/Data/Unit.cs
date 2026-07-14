@@ -64,6 +64,12 @@ public class Unit
     // research ship or a world with a research centre to have them researched).
     public List<int> samples = new List<int>();
 
+    // Survey pass bookkeeping: which world this ship is currently mapping and how far along that world
+    // already was when this pass began. A pass ends once the ship has mapped its class's surveyDepth
+    // (see UnitInfo.surveyDepth) — a weak sensor suite needs several passes to finish a world.
+    [System.NonSerialized] public CelestialBody surveyPassBody;
+    [System.NonSerialized] public float surveyPassStart;
+
     static readonly float[] RankXp = { 0f, 60f, 180f, 400f, 800f };
 
     public UnitInfo Info => UnitDatabase.Get(type);
