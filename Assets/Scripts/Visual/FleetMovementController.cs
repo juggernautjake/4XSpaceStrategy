@@ -72,7 +72,7 @@ public class FleetMovementController : MonoBehaviour
 
     void Update()
     {
-        if (!targeting) { HandleRightClickMove(); HandleDeselect(); return; }
+        if (!targeting) { PassivePreview(); HandleRightClickMove(); HandleDeselect(); return; }
         if (cam == null) cam = Camera.main;
         if (cam == null || fleet == null || fleet.Count == 0) { Disarm(); return; }
 
@@ -127,6 +127,77 @@ public class FleetMovementController : MonoBehaviour
             UnitManager.Instance?.SendUnits(fleet, hovered);
             Disarm();
         }
+    }
+
+    // Passive path preview: whenever movable ships are selected (and we're not already armed via the
+    // Send button), draw the dashed trajectory from the fleet to whatever the cursor is over and show
+    // the travel time — NO key required. Holding Shift additionally previews the predicted intercept
+    // point. To actually send, right-click and confirm.
+    void PassivePreview()
+    {
+        var sel = SelectableFleet();
+        if (sel.Count == 0) { line.enabled = false; marker.SetActive(false); return; }
+        if (cam == null) cam = Camera.main;
+        if (cam == null) { line.enabled = false; marker.SetActive(false); return; }
+        if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+        { line.enabled = false; marker.SetActive(false); return; }
+
+        // Figure out what's under the cursor.
+        CelestialBody hovered = null;
+        bool overToken = false;
+        var ray = cam.ScreenPointToRay(Input.mousePosition);
+        if (Physics.Raycast(ray, out RaycastHit hit, 5000f))
+        {
+            if (hit.collider.GetComponent<UnitToken>() != null) overToken = true;
+            var pc = hit.collider.GetComponent<PlanetClick>();
+            if (pc != null) hovered = pc.data;
+        }
+        // Don't fight the ship-token hover tooltip.
+        if (overToken) { line.enabled = false; marker.SetActive(false); return; }
+
+        Vector3 origin = FleetPosOf(sel);
+        Vector3 targetNow = hovered != null ? BodyPos(hovered) : RaycastPlane();
+
+        int slow = int.MaxValue;
+        foreach (var u in sel) slow = Mathf.Min(slow, Mathf.Max(1, u.Speed));
+        float dur = Mathf.Clamp(Vector3.Distance(origin, targetNow) / (slow * SpeedScale), 3f, 120f);
+
+        bool predict = Input.GetKey(PredictKey);
+        Vector3 endPoint = targetNow;
+        if (predict && hovered != null)
+        {
+            var oc = hovered.visualObject != null ? hovered.visualObject.GetComponent<OrbitController>() : null;
+            if (oc != null)
+            {
+                float t = dur;
+                for (int i = 0; i < 3; i++)
+                {
+                    Vector3 p = oc.PredictWorldPosition(t);
+                    t = Mathf.Clamp(Vector3.Distance(origin, p) / (slow * SpeedScale), 3f, 120f);
+                }
+                endPoint = oc.PredictWorldPosition(t);
+                dur = t;
+            }
+            marker.SetActive(true);
+            marker.transform.position = endPoint;
+        }
+        else marker.SetActive(false);
+
+        line.enabled = true;
+        line.SetPosition(0, origin);
+        line.SetPosition(1, endPoint);
+
+        string dest = hovered != null ? $"<b>{hovered.name}</b>" : "deep space";
+        TooltipManager.Instance.ShowAtCursor(
+            $"Right-click to send {sel.Count} ship(s) to {dest}\nTravel: {dur:F0}s" +
+            (predict ? "\n<color=#4DFF6E>predicted arrival point</color>" : "\n<size=10>hold Shift for predicted intercept</size>"));
+    }
+
+    List<Unit> SelectableFleet()
+    {
+        var g = new List<Unit>();
+        foreach (var u in UnitSelection.Selected) if (u.status != UnitStatus.Traveling) g.Add(u);
+        return g;
     }
 
     // Right-click a body or empty space with ships selected -> confirm sending them there.
@@ -188,13 +259,16 @@ public class FleetMovementController : MonoBehaviour
         return ray.origin + ray.direction * 100f;
     }
 
-    Vector3 FleetPos()
+    Vector3 FleetPos() => FleetPosOf(fleet);
+
+    static Vector3 FleetPosOf(List<Unit> f)
     {
-        var b = fleet[0].location;
+        var lead = f[0];
+        var b = lead.location;
         if (b != null && b.visualObject != null) return b.visualObject.transform.position;
         if (b != null && b.system != null) return b.system.galaxyPosition;
         // mid-transit: use the moving token estimate
-        return Vector3.Lerp(fleet[0].travelFrom, fleet[0].travelTo, fleet[0].TravelProgress);
+        return Vector3.Lerp(lead.travelFrom, lead.travelTo, lead.TravelProgress);
     }
 
     static Vector3 BodyPos(CelestialBody b)

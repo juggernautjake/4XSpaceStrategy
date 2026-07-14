@@ -157,8 +157,10 @@ public class PlanetUI : MonoBehaviour
 
         if (!body.Surveyed)
         {
-            sb.AppendLine("\n<color=#FFBF4D>Unexplored.</color> Send an exploration ship to survey this world and reveal its habitability, resources and secrets.");
-            sb.AppendLine($"Survey: {body.explorationProgress * 100f:F0}%");
+            sb.AppendLine("\n<color=#FFBF4D><b>Unexplored world</b></color>");
+            sb.AppendLine("<color=#9FB4C8>Known:</color> name, type, owner, orbit and host star.");
+            sb.AppendLine("<color=#FFBF4D>Send a ship to survey it to reveal its habitability, resources, ore deposits and any points of interest.</color>");
+            sb.AppendLine($"Survey progress: {body.explorationProgress * 100f:F0}%");
         }
         else
         {

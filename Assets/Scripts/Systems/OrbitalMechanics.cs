@@ -44,8 +44,9 @@ public static class OrbitalMechanics
     public static float PlanetAngularSpeed(StarData star, float radius)
         => AngularSpeedDeg(star != null && star.mass > 0f ? star.mass : StarMass(star != null ? star.type : StarType.G), radius);
 
+    // Moons orbit 15% slower on average than a strict Kepler default (a calmer, more readable sky).
     public static float MoonAngularSpeed(CelestialBody planet, float radius)
-        => AngularSpeedDeg(Mathf.Max(0.2f, BodyMass(planet)), radius);
+        => 0.85f * AngularSpeedDeg(Mathf.Max(0.2f, BodyMass(planet)), radius);
 
     // Flavour value for the info panel (relative units).
     public static float OrbitalVelocity(float primaryMass, float radius)

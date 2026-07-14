@@ -114,6 +114,7 @@ public class SystemVisualizer : MonoBehaviour
             visual.name = body.name;
             body.visualObject = visual;
             visual.transform.localScale = Vector3.one * Mathf.Max(0.6f, body.surfaceSize * 0.08f);
+            EnsureClickCollider(visual, 1.5f);   // generous, easy-to-hit selection target
 
             var click = visual.GetComponent<PlanetClick>();
             if (click != null) click.data = body;
@@ -132,6 +133,7 @@ public class SystemVisualizer : MonoBehaviour
                 moonVisual.name = moon.name;
                 moon.visualObject = moonVisual;
                 moonVisual.transform.localScale = Vector3.one * Mathf.Max(0.35f, moon.surfaceSize * 0.05f);
+                EnsureClickCollider(moonVisual, 1.1f);
 
                 var moonClick = moonVisual.GetComponent<PlanetClick>();
                 if (moonClick != null) moonClick.data = moon;
@@ -162,11 +164,14 @@ public class SystemVisualizer : MonoBehaviour
         var rend = star.GetComponent<Renderer>();
         if (rend != null)
         {
+            // Glow strength tracks the star's actual brightness so a dim red dwarf and a blazing
+            // blue giant read very differently.
+            float emK = Mathf.Clamp(1.0f + Mathf.Sqrt(Mathf.Max(0f, s.luminosity)) * 0.15f, 1.0f, 3.2f);
             rend.material.color = s.color;
             rend.material.EnableKeyword("_EMISSION");
-            rend.material.SetColor("_EmissionColor", s.color * 1.5f);
+            rend.material.SetColor("_EmissionColor", s.color * emK);
         }
-        if (star.GetComponent<Collider>() == null) star.AddComponent<SphereCollider>();
+        EnsureClickCollider(star, 1.8f);
 
         var si = star.GetComponent<StarInteraction>() ?? star.AddComponent<StarInteraction>();
         si.star = combined;
@@ -184,39 +189,112 @@ public class SystemVisualizer : MonoBehaviour
 
     void CreateBlackHole(Transform parent, StarData combined, StarSystemData sys)
     {
-        var bh = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        bh.name = "BlackHole";
-        bh.transform.SetParent(parent, false);
-        bh.transform.localPosition = Vector3.zero;
-        bh.transform.localScale = Vector3.one * combined.visualScale;
-        var rend = bh.GetComponent<Renderer>();
-        if (rend != null) rend.material.color = new Color(0.02f, 0.02f, 0.03f);
-        if (bh.GetComponent<Collider>() == null) bh.AddComponent<SphereCollider>();
+        float scale = Mathf.Max(1f, combined.visualScale);
 
-        var si = bh.GetComponent<StarInteraction>() ?? bh.AddComponent<StarInteraction>();
+        var root = new GameObject("BlackHole");
+        root.transform.SetParent(parent, false);
+        root.transform.localPosition = Vector3.zero;
+
+        // Event horizon: a truly black, UNLIT sphere so it never reads as a grey "ball".
+        var horizon = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        horizon.name = "EventHorizon";
+        horizon.transform.SetParent(root.transform, false);
+        horizon.transform.localScale = Vector3.one * scale;
+        var hr = horizon.GetComponent<Renderer>();
+        if (hr != null)
+        {
+            hr.material = UnlitMaterial(new Color(0.01f, 0.01f, 0.02f, 1f));
+            hr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
+        EnsureClickCollider(horizon, Mathf.Max(1.8f, scale * 0.6f));
+
+        var si = horizon.AddComponent<StarInteraction>();
         si.star = combined;
         si.system = sys;
 
-        var ringGo = new GameObject("Accretion");
-        ringGo.transform.SetParent(bh.transform, false);
-        var lr = ringGo.AddComponent<LineRenderer>();
-        lr.useWorldSpace = false; lr.loop = true; lr.positionCount = 96;
-        lr.material = new Material(Shader.Find("Sprites/Default"));
-        lr.startColor = lr.endColor = new Color(1f, 0.5f, 0.15f, 0.9f);
-        lr.startWidth = lr.endWidth = 0.25f;
-        lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        for (int i = 0; i < 96; i++)
+        // Bright photon ring hugging the horizon (the glowing rim of a black hole).
+        MakeRing(root.transform, "PhotonRing", scale * 0.62f, new Color(0.75f, 0.86f, 1f, 0.95f), scale * 0.06f, 128);
+
+        // Accretion disc: concentric rings, hot blue-white inside fading to orange-red outside, on a
+        // tilted holder that slowly rotates so the disc feels alive.
+        var disc = new GameObject("AccretionDisc");
+        disc.transform.SetParent(root.transform, false);
+        disc.transform.localRotation = Quaternion.Euler(74f, 0f, 0f);   // tilt so it reads as a disc, not a flat ring
+        const int rings = 7;
+        for (int i = 0; i < rings; i++)
         {
-            float a = i * Mathf.PI * 2f / 96;
-            lr.SetPosition(i, new Vector3(Mathf.Cos(a) * 1.7f, 0f, Mathf.Sin(a) * 1.7f));
+            float t = i / (float)(rings - 1);
+            float r = Mathf.Lerp(scale * 0.72f, scale * 1.85f, t);
+            Color c = Color.Lerp(new Color(1f, 0.97f, 0.9f), new Color(1f, 0.32f, 0.08f), t);
+            c.a = Mathf.Lerp(0.95f, 0.35f, t);
+            float w = Mathf.Lerp(scale * 0.10f, scale * 0.26f, t);
+            MakeRing(disc.transform, "Acc" + i, r, c, w, 96);
         }
+        disc.AddComponent<SelfSpin>().speed = 35f;
+
+        // A faint reddish halo glow behind everything for depth.
+        MakeRing(root.transform, "Halo", scale * 2.15f, new Color(1f, 0.45f, 0.2f, 0.18f), scale * 0.5f, 96);
 
         var lightGo = new GameObject("BHLight");
-        lightGo.transform.SetParent(bh.transform, false);
+        lightGo.transform.SetParent(root.transform, false);
         var light = lightGo.AddComponent<Light>();
         light.type = LightType.Point;
         light.color = new Color(1f, 0.6f, 0.3f);
         light.intensity = combined.lightIntensity;
         light.range = 160f;
     }
+
+    // A flat, loopable ring drawn in the local XZ plane. Used for the accretion disc / photon ring.
+    static LineRenderer MakeRing(Transform parent, string name, float radius, Color color, float width, int seg)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        var lr = go.AddComponent<LineRenderer>();
+        lr.useWorldSpace = false; lr.loop = true; lr.positionCount = seg;
+        lr.material = new Material(Shader.Find("Sprites/Default"));
+        lr.startColor = lr.endColor = color;
+        lr.startWidth = lr.endWidth = Mathf.Max(0.03f, width);
+        lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        lr.receiveShadows = false;
+        for (int i = 0; i < seg; i++)
+        {
+            float a = i * Mathf.PI * 2f / seg;
+            lr.SetPosition(i, new Vector3(Mathf.Cos(a) * radius, 0f, Mathf.Sin(a) * radius));
+        }
+        return lr;
+    }
+
+    // An unlit material that renders a solid colour regardless of scene lighting (URP-aware, with
+    // fallbacks) — so the event horizon stays black.
+    static Material UnlitMaterial(Color c)
+    {
+        var sh = Shader.Find("Universal Render Pipeline/Unlit");
+        if (sh == null) sh = Shader.Find("Unlit/Color");
+        if (sh == null) sh = Shader.Find("Sprites/Default");
+        var m = new Material(sh);
+        if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
+        if (m.HasProperty("_Color")) m.SetColor("_Color", c);
+        m.color = c;
+        return m;
+    }
+
+    // Ensures a body has exactly one sphere collider sized for an easy click. The collider's WORLD
+    // radius is at least minWorldRadius, so even tiny moons are comfortable to select.
+    static void EnsureClickCollider(GameObject go, float minWorldRadius)
+    {
+        var mesh = go.GetComponent<MeshCollider>();
+        if (mesh != null) Destroy(mesh);
+        var sc = go.GetComponent<SphereCollider>();
+        if (sc == null) sc = go.AddComponent<SphereCollider>();
+        float sl = Mathf.Max(0.0001f, go.transform.lossyScale.x);
+        sc.center = Vector3.zero;
+        sc.radius = Mathf.Max(0.5f, minWorldRadius / sl);
+    }
+}
+
+// Rotates its transform about local Y — used to slowly spin a black hole's accretion disc.
+public class SelfSpin : MonoBehaviour
+{
+    public float speed = 30f;
+    void Update() { transform.Rotate(0f, speed * Time.deltaTime, 0f, Space.Self); }
 }

@@ -56,7 +56,7 @@ public class SimpleAudio : MonoBehaviour
         ambGO.transform.SetParent(transform, false);
         ambient = ambGO.AddComponent<AudioSource>(); ambient.playOnAwake = false;
         ambientLP = ambGO.AddComponent<AudioLowPassFilter>(); ambientLP.cutoffFrequency = 2200f; // muffled/distant
-        var echo = ambGO.AddComponent<AudioEchoFilter>(); echo.delay = 220f; echo.decayRatio = 0.5f; echo.wetMix = 0.6f; echo.dryMix = 0.85f; // more echo-y, longer tail
+        var echo = ambGO.AddComponent<AudioEchoFilter>(); echo.delay = 275f; echo.decayRatio = 0.58f; echo.wetMix = 0.75f; echo.dryMix = 0.8f; // deep, cavernous echo
         var reverb = ambGO.AddComponent<AudioReverbFilter>(); reverb.reverbPreset = AudioReverbPreset.Hangar;
 
         cDing = Chord(new[] { 880f, 1320f, 1760f }, 0.6f, 5f, 0.8f);
@@ -222,16 +222,25 @@ public class SimpleAudio : MonoBehaviour
             for (int i = 0; i < gap; i++) d.Add(0f);
         }
 
-        // Smooth overall fade across the last ~45% so the message trails off instead of stopping hard.
         int total = d.Count;
+
+        // Smooth fade-IN across the first ~20% so the message drifts in rather than snapping on.
+        int fadeIn = (int)(total * 0.20f);
+        for (int i = 0; i < fadeIn; i++)
+        {
+            float k = i / (float)Mathf.Max(1, fadeIn);
+            d[i] *= k * k;   // eased fade-in
+        }
+
+        // Smooth fade-OUT across the last ~45% so the message trails off instead of stopping hard.
         int fadeStart = (int)(total * 0.55f);
         for (int i = fadeStart; i < total; i++)
         {
             float k = 1f - (i - fadeStart) / (float)Mathf.Max(1, total - fadeStart);
             d[i] *= k * k;   // eased fade-out
         }
-        // Silent tail so the echo/reverb wet signal rings out naturally past the dry sound.
-        int tail = (int)(sr * 0.5f);
+        // Long silent tail so the echo/reverb wet signal rings out naturally past the dry sound.
+        int tail = (int)(sr * 0.8f);
         for (int i = 0; i < tail; i++) d.Add(0f);
 
         var arr = d.ToArray();

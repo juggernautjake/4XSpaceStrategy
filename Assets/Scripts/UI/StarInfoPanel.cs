@@ -47,11 +47,11 @@ public class StarInfoPanel : MonoBehaviour
     {
         if (star == null) return;
 
-        string title = star.isBlackHole ? "Black Hole"
+        string kind = star.isBlackHole ? "Black Hole"
             : star.starCount >= 3 ? "Ternary System"
             : star.starCount == 2 ? "Binary System"
             : $"{star.type}-type Star";
-        titleText.text = title;
+        titleText.text = string.IsNullOrEmpty(star.name) ? kind : $"{star.name} — {kind}";
 
         string hz = star.hasHabitableZone
             ? $"{star.hzInner:F1} - {star.hzOuter:F1} units"
