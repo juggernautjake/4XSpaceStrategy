@@ -23,7 +23,7 @@ public static class GameBootstrap
         FleetMovementController.Create();
         TargetIndicator.Create();           // pulsing lock-on ring for right-click sends
         UnitTokenRenderer.Create();
-        StationModelRenderer.Create();      // 3D meshes for deployed stations (falls back to tokens)
+        UnitModelRenderer.Create();         // 3D meshes for stations + colony ships (falls back to tokens)
         SpaceBackground.Create();
         PostFxController.Create();
 
