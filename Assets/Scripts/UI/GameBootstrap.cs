@@ -19,6 +19,7 @@ public static class GameBootstrap
         UnitManager.Create();               // before the token renderer subscribes to it
         ColonyManager.Create();             // colony economy, growth, terraforming, construction
         FleetMovementController.Create();
+        TargetIndicator.Create();           // pulsing lock-on ring for right-click sends
         UnitTokenRenderer.Create();
         SpaceBackground.Create();
         PostFxController.Create();
@@ -46,6 +47,7 @@ public static class GameBootstrap
         ColonyWindow.Create(canvas.transform);
         SystemSummaryWindow.Create(canvas.transform);
         GalaxyLOD.Create(canvas.transform);
+        BoxSelectController.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);
         GenerationMenu.Create(canvas.transform);
         EscapeMenu.Create(canvas.transform);

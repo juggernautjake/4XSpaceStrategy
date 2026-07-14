@@ -72,7 +72,7 @@ public class FleetMovementController : MonoBehaviour
 
     void Update()
     {
-        if (!targeting) { PassivePreview(); HandleRightClickMove(); HandleDeselect(); return; }
+        if (!targeting) { PassivePreview(); HandleRightClickMove(); return; }   // deselect handled by BoxSelectController
         if (cam == null) cam = Camera.main;
         if (cam == null || fleet == null || fleet.Count == 0) { Disarm(); return; }
 
@@ -215,6 +215,8 @@ public class FleetMovementController : MonoBehaviour
 
         if (body != null)
         {
+            // Lock the pulsing indicator onto the body — it travels with it as it orbits.
+            TargetIndicator.Instance?.ShowAtBody(body);
             var options = new List<ContextMenu.Option>
             {
                 new ContextMenu.Option($"{verb}: move to {body.name}", () => mgr?.IssueMove(group, body, queue))
@@ -225,16 +227,17 @@ public class FleetMovementController : MonoBehaviour
             if (canSurvey) options.Add(new ContextMenu.Option($"{verb}: survey {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Survey, body, queue)));
             if (canResearch) options.Add(new ContextMenu.Option($"{verb}: research {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Research, body, queue)));
             if (canColonize) options.Add(new ContextMenu.Option($"{verb}: colonize {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Colonize, body, queue)));
-            options.Add(new ContextMenu.Option("Cancel", null));
+            options.Add(new ContextMenu.Option("Cancel", () => TargetIndicator.Instance?.Hide()));
             ContextMenu.Instance?.Show(mp, options);
         }
         else
         {
             Vector3 pt = RaycastPlane();
+            TargetIndicator.Instance?.ShowAtPoint(pt);
             ContextMenu.Instance?.Show(mp, new List<ContextMenu.Option>
             {
                 new ContextMenu.Option($"{verb}: move here (deep space)", () => mgr?.IssueMovePoint(group, pt, queue)),
-                new ContextMenu.Option("Cancel", null)
+                new ContextMenu.Option("Cancel", () => TargetIndicator.Instance?.Hide())
             });
         }
     }
