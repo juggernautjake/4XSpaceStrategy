@@ -68,25 +68,71 @@ public class ShipyardWindow : MonoBehaviour
 
         for (int i = list.childCount - 1; i >= 0; i--) Destroy(list.GetChild(i).gameObject);
 
-        var um = UnitManager.Instance;
-        foreach (var info in UnitDatabase.All)
+        // Grouped, ordered sections so the (large) catalogue stays navigable. Predicates are mutually
+        // exclusive and together cover every UnitType.
+        var cats = new (string name, System.Func<UnitInfo, bool> pred)[]
         {
-            var card = UIFactory.Panel(list, "Card", UITheme.RowBg);
-            var vlg = card.gameObject.AddComponent<VerticalLayoutGroup>();
-            vlg.padding = new RectOffset(8, 8, 6, 6); vlg.spacing = 2; vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
-            var fit = card.gameObject.AddComponent<ContentSizeFitter>(); fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            ("Starter Hulls", i => i.type == UnitType.Scout || i.type == UnitType.ResearchShip || i.type == UnitType.Fighter || i.type == UnitType.ColonyShip),
+            ("Upgraded Hulls (Mk II / III)", i => i.type == UnitType.ScoutII || i.type == UnitType.ResearchShipII || i.type == UnitType.FighterII || i.type == UnitType.ScoutIII || i.type == UnitType.FighterIII || i.type == UnitType.ResearchShipIII),
+            ("Civilian & Logistics", i => i.isWorker),
+            ("Warships", i => i.type == UnitType.Frigate || i.type == UnitType.Cruiser || i.type == UnitType.Carrier || i.type == UnitType.Dreadnought),
+            ("Science, Exploration & Terraforming", i => i.type == UnitType.ScienceVessel || i.type == UnitType.Explorer || i.type == UnitType.Probe || i.type == UnitType.Terraformer),
+            ("Space Stations", i => i.isStation),
+        };
 
-            string tier = info.minShipyardLevel > 1 ? $"  <size=11><color=#C9A94D>[Lv{info.minShipyardLevel} shipyard]</color></size>" : "";
-            UIFactory.WrapText(card.transform, $"<b>{info.name}</b>{tier}  <size=11><color=#9FB4C8>{info.costMetal} metal · {info.costEnergy} energy · {info.buildTime:F0}s</color></size>", UITheme.BodySize, new Color(info.iconColor.r, info.iconColor.g, info.iconColor.b));
-            UIFactory.WrapText(card.transform, $"HP {info.health}  Armor {info.armor}  Speed {info.speed}  Research {info.research}  Attack {info.attack}", UITheme.SmallSize, UITheme.SubText);
-            UIFactory.WrapText(card.transform, info.description, UITheme.SmallSize, UITheme.Text);
-
-            var t = info.type;
-            string why = "no shipyard";
-            bool can = um != null && um.CanBuildShip(t, out why);
-            var btn = UIFactory.Button(card.transform, can ? "Build" : why, () => { UnitManager.Instance?.QueueBuild(t); Refresh(); }, 26);
-            btn.interactable = can;
+        foreach (var cat in cats)
+        {
+            bool headerAdded = false;
+            foreach (var info in UnitDatabase.All)
+            {
+                if (info == null || !cat.pred(info)) continue;
+                if (!headerAdded)
+                {
+                    var h = UIFactory.WrapText(list, $"<b>{cat.name}</b>", UITheme.HeaderSize, UITheme.Accent);
+                    var hle = h.gameObject.GetComponent<LayoutElement>() ?? h.gameObject.AddComponent<LayoutElement>();
+                    hle.minHeight = 24;
+                    headerAdded = true;
+                }
+                BuildCard(info);
+            }
         }
+    }
+
+    void BuildCard(UnitInfo info)
+    {
+        var um = UnitManager.Instance;
+        var card = UIFactory.Panel(list, "Card", UITheme.RowBg);
+        var vlg = card.gameObject.AddComponent<VerticalLayoutGroup>();
+        vlg.padding = new RectOffset(8, 8, 6, 6); vlg.spacing = 2; vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
+        var fit = card.gameObject.AddComponent<ContentSizeFitter>(); fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        string gates = "";
+        if (info.minShipyardLevel > 1) gates += $"  <size=11><color=#C9A94D>[Lv{info.minShipyardLevel} shipyard]</color></size>";
+        if (info.minEmpireLevel > 1) gates += $"  <size=11><color=#8FC1FF>[Empire Lv{info.minEmpireLevel}]</color></size>";
+        UIFactory.WrapText(card.transform, $"<b>{info.name}</b>{gates}  <size=11><color=#9FB4C8>{info.costMetal} metal · {info.costEnergy} energy · {info.buildTime:F0}s</color></size>", UITheme.BodySize, new Color(info.iconColor.r, info.iconColor.g, info.iconColor.b));
+        UIFactory.WrapText(card.transform, $"HP {info.health}  Armor {info.armor}  Speed {info.speed}  Research {info.research}  Attack {info.attack}", UITheme.SmallSize, UITheme.SubText);
+        string fx = EffectSummary(info);
+        if (fx != "") UIFactory.WrapText(card.transform, fx, UITheme.SmallSize, UITheme.Good);
+        UIFactory.WrapText(card.transform, info.description, UITheme.SmallSize, UITheme.Text);
+
+        var t = info.type;
+        string why = "no shipyard";
+        bool can = um != null && um.CanBuildShip(t, out why);
+        var btn = UIFactory.Button(card.transform, can ? (info.isStation ? "Construct" : "Build") : why, () => { UnitManager.Instance?.QueueBuild(t); Refresh(); }, 26);
+        btn.interactable = can;
+    }
+
+    // One-line summary of a hull's passive station/worker effects (blank for plain ships).
+    static string EffectSummary(UnitInfo i)
+    {
+        var parts = new System.Collections.Generic.List<string>();
+        if (i.researchAura > 0f) parts.Add($"+{i.researchAura:0.#} research/s");
+        if (i.supplyBonus > 0f) parts.Add($"+{i.supplyBonus:0.#} metal & energy/s");
+        if (i.mineBonus > 0f) parts.Add($"+{i.mineBonus:0.#} metal/s mining");
+        if (i.terraformAura > 0f) parts.Add($"+{i.terraformAura:0.#}× terraform speed");
+        if (i.relayBoost > 0f) parts.Add($"+{i.relayBoost * 100f:0}% fleet range & speed");
+        if (i.deepSpace) parts.Add("runs on starlight — deploy anywhere");
+        return string.Join("   ", parts);
     }
 
     void Update()

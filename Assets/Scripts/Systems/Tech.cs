@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// The six core research branches. (A seventh, "Ancients", is reserved for schematic-gated secret tech.)
-public enum TechBranch { Foundations, Warfare, Science, Expansion, Exploration, Industry }
+// The research branches. Foundations is the prerequisite spine; the next five are the core paths.
+// Doctrine holds the strategic doctrine paths (War/Science/Exploration/Expansion/Prosperity). Ancients
+// is the secret branch, gated by ancient schematics recovered from precursor ruins.
+public enum TechBranch { Foundations, Warfare, Science, Expansion, Exploration, Industry, Doctrine, Ancients }
 
 // A single node in the tech tree. Researching it spends Research Points and applies its persistent,
 // stacking effects to the empire. Nodes require their prerequisite node(s), a minimum empire Tech
@@ -18,6 +20,7 @@ public class Tech
     public int minEmpireLevel;   // empire Tech Level required
     public string[] prereqs;     // ids that must be researched first
     public OreType reqOre = OreType.None;   // an ore that must be discovered first (None = no requirement)
+    public int reqSchematics = 0;   // ancient schematics that must be recovered first (Ancients branch)
 
     // Persistent empire effects (all optional; summed across every researched node).
     public float researchRate;   // +fractional research rate (0.15 = +15%)
@@ -136,6 +139,69 @@ public static class TechDatabase
             "Atom-precise fabrication makes even capital hulls cheap."); i4.reqOre = OreType.Adamantine;
         _all.Add(i4.With(buildCostCut: 0.15f, buildTimeCut: 0.10f, unlock: "Enables Mk III refits."));
 
+        // ---- Doctrines (strategic paths — commit resources toward a way of playing) ----
+        // Each doctrine is a strong, focused investment. They are deliberately expensive; you can afford
+        // to follow only one or two deeply, shaping your empire toward war, science, exploration,
+        // expansion or prosperity.
+        _all.Add(T("D_WAR", "War Doctrine", TechBranch.Doctrine, 2, 200, 2, new[] { "W2" },
+            "Put the empire on a war footing: militarized shipyards turn out warships far faster.")
+            .With(buildTimeCut: 0.15f, unlock: "War focus. Deepen with Total-War Mobilization."));
+        _all.Add(T("D_WAR2", "Total-War Mobilization", TechBranch.Doctrine, 3, 340, 4, new[] { "D_WAR" },
+            "A war economy: mass-produced fleets, cheaper and quicker to build.")
+            .With(buildTimeCut: 0.15f, buildCostCut: 0.12f));
+
+        _all.Add(T("D_SCI", "Science Doctrine", TechBranch.Doctrine, 2, 200, 2, new[] { "S2" },
+            "Enshrine research above all: your laboratories work markedly faster.")
+            .With(researchRate: 0.30f, unlock: "Science focus. Deepen with Grand Unified Theory."));
+        _all.Add(T("D_SCI2", "Grand Unified Theory", TechBranch.Doctrine, 3, 340, 4, new[] { "D_SCI" },
+            "A civilization organized around discovery — research pours in.")
+            .With(researchRate: 0.45f));
+
+        _all.Add(T("D_EXP", "Exploration Doctrine", TechBranch.Doctrine, 2, 200, 2, new[] { "E2" },
+            "A culture of pathfinders: every ship reaches substantially farther.")
+            .With(rangeMult: 0.30f, unlock: "Exploration focus. Deepen with Boundless Frontier."));
+        _all.Add(T("D_EXP2", "Boundless Frontier", TechBranch.Doctrine, 3, 340, 4, new[] { "D_EXP" },
+            "No horizon is out of reach — fleets range across the galaxy.")
+            .With(rangeMult: 0.50f));
+
+        _all.Add(T("D_TER", "Expansion Doctrine", TechBranch.Doctrine, 2, 200, 2, new[] { "X2" },
+            "Bend every world to habitability: terraforming reaches higher and finishes sooner.")
+            .With(terraCeiling: 12f, terraSpeed: 0.30f, unlock: "Expansion focus. Deepen with Worldshaping."));
+        _all.Add(T("D_TER2", "Worldshaping", TechBranch.Doctrine, 3, 340, 4, new[] { "D_TER" },
+            "Routine planetary engineering makes even dead worlds gardens.")
+            .With(terraCeiling: 15f, terraSpeed: 0.40f));
+
+        _all.Add(T("D_PROS", "Prosperity Doctrine", TechBranch.Doctrine, 2, 200, 2, new[] { "I2" },
+            "A doctrine of peace and plenty: richer yields and cheaper construction.")
+            .With(oreYield: 0.25f, buildCostCut: 0.10f, unlock: "Prosperity focus. Deepen with Post-Scarcity Economy."));
+        _all.Add(T("D_PROS2", "Post-Scarcity Economy", TechBranch.Doctrine, 3, 340, 4, new[] { "D_PROS" },
+            "Automation and abundance: everything you build costs a fraction.")
+            .With(oreYield: 0.30f, buildCostCut: 0.18f));
+
+        // ---- Ancients (secret branch — gated by schematics recovered from precursor ruins) ----
+        // Unlocked in the field by surveying worlds with Ancient Ruins. Xenoarchaeology (S3) opens the
+        // path; each node also demands recovered schematics.
+        var a1 = T("A1", "Precursor Alloys", TechBranch.Ancients, 2, 220, 3, new[] { "S3" },
+            "Reverse-engineered precursor metallurgy — impossibly strong, impossibly cheap.");
+        a1.reqSchematics = 1;
+        _all.Add(a1.With(oreYield: 0.30f, buildCostCut: 0.12f, unlock: "Opens the precursor technology tree."));
+
+        var a2 = T("A2", "Precursor Drives", TechBranch.Ancients, 3, 300, 4, new[] { "A1", "E3" },
+            "Fragments of a faster-than-thought drive — fleets leap across the void.");
+        a2.reqSchematics = 2;
+        _all.Add(a2.With(rangeMult: 0.55f));
+
+        var a3 = T("A3", "Precursor Ecoforming", TechBranch.Ancients, 3, 300, 4, new[] { "A1", "X4" },
+            "Living machines that reshape a whole biosphere in a heartbeat.");
+        a3.reqSchematics = 2;
+        _all.Add(a3.With(terraCeiling: 18f, terraSpeed: 0.50f));
+
+        var a4 = T("A4", "Precursor Ascendancy", TechBranch.Ancients, 3, 480, 6, new[] { "A2", "A3" },
+            "The precursors' final synthesis. Your civilization inherits their mantle — mastery of every art at once.");
+        a4.reqSchematics = 3;
+        _all.Add(a4.With(researchRate: 0.35f, rangeMult: 0.35f, oreYield: 0.20f, terraSpeed: 0.25f,
+            unlock: "The pinnacle of the tech tree — the legacy of the ancients is yours."));
+
         _byId = new Dictionary<string, Tech>();
         foreach (var t in _all) _byId[t.id] = t;
     }
@@ -193,8 +259,12 @@ public static class TechManager
             if (!researched.Contains(p) && !queue.Contains(p)) { reason = "needs " + PrereqNames(t); return false; }
         if (t.reqOre != OreType.None && !ResearchManager.IsDiscovered(t.reqOre))
         { reason = $"discover {OreDatabase.Get(t.reqOre).displayName} first"; return false; }
+        if (t.reqSchematics > 0 && AncientLore.SchematicsFound < t.reqSchematics)
+        { reason = $"recover {t.reqSchematics} ancient schematic(s) — {AncientLore.SchematicsFound}/{t.reqSchematics}"; return false; }
         return true;
     }
+
+    public static void NotifyChanged() => OnChanged?.Invoke();
 
     public static bool Enqueue(string id)
     {
@@ -278,6 +348,8 @@ public static class TechManager
         if (!PrereqsMet(t)) { reason = "needs " + PrereqNames(t); return false; }
         if (t.reqOre != OreType.None && !ResearchManager.IsDiscovered(t.reqOre))
         { reason = $"discover {OreDatabase.Get(t.reqOre).displayName} first"; return false; }
+        if (t.reqSchematics > 0 && AncientLore.SchematicsFound < t.reqSchematics)
+        { reason = $"recover {t.reqSchematics} ancient schematic(s) — {AncientLore.SchematicsFound}/{t.reqSchematics}"; return false; }
         if (ResearchManager.ResearchPoints < t.cost) { reason = $"need {t.cost} RP"; return false; }
         return true;
     }

@@ -163,14 +163,27 @@ public class UnitInfoPanel : MonoBehaviour
         UnitManager.Instance?.IssueAction(new List<Unit> { current }, OrderKind.Terraform, t, QueueMode);
     }
 
+    // One-line summary of a station/worker's passive effects (matches the shipyard card).
+    static string StationEffectText(UnitInfo i)
+    {
+        var parts = new List<string>();
+        if (i.researchAura > 0f) parts.Add($"+{i.researchAura:0.#} research/s");
+        if (i.supplyBonus > 0f) parts.Add($"+{i.supplyBonus:0.#} metal & energy/s");
+        if (i.mineBonus > 0f) parts.Add($"+{i.mineBonus:0.#} metal/s mining");
+        if (i.terraformAura > 0f) parts.Add($"+{i.terraformAura:0.#}× terraform speed at its world");
+        if (i.relayBoost > 0f) parts.Add($"+{i.relayBoost * 100f:0}% fleet range & speed");
+        return string.Join("   ", parts);
+    }
+
     void DoStop() { if (current != null) UnitManager.Instance?.StopAll(current); }
     void TogglePause() { if (current != null) UnitManager.Instance?.SetPaused(current, !current.queuePaused); }
 
     void DoSend()
     {
+        // Include ships/stations parked in open space (deep-space stations), not just those at a body.
         var fleet = new List<Unit>();
-        foreach (var u in UnitSelection.Selected) if (u.location != null) fleet.Add(u);
-        if (fleet.Count == 0 && current != null && current.location != null) fleet.Add(current);
+        foreach (var u in UnitSelection.Selected) if (u.location != null || u.inSpace) fleet.Add(u);
+        if (fleet.Count == 0 && current != null && (current.location != null || current.inSpace)) fleet.Add(current);
         FleetMovementController.Instance?.Arm(fleet);
     }
 
@@ -227,12 +240,26 @@ public class UnitInfoPanel : MonoBehaviour
 
         float er = UnitManager.Instance != null ? UnitManager.Instance.EffectiveRange(u) : u.Info.range;
         string rangeStr = (u.Info.range <= 0 || er >= float.MaxValue) ? "unlimited" : $"{er:F0}";
+
+        // Station / worker readout: role, whether it's deployed and working, and its live effects.
+        string structLine = "";
+        if (u.Info.isStation || u.Info.isWorker)
+        {
+            bool deployed = u.status != UnitStatus.Traveling && (u.location != null || u.inSpace);
+            string where = u.location != null ? $"at {u.location.name}" : (u.inSpace ? "in deep space" : "in transit");
+            string kind = u.Info.isStation ? $"Station · {u.Info.stationRole}" : "Civilian";
+            string state = deployed ? $"<color=#4DFF6E>deployed & working</color> ({where})" : "<color=#FFBF4D>not yet deployed — send it to position</color>";
+            structLine = $"\n<color=#B39DFF>{kind}:</color> {state}";
+            string fx = StationEffectText(u.Info);
+            if (fx != "") structLine += $"\n<color=#8FE9C0>{fx}</color>";
+        }
+
         body.text =
             $"<b>{u.Info.name}</b>  ·  <color=#FFD24D>{u.RankName}</color>\n" +
             $"Owner: <color={ownerHex}>{FactionManager.OwnerName(u.owner)}</color>\n" +
             $"Health {u.EffectiveHealth}  Armor {u.Armor}  Speed {u.Speed}  Range {rangeStr}\n" +
             $"Research {u.EffectiveResearch}  Attack {u.EffectiveAttack}\n" +
-            $"XP {u.experience:F0}  Worlds {u.worldsExplored}\n\n" +
+            $"XP {u.experience:F0}  Worlds {u.worldsExplored}{structLine}\n\n" +
             $"<color=#8FD0FF>Task:</color> {task}{queueLine}{sampleLine}";
 
         // Button availability. In Queue mode the target is the ship's last queued destination (so you
