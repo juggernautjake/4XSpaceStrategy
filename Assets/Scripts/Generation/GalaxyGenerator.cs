@@ -167,6 +167,12 @@ public static class GalaxyGenerator
         planet.shipyardLevel = 1;          // the capital always has a working (level-1) shipyard
         planet.researchCenterLevel = 1;    // ...and its founding laboratory, so research can start at all
         planet.explorationProgress = 1f;   // home world is fully known from the start
+        // ...and its capitol, which is a real structure on the surface grid rather than an abstraction.
+        // It carries the colony's founding reactor, so this is also what lights the home world's power
+        // grid — without it the capital would open with every mine and factory unpowered. Every OTHER
+        // settled world gets its seat from the colony ship that grounded itself there; this one was
+        // simply declared settled, so it has to be given one. (See SurfaceBuildManager.EnsureColonySeat.)
+        SurfaceBuildManager.EnsureColonySeat(planet);
 
         // Extra starting resources by difficulty.
         var keys = new List<ResourceType>(planet.resources.resources.Keys);

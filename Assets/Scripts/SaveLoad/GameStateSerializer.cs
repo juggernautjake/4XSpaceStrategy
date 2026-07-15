@@ -285,9 +285,22 @@ public static class GameStateSerializer
         b.deepSurveyed = dto.deepSurveyed;
         b.cityGrowthTimer = dto.cityGrowthTimer;
         if (dto.placedBuildings != null) b.placedBuildings = new List<PlacedBuilding>(dto.placedBuildings);
+
+        // DROP records whose type this build doesn't have. The ordinal indexes the database directly,
+        // so a save written by a LATER build — one with structures this one has never heard of — would
+        // sail through the load and then throw on the first colony tick, which is a far worse place to
+        // find out. Losing the odd unknown structure is the honest outcome: we cannot place, draw, or
+        // cost something we have no definition for.
+        b.placedBuildings.RemoveAll(pb => pb == null || pb.type < 0 || pb.type >= SurfaceBuildingDatabase.All.Length);
+
         // JsonUtility fills MISSING fields with 0, so a save written before tech levels and health
         // existed comes back with every structure at level 0 and 0 HP — a dead, non-existent tier.
         foreach (var pb in b.placedBuildings) pb.NormalizeAfterLoad();
+
+        // The power grid memoizes per world for the frame, and this world's buildings just changed under
+        // it. Cheap insurance: a load that lands on the same frame as a read would otherwise answer from
+        // whatever was derived before the save was applied.
+        PowerGrid.Invalidate();
         // Saves from before research-centre tiers existed record only that the building is there, so
         // give any existing centre its base tier rather than leaving it at level 0 (= no laboratory).
         if (b.researchCenterLevel < 1 && b.buildings.Contains((int)BuildingType.ResearchCenter))
@@ -329,6 +342,12 @@ public static class GameStateSerializer
                 foreach (var c in SurfaceBuildingDatabase.Footprint(pb))
                     if (c.x >= 0 && c.y >= 0 && c.x < b.surface.width && c.y < b.surface.height)
                         b.surface.tiles[c.x, c.y].occupied = true;
+
+        // A settled world must have a seat of government standing on it — it carries the colony's
+        // founding reactor, and a save written before the power grid existed has no such structure on
+        // ANY of its worlds. Without this every colony in every old save would load with its industry
+        // at the unpowered floor. Runs after the re-stamp above, so it packs around what's already down.
+        SurfaceBuildManager.EnsureColonySeat(b);
 
         if (b.surface != null)
             foreach (var o in dto.ores)

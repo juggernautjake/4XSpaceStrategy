@@ -85,10 +85,26 @@ public static class SurfaceBuildManager
             return false;
         }
 
+        // TECH. The one gate that isn't about this world at all — a fusion reactor is unbuildable
+        // everywhere until somebody works out fusion. Mirrors TerraformManager's check, down to naming
+        // the technology rather than its id, because "research F2 first" is not a sentence.
+        if (!string.IsNullOrEmpty(info.requiredTech) && !GameMode.DevMode && !TechManager.IsResearched(info.requiredTech))
+        {
+            var tech = TechDatabase.Get(info.requiredTech);
+            why = $"research {(tech != null ? tech.name : info.requiredTech)} first";
+            return false;
+        }
+
         // ONE OF EACH per world, for now: place a second and it's refused. (Some types — the capitol,
         // the shipyard — are inherently unique; the rest are capped here while the surface economy is
         // still being tuned. Relax this by dropping the OneOfEachPerWorld check.)
-        if ((OneOfEachPerWorld || info.uniquePerWorld) && CountOf(b, t) > 0)
+        //
+        // Power infrastructure opts out via allowMultiple. A tuning cap on how many mines a world may
+        // have is one thing; applied to relays it would reduce the power grid to a single node and
+        // delete the entire mechanic, so infrastructure meant to be chained is exempt by construction.
+        // Note the shape: uniquePerWorld is absolute and allowMultiple cannot override it, because a
+        // second capitol is wrong for reasons that have nothing to do with economy tuning.
+        if ((info.uniquePerWorld || (OneOfEachPerWorld && !info.allowMultiple)) && CountOf(b, t) > 0)
         { why = $"this world already has a {info.name.ToLower()}"; return false; }
 
         // A Planet Capitol isn't built from scratch: it's what a Colony Ship Base becomes. Placing one
@@ -150,6 +166,29 @@ public static class SurfaceBuildManager
         if (info.researchPerSec > 0f) parts.Add($"{info.researchPerSec * eff:0.00} research/s");
         if (info.popGrowthPerSec > 0f) parts.Add($"{info.popGrowthPerSec * eff:0.0} growth/s");
         if (info.storageCapacity > 0f) parts.Add($"+{info.storageCapacity:0} storage");
+
+        // Power, from the placing player's point of view: what it will feed the grid, what it will take
+        // out of it, and how far it will carry it. Quoted here rather than only on the card because
+        // this is the readout under the cursor, and "will this reach?" is a question about a SPOT.
+        //
+        // The lookup walks the whole FOOTPRINT, exactly as the real connection rule does. Asking about
+        // the origin cell alone would tell you "no grid here" for a four-tile plant whose origin sits
+        // one tile off the light — and then power it fully the moment you placed it anyway.
+        if (info.powerRange > 0f) parts.Add($"lights {info.powerRange:0.#} tiles");
+        if (info.powerDraw > 0f || info.powerStorage > 0f)
+        {
+            var net = PowerGrid.NetForFootprint(b, t, x, y, rotation);
+            string what = info.powerDraw > 0f ? $"draws {info.powerDraw:0.0}" : $"banks {info.powerStorage:0}";
+            // A capacitor gets the same warning as a consumer. It draws nothing, so it would otherwise
+            // sit off the grid quietly doing nothing at all, with the card still cheerfully quoting the
+            // bank it isn't providing.
+            parts.Add(net == null
+                ? $"<color=#FF6659>{what} — no grid reaches here</color>"
+                : net.Dead
+                    ? $"<color=#FFBF4D>{what} — Grid {net.index} has no plant on it</color>"
+                    : $"{what} · Grid {net.index}");
+        }
+
         if (parts.Count == 0) return "no direct output";
         return string.Join(" · ", parts);
     }
@@ -180,6 +219,7 @@ public static class SurfaceBuildManager
         if (b.placedBuildings == null) b.placedBuildings = new List<PlacedBuilding>();
         float eff = EfficiencyAt(b, t, x, y, rotation);
         b.placedBuildings.Add(new PlacedBuilding { type = (int)t, x = x, y = y, rotation = rotation, efficiency = eff });
+        PowerGrid.Invalidate();   // this may have just joined two grids into one
 
         // Mark the ground so the terrain viewer and anything else reading `occupied` agrees with us.
         foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, rotation))
@@ -215,6 +255,7 @@ public static class SurfaceBuildManager
         { type = (int)t, x = x, y = y, rotation = rotation, efficiency = EfficiencyAt(b, t, x, y, rotation) });
         foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, rotation))
             if (InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = true;
+        PowerGrid.Invalidate();
         return true;
     }
 
@@ -246,6 +287,40 @@ public static class SurfaceBuildManager
         return false;
     }
 
+    /// Make sure a settled world has its seat of government standing on the surface grid.
+    ///
+    /// A colony ship grounds itself into a Colony Ship Base when it settles a world, so worlds you
+    /// colonise get one for free. TWO kinds of world never go through that path:
+    ///
+    ///   THE HOME WORLD — declared settled at generation (GalaxyGenerator), with people, a shipyard and
+    ///                    a laboratory, but never a single structure on its surface grid.
+    ///   OLD SAVES      — written before there was anything to place.
+    ///
+    /// That was harmless right up until the capitol started carrying the colony's founding reactor. Now
+    /// a settled world with no seat is a settled world with NO POWER: every mine and factory on the
+    /// empire's best world running at the unpowered floor, for reasons the player can't see and didn't
+    /// cause. Hence an invariant rather than a fix in one place — "a settled world has a capitol" is
+    /// true by construction, wherever the world came from.
+    ///
+    /// It places the CAPITOL, not a ship base: a world that has been settled since before the game
+    /// began is an established world, not a landing site, and there is no grounded hull to represent.
+    public static bool EnsureColonySeat(CelestialBody b)
+    {
+        if (b?.surface == null || !b.settled) return false;
+        if (CountOf(b, SurfaceBuildingType.PlanetCapitol) > 0) return false;
+        if (CountOf(b, SurfaceBuildingType.ColonyShipBase) > 0) return false;
+        if (!FindSpot(b, SurfaceBuildingType.PlanetCapitol, out int x, out int y))
+        {
+            // Nowhere dry and clear to put it — an all-ocean world, or one built out to the waterline.
+            // Say so: silently returning false would leave a settled world at the unpowered floor with
+            // no capitol, no explanation, and nothing in the Power tab pointing at the cause.
+            Debug.LogWarning($"EnsureColonySeat: no room for a capitol on {b.name} — it will have no " +
+                             $"founding reactor, so its industry runs at the unpowered floor until a plant is built.");
+            return false;
+        }
+        return ForcePlace(b, SurfaceBuildingType.PlanetCapitol, x, y, 0);
+    }
+
     // ---- Upgrades ----
     // A Colony Ship Base becomes a Planet Capitol in place: same footprint, so it never has to find
     // room, and the colony visibly graduates from "a parked ship" to "a seat of government".
@@ -268,6 +343,7 @@ public static class SurfaceBuildManager
         var to = info.upgradesTo.Value;
         p.type = (int)to;
         p.efficiency = EfficiencyAt(b, to, p.x, p.y, p.rotation);
+        PowerGrid.Invalidate();   // the new type may generate, draw or relay differently
         SimpleAudio.Instance?.PlayNotify(NotifKind.Discovery);
         NotificationManager.Instance?.Push($"{SurfaceBuildingDatabase.Get(to).name} completed on {b.name}",
             SurfaceBuildingDatabase.Get(to).description, null, NotifKind.Discovery);
@@ -304,6 +380,9 @@ public static class SurfaceBuildManager
 
         p.level = Mathf.Clamp(p.level + 1, 1, PlacedBuilding.MaxLevel);
         p.health = 1f;   // a rebuilt structure comes back in full repair
+        // A tier buys a node real REACH (powerRange scales with LevelMult), so this can join two grids
+        // exactly as placing a new node between them would.
+        PowerGrid.Invalidate();
 
         // A shipyard's tier IS the world's shipyard tier — upgrading the structure upgrades the yard.
         if (p.Type == SurfaceBuildingType.SurfaceShipyard)
@@ -347,6 +426,10 @@ public static class SurfaceBuildManager
         foreach (var c in SurfaceBuildingDatabase.Footprint(p))
             if (InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = false;
 
+        // Losing a relay out of the middle of a chain is what splits one grid back into two — but only
+        // once the derivation runs again, so it must not be allowed to answer from this frame's cache.
+        PowerGrid.Invalidate();
+
         // Tearing down the world's shipyard takes its build power out of the pool with it.
         if (p.Type == SurfaceBuildingType.SurfaceShipyard && CountOf(b, SurfaceBuildingType.SurfaceShipyard) == 0)
         {
@@ -370,15 +453,27 @@ public static class SurfaceBuildManager
     // Called from ColonyManager's colony tick.
     public static void TickOutput(CelestialBody b, float dt)
     {
+        // Power settles FIRST. Each grid spends its generation on its own load, banks or exports the
+        // surplus, and records what fraction of demand it actually met — and that fraction is what
+        // everything standing on it produces with. Ticking this after the outputs would pay every
+        // building on last frame's supply, which is wrong on exactly the frames that matter: the one
+        // where you switch a reactor on, and the one where you lose it.
+        PowerGrid.Tick(b, dt);
+
         foreach (var p in On(b))
         {
             var info = p.Info;
-            float eff = p.OutputMult;   // siting x tech level
+            float eff = p.OutputMult * PowerGrid.PowerFactor(b, p);   // siting x tech level x power
             if (info.metalPerSec > 0f) PlayerEconomy.Add(ResourceType.Metal, info.metalPerSec * eff * TechEffects.OreYieldMult * dt);
-            // Power plants get their Power Distribution bonus applied live, so a hub built later still
-            // rewards the generators already sitting around it.
-            if (info.energyPerSec > 0f)
-                PlayerEconomy.Add(ResourceType.Energy, info.energyPerSec * eff * (1f + AdjacencyBonus(b, p)) * dt);
+
+            // A generator's output belongs to its GRID, and PowerGrid.Tick has already spent it on that
+            // grid's load and sent whatever was left to the stockpile. Paying it out again here would
+            // double-count it. Only a producer that no grid reaches is paid directly — it has nowhere
+            // to put its power but the empire's books. (Every real plant lights its own ground, so in
+            // practice this branch is for anything a future edit adds without a powerRange.)
+            if (info.energyPerSec > 0f && PowerGrid.NetOf(b, p) == null)
+                PlayerEconomy.Add(ResourceType.Energy, info.energyPerSec * p.OutputMult * (1f + AdjacencyBonus(b, p)) * dt);
+
             if (info.waterPerSec > 0f) PlayerEconomy.Add(ResourceType.Water, info.waterPerSec * eff * dt);
         }
     }
@@ -386,14 +481,14 @@ public static class SurfaceBuildManager
     public static float ResearchPerSec(CelestialBody b)
     {
         float sum = 0f;
-        foreach (var p in On(b)) sum += p.Info.researchPerSec * p.OutputMult;
+        foreach (var p in On(b)) sum += p.Info.researchPerSec * p.OutputMult * PowerGrid.PowerFactor(b, p);
         return sum;
     }
 
     public static float PopGrowthPerSec(CelestialBody b)
     {
         float sum = 0f;
-        foreach (var p in On(b)) sum += p.Info.popGrowthPerSec * p.OutputMult;
+        foreach (var p in On(b)) sum += p.Info.popGrowthPerSec * p.OutputMult * PowerGrid.PowerFactor(b, p);
         return sum;
     }
 

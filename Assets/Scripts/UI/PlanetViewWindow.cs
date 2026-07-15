@@ -25,7 +25,7 @@ public class PlanetViewWindow : MonoBehaviour
 {
     public static PlanetViewWindow Instance;
 
-    public enum Tab { Info, Sites, Build, Infrastructure, Survey, Terrain }
+    public enum Tab { Info, Sites, Build, Infrastructure, Power, Survey, Terrain }
 
     // ============================================================================================
     // WHAT EACH TAB NEEDS, AND WHY
@@ -87,6 +87,13 @@ public class PlanetViewWindow : MonoBehaviour
                 if (body.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
                 if (!body.settled) { why = "nothing is built here — settle the world first"; return false; }
                 return true;
+
+            case Tab.Power:
+                // Same bar as Infrastructure: it reports on what's standing here, and on a world with
+                // nothing standing on it there is no grid to report.
+                if (body.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
+                if (!body.settled) { why = "nothing is built here — settle the world first"; return false; }
+                return true;
         }
         return true;
     }
@@ -113,6 +120,8 @@ public class PlanetViewWindow : MonoBehaviour
     readonly LiveSet live = new LiveSet();
     string lastSig = null;
     Texture2D overlayTex;
+    float powerRepaintIn;   // see Update: the power overlay repaints on a timer, not every frame
+    Color[] powerPx;        // reused scratch for that repaint — see RefreshPowerOverlay
 
     // Selection marker (see DrawSelectionMarker / AnimateMarker).
     RectTransform markerLayer;
@@ -453,7 +462,18 @@ public class PlanetViewWindow : MonoBehaviour
         sb.Append(body.id).Append('|').Append((int)tab).Append('|');
         sb.Append(selected.HasValue ? (int)selected.Value : -1).Append('|');
         sb.Append((int)activeIndex).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
-        sb.Append(body.placedBuildings != null ? body.placedBuildings.Count : 0);
+
+        // The buildings, by TYPE and LEVEL rather than just how many there are. A count alone misses the
+        // two mutations that change what's standing here without changing how much of it there is: a
+        // structure upgrading a tier, and a settlement growing into a town. Both matter to the Power
+        // tab, which lists one card per GRID — and a node's reach scales with its tier, so upgrading one
+        // can join two grids into one and leave a card behind pointing at a grid that no longer exists.
+        if (body.placedBuildings != null)
+        {
+            sb.Append(body.placedBuildings.Count).Append('|');
+            foreach (var p in body.placedBuildings) sb.Append(p.type).Append(':').Append(p.level).Append(',');
+        }
+        else sb.Append(0);
         return sb.ToString();
     }
 
@@ -528,6 +548,17 @@ public class PlanetViewWindow : MonoBehaviour
         }
 
         if (tab == Tab.Build) DrawGhost();
+
+        // The power overlay's colour tracks each grid's LIVE supply, so it has to be repainted as the
+        // economy moves rather than only when the window rebuilds. A few times a second is plenty: it's
+        // following a number that drifts, and repainting up to 70,000 texels every frame to do it would
+        // be a real cost for something the eye can't see happening anyway.
+        if (tab == Tab.Power && body.surface != null)
+        {
+            powerRepaintIn -= Time.unscaledDeltaTime;
+            if (powerRepaintIn <= 0f) { powerRepaintIn = 0.25f; RefreshPowerOverlay(); }
+        }
+
         UpdateStatus();
     }
 
@@ -578,6 +609,34 @@ public class PlanetViewWindow : MonoBehaviour
                     ? "<color=#9FB4C8>Pick an index on the right to overlay it on the map.</color>"
                     : $"<b>{SurfaceIndex.Name(activeIndex)}</b> — {SurfaceIndex.Describe(activeIndex)}";
                 break;
+            case Tab.Power:
+                {
+                    // The legend belongs here rather than in the panel: it explains the MAP, and this is
+                    // the line that sits under the map.
+                    var nets = PowerGrid.Nets(body);
+                    if (nets.Count == 0)
+                    {
+                        statusText.text = "<color=#FFBF4D>No power on this world.</color> <size=10><color=#9FB4C8>" +
+                                          "The map is dark because there is no grid on it — build a plant from the Build tab.</color></size>";
+                        break;
+                    }
+                    float gen = PowerGrid.TotalGeneration(body), draw = PowerGrid.TotalDraw(body);
+                    string hex = ColorUtility.ToHtmlStringRGB(gen >= draw ? UITheme.Good : UITheme.Bad);
+                    var sb = new System.Text.StringBuilder();
+                    sb.Append("<color=#F5F58C>■</color> grid   <color=#4DC8FF>■</color> plants & relays");
+                    sb.Append($"   ·   <b>{gen:0.0}</b> made, <b>{draw:0.0}</b> drawn, ");
+                    sb.Append($"<color=#{hex}><b>{(gen - draw >= 0f ? "+" : "")}{gen - draw:0.0}/s</b></color>");
+                    if (hoverCell.x >= 0)
+                    {
+                        var n = PowerGrid.NetAt(body, hoverCell.x, hoverCell.y);
+                        sb.Append($"\n<color=#9FB4C8>({hoverCell.x},{hoverCell.y})</color> ");
+                        sb.Append(n == null
+                            ? "<color=#FF6659>dark — no grid reaches this tile</color>"
+                            : $"<color=#F5F58C>on Grid {n.index}</color> <size=10><color=#9FB4C8>· {PowerGrid.SupplyLabel(n)}</color></size>");
+                    }
+                    statusText.text = sb.ToString();
+                }
+                break;
             default:
                 statusText.text = body.Surveyed
                     ? "<color=#9FB4C8>Surveyed. Use the Build tab to develop the surface, or Survey to see where things belong.</color>"
@@ -607,6 +666,7 @@ public class PlanetViewWindow : MonoBehaviour
             case Tab.Sites: BuildSitesPanel(); break;
             case Tab.Build: BuildBuildPanel(); break;
             case Tab.Infrastructure: BuildInfrastructurePanel(); break;
+            case Tab.Power: BuildPowerPanel(); break;
             case Tab.Survey: BuildSurveyPanel(); break;
             case Tab.Terrain: BuildTerrainPanel(); break;
         }
@@ -798,6 +858,7 @@ public class PlanetViewWindow : MonoBehaviour
             case SurfaceBuildingCategory.Harvesting: return "HARVESTING";
             case SurfaceBuildingCategory.Industry: return "INDUSTRY";
             case SurfaceBuildingCategory.Military: return "MILITARY";
+            case SurfaceBuildingCategory.Electrical: return "ELECTRICAL ENGINEERING";
             default: return c.ToString().ToUpper();
         }
     }
@@ -831,7 +892,16 @@ public class PlanetViewWindow : MonoBehaviour
                 string idx = info.index == SurfaceIndexKind.None
                     ? "<color=#9FB4C8>terrain doesn't matter</color>"
                     : $"<color=#8FD0FF>{SurfaceIndex.Name(info.index)}</color>";
-                return $"<color=#{hex}>{m} metal · {e} energy</color> · {info.Cells} tiles · {idx}";
+
+                // What this thing does to the GRID, said on the card rather than only discovered after
+                // it's standing there: what it feeds in, what it takes out, how far it carries power.
+                var pw = new System.Text.StringBuilder();
+                if (info.energyPerSec > 0f) pw.Append($" · <color=#F5F58C>+{info.energyPerSec:0.0} power</color>");
+                if (info.powerDraw > 0f) pw.Append($" · <color=#FFBF4D>-{info.powerDraw:0.0} power</color>");
+                if (info.powerRange > 0f) pw.Append($" · <color=#4DC8FF>lights {info.powerRange:0.#}</color>");
+                if (info.powerStorage > 0f) pw.Append($" · <color=#4DC8FF>banks {info.powerStorage:0}</color>");
+
+                return $"<color=#{hex}>{m} metal · {e} energy</color> · {info.Cells} tiles · {idx}{pw}";
             });
 
             var btn = UIFactory.Button(card, "", () =>
@@ -845,6 +915,17 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 bool held = selected.HasValue && selected.Value == t;
                 if (held) return (true, "Put down");
+
+                // Tech before money: "Needs Fusion Power" is the real answer, and quoting a price for
+                // something you couldn't build at any price would send the player off to bank metal for
+                // a building that will still refuse them when they get back.
+                if (!string.IsNullOrEmpty(info.requiredTech) && !GameMode.DevMode
+                    && !TechManager.IsResearched(info.requiredTech))
+                {
+                    var tech = TechDatabase.Get(info.requiredTech);
+                    return (false, $"Needs {(tech != null ? tech.name : info.requiredTech)}");
+                }
+
                 int m = ColonyManager.DiscCost(info.costMetal), e = ColonyManager.DiscCost(info.costEnergy);
                 bool afford = GameMode.DevMode || PlayerEconomy.CanAfford(m, e);
                 return (afford, afford ? "Select" : $"Need {m}m {e}e");
@@ -1010,9 +1091,29 @@ public class PlanetViewWindow : MonoBehaviour
                 : $"{SurfaceIndex.Name(info.index)} <color=#{ColorUtility.ToHtmlStringRGB(SurfaceBuildManager.EfficiencyColor(cap.efficiency))}>" +
                   $"{cap.efficiency * 100f:F0}% ({SurfaceBuildManager.EfficiencyLabel(cap.efficiency)})</color>";
             string adj = SurfaceBuildManager.AdjacencyBonus(body, cap) > 0f
-                ? $" · <color=#F5F58C>+{SurfaceBuildManager.AdjacencyBonus(body, cap) * 100f:F0}% grid</color>" : "";
-            return $"({cap.x},{cap.y}) · {site}{adj}\n" +
-                   $"<color=#9FB4C8>Output ×{cap.OutputMult:0.00}</color> (siting × tech level)";
+                ? $" · <color=#F5F58C>+{SurfaceBuildManager.AdjacencyBonus(body, cap) * 100f:F0}% switchyard</color>" : "";
+
+            // Power is now a THIRD multiplier on output, so it has to be visible next to the other two —
+            // an Output ×0.35 with no explanation next to it is exactly the kind of unattributed number
+            // that sends people reading source code.
+            float pf = PowerGrid.PowerFactor(body, cap);
+            string power = "";
+            if (info.powerDraw > 0f)
+            {
+                var net = PowerGrid.NetOf(body, cap);
+                power = net == null
+                    ? " · <color=#FF6659>no grid reaches it</color>"
+                    : net.Failed
+                        ? $" · <color=#FF6659>Grid {net.index} has no plant</color>"
+                        : net.Dead
+                            ? $" · <color=#FFBF4D>Grid {net.index} — no plant, on the bank</color>"
+                            : net.served >= 0.999f
+                                ? $" · <color=#4DFF6E>Grid {net.index}</color>"
+                                : $" · <color=#FFBF4D>Grid {net.index} at {net.served * 100f:F0}%</color>";
+            }
+            return $"({cap.x},{cap.y}) · {site}{adj}{power}\n" +
+                   $"<color=#9FB4C8>Output ×{cap.OutputMult * pf:0.00}</color> (siting × tech level" +
+                   $"{(info.powerDraw > 0f ? " × power" : "")})";
         });
 
         // Upgrade + demolish.
@@ -1034,6 +1135,199 @@ public class PlanetViewWindow : MonoBehaviour
             SurfaceBuildManager.Demolish(body, cap);
             lastSig = null;
         }, 20);
+    }
+
+    // ---------------- POWER ----------------
+    // What the electricity on this world actually reaches, and what it's failing to reach.
+    //
+    // The map answers "where", so this panel answers "how much" and "is it enough" — a balance per grid,
+    // the bank each one is carrying, and a list of everything sitting in the dark. It is deliberately a
+    // DIAGNOSTIC view and not a second build tray: the plants and relays are placed from the Build tab
+    // like everything else, under ELECTRICAL ENGINEERING. Two places to put a building down would mean
+    // two copies of the ghost, the confirm and the rotation handling, all of which live on Build.
+    //
+    // NOTE on the live closures below: PowerGrid derives fresh PowerNet objects every frame, so a
+    // captured `net` would be a snapshot that stops updating the moment the frame ends. Every closure
+    // captures the grid's INDEX and looks the grid up again — see NetByIndex.
+    void BuildPowerPanel()
+    {
+        Header("POWER GRID");
+
+        var nets = PowerGrid.Nets(body);
+
+        // Gated on GENERATION, not on whether any grid exists. A world with a node on it has a grid —
+        // it just has no power in it, and telling someone with a relay standing right there that there
+        // is "no grid at all" would send them to build a second relay.
+        //
+        // Also gated on the BANK: a world generating nothing but still coasting on charged capacitors
+        // has a live grid, a draining reserve and a deadline, and the full panel is the only thing that
+        // shows any of that. Bailing out to a "go build a plant" note would hide the countdown.
+        if (PowerGrid.TotalGeneration(body) <= 0f && PowerGrid.TotalStored(body) <= 0f)
+        {
+            Note(nets.Count == 0
+                ? "<color=#FFBF4D>Nothing on this world makes power.</color> The map is dark because there is no grid on it at all.\n\n" +
+                  "Build a generator from the Build tab under <color=#F5F58C>ELECTRICAL ENGINEERING</color> — a Combustion Plant is cheap and " +
+                  "will run on almost anything. A plant lights only the ground immediately around itself; <color=#4DC8FF>Power Nodes</color> " +
+                  "are what carry that power anywhere else."
+                : "<color=#FF6659>This world has a grid but nothing generating on it.</color> Relays carry power; they don't make it, " +
+                  "so a chain of nodes with no plant at the end of it is just wire.\n\n" +
+                  "Build a generator from the Build tab under <color=#F5F58C>ELECTRICAL ENGINEERING</color> and anything already " +
+                  "standing on this grid will pick it up.");
+            return;
+        }
+
+        // ---- The world's books ----
+        var sum = Card();
+        var st = UIFactory.WrapText(sum, "", UITheme.SmallSize, UITheme.Text);
+        live.Text(st, () =>
+        {
+            float gen = PowerGrid.TotalGeneration(body), draw = PowerGrid.TotalDraw(body);
+            float net = gen - draw;
+            string hex = ColorUtility.ToHtmlStringRGB(net >= 0f ? UITheme.Good : UITheme.Bad);
+            int grids = PowerGrid.Nets(body).Count;
+            return $"<b>{gen:0.0}</b> generated  ·  <b>{draw:0.0}</b> drawn\n" +
+                   $"<color=#{hex}><b>{(net >= 0f ? "+" : "")}{net:0.0} per second</b></color>" +
+                   $"  <size=10><color=#9FB4C8>across {grids} grid{(grids == 1 ? "" : "s")}</color></size>";
+        });
+
+        // Stored vs capacity — the spec's fill bar. Reads "no capacitors" rather than an empty bar when
+        // there's nothing to store with, because an empty bar and a missing building look identical.
+        Bar(sum, () =>
+        {
+            float stored = PowerGrid.TotalStored(body), cap = PowerGrid.TotalStorage(body);
+            if (cap <= 0f) return (0f, "no capacitors — nothing banked", UITheme.SubText);
+            float f = Mathf.Clamp01(stored / cap);
+            Color c = f > 0.5f ? UITheme.Good : f > 0.15f ? UITheme.Warn : UITheme.Bad;
+            return (f, $"{stored:0} / {cap:0} banked", c);
+        });
+
+        var hint = UIFactory.WrapText(sum, "", UITheme.SmallSize, UITheme.SubText);
+        live.Text(hint, () =>
+        {
+            float net = PowerGrid.TotalGeneration(body) - PowerGrid.TotalDraw(body);
+            if (net >= 0f) return "<size=10>Surplus tops up the capacitors first, then goes to the empire's stockpile.</size>";
+            return "<size=10><color=#FFBF4D>This world is running at a deficit — it is living off its capacitors, " +
+                   "and when they empty everything on the short grids browns out.</color></size>";
+        });
+
+        // ---- Per grid ----
+        // Separate grids are the whole point of the system, so they're listed separately even when
+        // there's only one. Merging them into a single planetary total would hide the exact thing the
+        // player is here to see: that grid 2 is failing while grid 1 has power to spare.
+        Header(nets.Count == 1 ? "THE GRID" : $"{nets.Count} SEPARATE GRIDS");
+        if (nets.Count > 1)
+            Note("<size=10>These grids are not connected, so a surplus on one cannot help a shortfall on another. " +
+                 "Chain <color=#4DC8FF>Power Nodes</color> between them and they become one grid.</size>");
+
+        foreach (var n in nets) BuildGridCard(n.index);
+
+        // ---- What's in the dark ----
+        var dark = PowerGrid.Unpowered(body);
+        if (dark.Count > 0)
+        {
+            Header("IN THE DARK");
+            Note($"<color=#FF6659>{dark.Count} structure(s) have no working grid.</color> Anything that needs power falls back " +
+                 $"on its own back-up plant and runs at <b>{PowerGrid.UnpoweredFactor * 100f:F0}%</b>. Put a generator nearby, or run " +
+                 $"<color=#4DC8FF>Power Nodes</color> out to them from a grid that has power to spare.");
+            foreach (var p in dark)
+            {
+                var cap2 = p;
+                var card = Card();
+                var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
+                live.Text(t, () =>
+                {
+                    var info = cap2.Info;
+                    string hex = ColorUtility.ToHtmlStringRGB(info.color);
+                    var net = PowerGrid.NetOf(body, cap2);
+
+                    // Three genuinely different faults, and they want three different fixes — so they
+                    // are not collapsed into one "unpowered" label. A capacitor draws nothing and can't
+                    // be throttled; saying it "wants 0.0" would be nonsense.
+                    string fault;
+                    if (net == null && info.powerStorage > 0f && info.powerDraw <= 0f)
+                        fault = "<color=#FF6659>off the grid — banking nothing</color>";
+                    else if (net == null)
+                        fault = $"<color=#FF6659>no grid reaches it — wants {info.powerDraw * cap2.LevelMult:0.0}</color>";
+                    else
+                        fault = $"<color=#FF6659>on Grid {net.index}, which has no plant on it</color>";
+
+                    return $"<color=#{hex}>•</color> <b>{info.name}</b> at ({cap2.x},{cap2.y})  <size=10>{fault}</size>";
+                });
+            }
+        }
+    }
+
+    /// Nets are re-derived every frame, so anything that outlives a frame holds the INDEX and re-finds
+    /// the grid rather than holding the object.
+    PowerNet NetByIndex(int index)
+    {
+        foreach (var n in PowerGrid.Nets(body)) if (n.index == index) return n;
+        return null;
+    }
+
+    void BuildGridCard(int index)
+    {
+        var card = Card();
+
+        var title = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
+        live.Text(title, () =>
+        {
+            var n = NetByIndex(index);
+            if (n == null) return "<color=#9FB4C8>grid gone</color>";
+            string hex = ColorUtility.ToHtmlStringRGB(PowerGrid.SupplyColor(n));
+            return $"<b>Grid {n.index}</b>  <size=10><color=#{hex}>{PowerGrid.SupplyLabel(n)}</color></size>";
+        });
+
+        // Supply, as a bar. A grid meeting its load sits full and green; one that doesn't shows exactly
+        // how far short it is, which is the number that decides whether you need another plant or
+        // another capacitor.
+        Bar(card, () =>
+        {
+            var n = NetByIndex(index);
+            if (n == null) return (0f, "", UITheme.SubText);
+            if (n.draw <= 0.0001f) return (1f, $"{n.generation:0.0} spare · nothing drawing", UITheme.SubText);
+
+            // The bar tracks what the grid can SUSTAIN, not what it happens to be delivering off the
+            // bank this second. A grid generating nothing while its capacitors carry the load is at
+            // served = 1, and a full green bar reading "0.0 / 8.5 demanded (100%)" is a sentence that
+            // reads as a bug — the bank is a countdown, and the bar is where you'd look to see it.
+            float f = Mathf.Clamp01(n.Sustainable);
+            string bank = n.served > n.Sustainable + 0.001f ? "  <color=#FFBF4D>· on the bank</color>" : "";
+            return (f, $"{n.generation:0.0} / {n.draw:0.0} demanded  ({f * 100f:F0}%){bank}", PowerGrid.SupplyColor(n));
+        });
+
+        var detail = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.SubText);
+        live.Text(detail, () =>
+        {
+            var n = NetByIndex(index);
+            if (n == null) return "";
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"{n.generators.Count} plant(s) · {n.projectors.Count} projector(s) · {n.consumers.Count} drawing · ");
+            sb.Append($"<color=#F5F58C>{n.coverage.Count} tiles lit</color>");
+            if (n.storage > 0f)
+                sb.Append($"\n<color=#4DC8FF>{n.Stored:0} / {n.storage:0} banked</color> across {n.capacitors.Count} capacitor(s)");
+            else if (n.draw > 0f)
+                sb.Append("\n<color=#9FB4C8>No capacitors on this grid — it has no reserve to ride a shortfall out on.</color>");
+
+            // The honest diagnosis, in words. A bar tells you the grid is at 60%; this tells you what to
+            // go and do about it, which is the only reason anyone opened this tab.
+            if (n.Dead)
+            {
+                sb.Append("\n<color=#FF6659>Nothing on this grid generates.</color> Relays carry power; they don't make it. " +
+                          "Build a plant anywhere this grid reaches and everything on it picks it up at once.");
+                if (!n.Failed)
+                    sb.Append($" <color=#FFBF4D>It is running on {n.Stored:0} banked — full output until that runs out.</color>");
+            }
+            else if (n.draw > 0.0001f && n.Sustainable < 0.999f)
+            {
+                float shortfall = n.draw - n.generation;
+                sb.Append($"\n<color=#FF6659>Short by {shortfall:0.0}/s.</color> ");
+                sb.Append(n.Stored > 0f
+                    ? "<color=#FFBF4D>Running on the bank</color> — it holds until the capacitors empty, and then everything here throttles to match."
+                    : "Everything on this grid is throttled to match.");
+            }
+            return sb.ToString();
+        });
     }
 
     // ---------------- SURVEY ----------------
@@ -1297,6 +1591,15 @@ public class PlanetViewWindow : MonoBehaviour
         // Two different overlays share one texture:
         //  BUILD  — holding a structure highlights the best 10% of sites for it on this world.
         //  SURVEY — the raw index ramp.
+        // The power grid is its own overlay entirely: it isn't a ramp over an index, it's a map of what
+        // the electricity reaches, so it gets its own pass rather than being forced through Ramp().
+        if (tab == Tab.Power && body.surface != null)
+        {
+            overlayImage.gameObject.SetActive(true);
+            RefreshPowerOverlay();
+            return;
+        }
+
         var kind = SurfaceIndexKind.None;
         bool bestSites = false;
 
@@ -1370,6 +1673,73 @@ public class PlanetViewWindow : MonoBehaviour
                 }
                 px[y * w + x] = c;
             }
+
+        overlayTex.SetPixels(px);
+        overlayTex.Apply();
+        overlayImage.texture = overlayTex;
+    }
+
+    // ---- Power overlay ----
+    // Reading the grid is a question about REACH, and reach is invisible against full-vibrance terrain.
+    // So this overlay does something none of the index ramps do: it DULLS the whole map first, and then
+    // paints the electricity back on top in the only two colours on screen.
+    //
+    //   YELLOW — the grid. Every tile the electricity reaches.
+    //   BLUE   — the infrastructure. What's doing the reaching: the plants and the relays.
+    //
+    // Yellow is the grid, blue is the source. Once you know that you can read a world's power at a
+    // glance: blue dots joined by yellow puddles, and the gaps between the puddles are the problem.
+    //
+    // On a world with nothing generating, every tile stays dull — which is itself the answer, and a
+    // more honest one than an empty overlay that looks like it failed to load.
+    void RefreshPowerOverlay()
+    {
+        int w = body.surface.width, h = body.surface.height;
+        EnsureOverlayTex(w, h);
+
+        // Reused across repaints. This runs several times a second for as long as the tab is open, and a
+        // big world is 384x192 — a fresh Color[73728] each time is ~1.2 MB of garbage per repaint.
+        if (powerPx == null || powerPx.Length != w * h) powerPx = new Color[w * h];
+        var px = powerPx;
+
+        var dull = new Color(0.02f, 0.03f, 0.06f, 0.62f);
+        for (int i = 0; i < px.Length; i++) px[i] = dull;
+
+        foreach (var net in PowerGrid.Nets(body))
+        {
+            // A failing grid is drawn in a sicklier, dimmer yellow than a healthy one, so "which of
+            // these grids is in trouble" is answerable from the map rather than only from the list.
+            //
+            // A FAILED grid — relays with no plant behind them and no charge left — is drawn in dead
+            // grey rather than any shade of yellow. It has no load it can serve either, so a
+            // supply-based tint would paint it the same confident yellow as a working one, and the
+            // player would be looking at an apparently healthy grid wondering why the mine under it is
+            // at a third output. A dead grid still coasting on its capacitors gets amber: it IS
+            // delivering, it just has nothing behind it and a deadline.
+            float s = Mathf.Clamp01(net.served);
+            var lit = net.Failed
+                ? new Color(0.38f, 0.40f, 0.45f, 0.34f)
+                : net.Dead
+                    ? new Color(0.90f, 0.55f, 0.15f, 0.40f)
+                    : Color.Lerp(new Color(0.85f, 0.45f, 0.10f, 0.34f), new Color(1.00f, 0.95f, 0.20f, 0.42f), s);
+            foreach (var c in net.coverage)
+            {
+                if (c.x < 0 || c.y < 0 || c.x >= w || c.y >= h) continue;
+                px[c.y * w + c.x] = lit;
+            }
+        }
+
+        // Sources and relays go on last so they always read on top of their own light.
+        var electricBlue = new Color(0.25f, 0.72f, 1.00f, 0.85f);
+        foreach (var p in SurfaceBuildManager.On(body))
+        {
+            if (p.Info.powerRange <= 0f && p.Info.powerStorage <= 0f) continue;
+            foreach (var c in SurfaceBuildingDatabase.Footprint(p))
+            {
+                if (c.x < 0 || c.y < 0 || c.x >= w || c.y >= h) continue;
+                px[c.y * w + c.x] = electricBlue;
+            }
+        }
 
         overlayTex.SetPixels(px);
         overlayTex.Apply();
