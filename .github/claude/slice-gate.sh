@@ -38,6 +38,24 @@ REQUESTS_DIR="$PROJECT_DIR/dev-requests/in-progress"
 COUNTER_FILE="${TMPDIR:-/tmp}/claude-slice-gate.count"
 MAX_CONTINUATIONS="${SLICE_GATE_MAX_CONTINUATIONS:-12}"
 
+# Every decision is logged, not just the unhappy ones.
+#
+# Without this, a hook that never loaded and a hook that ran perfectly look exactly the
+# same from the outside: silence. That's a bad property for the one component holding the
+# whole loop together — you'd only discover it was dead by noticing, weeks later, that
+# multi-slice jobs had quietly been building one slice. The workflow prints this file at
+# the end of every run (see "Did the slice gate fire?"), so "is it working" is a question
+# with an answer instead of a guess.
+#
+# In $TMPDIR, not the workspace: the agent runs `git add -A`, and a log that committed
+# itself into somebody's feature branch would be its own small disaster.
+LOG_FILE="${TMPDIR:-/tmp}/claude-slice-gate.log"
+
+log() {
+  printf '%s  %s\n' "$(date -u +%H:%M:%S)" "$1" >> "$LOG_FILE" 2>/dev/null || true
+  printf 'slice-gate: %s\n' "$1" >&2
+}
+
 # The hook's stdin payload. We don't need a field from it, but draining it matters:
 # leaving it unread can hand the caller a broken pipe on a short write.
 cat >/dev/null 2>&1 || true
@@ -57,7 +75,7 @@ DOC_GLOB='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.md'
 if [ ! -d "$REQUESTS_DIR" ]; then
   # Fail LOUD, not open. Silently allowing the stop here is indistinguishable from
   # "all work finished", which is the one lie this whole system is built to avoid.
-  echo "slice-gate: $REQUESTS_DIR does not exist — cannot verify the work is finished." >&2
+  log "ERROR: $REQUESTS_DIR does not exist — cannot verify the work is finished."
   exit 2
 fi
 
@@ -73,6 +91,7 @@ remaining=$(grep -rhoE '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' "$REQUESTS
 remaining="${remaining:-0}"
 
 if [ "$remaining" -eq 0 ]; then
+  log "all objectives resolved — allowing the agent to stop."
   rm -f "$COUNTER_FILE"
   exit 0
 fi
@@ -86,12 +105,13 @@ if [ "$count" -ge "$MAX_CONTINUATIONS" ]; then
   # Allow the stop rather than grind forever. Safe to give up here only because every
   # finished slice was already committed AND PUSHED (instructions §3/§4) — the work
   # stands, the planning doc still shows what's left, and the next upload resumes it.
-  echo "slice-gate: hit $MAX_CONTINUATIONS continuations with $remaining objective(s) still open — letting it stop." >&2
+  log "BACKSTOP: hit $MAX_CONTINUATIONS continuations with $remaining objective(s) still open — letting it stop."
   rm -f "$COUNTER_FILE"
   exit 0
 fi
 
 echo $((count + 1)) > "$COUNTER_FILE"
+log "$remaining objective(s) still open — sending the agent back to work (continuation $((count + 1))/$MAX_CONTINUATIONS)."
 
 # `decision: block` + `reason` is the documented way to refuse a stop; the reason is
 # fed back to Claude as its next instruction, so it's written as one.
