@@ -145,6 +145,8 @@ public class PlanetViewWindow : MonoBehaviour
         var probe = mapGO.AddComponent<SurfaceGridProbe>();
         probe.Init(this, mapRT);
 
+        BuildZoomBar();
+
         // Side panel: the tab's controls.
         // Pinned to the RIGHT edge at a fixed width, rather than inset from the left by the map's size.
         // The map now grows with the world (ApplyMapSize), so a left-inset panel would be shoved off
@@ -255,6 +257,77 @@ public class PlanetViewWindow : MonoBehaviour
     Vector2 mapPan;                // map offset within the viewport
     Vector2 lastViewportSize;      // re-fit when the window is laid out or resized
 
+    // ---- Zoom bar ----
+    // Floats over the map's bottom-left corner: minus, plus, Fit, and a live zoom readout.
+    //
+    // The scroll wheel is the fast way to do this and the buttons are the discoverable one. Both exist
+    // because a wheel is invisible — nothing on screen says the map zooms — and because trackpads and
+    // some mice make a precise notch genuinely hard.
+    TMP_Text zoomLabel;
+    RectTransform zoomBar;
+
+    void BuildZoomBar()
+    {
+        var bar = zoomBar = UIFactory.NewUI(gridHolder, "ZoomBar").GetComponent<RectTransform>();
+        bar.anchorMin = bar.anchorMax = new Vector2(0, 0);
+        bar.pivot = new Vector2(0, 0);
+        bar.anchoredPosition = new Vector2(6, 6);
+        bar.sizeDelta = new Vector2(188, 26);
+
+        var bg = bar.gameObject.AddComponent<Image>();
+        bg.color = new Color(0.04f, 0.07f, 0.11f, 0.85f);
+
+        var h = bar.gameObject.AddComponent<HorizontalLayoutGroup>();
+        h.spacing = 4; h.padding = new RectOffset(4, 4, 3, 3);
+        h.childControlWidth = true; h.childControlHeight = true;
+        h.childForceExpandWidth = false; h.childForceExpandHeight = true;
+
+        ZoomButton(bar, "–", () => ZoomBy(1f / ZoomStep));
+        ZoomButton(bar, "+", () => ZoomBy(ZoomStep));
+
+        var fit = UIFactory.Button(bar.transform, "Fit", () => { tilePx = 0f; mapPan = Vector2.zero; ApplyMapSize(); DrawSelectionMarker(); }, 20f);
+        var fle = fit.gameObject.AddComponent<LayoutElement>();
+        fle.preferredWidth = 40f; fle.flexibleWidth = 0f;
+
+        zoomLabel = UIFactory.Text(bar, "100%", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.Center);
+        var zle = zoomLabel.gameObject.AddComponent<LayoutElement>();
+        zle.flexibleWidth = 1f;
+    }
+
+    void ZoomButton(RectTransform bar, string label, System.Action onClick)
+    {
+        var b = UIFactory.Button(bar.transform, label, onClick, 20f);
+        var le = b.gameObject.AddComponent<LayoutElement>();
+        le.preferredWidth = 26f; le.flexibleWidth = 0f;
+    }
+
+    /// How much one button press (or one wheel notch) changes the zoom.
+    const float ZoomStep = 1.5f;
+
+    /// Zoom about the CENTRE of the viewport — the buttons have no cursor to zoom toward, and pulling
+    /// the view sideways when someone presses "+" would be its own bug.
+    public void ZoomBy(float factor)
+    {
+        if (body?.surface == null) return;
+        float fit = FitTilePx();
+        float max = Mathf.Max(fit, MaxTilePx());
+        float next = Mathf.Clamp(tilePx * factor, fit, max);
+        if (Mathf.Approximately(next, tilePx)) return;
+
+        // The centre of the viewport stays put: scale the pan by the same ratio the map scaled by.
+        mapPan *= next / tilePx;
+        tilePx = next;
+        ApplyMapSize();
+        DrawSelectionMarker();
+    }
+
+    /// Current zoom as a percentage of "the whole world fits", for the readout.
+    float ZoomPercent()
+    {
+        float fit = FitTilePx();
+        return fit > 0.001f ? tilePx / fit * 100f : 100f;
+    }
+
     /// Pixels per cell at which the ENTIRE surface is visible. This is the zoomed-all-the-way-out end.
     ///
     /// No ceiling on it any more. There used to be one — capped at the detailed map's own tile size —
@@ -345,6 +418,14 @@ public class PlanetViewWindow : MonoBehaviour
         PollMapPan();
         PollClickAway();
 
+        // Written straight rather than through LiveSet: it's one short string on one label with no
+        // layout group above it, and it only changes while you're actively zooming.
+        if (zoomLabel != null)
+        {
+            string z = $"{ZoomPercent():F0}%";
+            if (zoomLabel.text != z) zoomLabel.text = z;
+        }
+
         // The selection marker is rebuilt only when the SELECTION changes — not on the signature, since
         // clicking a building must move the ring instantly without tearing down the whole side panel.
         SurfaceSelection.Validate();
@@ -383,12 +464,13 @@ public class PlanetViewWindow : MonoBehaviour
         {
             case Tab.Build:
                 if (!selected.HasValue)
-                    statusText.text = "<color=#9FB4C8>Pick a structure on the right, then hover the map to place it. Right-click rotates. Esc cancels.</color>";
+                    statusText.text = "<color=#9FB4C8>Pick a structure on the right, then hover the map to place it. Right-click rotates. Esc cancels." +
+                                      "  ·  Scroll to zoom · drag the map to pan.</color>";
                 else
                 {
                     var info = SurfaceBuildingDatabase.Get(selected.Value);
                     var sb = new System.Text.StringBuilder();
-                    sb.Append($"<b>{info.name}</b> · rot {rotation * 90}° <size=10><color=#9FB4C8>(R / right-click rotates · Esc cancels)</color></size>");
+                    sb.Append($"<b>{info.name}</b> · rot {rotation * 90}° <size=10><color=#9FB4C8>(R / right-click rotates · Esc cancels · middle-drag pans)</color></size>");
 
                     if (hoverCell.x >= 0)
                     {
@@ -1219,7 +1301,10 @@ public class PlanetViewWindow : MonoBehaviour
 
         float fit = FitTilePx();
         float max = Mathf.Max(fit, MaxTilePx());
-        float next = Mathf.Clamp(tilePx * Mathf.Exp(scroll * 4f), fit, max);
+
+        // One wheel notch = one press of + or -, so the two controls agree. Unity's ScrollWheel axis is
+        // ~0.1 per notch, hence the 10x before raising ZoomStep to it: pow(1.5, 0.1*10) = 1.5.
+        float next = Mathf.Clamp(tilePx * Mathf.Pow(ZoomStep, scroll * 10f), fit, max);
         if (Mathf.Approximately(next, tilePx)) return;
 
         // Zoom TOWARD THE CURSOR: keep whatever is under the pointer pinned there, rather than
@@ -1245,12 +1330,36 @@ public class PlanetViewWindow : MonoBehaviour
     Vector2 panGrabOffset;
     bool panning;
 
+    // ---- Grab the map and drag it ----
+    //
+    // LEFT drag is the pan, because that's what "grab the map" means everywhere else. It only conflicts
+    // with left-click-to-select for as long as it takes to move DragThreshold pixels: under that it's
+    // still a click and the map never moves; over it, `panDragged` latches and OnGridClick ignores the
+    // release, so a drag can't accidentally select whatever you happened to start the drag on top of.
+    //
+    // Middle drag pans too, and works even while a building is held.
+    //
+    // RIGHT drag used to pan, which was a straight conflict: right-click is also "rotate the held
+    // piece", so rotating nudged the map and panning rotated the piece.
     void PollMapPan()
     {
         if (body?.surface == null) return;
 
-        if (!panning && (Input.GetMouseButtonDown(2) || Input.GetMouseButtonDown(1)) &&
-            RectTransformUtility.RectangleContainsScreenPoint(gridHolder, Input.mousePosition, null))
+        // Cleared on ANY press, not just one that starts a pan. It has to be: a piece-holding press
+        // never starts a pan (see leftPans below), so if the flag only reset when a pan began, one drag
+        // would latch it true and silently swallow every click from then on.
+        if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(2)) panDragged = false;
+
+        // Left-drag is off while a piece is held — there, a left press is placing a building, and
+        // dragging the ground out from under it is the last thing anyone wants.
+        bool leftPans = !selected.HasValue;
+
+        if (!panning &&
+            ((leftPans && Input.GetMouseButtonDown(0)) || Input.GetMouseButtonDown(2)) &&
+            RectTransformUtility.RectangleContainsScreenPoint(gridHolder, Input.mousePosition, null) &&
+            // The zoom bar floats INSIDE the viewport, so its rect is inside the pan region too. Without
+            // this, pressing + and twitching a few pixels would drag the map out from under you.
+            !RectTransformUtility.RectangleContainsScreenPoint(zoomBar, Input.mousePosition, null))
         {
             panning = true;
             panGrabScreen = Input.mousePosition;
@@ -1259,13 +1368,21 @@ public class PlanetViewWindow : MonoBehaviour
 
         if (panning)
         {
-            if (!Input.GetMouseButton(2) && !Input.GetMouseButton(1)) { panning = false; return; }
+            if (!Input.GetMouseButton(0) && !Input.GetMouseButton(2)) { panning = false; return; }
+
             Vector2 delta = (Vector2)Input.mousePosition - panGrabScreen;
-            if (delta.sqrMagnitude < 9f) return;          // still a click, not yet a drag
+            if (!panDragged && delta.sqrMagnitude < DragThreshold * DragThreshold) return;
+
+            panDragged = true;
             mapPan = panGrabOffset + delta;
             ClampPan();
         }
     }
+
+    /// Pixels of movement before a press stops being a click and becomes a drag.
+    const float DragThreshold = 5f;
+
+    bool panDragged;
 
     // Click outside the window to dismiss it.
     //
@@ -1310,6 +1427,12 @@ public class PlanetViewWindow : MonoBehaviour
 
     public void OnGridClick(int x, int y)
     {
+        // The release that ends a pan is not a click. uGUI fires OnPointerClick on release whenever the
+        // press and release landed on the same object, however far the pointer travelled in between — so
+        // without this, every drag of the map would also select (or deselect) whatever was under where
+        // you grabbed it.
+        if (panDragged) return;
+
         // Holding a piece? The click places it.
         if (tab == Tab.Build && selected.HasValue)
         {
