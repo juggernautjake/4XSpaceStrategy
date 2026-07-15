@@ -53,7 +53,7 @@ public partial class InspectorWindow
         }
         else
         {
-            Stat(card, "Surface", () => $"{b.surfaceSize * 2}×{b.surfaceSize}");
+            Stat(card, "Surface", () => $"{MapMetrics.SurfW(b.surfaceSize)}×{MapMetrics.SurfH(b.surfaceSize)} cells");
             Stat(card, "Moons", () => b.moons != null ? b.moons.Count.ToString() : "0");
             Stat(card, "Ships here", () => b.units != null ? b.units.Count.ToString() : "0");
             Stat(card, "Points of interest", () => b.pointsOfInterest != null ? b.pointsOfInterest.Count.ToString() : "0");

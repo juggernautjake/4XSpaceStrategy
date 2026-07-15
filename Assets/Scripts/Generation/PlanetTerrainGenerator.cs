@@ -34,11 +34,20 @@ public static class PlanetTerrainGenerator
         public float latitude;     // 0 equator .. 1 pole
     }
 
-    // ---- Low-res grid (used by the classic tile viewer and gameplay) ----
+    // Octaves of noise the SURFACE GRID is built from.
+    //
+    // Six, matching what SurfaceTextureRenderer has always used to draw the detail map. It was four,
+    // which was the right call while the grid was six times coarser than the render — there is no point
+    // resolving detail finer than a cell. Now that a cell IS a detail texel, those two extra octaves are
+    // the coastlines and fine features the map exists to show.
+    public const int Octaves = 6;
+
+    // ---- The surface grid ----
+    // The one grid: gameplay builds on it, and every map renders one texel per cell of it.
     // Uses the body's own terrainParams so live edits are reflected everywhere consistently.
     public static PlanetSurface GenerateSurface(CelestialBody body)
     {
-        return Build(body, body.terrainParams, 4);
+        return Build(body, body.terrainParams, Octaves);
     }
 
     public static PlanetSurface GenerateSurfaceWithParams(
@@ -53,13 +62,17 @@ public static class PlanetTerrainGenerator
             heat = Mathf.Max(0.1f, heatStrength),
             ridge = Mathf.Max(0.1f, ridgeStrength)
         };
-        return Build(body, body.terrainParams, 4);
+        return Build(body, body.terrainParams, Octaves);
     }
 
     static PlanetSurface Build(CelestialBody body, NoiseParams p, int octaves)
     {
-        int width = Mathf.Max(4, body.surfaceSize * 2);
-        int height = Mathf.Max(2, body.surfaceSize);
+        // Dimensions come from MapMetrics, which every map renderer also reads. They used to be computed
+        // here as `surfaceSize * 2` while the detail renderer independently used `surfaceSize * 2 * 6`,
+        // and the two silently disagreed by a factor of six on each axis — which is exactly why a 1x1
+        // building was drawn six terrain pixels wide.
+        int width = MapMetrics.SurfW(body.surfaceSize);
+        int height = MapMetrics.SurfH(body.surfaceSize);
 
         PlanetSurface surface = new PlanetSurface(width, height);
         for (int x = 0; x < width; x++)

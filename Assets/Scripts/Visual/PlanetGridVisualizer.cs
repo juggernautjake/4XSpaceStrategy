@@ -31,8 +31,28 @@ public class PlanetGridVisualizer : MonoBehaviour
         cursorY = surface.height / 2;
     }
 
+    /// Most cells this viewer will ever turn into GameObjects before giving up. See BuildGrid.
+    const int MaxTileObjects = 4000;
+
     void BuildGrid()
     {
+        // This spawns ONE GAMEOBJECT PER CELL, and a cell is now a detail texel rather than a chunky
+        // block — a grid can be 240x120, so this would be nearly 30,000 GameObjects in a
+        // GridLayoutGroup. That is a frozen frame, not a map.
+        //
+        // Nothing calls this today (PlanetUI.gridVisualizer is an Inspector-only field that is never
+        // assigned, and the chunky mini map it drew was retired in favour of the Planet View). The guard
+        // is here because "nothing calls it" is one Inspector drag away from being false, and the
+        // failure mode is a hang rather than anything that would point at this file. Every map that IS
+        // live renders to a Texture2D, which doesn't care how many cells there are.
+        if (surface.width * surface.height > MaxTileObjects)
+        {
+            Debug.LogWarning($"[PlanetGridVisualizer] Refusing to build a {surface.width}x{surface.height} " +
+                             $"grid as {surface.width * surface.height} GameObjects. Use the Planet View " +
+                             $"(texture-based) instead — this viewer is retired.");
+            return;
+        }
+
         // Shared metric so the detailed map stays a consistent multiple of this mini map.
         currentTileSize = MapMetrics.MiniTile(surface.height);
 
