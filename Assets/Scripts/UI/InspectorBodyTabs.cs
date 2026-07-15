@@ -37,6 +37,17 @@ public partial class InspectorWindow
             string hex = "#" + ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(b.owner));
             return $"<color={hex}>{FactionManager.OwnerLabel(b.owner)}</color>";
         });
+        // Claimed and settled are different things (see Claim.cs) and the difference is most of the
+        // mid-game, so it's stated rather than left to be inferred from whether a city happens to exist.
+        Stat(card, "Status", () =>
+        {
+            var st = Claim.StageOf(b);
+            string hex = "#" + ColorUtility.ToHtmlStringRGB(Claim.StageColor(st));
+            string note = st == WorldStage.Claimed
+                ? (b.habitability >= Colony.FoundThreshold ? " — liveable, send a colony ship" : " — nobody can live here yet")
+                : "";
+            return $"<color={hex}>{Claim.StageLabel(st)}</color>{note}";
+        });
         Stat(card, "Habitability", () =>
         {
             string hex = Habitability.ScoreColorHex(b.habitability);
@@ -63,6 +74,8 @@ public partial class InspectorWindow
         if (b.claimProgress > 0f && b.owner != FactionManager.Player)
             Bar(p, () => (b.claimProgress, $"Being colonized — {b.claimProgress * 100f:F0}%", UITheme.Warn));
 
+        BuildClaimSection(p, b);
+
         // Actions.
         Header(p, "ACTIONS");
         var row = UIFactory.NewUI(p, "Actions"); UIFactory.AddLayout(row, 28);
@@ -86,6 +99,77 @@ public partial class InspectorWindow
             if (b.visualObject != null)
                 CameraController.Instance?.FocusAndZoom(b.visualObject.transform, b.surfaceSize, true);
         }, 26);
+    }
+
+    // The two-stage road to owning a world: CLAIM it, make it liveable, SETTLE it.
+    //
+    // Both condition lists are always shown for a world that isn't settled, with the failing ones marked,
+    // because the interesting question is never "can I?" — it's "what's stopping me?". A greyed-out
+    // button that doesn't say why is a dead end.
+    void BuildClaimSection(Transform p, CelestialBody b)
+    {
+        if (b == null || Claim.IsSettled(b)) return;
+        if (b.owner != null && b.owner != FactionManager.Player) return;   // somebody else's problem
+
+        if (!Claim.IsMine(b))
+        {
+            Header(p, "CLAIM THIS WORLD");
+            var card = Card(p);
+            Note(card, "A claim is a flag, not a colony. Habitability doesn't matter — claiming a dead " +
+                       "rock is the normal case. It's what keeps the world yours while you spend the " +
+                       "next hour terraforming it.");
+            ConditionList(card, () => Claim.ClaimConditions(b));
+
+            var btn = UIFactory.Button(p, "Claim", () => { if (Claim.DoClaim(b)) lastSig = null; }, 26);
+            live.Button(btn, () => Claim.CanClaim(b, out string why)
+                ? (true, $"Claim {b.name}  ({Claim.BeaconMetal(b)}m {Claim.BeaconEnergy(b)}e)")
+                : (false, $"Claim — {why}"));
+        }
+        else
+        {
+            Header(p, "SETTLE THIS WORLD");
+            var card = Card(p);
+            Note(card, "Claimed. Nobody lives here yet — a world has to be liveable before anyone can, " +
+                       "and until it's settled you can't build anything on its surface.");
+            ConditionList(card, () => Claim.SettleConditions(b));
+
+            var btn = UIFactory.Button(p, "Settle", () =>
+            {
+                // Settling is the colony ship's job — it lands and becomes the world's first capitol.
+                // This just aims it, so there's one code path that founds a colony rather than two that
+                // have to agree.
+                var ship = FirstColonyShip(b);
+                if (ship != null)
+                    UnitManager.Instance?.IssueAction(new List<Unit> { ship }, OrderKind.Colonize, b, false);
+            }, 26);
+            live.Button(btn, () => Claim.CanSettle(b, out string why)
+                ? (true, $"Settle {b.name} — land the colony ship")
+                : (false, $"Settle — {why}"));
+        }
+    }
+
+    static Unit FirstColonyShip(CelestialBody b)
+    {
+        if (b?.units == null) return null;
+        foreach (var u in b.units)
+            if (u != null && u.owner == FactionManager.Player && u.Info.canColonize) return u;
+        return null;
+    }
+
+    /// A live tick-list. Re-read every refresh, so it updates as a ship arrives or terraforming lands.
+    void ConditionList(Transform parent, System.Func<List<ColonyObjective>> src)
+    {
+        var t = UIFactory.WrapText(parent, "", UITheme.SmallSize, UITheme.Text);
+        live.Text(t, () =>
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var c in src())
+            {
+                string hex = ColorUtility.ToHtmlStringRGB(c.done ? UITheme.Good : UITheme.Bad);
+                sb.AppendLine($"<color=#{hex}>{(c.done ? "+" : "×")}</color> {c.label}  <color=#9FB4C8>{c.detail}</color>");
+            }
+            return sb.ToString().TrimEnd();
+        });
     }
 
     // ---------------- Climate ----------------

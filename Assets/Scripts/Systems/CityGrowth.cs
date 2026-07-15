@@ -142,6 +142,12 @@ public class CityGrowth : MonoBehaviour
     void TickWorld(CelestialBody b)
     {
         if (b.surface == null || b.placedBuildings == null) return;
+
+        // Settled worlds only. Towns grow out of a population, and an unsettled world hasn't got one —
+        // it's a claim, a flag on a rock. This asked instead whether a seat of government existed, which
+        // is a proxy for the same thing and was true on worlds that had never been colonised at all.
+        if (!b.settled) return;
+
         if (!b.buildings.Contains((int)BuildingType.City) &&
             SurfaceBuildManager.CountOf(b, SurfaceBuildingType.ColonyShipBase) == 0 &&
             SurfaceBuildManager.CountOf(b, SurfaceBuildingType.PlanetCapitol) == 0)
