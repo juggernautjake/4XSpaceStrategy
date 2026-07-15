@@ -7,24 +7,23 @@ using UnityEngine;
 // regions are visible.
 public static class SurfaceTextureRenderer
 {
-    // ---- Shared map tone ----
-    // Both MAP views run their pixels through this, so the points-of-interest map and the Planet View
-    // build grid are the same colours at the same intensity. They used to differ: the Planet View
-    // post-processed its texture to a pastel and the detail map didn't, so one world looked like two.
+    // ---- On terrain colour ----
+    // Terrain renders at FULL vibrance in every view — the map, the build grid and the 3D globes all get
+    // the same colours TerrainColorMap defines, untouched.
     //
-    // Desaturates toward each pixel's OWN grey and then lifts it toward white. That keeps every biome's
-    // hue — so terrain types stay clearly distinguishable — and only gives up intensity, which is what
-    // lets the fully-saturated structures on the build grid read as the foreground.
+    // There used to be a MapTone() here that desaturated each map pixel 30% toward its own grey and
+    // lifted it 28% toward white. Its job was to make the terrain recede so that placed structures — the
+    // only saturated things left — read as the foreground. That worked, but it paid for the figure by
+    // damaging the ground: every biome on every map view was permanently washed out, and a map's whole
+    // job is to show you the ground.
     //
-    // Opt-in, because SurfaceTextureRenderer.Build also skins the 3D globes in space (PlanetAppearance).
-    // Those are the subject, not a backdrop, and must stay vivid.
-    public static Color MapTone(Color c)
-    {
-        float grey = c.r * 0.299f + c.g * 0.587f + c.b * 0.114f;
-        c = Color.Lerp(c, new Color(grey, grey, grey), 0.30f);
-        c = Color.Lerp(c, Color.white, 0.28f);
-        return new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
-    }
+    // It's gone because structures no longer need it. They're drawn Vivid AND carry a thin black outline
+    // (PlanetViewWindow.OutlineFootprint), and an outline separates figure from ground without touching
+    // the ground at all — which is what an outline is for. Layering a global desaturation on top of that
+    // would now be paying the cost twice for a separation already achieved.
+    //
+    // If structures ever stop reading clearly, the fix belongs on the structure: a heavier outline, a
+    // drop shadow, anything local. Not another pass over every terrain pixel on the planet.
 
     // ============================================================================================
     // GRID-RESOLUTION render: EXACTLY ONE TEXEL PER GRID CELL.
@@ -37,7 +36,7 @@ public static class SurfaceTextureRenderer
     // Build() below now samples at the same resolution (both take it from MapMetrics), so the two agree
     // — but only this one agrees BY CONSTRUCTION. Prefer it for anything you can build on.
     // ============================================================================================
-    public static Texture2D BuildGrid(CelestialBody body, bool pastel = true)
+    public static Texture2D BuildGrid(CelestialBody body)
     {
         if (body?.surface == null) return null;
         int w = body.surface.width, h = body.surface.height;
@@ -66,9 +65,7 @@ public static class SurfaceTextureRenderer
                 if (tile.HasOre)
                     c = Color.Lerp(c, OreDatabase.Get(tile.ore).color, 0.35f);
 
-                pixels[y * w + x] = pastel
-                    ? MapTone(c)
-                    : new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
+                pixels[y * w + x] = new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
             }
 
         tex.SetPixels(pixels);
@@ -76,7 +73,7 @@ public static class SurfaceTextureRenderer
         return tex;
     }
 
-    public static Texture2D Build(CelestialBody body, bool pastel = false)
+    public static Texture2D Build(CelestialBody body)
     {
         // From MapMetrics, which is also what the grid is built at — so this renders exactly one texel
         // per cell, same as BuildGrid. The bare `* 6` that used to live here was the whole bug: it made
@@ -122,9 +119,7 @@ public static class SurfaceTextureRenderer
                     }
                 }
 
-                pixels[y * w + x] = pastel
-                    ? MapTone(c)
-                    : new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
+                pixels[y * w + x] = new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
             }
         }
 

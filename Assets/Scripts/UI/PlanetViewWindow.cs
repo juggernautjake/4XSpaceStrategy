@@ -219,28 +219,15 @@ public class PlanetViewWindow : MonoBehaviour
         // Rebuilt on every open rather than cached by body id, because terraforming can remodel a
         // world's terrain outright and a cache keyed only on identity would show the planet it used
         // to be.
-        //
-        // The pastel tone is applied by the renderer itself (SurfaceTextureRenderer.MapTone), shared
-        // with the points-of-interest map so the two views are the same colours at the same intensity.
-        // This used to post-process a second copy of the texture here, which both duplicated the tone
-        // (letting the two maps drift apart) and doubled the allocation.
         if (mapTex != null) Destroy(mapTex);
-        mapTex = SurfaceTextureRenderer.BuildGrid(body, pastel: true);
+        mapTex = SurfaceTextureRenderer.BuildGrid(body);
         mapImage.texture = mapTex;
         titleText.text = $"Planet View — {body.name}";
         ApplyMapSize();
     }
 
-    // Terrain is rendered PASTEL: every biome keeps its own hue, so tundra still reads as tundra and
-    // desert as desert — but the saturation is pulled down and the lightness up, so nothing on the map
-    // competes with the fully-saturated, fully-opaque structures sitting on top of it.
-    //
-    // Done by desaturating the PIXELS rather than by fading the image with alpha. Alpha would drop the
-    // whole map toward the dark panel behind it, which crushes the differences BETWEEN terrain types —
-    // exactly the information the map exists to convey. Pastel keeps the hue relationships intact and
-    // only gives up intensity.
-    // The map texture this window owns. Tone comes from the renderer now (see MapTone), so there's no
-    // second post-processed copy to keep in step.
+    // The map texture this window owns. Terrain comes out of the renderer at full vibrance — no tone
+    // pass, here or there.
     Texture2D mapTex;
 
     // ---- Zoom ----
@@ -1126,9 +1113,9 @@ public class PlanetViewWindow : MonoBehaviour
         foreach (var p in SurfaceBuildManager.On(body))
         {
             var info = p.Info;
-            // FULLY OPAQUE and pushed to full saturation. The terrain under it is deliberately pastel
-            // (see MapTone), so a structure is the one vivid thing on the map — what you built should
-            // never be something you have to hunt for.
+            // Fully opaque and pushed past its own saturation. What separates a structure from the
+            // ground is now the black OUTLINE below, not the terrain being dulled to get out of its way
+            // — so this only has to be a strong, readable colour, not the only strong colour on screen.
             var c = Vivid(info.color);
             var cells = SurfaceBuildingDatabase.Footprint(p);
             foreach (var cell in cells) AddCellQuad(pieceLayer, cell.x, cell.y, c);
@@ -1312,8 +1299,7 @@ public class PlanetViewWindow : MonoBehaviour
         }
     }
 
-    // Push a colour away from grey — the opposite of what Pastel does to the terrain, so the two can
-    // never be confused for one another.
+    // Push a colour away from grey, so a structure's own hue is as strong as it can be.
     static Color Vivid(Color c)
     {
         float grey = c.r * 0.299f + c.g * 0.587f + c.b * 0.114f;

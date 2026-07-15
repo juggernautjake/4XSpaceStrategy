@@ -103,7 +103,7 @@ public class DetailedSurfaceWindow : MonoBehaviour
         body = b;
         if (titleText != null) titleText.text = $"Detailed Surface — {b.name}";
         ApplySize(b);
-        map.texture = SurfaceTextureRenderer.Build(b, pastel: true);   // same tone as the Planet View build grid
+        map.texture = SurfaceTextureRenderer.Build(b);   // same colours as the Planet View build grid
         BuildMarkers();
         root.SetActive(true);
         rootRT.SetAsLastSibling();
@@ -125,7 +125,7 @@ public class DetailedSurfaceWindow : MonoBehaviour
     {
         if (root != null && root.activeSelf && body == b)
         {
-            map.texture = SurfaceTextureRenderer.Build(b, pastel: true);   // same tone as the Planet View build grid
+            map.texture = SurfaceTextureRenderer.Build(b);   // same colours as the Planet View build grid
             BuildMarkers();
         }
     }
