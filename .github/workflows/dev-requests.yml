@@ -112,15 +112,39 @@ jobs:
             echo "$v -> $(find "$out" -name 'frame_*.jpg' | wc -l) frame(s) in $out"
           done
 
+      # Runs the Claude Code CLI directly rather than anthropics/claude-code-action.
+      #
+      # Not a preference — the action REJECTS this event. It only accepts issue and PR
+      # events (issue_comment, issues, pull_request, pull_request_review,
+      # pull_request_review_comment); a push gets "Unsupported event type: push" and the
+      # job dies before Claude is ever invoked. That action is built for "@claude" in a
+      # comment thread, which is a different product from "a file appeared, go build it".
+      #
+      # The CLI is the documented path for CI and has no such restriction. What we give up
+      # is the action's git plumbing, which is two lines: actions/checkout already persists
+      # the GITHUB_TOKEN credential, so `git push` works — it just needs an identity.
       - name: Build the requests
         if: steps.triage.outputs.work == 'true'
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Passed explicitly so the agent's pushes are GITHUB_TOKEN pushes, which
-          # cannot trigger this workflow again.
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: |
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Bounds the Stop-hook loop: how many times the agent may be sent back to work.
+          # Sized against --max-turns, not wishfully — a slice is read → review subagents →
+          # edit → commit → push, realistically 20-40 turns. At 300 turns, ~12 continuations
+          # is what actually fits; a larger number would just mean turns run out first and
+          # the limit never does anything. A job with more slices than this builds what it
+          # can, pushes it, and leaves the rest unticked for the next run.
+          # (Also read by the "Did the slice gate fire?" step below.)
+          SLICE_GATE_MAX_CONTINUATIONS: '12'
+        run: |
+          set -euo pipefail
+
+          npm install -g @anthropic-ai/claude-code
+
+          # The agent commits, so it needs an identity. Nothing else sets one in CI.
+          git config user.name "dev-requests bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          claude -p "$(cat <<'PROMPT'
             You are running automatically because somebody added a file to
             `dev-requests/in-progress/` in this repository.
 
@@ -153,27 +177,59 @@ jobs:
               tick doesn't just mislead a human — it ends the job early.
 
             Start now.
-          # The allowlist IS the security boundary here — in prompt mode nothing sets a
-          # permission mode, so an unlisted tool is simply denied. Two consequences worth
-          # spelling out, because both bite silently:
-          #   - A misspelled tool name fails OPEN-looking and CLOSED-in-fact: allow rules with
-          #     unknown names are ignored without warning, so the tool just never works. The
-          #     subagent tool is `Agent`; `Task` is a different (task-list) tool entirely.
-          #   - Read-only shell (cat/ls/head/grep/find/wc) is deliberately absent: Read, Grep
-          #     and Glob already cover it, while `awk` and `sed` would hand over an arbitrary
-          #     exec primitive (`awk 'BEGIN{system(...)}'`, GNU `sed s///e`) for no benefit.
-          # git is enumerated by subcommand rather than `git *`, which would have included
-          # `git -c core.pager=...` — arbitrary execution wearing a git costume.
-          claude_args: |
-            --model claude-opus-4-8
-            --settings .github/claude/settings.json
-            --max-turns 300
-            --allowedTools "Read" "Write" "Edit" "Glob" "Grep" "Agent" "Bash(mkdir *)" "Bash(git add *)" "Bash(git commit *)" "Bash(git mv *)" "Bash(git status *)" "Bash(git diff *)" "Bash(git log *)" "Bash(git rev-parse *)" "Bash(git pull --rebase *)" "Bash(git push)" "Bash(git push origin main)"
-        env:
-          # Bounds the Stop-hook loop: how many times the agent may be sent back to work.
-          # Sized against --max-turns, not wishfully — a slice is read → review subagents →
-          # edit → commit → push, which is realistically 20-40 turns. At 300 turns, ~12
-          # continuations is what actually fits; a larger number would just mean turns run
-          # out first and the limit never does anything. A job with more slices than this
-          # builds what it can, pushes it, and leaves the rest unticked for the next run.
-          SLICE_GATE_MAX_CONTINUATIONS: '12'
+          PROMPT
+          )" \
+            --model claude-opus-4-8 \
+            --settings .github/claude/settings.json \
+            --max-turns 300 \
+            --allowedTools "Read,Write,Edit,Glob,Grep,Agent,Bash(mkdir *),Bash(git add *),Bash(git commit *),Bash(git mv *),Bash(git status *),Bash(git diff *),Bash(git log *),Bash(git rev-parse *),Bash(git pull --rebase *),Bash(git push),Bash(git push origin main)"
+          #
+          # Notes on the flags above, each of which is load-bearing:
+          #
+          # --settings is how the Stop hook gets loaded. It is NOT auto-discovered from
+          #   .github/, and that's deliberate (see settings.json: at .claude/settings.json it
+          #   would hijack local sessions too). No --bare: that flag skips hook discovery,
+          #   which would silently disable the entire slice loop.
+          #
+          # --allowedTools IS the security boundary. In -p mode an unlisted tool is denied
+          #   rather than prompted, so this list is the whole permission model. Two things
+          #   that bite silently:
+          #     - A wrong tool name fails closed with no warning: unknown names in an allow
+          #       rule are ignored. The subagent tool is `Agent`; `Task` is a different
+          #       (task-list) tool, and getting that wrong would silently deny every review
+          #       agent — the one mechanism compensating for having no compiler.
+          #     - Read-only shell (cat/ls/head/grep/find/wc) is deliberately absent: Read,
+          #       Grep and Glob cover it, while `awk` and `sed` would hand over an arbitrary
+          #       exec primitive (`awk 'BEGIN{system(...)}'`, GNU `sed s///e`) for nothing.
+          #   git is enumerated by subcommand rather than `git *`, which would have included
+          #   `git -c core.pager=...` — arbitrary execution wearing a git costume.
+          #   Comma-separated here; the GitHub Action took a space-separated list instead.
+
+      # Answers "is the Stop hook actually working?" without anyone having to squint at a
+      # transcript. `always()` matters: the runs where you most want this are the ones that
+      # timed out or died, and a plain step would be skipped on exactly those.
+      - name: Did the slice gate fire?
+        if: always() && steps.triage.outputs.work == 'true'
+        run: |
+          LOG="${TMPDIR:-/tmp}/claude-slice-gate.log"
+          echo "──────────────────────────────────────────────"
+          if [ -s "$LOG" ]; then
+            echo "The Stop hook ran $(wc -l < "$LOG" | tr -d ' ') time(s):"
+            echo
+            cat "$LOG"
+            echo
+            echo "Each 'sending the agent back to work' line is one slice boundary the loop"
+            echo "caught. A final 'all objectives resolved' means it finished the doc."
+          else
+            echo "The Stop hook NEVER RAN."
+            echo
+            echo "If the agent did real work above, this is a problem — it means the loop"
+            echo "isn't running and it only ever built whatever it managed in one go."
+            echo "Likely causes, in order:"
+            echo "  1. --settings .github/claude/settings.json didn't load."
+            echo "  2. .github/claude/slice-gate.sh isn't executable (needs mode 100755)."
+            echo "  3. The agent hit --max-turns and was killed before it ever tried to stop."
+            echo
+            echo "If the agent did nothing, the run failed earlier — read the step above."
+          fi
+          echo "──────────────────────────────────────────────"
