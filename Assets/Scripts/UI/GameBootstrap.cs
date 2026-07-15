@@ -39,12 +39,10 @@ public static class GameBootstrap
         NotificationManager.Create(canvas.transform);
 
         OrbitControlPanel.Create(canvas.transform);
-        TerrainControlPanel.Create(canvas.transform);
         StarInfoPanel.Create(canvas.transform);
         ResearchWindow.Create(canvas.transform);
         SaveLoadMenu.Create(canvas.transform);
         SpeciesWindow.Create(canvas.transform);
-        DetailedSurfaceWindow.Create(canvas.transform);
         UnitInfoPanel.Create(canvas.transform);
         FleetWindow.Create(canvas.transform);
         ShipyardWindow.Create(canvas.transform);

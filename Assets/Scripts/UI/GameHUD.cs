@@ -32,7 +32,9 @@ public class GameHUD : MonoBehaviour
         BarButton(bar.transform, "Notices", 70, () => NotificationManager.Instance?.ToggleHistory());
         BarButton(bar.transform, "Zone", 56, () => SystemContext.Zone?.Toggle());
         orbitBtn = BarButton(bar.transform, "Orbit", 58, () => OrbitControlPanel.Instance?.Toggle());
-        terrainBtn = BarButton(bar.transform, "Terrain", 68, () => TerrainControlPanel.Instance?.Toggle());
+        // Terrain is a TAB of the Planet View now, not its own window — it edits that map, so it lives
+        // on it. This opens the world and lands you on that tab.
+        terrainBtn = BarButton(bar.transform, "Terrain", 68, OpenTerrainTab);
         detailedBtn = BarButton(bar.transform, "Map", 52, OpenDetailed);
         followBtn = BarButton(bar.transform, "Follow", 66, ToggleFollow);
         BarButton(bar.transform, "Fleet", 56, () => FleetWindow.Instance?.Toggle());
@@ -90,14 +92,17 @@ public class GameHUD : MonoBehaviour
     {
         var b = PlanetUI.Selected;
         if (b == null) return;
-        if (!b.Surveyed)
-        {
-            SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
-            NotificationManager.Instance?.Push($"{b.name} not surveyed",
-                "Send a ship to survey this world to unlock its detailed map.", null, NotifKind.Info);
-            return;
-        }
-        DetailedSurfaceWindow.Instance?.Open(b);
+        // Opens whatever the world's state allows. The window's own tabs gate themselves and say what's
+        // missing (PlanetViewWindow.TabAvailable) — refusing to open it at all just meant the player
+        // couldn't read the thing that would have told them what to do.
+        PlanetViewWindow.Instance?.ShowFor(b);
+    }
+
+    void OpenTerrainTab()
+    {
+        var b = PlanetUI.Selected;
+        if (b == null) return;
+        PlanetViewWindow.Instance?.ShowFor(b, PlanetViewWindow.Tab.Terrain);
     }
 
     void ToggleFollow()

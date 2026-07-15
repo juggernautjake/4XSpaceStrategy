@@ -25,7 +25,71 @@ public class PlanetViewWindow : MonoBehaviour
 {
     public static PlanetViewWindow Instance;
 
-    public enum Tab { Info, Build, Infrastructure, Survey }
+    public enum Tab { Info, Sites, Build, Infrastructure, Survey, Terrain }
+
+    // ============================================================================================
+    // WHAT EACH TAB NEEDS, AND WHY
+    //
+    // This is the one place that answers "why can't I click that tab?", and it answers it in words. A
+    // greyed tab that doesn't say what's missing is a dead end — the player can see the feature exists
+    // and has no idea what to go and do.
+    //
+    // The milestones, in the order they actually happen:
+    //   VISITED   — a ship has been here. You get the map at all.
+    //   SURVEYED  — mapped from orbit. Terrain, ores, and the sites that are visible from up there.
+    //   DEEP      — a research ship studied it on the ground. The Heat/Fertile/Wind indexes, and the
+    //               anomalies you can only find by walking on them.
+    //   CLAIMED   — the world is legally yours (Claim.cs).
+    //   SETTLED   — people live here. Only now can you build.
+    // ============================================================================================
+    bool TabAvailable(Tab t, out string why)
+    {
+        why = null;
+        if (body == null) { why = "no world"; return false; }
+
+        // The sandbox terrain editor. The ONLY tab that Dev Mode gates rather than opens, so it's tested
+        // before the blanket Dev Mode pass below — otherwise Dev Mode would unlock it and then this
+        // would never be reached to hide it in normal play.
+        if (t == Tab.Terrain)
+        {
+            if (!GameMode.DevMode) { why = "Dev Mode only"; return false; }
+            return true;
+        }
+
+        if (GameMode.DevMode) return true;
+
+        switch (t)
+        {
+            case Tab.Info:
+                return true;                       // always: name, type, orbit and host star are free
+
+            case Tab.Sites:
+                if (!body.Surveyed) { why = "survey this world to see what's on it"; return false; }
+                return true;
+
+            case Tab.Survey:
+                if (!body.Surveyed) { why = "survey this world first"; return false; }
+                return true;
+
+            case Tab.Build:
+                if (!body.Surveyed) { why = "survey this world first"; return false; }
+                if (body.owner != FactionManager.Player) { why = "claim this world first"; return false; }
+                if (!body.settled)
+                {
+                    why = body.habitability >= Colony.FoundThreshold
+                        ? "settle this world — nobody lives here to build anything"
+                        : $"terraform to {Colony.FoundThreshold:F0}% (now {body.habitability:F0}%), then settle it";
+                    return false;
+                }
+                return true;
+
+            case Tab.Infrastructure:
+                if (body.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
+                if (!body.settled) { why = "nothing is built here — settle the world first"; return false; }
+                return true;
+        }
+        return true;
+    }
 
     GameObject root;
     TMP_Text titleText;
@@ -175,12 +239,23 @@ public class PlanetViewWindow : MonoBehaviour
         else body = b;
     }
 
-    public void ShowFor(CelestialBody b)
+    public void ShowFor(CelestialBody b) => ShowFor(b, null);
+
+    /// Open on a world, optionally landing on a specific tab. `openOn` is honoured only if that tab is
+    /// actually available for this world — asking for Build on an unsettled rock lands on Info, which is
+    /// the tab that can explain why.
+    public void ShowFor(CelestialBody b, Tab? openOn)
     {
         body = b;
         selected = null; rotation = 0;
         CancelPlace();          // a confirm from the last world means nothing on this one
         lastSig = null;
+
+        // The tab you were on may not exist for THIS world — Build on your capital, then click a
+        // barren rock, and Build has to give way to something readable rather than showing an empty
+        // build list on a world nobody lives on.
+        if (openOn.HasValue && TabAvailable(openOn.Value, out _)) tab = openOn.Value;
+        else if (!TabAvailable(tab, out _)) tab = Tab.Info;
         // Open showing the WHOLE world, centred — the zoom of the last planet you looked at means
         // nothing on this one.
         tilePx = 0f;            // ApplyMapSize resolves this to the fit-everything zoom
@@ -529,9 +604,11 @@ public class PlanetViewWindow : MonoBehaviour
         switch (tab)
         {
             case Tab.Info: BuildInfoPanel(); break;
+            case Tab.Sites: BuildSitesPanel(); break;
             case Tab.Build: BuildBuildPanel(); break;
             case Tab.Infrastructure: BuildInfrastructurePanel(); break;
             case Tab.Survey: BuildSurveyPanel(); break;
+            case Tab.Terrain: BuildTerrainPanel(); break;
         }
 
         RefreshOverlay();
@@ -543,14 +620,24 @@ public class PlanetViewWindow : MonoBehaviour
     {
         foreach (Tab t in System.Enum.GetValues(typeof(Tab)))
         {
+            // The terrain editor doesn't exist outside Dev Mode — greying it would advertise a sandbox
+            // tool to a player who can never use it. Every other tab is a real feature they can unlock,
+            // so those stay visible and explain themselves.
+            if (t == Tab.Terrain && !GameMode.DevMode) continue;
+
             var captured = t;
             bool active = t == tab;
+            bool open = TabAvailable(t, out string why);
+
             var btn = UIFactory.Button(tabStrip, t.ToString(), () =>
             {
+                if (!TabAvailable(captured, out _)) return;
                 tab = captured;
                 if (captured != Tab.Build) { selected = null; CancelPlace(); }
                 lastSig = null;
             }, 22);
+            btn.interactable = open;
+
             var le = btn.GetComponent<LayoutElement>();
             le.preferredWidth = 90; le.minWidth = 70; le.flexibleWidth = 0;
 
@@ -561,7 +648,15 @@ public class PlanetViewWindow : MonoBehaviour
             colors.selectedColor = colors.normalColor;
             btn.colors = colors;
             var lbl = btn.GetComponentInChildren<TMP_Text>();
-            if (lbl != null) { lbl.fontSize = UITheme.SmallSize; lbl.color = active ? Color.white : UITheme.SubText; }
+            if (lbl != null)
+            {
+                lbl.fontSize = UITheme.SmallSize;
+                lbl.color = !open ? new Color(0.45f, 0.52f, 0.62f) : active ? Color.white : UITheme.SubText;
+            }
+
+            // The reason lives on the tab itself, so it's there when you go looking for it rather than
+            // only in a status line you have to already be reading.
+            if (!open && why != null) UIFactory.Tooltip(btn.gameObject, $"{t} — {why}");
         }
     }
 
@@ -942,6 +1037,191 @@ public class PlanetViewWindow : MonoBehaviour
     }
 
     // ---------------- SURVEY ----------------
+    // ---------------- SITES (points of interest) ----------------
+    //
+    // What's actually ON this world: ruins, settlements, rich seams, and the anomalies that are just a
+    // "?" until somebody goes and looks. This replaces the separate detailed-map window, which drew a
+    // second copy of the same terrain purely to hang these markers on it.
+    //
+    // What you can KNOW about a site is staged like everything else:
+    //   surveyed      — the site exists, and its type. Orbit can see that much.
+    //   deep survey   — a research ship on the ground. Some sites are only visible from down there.
+    //   researched    — what it actually IS. A Mystery reads "?" until studied; that's the whole point
+    //                   of it, and it's the only route into the Ancients tech tree.
+    void BuildSitesPanel()
+    {
+        Header("POINTS OF INTEREST");
+
+        var pois = body.pointsOfInterest;
+        if (pois == null || pois.Count == 0)
+        {
+            Note("Nothing of note found here. A deep survey by a research ship sometimes turns up what an orbital pass missed.");
+            return;
+        }
+
+        if (!body.deepSurveyed)
+            Note("<color=#FFBF4D>Orbital survey only.</color> Send a research ship to study this world on the ground — some sites can't be seen from orbit at all, and anomalies can't be identified from up there.");
+
+        foreach (var poi in pois)
+        {
+            var cap = poi;
+            var card = Card();
+
+            var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
+            live.Text(t, () =>
+            {
+                string hex = ColorUtility.ToHtmlStringRGB(SiteColor(cap));
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"<color=#{hex}><b>{SiteMark(cap)}</b></color>  <b>{SiteTitle(cap)}</b>");
+                sb.AppendLine($"<size=10><color=#9FB4C8>{SiteBlurb(cap)}</color></size>");
+                if (cap.IsResearchable)
+                    sb.AppendLine($"<size=10><color=#8FD0FF>Study: {cap.researchPointCost} pts · ~{cap.researchDuration:F0}s · " +
+                                  $"pays {cap.researchReward} pts{(cap.yieldsSchematic ? " · may yield a schematic" : "")}</color></size>");
+                return sb.ToString().TrimEnd();
+            });
+
+            // Centre the map on it. A list entry you can't find on the map is a list entry.
+            UIFactory.Button(card, "Show on map", () => CentreOn(cap.u, cap.v), 22);
+
+            if (poi.IsResearchable)
+            {
+                var btn = UIFactory.Button(card, "", () => ResearchTaskManager.Instance?.StartResearch(body, cap), 22);
+                live.Button(btn, () =>
+                {
+                    var rtm = ResearchTaskManager.Instance;
+                    if (rtm == null) return (false, "Study — unavailable");
+                    if (rtm.IsResearching(cap)) return (false, "Studying…");
+                    return rtm.CanStart(body, cap, out string why)
+                        ? (true, $"Study this site ({cap.researchPointCost} pts)")
+                        : (false, $"Study — {why}");
+                });
+            }
+        }
+    }
+
+    /// Scroll the map so a normalized surface position sits in the middle of the viewport.
+    void CentreOn(float u, float v)
+    {
+        if (body?.surface == null || mapRT == null) return;
+        // mapPan moves the MAP, so it's the negative of where the point sits relative to the centre.
+        mapPan = new Vector2(-(u - 0.5f) * mapRT.rect.width, -(v - 0.5f) * mapRT.rect.height);
+        ClampPan();
+    }
+
+    static Color SiteColor(PointOfInterest p)
+    {
+        switch (p.type)
+        {
+            case POIType.Settlement: return new Color(0.30f, 1f, 0.45f);
+            case POIType.AncientRuins: return new Color(0.72f, 0.55f, 1f);
+            case POIType.SpecialResource: return new Color(0.56f, 0.82f, 1f);
+            default: return p.explored ? new Color(0.7f, 0.85f, 1f) : new Color(1f, 0.82f, 0.30f);
+        }
+    }
+
+    static string SiteMark(PointOfInterest p)
+    {
+        switch (p.type)
+        {
+            case POIType.Settlement: return "C";
+            case POIType.AncientRuins: return "R";
+            case POIType.SpecialResource: return "M";
+            default: return p.explored ? "!" : "?";
+        }
+    }
+
+    /// The site's name — or the absence of one. An unstudied Mystery is deliberately anonymous.
+    static string SiteTitle(PointOfInterest p)
+        => p.type == POIType.Mystery && !p.explored ? "Unknown anomaly"
+         : p.type == POIType.Mystery ? p.revealTitle
+         : p.title;
+
+    static string SiteBlurb(PointOfInterest p)
+    {
+        if (p.type == POIType.Mystery)
+            return p.explored ? p.revealText : "Something is down there. Nothing more is known until it's studied.";
+        if (p.type == POIType.SpecialResource)
+        {
+            string ore = p.relatedOre != OreType.None ? OreDatabase.Get(p.relatedOre).displayName : "an unidentified material";
+            bool known = p.relatedOre == OreType.None || ResearchManager.IsDiscovered(p.relatedOre);
+            return known ? $"A rich {ore} deposit. {p.description}" : $"A rich seam of something unidentified. {p.description}";
+        }
+        return p.description;
+    }
+
+    // ---------------- TERRAIN (Dev Mode sandbox) ----------------
+    //
+    // The old free-floating Terrain Controls window, moved in here. It edited the body's shared
+    // terrainParams and then had to remember to refresh three different viewers by name — the low-res
+    // grid, the detailed map, and the 3D globe. Two of those are gone now, and living inside the map it
+    // edits means the result is right there as you drag rather than in another window you have to find.
+    void BuildTerrainPanel()
+    {
+        Header("TERRAIN SANDBOX");
+        Note("<color=#FFBF4D>Dev Mode.</color> Regenerates this world's surface live. Every map reads the same terrainParams, so what you see here is what the world becomes.");
+
+        var p = body.terrainParams;
+        SliderRow("Feature scale", "continent size", 0.4f, 3f, p.scale, v => SetTerrain(0, v));
+        SliderRow("Elevation", "land vs water", 0.3f, 2f, p.elevation, v => SetTerrain(1, v));
+        SliderRow("Moisture", "dry vs lush", 0.3f, 2f, p.moisture, v => SetTerrain(2, v));
+        SliderRow("Temperature", "cold vs hot", 0.3f, 2f, p.heat, v => SetTerrain(3, v));
+        SliderRow("Mountains", "ridged terrain", 0.3f, 2f, p.ridge, v => SetTerrain(4, v));
+
+        Header("SEED");
+        var seed = Card();
+        Stat(seed, "Terrain seed", () => $"{body.terrainSeed:F0}");
+        UIFactory.Button(seed, "Randomize (new world, same settings)", () =>
+        {
+            body.terrainSeed = Random.Range(0f, 10000f);
+            RegenerateTerrain();
+        }, 24);
+
+        UIFactory.Button(sidePanel, "Reset to default", () =>
+        {
+            body.terrainParams = PlanetTerrainGenerator.NoiseParams.Default;
+            RegenerateTerrain();
+            lastSig = null;    // rebuild so the sliders snap back to their new values
+        }, 26);
+    }
+
+    void SliderRow(string label, string hint, float min, float max, float value, System.Action<float> onChanged)
+    {
+        var card = Card();
+        UIFactory.WrapText(card, $"<b>{label}</b>  <size=10><color=#9FB4C8>{hint}</color></size>", UITheme.SmallSize, UITheme.Text);
+        UIFactory.LabeledSlider(card, "", min, max, value, onChanged, "F2", 34f);
+    }
+
+    // 0=scale 1=elevation 2=moisture 3=heat 4=ridge
+    void SetTerrain(int which, float v)
+    {
+        if (body == null) return;
+        var p = body.terrainParams;
+        switch (which)
+        {
+            case 0: p.scale = v; break;
+            case 1: p.elevation = v; break;
+            case 2: p.moisture = v; break;
+            case 3: p.heat = v; break;
+            case 4: p.ridge = v; break;
+        }
+        body.terrainParams = p;
+        RegenerateTerrain();
+    }
+
+    void RegenerateTerrain()
+    {
+        if (body == null) return;
+        body.surface = PlanetTerrainGenerator.GenerateSurface(body);
+        OreGenerator.Populate(body);
+
+        // Every derived read of the surface has to be dropped, or the map shows a new world scored
+        // against the old one's statistics.
+        SurfaceIndex.InvalidateStats(body);
+
+        RefreshMapTexture();                                   // this window's map
+        PlanetAppearance.RefreshTexture(body, body.visualObject);   // and the globe in space
+    }
+
     void BuildSurveyPanel()
     {
         Header("INDEX OVERLAYS");
