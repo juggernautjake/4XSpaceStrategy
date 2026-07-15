@@ -191,6 +191,10 @@ public class CityGrowth : MonoBehaviour
             p.level = Mathf.Clamp(p.level, 1, PlacedBuilding.MaxLevel);
             p.health = 1f;
             StampFootprint(b, p);
+            // Growing into a City turns a plain building into a PROJECTOR (a city carries its own
+            // generation and lights its own ground), so this promotion can bring a whole grid into
+            // existence — the same as placing one would.
+            PowerGrid.Invalidate();
 
             NotificationManager.Instance?.Push($"{SurfaceBuildingDatabase.Get(next).name} on {b.name}",
                 $"A settlement has grown into a {SurfaceBuildingDatabase.Get(next).name.ToLower()} as {b.name}'s population spreads.",

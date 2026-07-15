@@ -16,12 +16,14 @@ public enum SurfaceBuildingType
     // Harvesting
     HydroPlant,
     // Government — grown by the population itself, not placed (see CityGrowth)
-    Settlement, Town, City
+    Settlement, Town, City,
+    // Electrical — the power grid (see PowerGrid.cs)
+    PowerNode, Capacitor, CombustionPlant, SteamTurbine, FissionReactor, FusionReactor
 }
 
 // What a structure is FOR. The build menu groups by this, so a long catalogue stays navigable and you
 // can find "the thing that makes power" without reading every card.
-public enum SurfaceBuildingCategory { Government, Harvesting, Industry, Military }
+public enum SurfaceBuildingCategory { Government, Harvesting, Industry, Military, Electrical }
 
 // One surface structure: its footprint SHAPE, what index makes it efficient, and what it produces.
 //
@@ -39,6 +41,31 @@ public class SurfaceBuildingInfo
 
     // One per world (a capitol, a shipyard). Upgrades replace rather than stack.
     public bool uniquePerWorld = false;
+
+    // Opts OUT of SurfaceBuildManager.OneOfEachPerWorld — you may build as many of these as you like.
+    // The power grid is the reason this exists: a grid whose whole point is chaining relays across a
+    // continent is not a feature if the world is allowed exactly one relay. The blanket one-of-each cap
+    // is an economy-tuning measure, and it cannot be allowed to cap infrastructure that is meant to be
+    // built in quantity. (`uniquePerWorld` still wins — a second capitol is wrong for its own reasons.)
+    public bool allowMultiple = false;
+
+    // ---- Power ----
+    // How far this structure LIGHTS GROUND, in tiles, measured from any cell of its own footprint.
+    // 0 = it doesn't project a grid at all. See PowerGrid.cs: overlapping light is what makes two
+    // projectors one grid, so this number is the whole topology of a world's electricity.
+    public float powerRange = 0f;
+
+    // What this structure DEMANDS to run at full output. A building on a grid that can't meet its draw
+    // browns out; one no grid reaches at all falls back to PowerGrid.UnpoweredFactor.
+    public float powerDraw = 0f;
+
+    // Capacitor buffer: how much energy this can bank for its grid. Surplus charges it, a deficit drains
+    // it. This is what lets an intermittent grid (solar, wind) carry a load it can't instantaneously meet.
+    public float powerStorage = 0f;
+
+    // The tech that unlocks this structure, or null for the ones you start with. Mirrors
+    // TerraformProjectInfo.requiredTech — same field name, same null-means-free rule, checked in CanPlace.
+    public string requiredTech = null;
 
     // The type this upgrades INTO, if any. A Colony Ship Base becomes a Planet Capitol in place —
     // same footprint, so the upgrade never has to find new room for itself.
@@ -115,6 +142,12 @@ public class PlacedBuilding
     // hardcoded label, and so raids/decay have somewhere to land.
     public float health = 1f;
 
+    // Energy banked in this structure, if it's a capacitor. Held per BUILDING rather than per grid
+    // because a grid is derived and has no identity that could survive a save — or a merge. Charge
+    // living in the capacitor means a grid's reserve is exactly the capacitors standing on it, so when
+    // two grids join, their banks join too, with nothing to reconcile.
+    public float stored = 0f;
+
     public const int MaxLevel = 3;
 
     public SurfaceBuildingType Type => (SurfaceBuildingType)type;
@@ -138,11 +171,32 @@ public class PlacedBuilding
         if (level > MaxLevel) level = MaxLevel;
         if (health <= 0f) health = 1f;
         health = Mathf.Clamp01(health);
+
+        // An empty capacitor is a legitimate state, so unlike level/health there's nothing to repair
+        // here — 0 means 0. Only guard against a negative, and against a save written when this thing
+        // held more than the current tier allows.
+        //
+        // The bounds check guards the line below it: `Info` indexes the database by this ordinal, so a
+        // record from a LATER build would throw rather than be normalized. The loader drops such records
+        // before it gets here (GameStateSerializer), so this is the belt to that braces — it keeps this
+        // method safe to call on a record from anywhere, not only from a load that already screened it.
+        if (stored < 0f) stored = 0f;
+        if (type < 0 || type >= SurfaceBuildingDatabase.All.Length) return;
+        float cap = Info.powerStorage * LevelMult;
+        if (stored > cap) stored = cap;
     }
 }
 
 public static class SurfaceBuildingDatabase
 {
+    // How far the capitol's own reactor lights the ground around it — the radius of a colony's core.
+    //
+    // Sized against how far a player actually builds from their landing site, NOT against the capitol's
+    // footprint. It is the single number that decides whether the power grid is a system you engage
+    // with or a tax you can't pay: too small and every colony opens crippled with no first move
+    // available, too large and there's never a reason to build a plant at all.
+    public const float ColonyReactorRange = 14f;
+
     static SurfaceBuildingInfo[] _all;
 
     public static SurfaceBuildingInfo[] All { get { if (_all == null) Build(); return _all; } }
@@ -314,6 +368,137 @@ public static class SurfaceBuildingDatabase
         city.storageCapacity = 700f;
         _all[(int)SurfaceBuildingType.City] = city;
 
+        // ================= ELECTRICAL =================
+        // The power grid (PowerGrid.cs). Two kinds of thing live here: what MAKES power, and what MOVES
+        // or BANKS it. Everything in this category may be built in quantity — a grid built out of
+        // relays you're allowed one of is not a grid.
+
+        // The relay. No output of its own; its entire job is REACH. Seven tiles of it, which is what
+        // turns two cities' separate grids into one grid, or carries a reactor's output to the mining
+        // country on the far side of a mountain.
+        var node = new SurfaceBuildingInfo(SurfaceBuildingType.PowerNode, SurfaceBuildingCategory.Electrical,
+            "Power Node",
+            "A relay pylon. Makes no power at all — it CARRIES it, seven tiles in every direction. Chain them and two isolated grids become one; lose the node in the middle of the chain and they are two again. The cheapest tile on this list and the one that decides the shape of everything else.",
+            S(0, 0), SurfaceIndexKind.None, 30, 20, 8f, new Color(0.30f, 0.75f, 1.00f));
+        node.powerRange = 7f;
+        node.allowMultiple = true;
+        _all[(int)SurfaceBuildingType.PowerNode] = node;
+
+        // The bank. Turns an intermittent grid into a grid you can actually build on.
+        var cap = new SurfaceBuildingInfo(SurfaceBuildingType.Capacitor, SurfaceBuildingCategory.Electrical,
+            "Capacitor Bank",
+            "Stores power for the grid it stands on. Surplus charges it; a shortfall drains it. This is what lets a grid running on sun and wind carry a load it cannot meet at every instant — without one, the moment demand passes generation everything on the grid browns out together.",
+            S(0, 0, 1, 0, 2, 0), SurfaceIndexKind.None, 60, 40, 12f, new Color(0.45f, 0.90f, 0.95f));
+        cap.powerStorage = 240f;
+        cap.allowMultiple = true;
+        _all[(int)SurfaceBuildingType.Capacitor] = cap;
+
+        // L-tromino, same corner piece as the mine — it's the same industry, really.
+        var comb = new SurfaceBuildingInfo(SurfaceBuildingType.CombustionPlant, SurfaceBuildingCategory.Electrical,
+            "Combustion Plant",
+            "Burns whatever is under it — coal, peat, timber. Primitive, dirty and cheap, and it will light a young colony's first grid on ground that could never support a reactor. Wants something worth burning: it reads the Mineral Index.",
+            S(0, 0, 0, 1, 1, 0), SurfaceIndexKind.Mineral, 40, 10, 10f, new Color(0.75f, 0.45f, 0.25f));
+        comb.energyPerSec = 1.0f;
+        comb.powerRange = 1.5f;
+        comb.allowMultiple = true;
+        _all[(int)SurfaceBuildingType.CombustionPlant] = comb;
+
+        // Domino.
+        var steam = new SurfaceBuildingInfo(SurfaceBuildingType.SteamTurbine, SurfaceBuildingCategory.Electrical,
+            "Steam Turbine",
+            "A boiler hall and turbine. Needs water to raise steam with, so it wants a river or a coast — check the Hydro Index. Solid, unglamorous, moderate power anywhere wet.",
+            S(0, 0, 0, 1), SurfaceIndexKind.Water, 70, 30, 16f, new Color(0.80f, 0.82f, 0.86f));
+        steam.energyPerSec = 1.8f;
+        steam.powerRange = 1.5f;
+        steam.allowMultiple = true;
+        _all[(int)SurfaceBuildingType.SteamTurbine] = steam;
+
+        // Z-tetromino.
+        var fission = new SurfaceBuildingInfo(SurfaceBuildingType.FissionReactor, SurfaceBuildingCategory.Electrical,
+            "Fission Reactor",
+            "A pressurised-water pile. Doesn't care what it sits on and doesn't care about the weather — the first generator that makes a grid genuinely reliable rather than merely present.",
+            S(0, 1, 1, 1, 1, 0, 2, 0), SurfaceIndexKind.None, 120, 80, 22f, new Color(0.55f, 0.95f, 0.45f));
+        fission.energyPerSec = 2.4f;
+        fission.powerRange = 1.5f;
+        fission.allowMultiple = true;
+        fission.requiredTech = "F1";
+        _all[(int)SurfaceBuildingType.FissionReactor] = fission;
+
+        // O-tetromino.
+        var fusion = new SurfaceBuildingInfo(SurfaceBuildingType.FusionReactor, SurfaceBuildingCategory.Electrical,
+            "Fusion Reactor",
+            "The real thing. Terrain-independent, weather-independent, and worth more than any two other plants on this list put together. Expensive enough that where you put it — and what you wire it to — matters.",
+            S(0, 0, 1, 0, 0, 1, 1, 1), SurfaceIndexKind.None, 200, 150, 30f, new Color(0.60f, 0.85f, 1.00f));
+        fusion.energyPerSec = 4.0f;
+        fusion.powerRange = 1.5f;
+        fusion.allowMultiple = true;
+        fusion.requiredTech = "F2";
+        _all[(int)SurfaceBuildingType.FusionReactor] = fusion;
+
+        // ---- Power: who makes it, who moves it, who eats it ----
+        //
+        // GENERATORS light their own footprint and the ring around it (range 1.5 reaches the diagonals
+        // too). That's deliberately a very short reach: a plant powers what's built AROUND it, and
+        // getting its output anywhere else is what Power Nodes are for.
+        //
+        // INVARIANT: everything with energyPerSec > 0 must also have powerRange > 0, or its output
+        // would have no grid to land in. Enforced below rather than left to whoever adds the next plant.
+        Project(SurfaceBuildingType.GeothermalPlant, 1.5f);
+        Project(SurfaceBuildingType.SolarArray, 1.5f);
+        Project(SurfaceBuildingType.WindFarm, 1.5f);
+        Project(SurfaceBuildingType.HydroPlant, 1.5f);
+
+        // The switchyard was already the "pack your plants tightly" building. Now it relays as well —
+        // modestly, three tiles, so it's a local tidy-up rather than a substitute for a node chain.
+        Project(SurfaceBuildingType.PowerDistribution, 3f);
+
+        // THE COLONY'S FOUNDING REACTOR, and the reason a settled world is never dark.
+        //
+        // The colony ship's reactor doesn't stop working when the ship lands, and the capitol built
+        // around it inherits it — so upgrading the base never puts the lights out.
+        //
+        // Its range is COLONY-SCALE (see ColonyReactorRange) rather than the ring a plant lights, and
+        // that number is load-bearing. Every other generator has to be BUILT, and every building —
+        // including the generators — needs a colony to build it. If a new colony's grid only covered its
+        // own four tiles, then every world would open with its industry sited out on the seams it was
+        // sited on FOR, all of it unpowered, and on a world with neither fuel nor water to hand there
+        // would be no first plant you could build to escape it. A colony arrives with its core lit, and
+        // reaching past that core is what the rest of this category is for.
+        Reactor(SurfaceBuildingType.ColonyShipBase, 0.8f, ColonyReactorRange);
+        Reactor(SurfaceBuildingType.PlanetCapitol, 1.2f, ColonyReactorRange);
+
+        // Cities carry their own generation and light their own ground, so an inhabited world grows a
+        // grid whether you planned one or not — and that grid is usually the one you end up hanging
+        // your industry off.
+        Project(SurfaceBuildingType.City, 1.5f);
+        Project(SurfaceBuildingType.Spaceport, 1.5f);
+
+        // ---- CONSUMERS: industry, and only industry ----
+        //
+        // Housing, farmland and the grown settlements draw NOTHING, which is a decision rather than an
+        // oversight. Power is a new axis on a game that already has colonies in it; hanging it on
+        // POPULATION would mean every world that existed before this system did — and every world whose
+        // people live somewhere other than next to a reactor — quietly loses most of its growth, with
+        // the cause invisible and the fix unavailable. It would also feed back on itself, since it's
+        // population that builds the plants that would fix it. The spec's own line is that city blocks
+        // still work as housing without power; they just don't do the extra.
+        //
+        // So the grid throttles what you BUILD, not who lives there. What that costs is a world where
+        // farms don't care about electricity, which is a small lie next to a colony that strangles
+        // itself. If housing should draw later, it wants a grace period and a notification, not a line
+        // added here.
+        //
+        // StorageDepot is left out for a different reason: its only output is storageCapacity, which
+        // PlayerEconomy sums straight off the building and PowerFactor never touches. Giving it a draw
+        // would be a tax with no mechanism behind it — an unpowered depot would still hold exactly as
+        // much, so the only thing the player could observe is the bill.
+        Draw(SurfaceBuildingType.SurfaceShipyard, 2.0f);
+        Draw(SurfaceBuildingType.Factory, 1.6f);
+        Draw(SurfaceBuildingType.Spaceport, 1.5f);
+        Draw(SurfaceBuildingType.Refinery, 1.4f);
+        Draw(SurfaceBuildingType.ResearchOutpost, 1.2f);
+        Draw(SurfaceBuildingType.Mine, 0.8f);
+
         // ---- Siting requirements ----
         // The floor below which a site is not merely poor but POINTLESS. Absolute, not graded on a
         // curve: a world genuinely may have no viable geothermal site, and the honest answer is to say
@@ -333,6 +518,18 @@ public static class SurfaceBuildingDatabase
             "Needs exposure — ridgelines, coasts, open steppe. Sheltered forest and canyon floors are still.");
         Require(SurfaceBuildingType.HydroPlant, 0.3f,
             "Needs flowing water and relief for it to fall through.");
+        Require(SurfaceBuildingType.CombustionPlant, 0.12f,
+            "Needs something under it worth burning. Bare ice and open ocean have no fuel in them.");
+        Require(SurfaceBuildingType.SteamTurbine, 0.15f,
+            "Needs water to raise steam with. A desert has nothing to boil.");
+
+        // The invariant from the power block above, enforced rather than trusted: a plant that made
+        // power but lit no ground would pour its output into a grid that doesn't exist, and the loss
+        // would be silent. Fail loudly at startup instead — this is a data error, not a game state.
+        foreach (var info in _all)
+            if (info != null && info.energyPerSec > 0f && info.powerRange <= 0f)
+                Debug.LogError($"SurfaceBuildingDatabase: {info.name} generates {info.energyPerSec}/s but has no " +
+                               $"powerRange, so its output has no grid to land in. Give it Project(...).");
     }
 
     static void Require(SurfaceBuildingType t, float minIndex, string why)
@@ -341,6 +538,29 @@ public static class SurfaceBuildingDatabase
         if (info == null) return;
         info.minIndex = minIndex;
         info.siteRequirement = why;
+    }
+
+    /// This structure lights the ground around it, out to `range` tiles.
+    static void Project(SurfaceBuildingType t, float range)
+    {
+        var info = _all[(int)t];
+        if (info != null) info.powerRange = range;
+    }
+
+    /// This structure carries its own plant: it generates, and lights its own ground.
+    static void Reactor(SurfaceBuildingType t, float energyPerSec, float range)
+    {
+        var info = _all[(int)t];
+        if (info == null) return;
+        info.energyPerSec = energyPerSec;
+        info.powerRange = range;
+    }
+
+    /// This structure needs `mw` of grid power to run at full output.
+    static void Draw(SurfaceBuildingType t, float mw)
+    {
+        var info = _all[(int)t];
+        if (info != null) info.powerDraw = mw;
     }
 
     // ---- Geometry ----

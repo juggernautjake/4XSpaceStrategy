@@ -280,12 +280,22 @@ Drag a window by its title bar; brings it to front on click.
 - **`Show(star)`** — star attributes + a **Show Habitable Zone** toggle (disabled if the star has none).
 
 ### PlanetViewWindow.cs  *(HUD "Surface" — the world you develop)*
-Three tabs over one shared surface grid:
+Seven tabs over one shared surface grid:
 - **Info** — name, type, size class, climate/weather prose, development density, survey state.
+- **Sites** — the points of interest on this world (what the retired detailed-map window used to hang).
 - **Build** — click a structure to pick it up; it rides the mouse as a loose ghost, then SNAPS to the
   grid over the map (green = fits, red = doesn't). **Right-click rotates** at any point; left-click
   commits; Esc drops it. Footprints are tetromino-like, so packing a dense city is a real puzzle.
+  Grouped by category — Government · Harvesting · Industry · Military · **Electrical Engineering**.
+- **Infrastructure** — everything standing here: tier, condition, siting, and its grid.
+- **Power** — the grid overlay (yellow = reach, blue = plants and relays, dull = dark) plus a balance per
+  grid and a list of what's in the dark. Diagnostic only; the plants are placed from **Build**, since a
+  second placement surface would mean a second copy of the ghost/confirm/rotation handling.
 - **Survey** — the index overlays, each with its own colour ramp, plus a live per-tile readout.
+- **Terrain** — the sandbox terrain editor. The one tab Dev Mode *gates* rather than opens.
+
+`TabAvailable(tab, out why)` is the single gate, and it answers **in words** — a greyed tab that won't
+say what's missing is a dead end. Milestones: visited → surveyed → deep-surveyed → claimed → settled.
 
 Drawing: overlays are ONE point-filtered texture the size of the grid (a texel per cell), not a
 GameObject per tile — a 40×20 world is 800 cells. Structures and the ghost are a few quads on top.
@@ -306,6 +316,29 @@ they cost nothing to save and survive a reload untouched (the same guarantee ter
 - **`CanPlace / Place / Demolish`** (60% refund), `Occupied`, `Density`.
 - **`EfficiencyAt`** — the average of the driving index across the footprint, **locked in at placement**.
   A mine on a seam pays forever; one on dead rock is a permanent mistake. `TickOutput` scales by it.
+- `requiredTech` — gates a structure on research (`TerraformProjectInfo.requiredTech`'s twin). Checked in
+  `CanPlace`; Fission needs F1, Fusion needs F2.
+- `allowMultiple` — opts out of `OneOfEachPerWorld`. Power infrastructure only: a grid you may build one
+  relay for is not a grid. `uniquePerWorld` still wins over it.
+
+### PowerGrid.cs
+**Electricity as a place rather than a number.** A grid is a **connected component of projectors**, where
+a projector is anything with `powerRange > 0` (a plant lights its footprint + the 8-ring; a Power Node is
+a 1×1 relay reaching 7; the capitol's founding reactor reaches `ColonyReactorRange`). Two projectors are
+one grid **iff the ground they light overlaps** — that single rule is the whole system.
+- **Derived, never maintained.** No merge code, no split code: `Compute` union-finds every grid on a world
+  from the buildings standing on it, memoized per (world, frame). Chain nodes between two cities and they
+  *were never two grids*; lose the middle node and they are two again. Every mutation calls `Invalidate()`.
+- `PowerFactor(b, p)` — `1` if it draws nothing, `UnpoweredFactor` (0.35) if no grid reaches it, else
+  `Lerp(0.35, 1, served)`. `TickOutput` ticks the grid **first**, then scales every output by this.
+- `served` vs `SteadyServed` — `Tick` runs on ColonyManager's ~1s step, the UI reads every frame, so
+  `served` is **derived from state** rather than left as a tick artifact. Otherwise 59 frames in 60 would
+  show a number computed without the capacitors in it.
+- `Dead` — a grid with no plant on it. Relays with nothing behind them; distinct from having no grid.
+- Capacitor charge lives on `PlacedBuilding.stored`, so merging grids needs no reconciliation.
+- **Consumers are industry only** (mine/factory/refinery/lab/spaceport/shipyard). Housing and farms draw
+  nothing, deliberately — see the comment in `SurfaceBuilding.cs`; hanging power on population would
+  strangle every pre-existing colony and feed back on the growth that would fix it.
 
 ### InspectorWindow.cs + InspectorBodyTabs / InspectorUnitTabs / InspectorFacilityTabs / InspectorStarTabs
 **One tabbed window for everything you can click on.** `partial class InspectorWindow`.
