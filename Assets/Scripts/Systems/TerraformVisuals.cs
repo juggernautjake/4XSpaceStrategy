@@ -123,6 +123,7 @@ public static class TerraformVisuals
     {
         if (b == null) return;
         b.naturalParams = b.terrainParams;
+        b.naturalSeed = b.terrainSeed;   // the seed the world was generated with, for "Reset to default"
         b.lastTerraformRenderHab = b.habitability;
     }
 }

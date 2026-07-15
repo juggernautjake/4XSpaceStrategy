@@ -15,6 +15,11 @@ public class CelestialBody
     // this same seed/frequency/params, so the two views ALWAYS match (including live edits).
     public float terrainSeed = 0f;
 
+    // The terrain seed the world was GENERATED with, captured once at generation and never touched
+    // after. terrainSeed itself can be rerolled live in the Dev Mode terrain sandbox (Randomize), so
+    // this is the only record of the world you started with — it's what "Reset to default" restores.
+    public float naturalSeed = 0f;
+
     // The climate nature gave this world, before any terraforming moved it. Terraforming lerps
     // terrainParams from HERE toward what the species would build for itself (TerraformVisuals), so this
     // has to be the untouched original — once terrainParams starts moving, the origin is gone otherwise.

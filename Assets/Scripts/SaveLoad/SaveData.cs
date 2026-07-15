@@ -100,6 +100,11 @@ public class BodyDTO
     public float terrainSeed;
     public float continentFrequency;
 
+    // The seed the world was generated with. Persisted so "Reset to default" can restore it after the
+    // live seed has been rerolled in the Dev sandbox. Zero means a save written before this existed —
+    // the loader falls back to terrainSeed there.
+    public float naturalSeed;
+
     // The world's UNTOUCHED climate. Must persist: terraforming lerps terrainParams away from this, so
     // re-deriving it on load would capture the already-terraformed values as "natural" and freeze all
     // further progress. Zero means a save written before this existed — see the loader.

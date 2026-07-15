@@ -97,6 +97,7 @@ public static class GameStateSerializer
             habitabilityLocked = b.habitabilityLocked,
             surfaceSize = b.surfaceSize,
             terrainSeed = b.terrainSeed,
+            naturalSeed = b.naturalSeed,
             continentFrequency = b.continentFrequency,
             tScale = b.terrainParams.scale, tElev = b.terrainParams.elevation,
             tMoist = b.terrainParams.moisture, tHeat = b.terrainParams.heat, tRidge = b.terrainParams.ridge,
@@ -330,6 +331,11 @@ public static class GameStateSerializer
                 ridge = dto.nRidge <= 0f ? 1f : dto.nRidge
             }
             : b.terrainParams;
+
+        // The generation seed "Reset to default" restores. A save written before this existed has 0
+        // here; the only honest answer is the current seed — that's the world it recorded, and there's
+        // no earlier one to recover.
+        b.naturalSeed = dto.naturalSeed > 0f ? dto.naturalSeed : b.terrainSeed;
         b.lastTerraformRenderHab = b.habitability;   // don't regenerate on the first tick after loading
 
         b.surface = PlanetTerrainGenerator.GenerateSurface(b);
