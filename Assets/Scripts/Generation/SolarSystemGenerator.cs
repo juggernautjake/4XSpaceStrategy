@@ -44,6 +44,7 @@ public class SolarSystemGenerator : MonoBehaviour
             body.distanceFromStar = currentRadius;
             body.orbitRadius = currentRadius;
             BiasHeat(body, currentRadius, currentStar);                       // climate follows distance
+            TerraformVisuals.CaptureNatural(body);   // re-capture: BiasHeat is the world's real natural climate, not the pre-bias variance SeedTerrain rolled
             body.surface = PlanetTerrainGenerator.GenerateSurface(body);      // regenerate with correct heat
             body.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
             body.spinSpeed = OrbitalMechanics.Spin(body, Random.Range(0.7f, 1.3f));
@@ -70,6 +71,7 @@ public class SolarSystemGenerator : MonoBehaviour
                 moon.distanceFromStar = body.distanceFromStar;   // shares the planet's solar distance
                 SeedTerrain(moon);
                 BiasHeat(moon, moon.distanceFromStar, currentStar);           // same climate band as its planet
+                TerraformVisuals.CaptureNatural(moon);   // re-capture the post-bias climate as this moon's natural state
                 moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
                 OreGenerator.Populate(moon);
                 ResourceGenerator.GenerateResources(moon);
