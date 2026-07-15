@@ -470,7 +470,13 @@ public class CameraController : MonoBehaviour
 
         // Following a body means the camera is pinned to IT — LateUpdate re-centres on it every frame,
         // so any correction here would be overwritten and just fight the follow.
-        bool anchor = !following && ZoomToCursor && GroundPoint(Input.mousePosition, before, out Vector3 groundBefore);
+        //
+        // groundBefore is declared and initialised OUTSIDE the condition rather than as an inline `out`.
+        // The && short-circuits, so when `following` is true GroundPoint never runs and never assigns it
+        // — and the compiler is right to refuse: it can't know that `anchor` being true implies the call
+        // happened. That correlation is only in my head.
+        Vector3 groundBefore = Vector3.zero;
+        bool anchor = !following && ZoomToCursor && GroundPoint(Input.mousePosition, before, out groundBefore);
 
         pos.y = after;
         transform.position = pos;
