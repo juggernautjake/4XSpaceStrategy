@@ -235,7 +235,7 @@ public class CameraController : MonoBehaviour
     }
 
     // Snap onto an object and zoom until it FILLS the view — a small moon gets a close look, a giant
-    // gets a wider one, automatically.
+    // gets a wider one, automatically. See FillHeight for how close, and why.
     //
     // `objectSizeHint` is now only a fallback. It used to be the whole calculation
     //     targetHeight = 3.5 + objectSize * 0.45   (clamped 3.5 .. 22)
@@ -254,18 +254,41 @@ public class CameraController : MonoBehaviour
         if (target != null) FocusOn(target.position);
     }
 
-    /// The height at which an object of this radius fills most of the view.
-    ///
-    /// Solve it rather than guess: at distance d an object of radius R subtends asin(R/d), so to fill
-    /// ~80% of the vertical FOV we need d = R / sin(0.8 * fov/2). The camera sits at Pitch above the
-    /// plane, so h = d * sin(Pitch).
+    // ============================================================================================
+    // HOW CLOSE "FOCUS ON THIS" GETS — expressed as a multiple of the object's own radius.
+    //
+    // The whole geometry, once, so these numbers can be read rather than guessed at:
+    //   camera distance    d = h / sin(Pitch)          (Pitch = 55, so d = 1.221 * h)
+    //   angular size       a = 2 * asin(R / d)
+    //   the SURFACE is at  d = R,  i.e.  h = R * sin(55) = 0.819 * R   <- a hard wall
+    //
+    //   h = 2.01R -> 48 deg -> fills  81% of the 60 deg FOV   (what this used to do)
+    //   h = 1.30R -> 78 deg -> fills 130%                     (overflows the screen)
+    //   h = 1.00R -> 110 deg -> fills 183%
+    //   h = 0.82R -> the camera is touching the surface
+    //
+    // 2.01R was the old "fill 80% of the FOV" target, and 80% of the screen is exactly the framing you
+    // want to start zooming in FROM, not to land on. Worse, it made clicking a body you were already
+    // close to PULL THE CAMERA BACK to it — you'd zoom in by hand, click the planet to look at it, and
+    // get yanked away. Landing above 1.0R means every focus overflows the view: the body is the screen.
+    //
+    // Small things get proportionally closer still. A moon at 1.0R and a gas giant at 1.3R both overfill
+    // the view, but the moon lets you right down onto it — which is what "even more zoomed in for
+    // smaller planets and moons and ships" means, and it can't come from a single multiplier, because a
+    // single multiplier IS proportional and would treat them identically.
+    // ============================================================================================
+
+    const float FocusKSmall = 1.00f;   // R <= FocusRSmall: nearly on the surface
+    const float FocusKLarge = 1.30f;   // R >= FocusRLarge: still overflows the screen
+    const float FocusRSmall = 0.2f;    // a ship token / small moon
+    const float FocusRLarge = 1.3f;    // a gas giant
+
+    /// The height at which an object of this radius FILLS the view (and then some).
     public float FillHeight(float radius)
     {
-        if (cam == null) cam = GetComponent<Camera>();
-        float fov = cam != null ? cam.fieldOfView : 60f;
-        float halfAngle = fov * 0.5f * 0.8f * Mathf.Deg2Rad;
-        float d = radius / Mathf.Max(0.05f, Mathf.Sin(halfAngle));
-        return d * Mathf.Sin(Pitch * Mathf.Deg2Rad);
+        float k = Mathf.Lerp(FocusKSmall, FocusKLarge,
+                             Mathf.InverseLerp(FocusRSmall, FocusRLarge, radius));
+        return radius * k;
     }
 
     /// An object's actual radius in world units. Bounds are authoritative (they account for children
@@ -383,7 +406,8 @@ public class CameraController : MonoBehaviour
         if (followTarget != null)
         {
             float r = WorldRadius(followTarget);
-            sb.AppendLine($"                radius {r:F3}  fillHeight {FillHeight(r):F2}  -> floor is fill*{SurfaceFrac} = {FillHeight(r) * SurfaceFrac:F2}");
+            sb.AppendLine($"                radius {r:F3}   focus lands at {FillHeight(r):F3} ({FillHeight(r) / Mathf.Max(0.0001f, r):F2}x radius)");
+            sb.AppendLine($"                surface at {r * 0.819f:F3}   floor {r * SurfaceK:F3} ({SurfaceK}x radius)");
         }
 
         sb.AppendLine($"  GALAXY        radius {gr:F1}   frames entirely at height {frame:F1}");
@@ -403,25 +427,23 @@ public class CameraController : MonoBehaviour
     {
         if (followTarget == null) return Mathf.Max(minHeight, freeLookMinHeight);
 
-        // Stop just off the SURFACE of the thing you're looking at — worked from the geometry, not
-        // picked.
+        // Stop just off the SURFACE of the thing you're looking at. Closer than the surface is INSIDE
+        // it, where there is nothing to see but backfaces and the near plane — this is the hard limit on
+        // zooming in on a body, and it comes from geometry, not taste.
         //
-        // The camera sits at height h and looks down at Pitch, so its distance to the target is
-        // d = h / sin(Pitch). To stay outside a body of radius R we need d > R, i.e. h > R * sin(Pitch).
-        // FillHeight returns h = 2.01 * R (it solves for the object subtending 80% of the FOV), so the
-        // surface sits at R * sin(55) = 0.82R, which is 0.41 * FillHeight.
-        //
-        // This is the hard limit on zooming in on an object: closer than the surface is INSIDE it, where
-        // there is nothing to see but backfaces and the near plane. A previous pass set this to
-        // fill * 0.2 to "get closer" — that is d = 0.49R, half way to the core, and it is why zooming
-        // in on a planet stopped showing you the planet.
-        float fill = FillHeight(WorldRadius(followTarget));
-        return Mathf.Max(minHeight, fill * SurfaceFrac);
+        // Derived from the RADIUS, not from FillHeight. It used to be `fill * 0.44`, which only worked
+        // because fill happened to be 2.01R at the time (0.44 * 2.01 = 0.88). The moment FillHeight's
+        // framing changed, that fraction silently meant something else — at fill = 1.3R it would put the
+        // floor at 0.57R, well inside the planet. A limit defined as a fraction of a framing choice
+        // isn't a limit, it's a coincidence waiting to be broken.
+        float r = WorldRadius(followTarget);
+        return Mathf.Max(minHeight, r * SurfaceK);
     }
 
-    /// Fraction of FillHeight at which the camera grazes the target's surface — see ZoomFloor. Slightly
-    /// above the true 0.41 so there's a hair of clearance rather than a plane through the crust.
-    const float SurfaceFrac = 0.44f;
+    /// Height, as a multiple of the target's radius, at which the camera grazes its surface.
+    /// The surface is exactly sin(Pitch) = 0.819; the extra is clearance so it's a near miss rather than
+    /// a plane through the crust.
+    const float SurfaceK = 0.90f;
 
     private void SmoothHeightMovement()
     {
