@@ -179,6 +179,7 @@ public class PlanetViewWindow : MonoBehaviour
     {
         body = b;
         selected = null; rotation = 0;
+        CancelPlace();          // a confirm from the last world means nothing on this one
         lastSig = null;
         // Open showing the WHOLE world, centred — the zoom of the last planet you looked at means
         // nothing on this one.
@@ -418,6 +419,10 @@ public class PlanetViewWindow : MonoBehaviour
         PollMapPan();
         PollClickAway();
 
+        // The confirm panel is anchored to a map cell, so it has to be re-placed whenever the map moves
+        // under it — which is every frame you're zooming or panning.
+        if (pendingType.HasValue) RefreshConfirmPanel();
+
         // Written straight rather than through LiveSet: it's one short string on one label with no
         // layout group above it, and it only changes while you're actively zooming.
         if (zoomLabel != null)
@@ -440,7 +445,9 @@ public class PlanetViewWindow : MonoBehaviour
         // the map so it works the moment you pick a building up, wherever the cursor happens to be.
         // R is offered alongside right-click because right-click is also the world's "send fleet" verb,
         // so a keyboard rotate is never ambiguous.
-        if (tab == Tab.Build && selected.HasValue &&
+        // Not while a confirm is up: the panel is asking about a specific footprint at a specific
+        // rotation, and rotating underneath the question would make the answer mean something else.
+        if (tab == Tab.Build && selected.HasValue && !pendingType.HasValue &&
             (Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.R)))
         {
             rotation = (rotation + 1) % 4;
@@ -448,10 +455,14 @@ public class PlanetViewWindow : MonoBehaviour
             SimpleAudio.Instance?.PlayTick();
         }
 
+        // Escape backs out of the confirm first, and only then drops the held piece — one step at a
+        // time, so cancelling a misclick doesn't also make you re-pick the building.
+        if (pendingType.HasValue && Input.GetKeyDown(KeyCode.Escape)) { CancelPlace(); return; }
+
         // Escape drops the held piece.
         if (tab == Tab.Build && selected.HasValue && Input.GetKeyDown(KeyCode.Escape))
         {
-            selected = null; lastSig = null; ClearGhost();
+            selected = null; CancelPlace(); lastSig = null; ClearGhost();
         }
 
         if (tab == Tab.Build) DrawGhost();
@@ -464,8 +475,8 @@ public class PlanetViewWindow : MonoBehaviour
         {
             case Tab.Build:
                 if (!selected.HasValue)
-                    statusText.text = "<color=#9FB4C8>Pick a structure on the right, then hover the map to place it. Right-click rotates. Esc cancels." +
-                                      "  ·  Scroll to zoom · drag the map to pan.</color>";
+                    statusText.text = "<color=#9FB4C8>Pick a structure on the right, then click the map to site it — you'll be asked to confirm. " +
+                                      "Right-click rotates. Esc cancels.  ·  Scroll to zoom · drag the map to pan.</color>";
                 else
                 {
                     var info = SurfaceBuildingDatabase.Get(selected.Value);
@@ -550,7 +561,7 @@ public class PlanetViewWindow : MonoBehaviour
             var btn = UIFactory.Button(tabStrip, t.ToString(), () =>
             {
                 tab = captured;
-                if (captured != Tab.Build) selected = null;
+                if (captured != Tab.Build) { selected = null; CancelPlace(); }
                 lastSig = null;
             }, 22);
             var le = btn.GetComponent<LayoutElement>();
@@ -745,6 +756,7 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 selected = (selected.HasValue && selected.Value == t) ? (SurfaceBuildingType?)null : t;
                 rotation = 0;
+                CancelPlace();   // picking a different structure abandons the pending question
                 lastSig = null;
             }, 24);
             live.Button(btn, () =>
@@ -1115,10 +1127,188 @@ public class PlanetViewWindow : MonoBehaviour
         {
             var info = p.Info;
             // FULLY OPAQUE and pushed to full saturation. The terrain under it is deliberately pastel
-            // (see Pastel), so a structure is the one vivid thing on the map — what you built should
+            // (see MapTone), so a structure is the one vivid thing on the map — what you built should
             // never be something you have to hunt for.
             var c = Vivid(info.color);
-            foreach (var cell in SurfaceBuildingDatabase.Footprint(p)) AddCellQuad(pieceLayer, cell.x, cell.y, c);
+            var cells = SurfaceBuildingDatabase.Footprint(p);
+            foreach (var cell in cells) AddCellQuad(pieceLayer, cell.x, cell.y, c);
+            OutlineFootprint(pieceLayer, cells);
+        }
+    }
+
+    // ---- Confirm before building ----
+    //
+    // The panel is a child of the VIEWPORT and anchored to the map cell, so it sits next to the thing it
+    // is asking about. A dialog in the middle of the screen would ask "place the Mine?" while covering
+    // the ground you were looking at to decide.
+    RectTransform confirmPanel;
+    TMP_Text confirmText;
+    Vector2Int pendingCell = new Vector2Int(-1, -1);
+    int pendingRotation;
+    SurfaceBuildingType? pendingType;
+
+    void AskPlace(int x, int y)
+    {
+        pendingCell = new Vector2Int(x, y);
+        pendingRotation = rotation;
+        pendingType = selected;
+        BuildConfirmPanel();
+        RefreshConfirmPanel();
+    }
+
+    void CancelPlace()
+    {
+        pendingType = null;
+        pendingCell = new Vector2Int(-1, -1);
+        if (confirmPanel != null) confirmPanel.gameObject.SetActive(false);
+    }
+
+    void DoPlace()
+    {
+        if (!pendingType.HasValue) { CancelPlace(); return; }
+
+        // Re-check rather than trust the check from when the panel opened. Between then and now the
+        // economy has ticked, another world may have spent the metal, and organic growth may have put a
+        // settlement on the very cell being asked about.
+        if (SurfaceBuildManager.CanPlace(body, pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation, out _) &&
+            SurfaceBuildManager.Place(body, pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation))
+        {
+            lastSig = null;   // the built list and the map both changed
+            SimpleAudio.Instance?.PlayComplete();
+        }
+        else SimpleAudio.Instance?.PlayTick();
+
+        CancelPlace();
+    }
+
+    void BuildConfirmPanel()
+    {
+        if (confirmPanel != null) { confirmPanel.gameObject.SetActive(true); confirmPanel.SetAsLastSibling(); return; }
+
+        confirmPanel = UIFactory.NewUI(gridHolder, "ConfirmPlace").GetComponent<RectTransform>();
+        confirmPanel.sizeDelta = new Vector2(212, 62);
+        var bg = confirmPanel.gameObject.AddComponent<Image>();
+        bg.color = new Color(0.05f, 0.09f, 0.14f, 0.97f);
+        var outline = confirmPanel.gameObject.AddComponent<Outline>();
+        outline.effectColor = UITheme.Accent;
+        outline.effectDistance = new Vector2(1.2f, -1.2f);
+
+        var v = confirmPanel.gameObject.AddComponent<VerticalLayoutGroup>();
+        v.padding = new RectOffset(6, 6, 5, 5); v.spacing = 4;
+        v.childControlWidth = true; v.childControlHeight = true;
+        v.childForceExpandWidth = true; v.childForceExpandHeight = false;
+
+        confirmText = UIFactory.Text(confirmPanel, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
+        var tle = confirmText.gameObject.AddComponent<LayoutElement>();
+        tle.preferredHeight = 30f;
+
+        var row = UIFactory.NewUI(confirmPanel, "Row");
+        UIFactory.AddLayout(row, 22);
+        var h = row.AddComponent<HorizontalLayoutGroup>();
+        h.spacing = 4;
+        h.childControlWidth = true; h.childControlHeight = true;
+        h.childForceExpandWidth = true; h.childForceExpandHeight = true;
+
+        UIFactory.Button(row.transform, "Build", DoPlace, 20);
+        UIFactory.Button(row.transform, "Cancel", CancelPlace, 20);
+
+        confirmPanel.SetAsLastSibling();   // above the zoom bar, which is also a child of the viewport
+    }
+
+    void RefreshConfirmPanel()
+    {
+        if (confirmPanel == null || !pendingType.HasValue || body?.surface == null) return;
+
+        var info = SurfaceBuildingDatabase.Get(pendingType.Value);
+        int m = ColonyManager.DiscCost(info.costMetal), e = ColonyManager.DiscCost(info.costEnergy);
+        string hex = ColorUtility.ToHtmlStringRGB(Vivid(info.color));
+        // "•" and not "■": the Geometric Shapes block isn't in the LiberationSans atlas, so a square
+        // renders as a tofu box. This is the same swatch glyph the rest of the UI settled on.
+        confirmText.text = $"<color=#{hex}>•</color> Build <b>{info.name}</b> here?\n" +
+                           $"<size=10><color=#9FB4C8>{m} metal · {e} energy · ({pendingCell.x},{pendingCell.y})</color></size>";
+
+        // Follow the cell. Anchored in the MAP's normalised space so it tracks through zoom and pan
+        // rather than being pinned to a screen position the map has since slid out from under.
+        int w = body.surface.width, hgt = body.surface.height;
+        Vector2 cellCentre = new Vector2((pendingCell.x + 0.5f) / w, (pendingCell.y + 0.5f) / hgt);
+        Vector2 inMap = new Vector2((cellCentre.x - 0.5f) * mapRT.rect.width,
+                                    (cellCentre.y - 0.5f) * mapRT.rect.height);
+        Vector2 pos = inMap + mapPan + new Vector2(0f, 46f);   // just above the footprint
+
+        // Keep it inside the viewport: a confirm you have to pan to find is worse than no confirm.
+        var vp = gridHolder.rect;
+        float hw = confirmPanel.sizeDelta.x * 0.5f, hh = confirmPanel.sizeDelta.y * 0.5f;
+        pos.x = Mathf.Clamp(pos.x, vp.xMin + hw, vp.xMax - hw);
+        pos.y = Mathf.Clamp(pos.y, vp.yMin + hh, vp.yMax - hh);
+
+        confirmPanel.anchorMin = confirmPanel.anchorMax = new Vector2(0.5f, 0.5f);
+        confirmPanel.pivot = new Vector2(0.5f, 0.5f);
+        confirmPanel.anchoredPosition = pos;
+    }
+
+    // A thin black outline around a placed structure's PERIMETER.
+    //
+    // The perimeter, not each cell. Outlining every cell would draw a black grid THROUGH a multi-cell
+    // building and read as several small structures rather than one large one — the opposite of what an
+    // outline is for. So an edge is drawn only where the neighbouring cell isn't part of this same
+    // building.
+    //
+    // Thickness is in PIXELS, not in cells, so it stays a hairline at every zoom. In cells it would
+    // vanish when zoomed out and become a fat black border when zoomed in.
+    void OutlineFootprint(RectTransform layer, List<Vector2Int> cells)
+    {
+        if (cells == null || cells.Count == 0) return;
+
+        var set = new HashSet<Vector2Int>(cells);
+        foreach (var cell in cells)
+        {
+            if (!set.Contains(cell + Vector2Int.up))    AddEdgeQuad(layer, cell.x, cell.y, 0);
+            if (!set.Contains(cell + Vector2Int.right)) AddEdgeQuad(layer, cell.x, cell.y, 1);
+            if (!set.Contains(cell + Vector2Int.down))  AddEdgeQuad(layer, cell.x, cell.y, 2);
+            if (!set.Contains(cell + Vector2Int.left))  AddEdgeQuad(layer, cell.x, cell.y, 3);
+        }
+    }
+
+    /// Outline thickness, in screen pixels. Thin, but never sub-pixel — below 1 it starts dropping out
+    /// entirely on some edges as the rasteriser rounds.
+    const float OutlinePx = 1.5f;
+
+    /// One edge of one cell. dir: 0=top, 1=right, 2=bottom, 3=left. Drawn INSIDE the cell, so the
+    /// outline never encroaches on the neighbouring tile's ground.
+    void AddEdgeQuad(RectTransform layer, int x, int y, int dir)
+    {
+        if (body?.surface == null) return;
+        int w = body.surface.width, h = body.surface.height;
+
+        float l = x / (float)w, r = (x + 1) / (float)w;
+        float b = y / (float)h, t = (y + 1) / (float)h;
+
+        var q = UIFactory.Panel(layer, "o", Color.black);
+        q.raycastTarget = false;
+        var rt = q.rectTransform;
+
+        // The ANCHORS collapse onto the edge; the OFFSETS then give it thickness. Both halves matter:
+        // collapsing the anchors is what makes it an edge rather than the whole cell, and expressing the
+        // thickness as a pixel offset is what keeps it a hairline at every zoom (an anchor-space
+        // thickness would scale with the map and become a fat black border zoomed in).
+        switch (dir)
+        {
+            case 0:  // top
+                rt.anchorMin = new Vector2(l, t); rt.anchorMax = new Vector2(r, t);
+                rt.offsetMin = new Vector2(0f, -OutlinePx); rt.offsetMax = Vector2.zero;
+                break;
+            case 1:  // right
+                rt.anchorMin = new Vector2(r, b); rt.anchorMax = new Vector2(r, t);
+                rt.offsetMin = new Vector2(-OutlinePx, 0f); rt.offsetMax = Vector2.zero;
+                break;
+            case 2:  // bottom
+                rt.anchorMin = new Vector2(l, b); rt.anchorMax = new Vector2(r, b);
+                rt.offsetMin = Vector2.zero; rt.offsetMax = new Vector2(0f, OutlinePx);
+                break;
+            default: // left
+                rt.anchorMin = new Vector2(l, b); rt.anchorMax = new Vector2(l, t);
+                rt.offsetMin = Vector2.zero; rt.offsetMax = new Vector2(OutlinePx, 0f);
+                break;
         }
     }
 
@@ -1222,11 +1412,27 @@ public class PlanetViewWindow : MonoBehaviour
 
         var info = SurfaceBuildingDatabase.Get(selected.Value);
 
+        // A confirm is up: freeze the ghost on the footprint being asked about. Letting it keep chasing
+        // the cursor would show the piece in one place while the panel asks about another.
+        if (pendingType.HasValue)
+        {
+            var pc = Vivid(SurfaceBuildingDatabase.Get(pendingType.Value).color);
+            foreach (var cell in SurfaceBuildingDatabase.Footprint(pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation))
+                AddCellQuad(ghostLayer, cell.x, cell.y, pc);
+            return;
+        }
+
+        // The ghost carries the structure's FULL colour — Vivid, exactly as the placed building will be
+        // drawn. It used to be a 62%-alpha wash of it, which made every structure look like a different,
+        // paler thing while you were choosing where to put it than it did once it landed. You should be
+        // deciding with the real colour in front of you.
+        //
+        // It's still distinguishable from a placed structure, just not by hue: a ghost has no black
+        // outline, and a placed one does.
         if (hoverCell.x >= 0)
         {
-            // Snapped: green when it fits, red when it doesn't, so validity is obvious before you click.
-            Color c = hoverValid ? new Color(info.color.r, info.color.g, info.color.b, 0.62f)
-                                 : new Color(1f, 0.25f, 0.2f, 0.5f);
+            // Vivid when it fits, red when it doesn't, so validity is obvious before you click.
+            Color c = hoverValid ? Vivid(info.color) : new Color(1f, 0.25f, 0.2f, 0.85f);
             foreach (var cell in SurfaceBuildingDatabase.Footprint(selected.Value, hoverCell.x, hoverCell.y, rotation))
                 AddCellQuad(ghostLayer, cell.x, cell.y, c);
         }
@@ -1237,7 +1443,7 @@ public class PlanetViewWindow : MonoBehaviour
                     ghostLayer, Input.mousePosition, null, out Vector2 lp)) return;
             float cw = mapRT.rect.width / body.surface.width;
             float ch = mapRT.rect.height / body.surface.height;
-            var c = new Color(info.color.r, info.color.g, info.color.b, 0.45f);
+            var c = Vivid(info.color);
             foreach (var cell in SurfaceBuildingDatabase.CellsOf(selected.Value, rotation))
             {
                 var q = UIFactory.Panel(ghostLayer, "g", c);
@@ -1433,12 +1639,13 @@ public class PlanetViewWindow : MonoBehaviour
         // you grabbed it.
         if (panDragged) return;
 
-        // Holding a piece? The click places it.
+        // Holding a piece? The click ASKS to place it — it doesn't place it. Building costs resources
+        // and permanently occupies ground on a grid where siting decides yield, so it's not something to
+        // do on a stray click.
         if (tab == Tab.Build && selected.HasValue)
         {
             if (!SurfaceBuildManager.CanPlace(body, selected.Value, x, y, rotation, out _)) return;
-            if (SurfaceBuildManager.Place(body, selected.Value, x, y, rotation))
-                lastSig = null;   // the built list and the map both changed
+            AskPlace(x, y);
             return;
         }
 
