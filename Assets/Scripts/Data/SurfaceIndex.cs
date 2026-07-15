@@ -356,7 +356,12 @@ public static class SurfaceIndex
             case SurfaceIndexKind.Mineral: c = Color.Lerp(new Color(0.20f, 0.13f, 0.07f), new Color(0.78f, 0.52f, 0.24f), t); break;
             case SurfaceIndexKind.Heat: c = Color.Lerp(new Color(0.85f, 0.45f, 0.10f), new Color(1.00f, 0.10f, 0.05f), t); break;
             case SurfaceIndexKind.Fertile: c = Color.Lerp(new Color(0.05f, 0.22f, 0.08f), new Color(0.30f, 1.00f, 0.25f), t); break;
-            case SurfaceIndexKind.Wind: c = Color.Lerp(new Color(0.30f, 0.42f, 0.52f), new Color(0.75f, 0.98f, 1.00f), t); break;
+            // PURPLE. It was a slate-to-whitish blue, which failed twice over: a pale desaturated blue
+            // barely separates from the pastel terrain underneath it, and it was near enough to Water's
+            // ramp that the two overlays read as the same map. Purple is the one hue nothing else here
+            // uses — Mineral is brown, Heat orange-red, Fertile green, Solar yellow, Water blue — so a
+            // glance at the colour is enough to know which overlay you're looking at.
+            case SurfaceIndexKind.Wind: c = Color.Lerp(new Color(0.16f, 0.05f, 0.28f), new Color(0.80f, 0.36f, 1.00f), t); break;
             case SurfaceIndexKind.Solar: c = Color.Lerp(new Color(0.40f, 0.34f, 0.10f), new Color(1.00f, 0.95f, 0.40f), t); break;
             case SurfaceIndexKind.Water: c = Color.Lerp(new Color(0.08f, 0.18f, 0.35f), new Color(0.35f, 0.75f, 1.00f), t); break;
             default: return new Color(0, 0, 0, 0);
