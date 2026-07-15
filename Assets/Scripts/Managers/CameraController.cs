@@ -284,7 +284,35 @@ public class CameraController : MonoBehaviour
         followTarget = target;
         following = follow;
         targetHeight = Mathf.Clamp(FillHeight(WorldRadius(target, objectSizeHint)), minHeight, maxHeight);
-        if (target != null) FocusOn(target.position);
+        if (target == null) return;
+
+        FocusOn(target.position);
+
+        // Aim the EASE at the target as well, not just the snap.
+        //
+        // FocusOn centres the target for the height the camera is at RIGHT NOW. The height then eases to
+        // targetHeight while x/z sit still — and the point the camera looks at is a function of its
+        // height, so the target slides off centre as the zoom comes in. It ends up framed at the size you
+        // asked for and no longer under the middle of the screen.
+        //
+        // Following hid this: LateUpdate re-centres a followed body every frame, so it's corrected
+        // continuously. Stars pass follow=false, nothing re-centred them, and clicking a star zoomed
+        // toward where it USED to be — which is the "doesn't zoom in on the star correctly" bug.
+        //
+        // Same anchor the cursor zoom uses (see HandleHeightChange), aimed at the screen centre instead
+        // of the pointer: solve where the camera must be at targetHeight for the target to be centred,
+        // and let the one easing carry x, y and z there together.
+        if (!follow) AnchorOnCentre(target.position, targetHeight);
+    }
+
+    /// Point the ease at `worldPos` being centred once the camera reaches `atHeight`.
+    void AnchorOnCentre(Vector3 worldPos, float atHeight)
+    {
+        Vector3 f = transform.forward;
+        if (f.y > -0.0001f) return;              // not looking down: nothing to solve
+        float kx = f.x / f.y, kz = f.z / f.y;    // same xz/y slope the cursor anchor uses
+        anchorXZ = new Vector2(worldPos.x + atHeight * kx, worldPos.z + atHeight * kz);
+        haveAnchor = true;
     }
 
     // ============================================================================================

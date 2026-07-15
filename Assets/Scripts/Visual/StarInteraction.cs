@@ -8,6 +8,23 @@ public class StarInteraction : MonoBehaviour
     public StarData star;
     public StarSystemData system;
 
+    /// The rendered transform for a StarData, or null if it isn't on screen.
+    ///
+    /// StarData is pure data and holds no back-reference to its visual — unlike CelestialBody, which has
+    /// `visualObject`. This component is the only thing that knows the mapping, so the lookup lives here
+    /// rather than being re-derived by every caller that wants to point a camera at a star.
+    ///
+    /// A scan rather than a registry because `star` is assigned AFTER AddComponent (see
+    /// SystemVisualizer.CreateStarVisual), so an Awake-time registration would file every star under
+    /// null. It only runs on a click, not per frame.
+    public static Transform TransformOf(StarData s)
+    {
+        if (s == null) return null;
+        foreach (var si in FindObjectsByType<StarInteraction>(FindObjectsSortMode.None))
+            if (si.star == s) return si.transform;
+        return null;
+    }
+
     void OnMouseDown()
     {
         if (UnityEngine.EventSystems.EventSystem.current != null &&
@@ -27,8 +44,12 @@ public class StarInteraction : MonoBehaviour
         // The tabbed Inspector is the primary readout for anything you click, stars included.
         InspectorWindow.Instance?.Inspect(InspectorTarget.Of(star, system), resetTrail: true);
 
+        // AutoFollow, like a planet click — not IsFollowing. Passing the CURRENT follow state meant
+        // clicking a star only followed it if you already happened to be following something else, which
+        // is not a rule anybody could have guessed. A star sits at its system's pivot and doesn't move,
+        // so following it costs nothing and keeps it centred.
         if (CameraController.Instance != null)
-            CameraController.Instance.FocusAndZoom(transform, transform.lossyScale.x, CameraController.Instance.IsFollowing);
+            CameraController.Instance.FocusAndZoom(transform, transform.lossyScale.x, CameraController.AutoFollow);
         ObjectLabelManager.Instance?.ShowForStar(transform, transform.lossyScale.x * 0.5f, Name(), Category());
     }
 

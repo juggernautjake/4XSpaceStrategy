@@ -20,6 +20,11 @@ public class UnitTokenRenderer : MonoBehaviour
         new GameObject("UnitTokenRenderer").AddComponent<UnitTokenRenderer>();
     }
 
+    /// Where this unit is drawn, or null if it isn't drawn here (it has a mesh instead).
+    /// See UnitVisuals.TransformOf.
+    public Transform TransformOf(Unit u)
+        => u != null && tokens.TryGetValue(u, out var t) && t != null ? t.transform : null;
+
     void Awake()
     {
         Instance = this;
