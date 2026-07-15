@@ -217,7 +217,12 @@ public class FleetMovementController : MonoBehaviour
         var group = new List<Unit>(SelectableFleet());
         foreach (var u in UnitSelection.Selected)
             if (u.status == UnitStatus.Traveling && !group.Contains(u)) group.Add(u);
-        if (group.Count == 0) return;
+
+        // NOTHING SELECTED -> right-click is an OBJECT menu instead of an order.
+        //
+        // The two never collide, because "send my ships there" is only a meaningful thing to say when you
+        // have ships selected to send. With none, right-click had no meaning at all and did nothing.
+        if (group.Count == 0) { ShowObjectMenu(Input.mousePosition); return; }
 
         bool queue = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
         string verb = queue ? "Queue" : "Send";
@@ -324,6 +329,71 @@ public class FleetMovementController : MonoBehaviour
         }
         return null;
     }
+
+    // ============================================================================================
+    // RIGHT-CLICK AN OBJECT (with no ships selected) -> what can I do with this?
+    //
+    // Works on anything you can see: planets, moons, stars and ships. They're four different components
+    // with four different notions of "size", so the menu is built per kind — but Focus is on every one of
+    // them, because "take me to this and keep me there" is the thing you want from any of them.
+    // ============================================================================================
+    void ShowObjectMenu(Vector2 screenPos)
+    {
+        var ray = cam.ScreenPointToRay(Input.mousePosition);
+        if (!Physics.Raycast(ray, out RaycastHit hit, 5000f)) return;   // empty space: nothing to offer
+
+        var opts = new List<ContextMenu.Option>();
+
+        var token = hit.collider.GetComponent<UnitToken>();
+        if (token != null && token.Unit != null)
+        {
+            var u = token.Unit;
+            opts.Add(Focus($"Focus on {u.name}", hit.collider.transform, 3f));
+            opts.Add(new ContextMenu.Option($"Select {u.name}", () => UnitSelection.SelectOnly(u)));
+            opts.Add(new ContextMenu.Option("Ship info", () =>
+                InspectorWindow.Instance?.Inspect(InspectorTarget.Of(u), resetTrail: true)));
+        }
+        else if (hit.collider.GetComponent<PlanetClick>() is PlanetClick pc && pc.data != null)
+        {
+            var b = pc.data;
+            opts.Add(Focus($"Focus on {b.name}", b.visualObject != null ? b.visualObject.transform : hit.collider.transform, b.surfaceSize));
+            opts.Add(new ContextMenu.Option($"{b.name} info", () =>
+                InspectorWindow.Instance?.Inspect(InspectorTarget.Of(b), resetTrail: true)));
+
+            if (b.Surveyed)
+                opts.Add(new ContextMenu.Option("Planet View (build / survey)",
+                    () => PlanetViewWindow.Instance?.ShowFor(b)));
+
+            // Claiming is the one action worth offering straight off the map — it's the thing you do to a
+            // world you just found, and it's a single click that would otherwise mean opening a panel.
+            if (Claim.CanClaim(b, out string whyClaim))
+                opts.Add(new ContextMenu.Option($"Claim ({Claim.BeaconMetal(b)}m {Claim.BeaconEnergy(b)}e)",
+                    () => Claim.DoClaim(b)));
+            else if (!Claim.IsMine(b) && b.owner == null)
+                opts.Add(new ContextMenu.Option($"Can't claim — {whyClaim}", null, false));
+        }
+        else if (hit.collider.GetComponent<StarInteraction>() is StarInteraction si && si.star != null)
+        {
+            var s = si.star; var sys = si.system;
+            opts.Add(Focus($"Focus on {s.name}", hit.collider.transform, hit.collider.transform.lossyScale.x));
+            opts.Add(new ContextMenu.Option($"{s.name} info", () =>
+                InspectorWindow.Instance?.Inspect(InspectorTarget.Of(s, sys), resetTrail: true)));
+            if (sys != null)
+                opts.Add(new ContextMenu.Option($"Focus system {sys.name}", () => GameManager.Instance?.SetFocus(sys)));
+        }
+
+        if (opts.Count == 0) return;
+        opts.Add(new ContextMenu.Option("Cancel", null));
+        ContextMenu.Instance?.Show(screenPos, opts);
+    }
+
+    /// Focus = zoom onto it AND follow it. Following is the point: a planet is a moving target, so a
+    /// zoom that doesn't track just watches it drift out of frame.
+    static ContextMenu.Option Focus(string label, Transform t, float sizeHint)
+        => new ContextMenu.Option(label, () =>
+        {
+            if (t != null) CameraController.Instance?.FocusAndZoom(t, sizeHint, true);
+        }, t != null);
 
     static Texture2D DashTexture()
     {

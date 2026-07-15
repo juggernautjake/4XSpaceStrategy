@@ -184,6 +184,10 @@ public class UnitToken : MonoBehaviour
     MeshRenderer emblem;
     float baseScale;
 
+    /// The ship this token stands for. Exposed so a raycast can identify what it hit — the token is the
+    /// only thing in the scene that knows.
+    public Unit Unit => unit;
+
     public void Init(Unit u, MeshRenderer emblem)
     {
         unit = u; this.emblem = emblem; baseScale = transform.localScale.x;
