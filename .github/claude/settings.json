@@ -1,0 +1,38 @@
+{
+  "_comment": "CI-ONLY Claude Code settings. Deliberately NOT at .claude/settings.json: the Stop hook below refuses to let the agent stop while objectives remain, and .claude/settings.json is picked up automatically by every local session too — it would block you from ending your own conversations. The dev-requests workflow points at this file explicitly with --settings, so it only ever applies in GitHub Actions.",
+
+  "_permissions_comment": "Deny beats allow, always. This job's entire input is arbitrary text a human found somewhere, handed to an agent told to act on it — so the guardrails have to be things the text cannot talk its way past. The .github/** rules are the ones that matter most: they stop a request from rewriting the workflow, the allowlist, or this file. curl/wget close the obvious exfiltration path for ANTHROPIC_API_KEY, which is in the agent's environment. `git -c` is denied because it runs arbitrary commands via core.pager and alias.*, which would otherwise walk straight through the git allowlist.",
+  "permissions": {
+    "deny": [
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(nc *)",
+      "Bash(ssh *)",
+      "Bash(git -c *)",
+      "Bash(git config *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Edit(./.github/**)",
+      "Write(./.github/**)",
+      "Edit(./dev-requests/in-progress/READ THESE INSTRUCTIONS FIRST.md)",
+      "Write(./dev-requests/in-progress/READ THESE INSTRUCTIONS FIRST.md)"
+    ]
+  },
+
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.github/claude/slice-gate.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
