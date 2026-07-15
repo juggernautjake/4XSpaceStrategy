@@ -37,6 +37,6 @@ it is called after the seed is assigned in both `SolarSystemGenerator.SeedTerrai
 Depends on nothing; 1b depends on this.
 
 ### 1b. Make "Reset to default" restore the original seed
-- [ ] The **Reset to default** button restores `body.terrainSeed` to the original seed and `body.terrainParams` to `body.naturalParams`, then regenerates and rebuilds the panel so the sliders and seed readout reflect the restored values
+- [x] The **Reset to default** button restores `body.terrainSeed` to the original seed and `body.terrainParams` to `body.naturalParams`, then regenerates and rebuilds the panel so the sliders and seed readout reflect the restored values
 
 **Notes:** Depends on 1a for the stored seed.

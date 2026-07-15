@@ -1501,9 +1501,13 @@ public class PlanetViewWindow : MonoBehaviour
 
         UIFactory.Button(sidePanel, "Reset to default", () =>
         {
-            body.terrainParams = PlanetTerrainGenerator.NoiseParams.Default;
+            // Restore the world as it was GENERATED — its original terrain seed and the per-world
+            // natural params — not the flat NoiseParams.Default. This is the way back to the planet you
+            // started with after rerolling the seed above or dragging the sliders.
+            body.terrainSeed = body.naturalSeed;
+            body.terrainParams = body.naturalParams;
             RegenerateTerrain();
-            lastSig = null;    // rebuild so the sliders snap back to their new values
+            lastSig = null;    // rebuild so the sliders and seed readout snap back to the restored values
         }, 26);
     }
 
