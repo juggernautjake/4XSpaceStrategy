@@ -65,46 +65,32 @@ public class AmbientDrone : MonoBehaviour
         (1, 0.6f), (2, 1.2f), (3, 1.0f), (4, 0.7f), (5, 0.9f), (7, 0.5f),
     };
 
-    const int Voices = 6;
-
-    // C#1 — nearly an octave below the original A1. EVERY voice lives between here and roughly 130Hz,
-    // which is two octaves below middle C: the whole chord is sub-bass and low bass, with nothing in
-    // the register where a pad would normally sit.
-    const float RootHzBase = 34.65f;
     const int RootMin = -5, RootMax = 5;  // semitone window the root wanders inside
 
-    // The HIGHEST any voice may ever sound. A hard ceiling, enforced in Hz rather than trusted to fall
-    // out of the octave maths, because that's exactly what went wrong before: the root was lowered to
-    // 41Hz but a per-voice octave table simultaneously pushed four of the six voices up one or two
-    // octaves, so voices ran to 330Hz and the bed came out HIGHER than the 55-110Hz it replaced. Lower
-    // the floor and raise the ceiling and you have not made anything deeper. A ceiling can't drift.
-    const float MaxVoiceHz = 132f;
-
-    // ---- Register plan ----
-    // Which octave a tone sits in is decided by the TONE, not by the voice's index — that was the bug.
-    //
-    // Only the root and a perfect fifth may sound at the very bottom: those two beat against each other
-    // slowly and cleanly (a 3:2 ratio), so they read as one deep note rather than as mud. Colour tones —
-    // thirds, sevenths, ninths — go up ONE octave, because a minor third stacked directly on a 35Hz root
-    // is ~41Hz, a 6Hz difference the ear cannot resolve as harmony; it just hears a wobble.
-    //
-    // One octave, never two, and never above MaxVoiceHz. That keeps the entire chord inside roughly
-    // 35-130Hz while still being a real chord.
-    static int OctaveFor(int semi) => (semi == 0 || semi == 7) ? 0 : 1;
-
-    // ---- Audio-thread state ----
-    // Touched from OnAudioFilterRead. Only plain floats: no Unity API is legal on the audio thread.
-    readonly float[] curFreq = new float[Voices];
-    readonly float[] tgtFreq = new float[Voices];
-    readonly float[] amp = new float[Voices];
-    readonly double[] phase = new double[Voices];
-    readonly float[] tremRate = new float[Voices];
-    readonly float[] tremDepth = new float[Voices];
-    readonly double[] tremPhase = new double[Voices];
-    double subPhase;
+    // ---- The engine ----
+    // This class owns the HARMONY — the chord vocabulary, the root's wander, the voice leading — and an
+    // engine owns the SOUND. All three engines get the same chord at the same moment and the same depth
+    // limits (DroneTuning), so switching changes the character of the bed without changing what it's
+    // playing or how low it sits.
+    DroneEngine engine;
+    DroneStyle style = DroneStyle.Strata;
+    public static DroneStyle Style => Instance != null ? Instance.style : DroneStyle.Strata;
 
     double sampleRate = 44100.0;
     volatile float masterGain = 0f;    // faded in on start so it never begins with a click
+
+    // ---- Switching styles without a click ----
+    // Swapping the engine mid-buffer would cut from one waveform straight to another at whatever
+    // amplitude each happened to be at — a step discontinuity, which is a click, and a loud one on a
+    // signal this low. So the bed fades out first, swaps at silence, and fades back in.
+    //
+    // This also makes the swap thread-safe for free: at the moment `engine` is reassigned, switchFade is
+    // 0 and the audio thread is multiplying everything by it, so it cannot matter which reference it
+    // reads.
+    volatile float switchFade = 1f;
+    DroneStyle pendingStyle;
+    bool switching;
+    const float SwitchFadeRate = 3.5f;   // ~0.3s each way
 
     // ---- Main-thread state ----
     int rootSemi;
@@ -144,10 +130,41 @@ public class AmbientDrone : MonoBehaviour
         src.clip = AudioClip.Create("droneCarrier", 1024, 1, (int)sampleRate, false);
         src.Play();
 
+        style = (DroneStyle)Mathf.Clamp(PlayerPrefs.GetInt(PrefKey, (int)DroneStyle.Strata),
+                                        0, 2);
+        engine = Make(style);
+        engine.Init(sampleRate);
+
         rootSemi = 0;
         current = Pick(null);
         ApplyChord(instant: true);
-        changeTimer = Random.Range(10f, 18f);
+        // From the engine, not a hardcoded 10-18s — otherwise a session that starts on Monolith (which
+        // is meant to be geological, 40-75s) would move the harmony within ten seconds and give exactly
+        // the wrong first impression of it.
+        var iv0 = engine.ChangeInterval;
+        changeTimer = Random.Range(iv0.x, iv0.y);
+    }
+
+    const string PrefKey = "audio.droneStyle";
+
+    static DroneEngine Make(DroneStyle s)
+    {
+        switch (s)
+        {
+            case DroneStyle.Monolith: return new MonolithEngine();
+            case DroneStyle.Tidal:    return new TidalEngine();
+            default:                  return new StrataEngine();
+        }
+    }
+
+    /// Pick a hum. Takes effect over ~0.6s (out, swap, in) rather than instantly — see switchFade.
+    public static void SetStyle(DroneStyle s)
+    {
+        if (Instance == null) return;
+        if (Instance.style == s && !Instance.switching) return;
+        Instance.pendingStyle = s;
+        Instance.switching = true;
+        PlayerPrefs.SetInt(PrefKey, (int)s);
     }
 
     void Update()
@@ -156,16 +173,49 @@ public class AmbientDrone : MonoBehaviour
         float target = SimpleAudio.Instance != null ? SimpleAudio.Instance.HumVolume : 1f;
         masterGain = Mathf.MoveTowards(masterGain, BaseGain * target, Time.unscaledDeltaTime * 0.09f);
 
+        if (TickSwitch()) return;   // mid-swap: don't also change chord under it
+
         // Unscaled: the music must not speed up when the player speeds up the simulation, and must not
         // stop when they pause.
         changeTimer -= Time.unscaledDeltaTime;
         if (changeTimer > 0f) return;
 
-        // 10-30 seconds, as asked. The glide takes ~8s of that, so the bed is genuinely moving about a
-        // third of the time and settled the rest — which is what makes the movement feel deliberate.
-        changeTimer = Random.Range(10f, 30f);
+        // How often the harmony moves is part of a style's character, so the engine sets it: Tidal is
+        // restless at 6-14s, Monolith is geological at 40-75s.
+        var iv = engine.ChangeInterval;
+        changeTimer = Random.Range(iv.x, iv.y);
         Shift();
     }
+
+    /// Runs the fade-out / swap / fade-in. Returns true while a swap is in progress.
+    bool TickSwitch()
+    {
+        if (!switching)
+        {
+            // Recover from a fade-out that was interrupted (style set twice in quick succession).
+            if (switchFade < 1f)
+                switchFade = Mathf.MoveTowards(switchFade, 1f, Time.unscaledDeltaTime * SwitchFadeRate);
+            return false;
+        }
+
+        switchFade = Mathf.MoveTowards(switchFade, 0f, Time.unscaledDeltaTime * SwitchFadeRate);
+        if (switchFade > 0.0001f) return true;
+
+        // At silence. Safe to swap.
+        style = pendingStyle;
+        var next = Make(style);
+        next.Init(sampleRate);
+        // Hand it the chord that's already playing, instantly — it has to come back up on the harmony we
+        // faded out on, not glide in from wherever its arrays happened to start (which is 0 Hz, i.e. DC).
+        next.Retune(RootHz(), current.tones, instant: true);
+        engine = next;
+
+        switching = false;
+        changeTimer = Random.Range(engine.ChangeInterval.x, engine.ChangeInterval.y);
+        return true;
+    }
+
+    float RootHz() => DroneTuning.RootHzBase * Mathf.Pow(2f, rootSemi / 12f);
 
     void Shift()
     {
@@ -221,58 +271,21 @@ public class AmbientDrone : MonoBehaviour
         return 0;
     }
 
-    /// The tone allowed to join the root at the very bottom of the chord: a PERFECT fifth, or nothing.
-    ///
-    /// Strict on purpose. A tritone (min7b5) or an augmented fifth voiced down at 60Hz is genuinely
-    /// unpleasant — those intervals are meant to be heard as colour up top, not as the foundation. When
-    /// the chord has no perfect fifth, the bottom just doubles the root and the chord's character comes
-    /// entirely from the upper voices.
-    static int LowCompanion(int[] tones)
-    {
-        foreach (var t in tones) if (t == 7) return 7;
-        return tones[0];
-    }
-
-    // Write the new chord into the voices' TARGETS. The audio thread glides toward them; nothing is
-    // re-triggered, so there's no edge to hear.
+    // Hand the new chord to the engine, and publish it for the chirps.
+    //
+    // The register plan (which tone sits in which octave, and the hard Hz ceiling) lives in DroneTuning
+    // and is applied by the engines, not here — otherwise each of the three would need its own copy of
+    // it, and the copies would drift. That drift is exactly how the bed once ended up HIGHER after being
+    // "lowered".
     void ApplyChord(bool instant)
     {
-        float root = RootHzBase * Mathf.Pow(2f, rootSemi / 12f);
+        float root = RootHz();
         var tones = current.tones;
 
-        int fifth = LowCompanion(tones);
+        engine.Retune(root, tones, instant);
 
-        for (int v = 0; v < Voices; v++)
-        {
-            // Bottom two voices: root and its fifth (or the root doubled, when the chord hasn't got a
-            // clean fifth to lend). Everything above: the chord's own tones, cycled, placed by
-            // OctaveFor — colour tones up exactly one octave, root and fifth left at the bottom.
-            int semi = v == 0 ? tones[0]
-                     : v == 1 ? fifth
-                     : tones[(v - 2) % tones.Length];
-
-            float f = root * Mathf.Pow(2f, (semi + OctaveFor(semi) * 12) / 12f);
-
-            // Fold anything that still lands too high back down an octave at a time. A voice an octave
-            // down is the same note, so this can never break the harmony — it only enforces the ceiling.
-            while (f > MaxVoiceHz) f *= 0.5f;
-
-            // Detune every other voice very slightly. Two near-identical sines beat against each other
-            // at their difference frequency — a slow, organic shimmer no LFO reproduces.
-            if (v % 2 == 1) f *= 1.0018f;
-
-            tgtFreq[v] = f;
-            if (instant) curFreq[v] = f;
-
-            // Weighted hard toward the bottom: the two fundamentals carry the sound and the colour
-            // tones only tint it. This is the other half of "deeper on average" — the low voices are
-            // not merely lower than before, they're a bigger share of what you hear.
-            amp[v] = Mathf.Lerp(1f, 0.16f, Mathf.Pow(v / (float)(Voices - 1), 0.75f));
-            tremRate[v] = 0.05f + v * 0.031f;     // mutually prime-ish: never lines up, never pulses
-            tremDepth[v] = 0.10f + (v % 3) * 0.03f;
-        }
-
-        // Publish for the chirps.
+        // Publish for the chirps. These are the raw chord tones, un-octaved — ChordPitch only wants the
+        // pitch classes, and it places its own octaves (chirps want to be high; the bed doesn't).
         var pub = new float[tones.Length];
         for (int i = 0; i < tones.Length; i++) pub[i] = root * Mathf.Pow(2f, tones[i] / 12f);
         CurrentTones = pub;
@@ -282,54 +295,21 @@ public class AmbientDrone : MonoBehaviour
     }
 
     // ---- The synth ----
+    // The host does the mixing; the engine does the sound. Everything legal here is a plain float
+    // operation: no Unity API and no allocation is safe on the audio thread.
     void OnAudioFilterRead(float[] data, int channels)
     {
-        double sr = sampleRate;
-        float gain = masterGain;
-        if (gain <= 0.0001f) return;
+        var eng = engine;                     // read ONCE: the main thread may swap it mid-buffer
+        if (eng == null) return;
 
-        // ~8 seconds to reach a new pitch. Per-sample exponential glide: slow enough to read as a bend
-        // rather than a slide, and it lands softly instead of arriving.
-        float glide = (float)(1.0 - System.Math.Exp(-1.0 / (sr * 8.0)));
+        float gain = masterGain * switchFade;
+        if (gain <= 0.0001f) return;
 
         int frames = data.Length / channels;
         for (int i = 0; i < frames; i++)
         {
-            float sample = 0f;
-            float norm = 0f;
+            float sample = eng.Next() * gain;
 
-            for (int v = 0; v < Voices; v++)
-            {
-                curFreq[v] += (tgtFreq[v] - curFreq[v]) * glide;
-
-                phase[v] += curFreq[v] / sr;
-                if (phase[v] > 1.0) phase[v] -= 1.0;
-
-                // Slow independent tremolo per voice, so the bed breathes. Advanced from its OWN phase
-                // accumulator rather than Time.unscaledTime: this runs on the audio thread, where the
-                // Unity API is off limits — reading Time here is a real (if quiet) violation.
-                tremPhase[v] += tremRate[v] / sr;
-                if (tremPhase[v] > 1.0) tremPhase[v] -= 1.0;
-
-                float lfo = 1f - tremDepth[v] * 0.5f * (1f + Mathf.Sin((float)(tremPhase[v] * 6.2831853)));
-                float s = Mathf.Sin((float)(phase[v] * 6.2831853));
-                sample += s * amp[v] * lfo;
-                norm += amp[v];
-            }
-
-            // A sub an octave below the root: felt more than heard.
-            //
-            // Quieter than the voices now, and deliberately so. With the root down at ~35Hz this sits
-            // near 17Hz, which almost nothing actually reproduces — so every unit of level given to it
-            // is level taken out of the normalisation below and returned as silence. It earns its keep
-            // as weight on hardware that can move that much air, and costs little on hardware that
-            // can't.
-            subPhase += (curFreq[0] * 0.5f) / sr;
-            if (subPhase > 1.0) subPhase -= 1.0;
-            sample += Mathf.Sin((float)(subPhase * 6.2831853)) * 0.35f;
-            norm += 0.35f;
-
-            sample = sample / Mathf.Max(0.001f, norm) * gain;
             // Gentle soft-clip: keeps a chord whose partials line up from ever spiking.
             sample = Mathf.Clamp(sample - sample * sample * sample / 3f, -0.5f, 0.5f);
 
