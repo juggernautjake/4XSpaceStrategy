@@ -218,6 +218,9 @@ public class SolarSystemGenerator : MonoBehaviour
         body.terrainSeed = Random.Range(0f, 10000f);
         body.continentFrequency = Mathf.Clamp(body.surfaceSize * 0.32f, 2.5f, 8f);
         TerrainVariance.Apply(body);   // give every world a distinct terrain character
+        // The climate nature gave it. Terraforming lerps FROM here (TerraformVisuals), so it has to be
+        // captured before anything moves it.
+        TerraformVisuals.CaptureNatural(body);
     }
 
     void ApplyHabitability(CelestialBody body)

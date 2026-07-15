@@ -99,6 +99,11 @@ public class BodyDTO
     public int surfaceSize;
     public float terrainSeed;
     public float continentFrequency;
+
+    // The world's UNTOUCHED climate. Must persist: terraforming lerps terrainParams away from this, so
+    // re-deriving it on load would capture the already-terraformed values as "natural" and freeze all
+    // further progress. Zero means a save written before this existed — see the loader.
+    public float nScale, nElev, nMoist, nHeat, nRidge;
     public float tScale = 1f, tElev = 1f, tMoist = 1f, tHeat = 1f, tRidge = 1f; // terrain params
 
     public float orbitRadius, orbitSpeed, orbitPhase;

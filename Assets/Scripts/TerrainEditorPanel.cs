@@ -82,12 +82,19 @@ public class TerrainEditorPanel : MonoBehaviour
         // Re-seed ore deposits so the mineral markers persist after a regenerate.
         OreGenerator.Populate(currentBody);
 
-        // Refresh the grid in the UI
-        if (PlanetUI.Instance != null && PlanetUI.Instance.gridVisualizer != null)
-        {
-            PlanetUI.Instance.gridVisualizer.ShowSurface(currentBody.surface);
-        }
+        // Every derived read of the surface has to be dropped, or the map scores a new world against
+        // the old one's statistics.
+        SurfaceIndex.InvalidateStats(currentBody);
 
-        Debug.Log("Terrain regenerated!");
+        // Refresh the maps that still exist.
+        //
+        // This used to push the new surface into PlanetUI.gridVisualizer — the retired chunky tile
+        // viewer, which builds ONE GAMEOBJECT PER CELL. A cell is now a detail texel (MapMetrics.Subdiv),
+        // so a regular world is 156x78 and that call asked for 12,168 GameObjects. Every drag of a slider
+        // fired it again, which is the console spam. The viewer's guard caught it and refused, but the
+        // right fix is to stop asking: the Planet View draws to a Texture2D and doesn't care how many
+        // cells there are.
+        PlanetViewWindow.Instance?.RefreshIfShowing(currentBody);
+        PlanetAppearance.RefreshTexture(currentBody, currentBody.visualObject);
     }
 }

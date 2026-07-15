@@ -561,6 +561,12 @@ public class ColonyManager : MonoBehaviour
             PlayerEconomy.Add(ResourceType.Metal, -metal);
             b.habitability = Mathf.Min(ceiling, b.habitability + gain);
             b.isHabitable = b.habitability >= Colony.FoundThreshold;
+
+            // Reshape the world to match, not just the number describing it. This walks the terrain's
+            // climate toward what the species would build for itself and rebuilds the surface — so ice
+            // retreats, seas fill and green spreads while you watch, on the same continents. Throttled
+            // internally; safe to call every tick. See TerraformVisuals.
+            TerraformVisuals.Advance(b, SpeciesManager.Current);
         }
         else
         {
