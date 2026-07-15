@@ -3,23 +3,47 @@ using UnityEngine.EventSystems;
 
 public class CameraController : MonoBehaviour
 {
-    [Header("Movement")]
-    public float panSpeed = 30f;           // WASD panning speed
-    public float heightSpeed = 130f;       // Mouse wheel height change speed
+    // ============================================================================================
+    // TUNING — const, and that is LOAD-BEARING. Do not make these public fields again.
+    //
+    // These were `public float`, which means Unity SERIALIZED them into the scene. Once a value is baked
+    // into SampleScene.unity, the scene's copy is deserialized OVER the script's default every time the
+    // component loads — so editing the default here does exactly nothing to the instance in the scene.
+    //
+    // That is not a hypothetical. The scene held:
+    //     minHeight: 10        maxHeight: 80        panSpeed: 20        heightSpeed: 5
+    // while this file claimed 0.04 / 120000 / 30 / 130. The camera was hard-capped at 80 units the whole
+    // time. The ceiling was raised here three separate times — 9000, then 60000, then 120000 — and every
+    // one of those edits was silently discarded on load. "Zooming out doesn't go far enough", three
+    // times over, was this: the number being read was never the number being written.
+    //
+    // A const cannot be serialized, so the script is now the only source of truth and the two cannot
+    // drift apart again. The old keys still sitting in the scene YAML are simply ignored — an unknown
+    // key deserializes to nothing.
+    //
+    // The rule this encodes: a value that is TUNING (one right answer, same for every instance) does not
+    // belong in the Inspector. Only genuinely per-instance data should be a serialized field.
+    // ============================================================================================
 
-    [Header("Limits")]
+    const float panSpeed = 30f;            // WASD panning speed
+    // heightSpeed is gone: it was declared, serialized (as 5), and never read by anything. Zoom is
+    // proportional (HandleHeightChange), so a linear "units per notch" speed has nothing to mean.
+
     // The absolute floor. Low, because a moon is only ~0.35 world units across and filling the screen
-    // with one genuinely needs the camera this close. It was 4, which is further away than some whole
-    // planets are wide — you could never get near anything.
-    public float minHeight = 0.04f;
+    // with one genuinely needs the camera this close.
+    const float minHeight = 0.04f;
+
     // The floor when nothing is selected — and the one that actually governs "how far can I zoom in",
     // since with a body selected the limit is that body's own surface (see ZoomFloor). Low enough to get
-    // right down among the planets: it was 3, which is further away than a whole planet is wide.
-    public float freeLookMinHeight = 0.35f;
-    // Farthest view. Generous on purpose: this is a hard ceiling on how far back you can ever pull, and
-    // the only cost of headroom is a bigger far clip, which UpdateClipPlanes already tracks. The galaxy
-    // is framed by HeightToFrame, not by this — so this only ever needs to be comfortably beyond it.
-    public float maxHeight = 120000f;
+    // right down among the planets. The scene's serialized minHeight of 10 was overriding this into
+    // uselessness: 10 units up is further away than a whole planet is wide.
+    const float freeLookMinHeight = 0.35f;
+
+    // Farthest view. Framing the whole galaxy needs only ~1.12 * its radius (see HeightToFrame), so for
+    // any galaxy this generates that's a few thousand units — this ceiling is orders of magnitude beyond
+    // anything reachable, on purpose. Headroom costs nothing but a bigger far clip, which
+    // UpdateClipPlanes already tracks, and a ceiling that binds is a ceiling that fights you.
+    const float maxHeight = 120000f;
 
     private float targetHeight;            // For smooth movement
 
@@ -181,6 +205,16 @@ public class CameraController : MonoBehaviour
         // Mouse-wheel zoom is suppressed only when the cursor is over UI (so scrolling a window
         // doesn't also zoom the world) and while the menu is open.
         if (!overUI && !menuOpen) HandleHeightChange();
+        else if (ZoomLog && Input.GetAxis("Mouse ScrollWheel") != 0f)
+            Debug.Log($"[Zoom] scroll IGNORED — overUI={overUI} menuOpen={menuOpen}. " +
+                      "The wheel never reached the camera.");
+
+        // F9 = dump the whole zoom chain. See LogZoomReport.
+        if (Input.GetKeyDown(KeyCode.F9))
+        {
+            ZoomLog = !ZoomLog;
+            LogZoomReport(ZoomLog ? "logging ON" : "logging OFF (final report)");
+        }
 
         // Home = pull back to the whole galaxy. A one-key way to see the entire map.
         if (!menuOpen && Input.GetKeyDown(KeyCode.Home)) ViewWholeGalaxy();
@@ -293,7 +327,71 @@ public class CameraController : MonoBehaviour
         if (scroll == 0) return;
 
         float factor = Mathf.Exp(-scroll * 6f);      // scroll up -> factor < 1 -> closer
-        targetHeight = Mathf.Clamp(targetHeight * factor, ZoomFloor(), maxHeight);
+        float floor = ZoomFloor();
+        float want = targetHeight * factor;
+        float got = Mathf.Clamp(want, floor, maxHeight);
+
+        if (ZoomLog)
+        {
+            // The line that matters: what the wheel ASKED for, what it GOT, and which limit ate the
+            // difference. A dump of every value is a haystack; naming the binding constraint is the
+            // answer. This one line, printed once, is what would have found the eight months the scene
+            // was overriding maxHeight to 80 while this file said 120000.
+            string why = got < want - 0.001f ? $"CLAMPED BY CEILING (maxHeight={maxHeight:F0})"
+                       : got > want + 0.001f ? $"CLAMPED BY FLOOR (ZoomFloor={floor:F2})"
+                       : "free";
+            Debug.Log($"[Zoom] scroll={scroll:F3} x{factor:F2}  {targetHeight:F1} -> want {want:F1} -> got {got:F1}  [{why}]");
+        }
+
+        targetHeight = got;
+    }
+
+    // ============================================================================================
+    // ZOOM DIAGNOSTICS — F9 toggles.
+    //
+    // Prints the whole chain in one place, because the zoom's behaviour is the product of about eight
+    // numbers that live in five different files, and reading any one of them in isolation is how you end
+    // up "fixing" the wrong one. Repeatedly.
+    // ============================================================================================
+    public static bool ZoomLog;
+
+    public void LogZoomReport(string reason)
+    {
+        if (cam == null) cam = GetComponent<Camera>();
+
+        float floor = ZoomFloor();
+        float h = transform.position.y;
+        float gr = GalaxyRadius();
+        float frame = HeightToFrame(gr);
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"===== ZOOM REPORT ({reason}) =====");
+        sb.AppendLine($"  height        {h:F2}        target {targetHeight:F2}");
+        sb.AppendLine($"  LIMITS        floor {floor:F2}  ..  ceiling {maxHeight:F0}     range x{(floor > 0.001f ? maxHeight / floor : 0f):F0}");
+        sb.AppendLine($"    minHeight         {minHeight}       (const - the scene cannot override it)");
+        sb.AppendLine($"    freeLookMinHeight {freeLookMinHeight}");
+        sb.AppendLine($"    maxHeight         {maxHeight}");
+
+        // Which end are we sitting on? "At the ceiling" is the single most useful fact here, and it's
+        // what an isolated height reading never tells you.
+        if (h >= maxHeight * 0.999f) sb.AppendLine("  >> AT THE CEILING. Cannot zoom out further.");
+        else if (h <= floor * 1.001f) sb.AppendLine("  >> AT THE FLOOR. Cannot zoom in further.");
+        else sb.AppendLine($"  >> free: {maxHeight / Mathf.Max(0.001f, h):F1}x further out available, " +
+                           $"{h / Mathf.Max(0.001f, floor):F1}x further in");
+
+        sb.AppendLine($"  FOCUS         following={following} target={(followTarget != null ? followTarget.name : "<none>")}");
+        if (followTarget != null)
+        {
+            float r = WorldRadius(followTarget);
+            sb.AppendLine($"                radius {r:F3}  fillHeight {FillHeight(r):F2}  -> floor is fill*{SurfaceFrac} = {FillHeight(r) * SurfaceFrac:F2}");
+        }
+
+        sb.AppendLine($"  GALAXY        radius {gr:F1}   frames entirely at height {frame:F1}");
+        sb.AppendLine($"                (so a ceiling below {frame:F0} makes the whole map unreachable)");
+        sb.AppendLine($"  CLIP          near {cam?.nearClipPlane:F3}  far {cam?.farClipPlane:F0}   fov {cam?.fieldOfView:F0}  pitch {Pitch}");
+        sb.AppendLine($"  INPUT         overUI={(EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())}  " +
+                      $"scrollAxis={Input.GetAxis("Mouse ScrollWheel"):F3}");
+        Debug.Log(sb.ToString());
     }
 
     // How close the wheel may get.

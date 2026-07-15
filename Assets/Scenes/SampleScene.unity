@@ -1457,10 +1457,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dda0baa7ba24d90419429d93313860ad, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CameraController
-  panSpeed: 20
-  heightSpeed: 5
-  minHeight: 10
-  maxHeight: 80
 --- !u!1 &341901011
 GameObject:
   m_ObjectHideFlags: 0
