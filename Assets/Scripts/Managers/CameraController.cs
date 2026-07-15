@@ -445,11 +445,69 @@ public class CameraController : MonoBehaviour
     /// a plane through the crust.
     const float SurfaceK = 0.90f;
 
+    // ============================================================================================
+    // ZOOM TOWARD THE CURSOR
+    //
+    // Whatever is under the pointer stays under the pointer as the height changes. Without it, zooming
+    // always converges on the screen centre, so reaching a system in the corner is zoom-pan-zoom-pan
+    // instead of just pointing at it and scrolling.
+    //
+    // Done HERE rather than in HandleHeightChange, and that's the crux: the height is SMOOTHED, so the
+    // frame the wheel is read is not the frame the camera actually moves. Correcting at wheel-time would
+    // apply the whole shift instantly while the height eased in behind it, and the point under the cursor
+    // would visibly slide. Correcting per-frame against the height that ACTUALLY changed keeps them
+    // locked together however the smoothing behaves.
+    //
+    // The maths: the camera looks along `forward` at Pitch, so the ground point under a screen ray is
+    // found by walking that ray to y=0. Do it before the height changes and again after; the difference
+    // is how far the world slid, so translating back by it pins the point.
     private void SmoothHeightMovement()
     {
         Vector3 pos = transform.position;
-        pos.y = Mathf.Lerp(pos.y, targetHeight, 10f * Time.unscaledDeltaTime); // Smoothness (time-independent)
+        float before = pos.y;
+        float after = Mathf.Lerp(before, targetHeight, 10f * Time.unscaledDeltaTime);
+        if (Mathf.Approximately(before, after)) return;
+
+        // Following a body means the camera is pinned to IT — LateUpdate re-centres on it every frame,
+        // so any correction here would be overwritten and just fight the follow.
+        bool anchor = !following && ZoomToCursor && GroundPoint(Input.mousePosition, before, out Vector3 groundBefore);
+
+        pos.y = after;
         transform.position = pos;
+
+        if (anchor && GroundPoint(Input.mousePosition, after, out Vector3 groundAfter))
+        {
+            Vector3 slide = groundBefore - groundAfter;
+            slide.y = 0f;
+            transform.position += slide;
+        }
+    }
+
+    /// Toggle for cursor-anchored zoom. On by default; here so the behaviour has a name.
+    public static bool ZoomToCursor = true;
+
+    /// Where the ray through `screenPos` meets the orbital plane (y=0), for a camera at height h.
+    ///
+    /// Computed from the camera's own ray rather than Physics.Raycast: the plane is what the zoom is
+    /// anchored to, and it exists whether or not there's a collider under the cursor. Raycasting would
+    /// make zoom-to-cursor work over planets and silently fall back to centre-zoom over empty space,
+    /// which is most of the map.
+    bool GroundPoint(Vector3 screenPos, float h, out Vector3 hit)
+    {
+        hit = default;
+        if (cam == null) cam = GetComponent<Camera>();
+        if (cam == null) return false;
+
+        // Build the ray from a camera at height h without moving the real one.
+        Vector3 origin = transform.position; origin.y = h;
+        Ray r = cam.ScreenPointToRay(screenPos);
+        Vector3 dir = r.direction;
+        if (Mathf.Abs(dir.y) < 0.0001f) return false;    // parallel to the plane: never meets it
+
+        float t = -origin.y / dir.y;
+        if (t <= 0f) return false;                        // the plane is behind the camera
+        hit = origin + dir * t;
+        return true;
     }
 
     private void KeepCameraAngle()
