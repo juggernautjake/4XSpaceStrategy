@@ -82,17 +82,15 @@ public partial class InspectorWindow
         var h = row.AddComponent<HorizontalLayoutGroup>();
         h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true;
 
-        // The Planet View is where you actually develop a world: info, the build grid, and the survey
-        // overlays. The old read-only detail map stays available for points of interest.
-        var viewBtn = UIFactory.Button(row.transform, "Planet View", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
-        live.Button(viewBtn, () => b.Surveyed
-            ? (true, "Planet View (build / survey)")
-            : (false, "Planet View — survey this world first"));
-
-        var mapBtn = UIFactory.Button(row.transform, "Map", () => DetailedSurfaceWindow.Instance?.Open(b), 26);
-        live.Button(mapBtn, () => b.Surveyed
-            ? (true, "Points of Interest Map")
-            : (false, "Map — survey this world first"));
+        // ONE map. The Planet View is the world: info, sites, the build grid, and the survey overlays,
+        // all on the same terrain at the same zoom.
+        //
+        // There used to be a second "Map" button here opening a separate detailed-surface window, which
+        // drew the same terrain again purely to hang point-of-interest markers on it. Two maps of one
+        // world is two things to keep in step and one of them is always slightly wrong — the sites are a
+        // TAB now, not a window. It opens unsurveyed too: there's nothing to hide about a world's name
+        // and orbit, and the tabs that need a survey say so themselves.
+        UIFactory.Button(row.transform, "Planet View", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
 
         UIFactory.Button(row.transform, "Focus Camera", () =>
         {

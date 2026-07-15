@@ -111,7 +111,7 @@ public class ResearchTaskManager : MonoBehaviour
         string report = (string.IsNullOrEmpty(poi.reportText) ? "Research complete." : poi.reportText) + extra;
 
         NotificationManager.Instance?.Push($"Research complete: {title}", report, () => FocusReport(body, title, report), NotifKind.Research);
-        DetailedSurfaceWindow.Instance?.RefreshIfShowing(body);
+        PlanetViewWindow.Instance?.RefreshIfShowing(body);
     }
 
     void FocusReport(CelestialBody body, string title, string report)
@@ -121,7 +121,7 @@ public class ResearchTaskManager : MonoBehaviour
         if (body != null)
         {
             PlanetUI.Instance?.Show(body);
-            DetailedSurfaceWindow.Instance?.Open(body);
+            PlanetViewWindow.Instance?.ShowFor(body);
         }
         NotificationManager.Instance?.Push($"Report: {title}", report, null);
     }

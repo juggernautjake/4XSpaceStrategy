@@ -374,4 +374,30 @@ public static class UIFactory
         scroll.content = content;
         return scroll;
     }
+
+    /// Attach a hover tooltip to any UI object.
+    ///
+    /// Its own component rather than the Button's own handlers, because the main use is explaining a
+    /// DISABLED control — and a Button with interactable=false stops running its own pointer callbacks.
+    /// The raycast still lands, so a separate handler still hears it. A control that's greyed out and
+    /// won't say why is the exact thing this is for.
+    public static void Tooltip(GameObject go, string text)
+    {
+        if (go == null) return;
+        var t = go.GetComponent<HoverTip>() ?? go.AddComponent<HoverTip>();
+        t.text = text;
+    }
+}
+
+/// See UIFactory.Tooltip.
+public class HoverTip : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+{
+    public string text;
+
+    public void OnPointerEnter(PointerEventData e)
+    {
+        if (!string.IsNullOrEmpty(text)) TooltipManager.Instance.ShowAtCursor(text);
+    }
+
+    public void OnPointerExit(PointerEventData e) => TooltipManager.Instance.Hide();
 }
