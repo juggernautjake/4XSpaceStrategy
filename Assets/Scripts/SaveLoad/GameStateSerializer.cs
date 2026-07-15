@@ -111,7 +111,8 @@ public static class GameStateSerializer
             terraformProjects = b.terraformProjects != null ? new List<int>(b.terraformProjects) : new List<int>(),
             placedBuildings = b.placedBuildings != null ? new List<PlacedBuilding>(b.placedBuildings) : new List<PlacedBuilding>(),
             deepSurveyed = b.deepSurveyed, cityGrowthTimer = b.cityGrowthTimer,
-            birthrightClaim = b.birthrightClaim, visited = b.visited, explorationProgress = b.explorationProgress
+            birthrightClaim = b.birthrightClaim, settled = b.settled,
+            visited = b.visited, explorationProgress = b.explorationProgress
         };
 
         if (b.resources != null)
@@ -268,9 +269,15 @@ public static class GameStateSerializer
             shipyardLevel = dto.shipyardLevel, researchCenterLevel = dto.researchCenterLevel,
             population = dto.population, cities = dto.cities,
             terraforming = dto.terraforming, terraformability = dto.terraformability,
-            birthrightClaim = dto.birthrightClaim, visited = dto.visited,
-            explorationProgress = dto.explorationProgress
+            birthrightClaim = dto.birthrightClaim, settled = dto.settled,
+            visited = dto.visited, explorationProgress = dto.explorationProgress
         };
+        // Saves written before `settled` existed have it false everywhere, which would silently
+        // un-colonise every world in an old save. A world with a City on it was settled by definition —
+        // that inference is exactly what Claim.cs replaces, and this is the one place it's still correct
+        // to make it, because it's the only evidence such a save carries.
+        if (!b.settled && (dto.cities > 0 || (dto.buildings != null && dto.buildings.Contains((int)BuildingType.City))))
+            b.settled = true;
         if (dto.buildings != null) b.buildings = new List<int>(dto.buildings);
         if (dto.terraformProjects != null) b.terraformProjects = new List<int>(dto.terraformProjects);
         b.deepSurveyed = dto.deepSurveyed;

@@ -37,11 +37,28 @@ public class CelestialBody
     public bool habitabilityLocked = false; // home world's difficulty-set rating won't be recomputed
 
     // --- Ownership ---
+    // TWO STAGES, and they are genuinely different things. See Claim.cs.
+    //
+    //   CLAIMED  (owner != null)  — the world is legally yours. You surveyed it, you have a ship there,
+    //                               and you planted a beacon. It does NOT mean anyone lives there. A
+    //                               claim is what lets you terraform a world and keep rivals off it
+    //                               while you make it liveable.
+    //   SETTLED  (settled)        — people actually live here. Needs the world to be habitable FIRST,
+    //                               which for most worlds means terraforming a claim you already hold.
+    //
+    // `owner` has always meant "claimed" — the home world's moons are owner=Player from turn one and
+    // are deliberately NOT settled — but nothing recorded the second half, so "is this world colonised"
+    // was inferred from side effects like `cities > 0` or a City in `buildings`. Those are consequences
+    // of settling, not the fact of it, and inferring a fact from its consequences is how a moon ended up
+    // with a free city (see ColonyManager.TickColony).
     public Faction owner;               // null == unclaimed
 
-    // Claimed purely by BIRTHRIGHT (the home world and its moons). Such bodies count as fully claimed
-    // just for being ours from the start — they bypass the usual survey/habitability/population/
-    // building objectives that other worlds must satisfy to be fully established.
+    /// People live here. Set by settling; never by owning.
+    public bool settled = false;
+
+    // Claimed purely by BIRTHRIGHT (the home world and its moons) rather than by going and doing it.
+    // Skips the claim CONDITIONS — it's already yours — but grants no settlement: a birthright moon is
+    // a claim you still have to make liveable.
     public bool birthrightClaim = false;
 
     // Shipyard tier on this world (0 = none, 1-5). Building a Shipyard sets it to 1; it can be upgraded

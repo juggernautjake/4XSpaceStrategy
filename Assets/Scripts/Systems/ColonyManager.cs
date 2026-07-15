@@ -397,6 +397,7 @@ public class ColonyManager : MonoBehaviour
             else if (c.establishCity)
             {
                 if (!c.body.buildings.Contains((int)BuildingType.City)) c.body.buildings.Add((int)BuildingType.City);
+                c.body.settled = true;          // the other way a world becomes settled — see Claim.cs
                 c.body.cities = Mathf.Max(1, c.body.cities);
                 c.body.population = Mathf.Max(c.body.population, Population.ColonyStart(c.body, SpeciesManager.Current));
                 c.body.claimProgress = Colony.ClaimProgress(c.body);
@@ -421,7 +422,15 @@ public class ColonyManager : MonoBehaviour
     // ---- Per-colony tick ----
     void TickColony(CelestialBody b, float dt)
     {
-        if (b.cities < 1) b.cities = 1;
+        // A CLAIM is not a colony. This runs for every body you own, and owning a world means you've
+        // planted a flag on it — the home world's moons are yours from turn one and are meant to be bare
+        // rock until you terraform and settle them.
+        //
+        // This used to open with `if (b.cities < 1) b.cities = 1;`, which handed every claimed world a
+        // free city on its first tick: no colony ship, no habitability check, no cost, nothing. The rest
+        // of the game asks for a colony ship and 40% habitability to found a city; this gave one away for
+        // owning the rock. That's why moons had cities on them.
+        if (!b.settled) return;
         // Output scales with the workforce. Tuned against the population UNIT scale (1 = 100,000), so a
         // one-million homeworld (10) starts near 0.9x and a large city world climbs toward ~2x.
         float popMult = 0.5f + b.population / 25f;

@@ -956,6 +956,7 @@ public class UnitManager : MonoBehaviour
     void FoundColony(Unit u, CelestialBody b)
     {
         b.owner = FactionManager.Player;
+        b.settled = true;               // people live here now — see Claim.cs
         b.claimingFaction = null;
         b.visited = true;
         b.explorationProgress = Mathf.Max(b.explorationProgress, 1f);   // owning fully reveals it
@@ -1065,6 +1066,10 @@ public class UnitManager : MonoBehaviour
             homePlanet.shipyardLevel = Mathf.Max(1, homePlanet.shipyardLevel);
             homePlanet.researchCenterLevel = Mathf.Max(1, homePlanet.researchCenterLevel);   // pre-tier saves
             homePlanet.birthrightClaim = true;
+            // The home world is settled by definition. Without this a save written before `settled`
+            // existed would load with the capital marked unsettled, and TickColony — which now returns
+            // early on unsettled worlds — would quietly stop the empire's entire economy.
+            homePlanet.settled = true;
         }
 
         if (dtos != null)

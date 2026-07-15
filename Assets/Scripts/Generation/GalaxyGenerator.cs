@@ -152,6 +152,9 @@ public static class GalaxyGenerator
 
         planet.owner = FactionManager.Player;
         planet.birthrightClaim = true;
+        // The ONLY world that starts settled. Its moons are claimed by the same birthright but stay bare
+        // rock until you terraform and settle them — a claim is a flag, not a population.
+        planet.settled = true;
         // The capital is an established world, not a landing site: about a million people, adjusted for
         // how the species breeds and how long it lives (see Population.HomeStart).
         planet.cities = 1;

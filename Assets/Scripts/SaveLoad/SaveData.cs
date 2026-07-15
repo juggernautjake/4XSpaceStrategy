@@ -122,6 +122,7 @@ public class BodyDTO
     public bool deepSurveyed;                               // unlocks the Heat/Fertile/Wind/Solar/Water indexes
     public float cityGrowthTimer;                           // progress toward this world's next settlement
     public bool birthrightClaim;
+    public bool settled;            // people live here (Claim.cs). Distinct from owning it.
     public bool visited;
     public float explorationProgress;
 

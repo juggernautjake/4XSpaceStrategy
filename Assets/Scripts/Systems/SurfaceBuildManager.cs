@@ -70,8 +70,20 @@ public static class SurfaceBuildManager
         var info = SurfaceBuildingDatabase.Get(t);
 
         if (b == null) { why = "no world"; return false; }
-        if (b.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
+        if (b.owner != FactionManager.Player) { why = "this world isn't yours — claim it first"; return false; }
         if (!b.Surveyed) { why = "survey this world first"; return false; }
+
+        // SETTLED, not merely owned. Infrastructure needs people to build and run it, and a claim is a
+        // flag on a rock — the home world's moons are yours from turn one and have nobody on them.
+        // Checking ownership alone let you cover an airless moon in farms and factories staffed by
+        // nobody, which is the same hole that gave those moons free cities.
+        if (!b.settled && !GameMode.DevMode)
+        {
+            why = b.habitability >= Colony.FoundThreshold
+                ? "nobody lives here yet — settle it with a colony ship"
+                : $"nobody lives here — terraform to {Colony.FoundThreshold:F0}% (now {b.habitability:F0}%), then settle it";
+            return false;
+        }
 
         // ONE OF EACH per world, for now: place a second and it's refused. (Some types — the capitol,
         // the shipyard — are inherently unique; the rest are capped here while the surface economy is
