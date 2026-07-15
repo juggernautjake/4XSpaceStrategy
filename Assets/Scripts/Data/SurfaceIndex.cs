@@ -363,7 +363,13 @@ public static class SurfaceIndex
             // glance at the colour is enough to know which overlay you're looking at.
             case SurfaceIndexKind.Wind: c = Color.Lerp(new Color(0.16f, 0.05f, 0.28f), new Color(0.80f, 0.36f, 1.00f), t); break;
             case SurfaceIndexKind.Solar: c = Color.Lerp(new Color(0.40f, 0.34f, 0.10f), new Color(1.00f, 0.95f, 0.40f), t); break;
-            case SurfaceIndexKind.Water: c = Color.Lerp(new Color(0.08f, 0.18f, 0.35f), new Color(0.35f, 0.75f, 1.00f), t); break;
+            // Saturation RISES with the score, rather than falling. This ran navy -> pale sky blue, so
+            // the best ground got the weakest, most washed-out colour on the map — the ramp was reading
+            // as "more index = whiter", which is the opposite of intensity. Now weak ground is a muted
+            // grey-blue that sinks into the terrain and strong ground is a deep, fully saturated blue
+            // that sits on top of it. Alpha (below) climbs alongside, so the two reinforce instead of
+            // fighting.
+            case SurfaceIndexKind.Water: c = Color.Lerp(new Color(0.34f, 0.44f, 0.56f), new Color(0.00f, 0.34f, 1.00f), t); break;
             default: return new Color(0, 0, 0, 0);
         }
         c.a = Mathf.Lerp(0.12f, 0.88f, t);
