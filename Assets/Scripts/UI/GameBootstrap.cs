@@ -15,6 +15,7 @@ public static class GameBootstrap
 
         // Core managers (no canvas needed).
         SimpleAudio.Create();
+        DevCheats.Create();                 // Dev Mode: keeps a million of everything topped up
         ResearchTaskManager.Create();
         UnitManager.Create();               // before the token renderer subscribes to it
         ColonyManager.Create();             // colony economy, growth, terraforming, construction

@@ -22,6 +22,11 @@ public static class PlayerEconomy
 
     public static float Capacity(ResourceType t)
     {
+        // Dev Mode has no warehouse. Storage exists to make banking a decision, and in Dev Mode there
+        // are no decisions — DevCheats tops the stockpile back to a million every few seconds, and a
+        // 3,000 ceiling would silently swallow the top-up and hand back 3,000.
+        if (GameMode.DevMode) return DevCheats.Stock;
+
         if (capFrame == Time.frameCount && capCache >= 0f) return capCache;
         float cap = BaseCapacity;
         if (SystemContext.Galaxy != null)
