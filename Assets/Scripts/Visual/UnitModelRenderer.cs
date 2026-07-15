@@ -134,6 +134,11 @@ public class UnitModelRenderer : MonoBehaviour
     /// The token renderer asks this so it never double-renders something that has a mesh.
     public static bool UsesModel(Unit u) => UnitModelLibrary.HasModel(u);
 
+    /// Where this unit is drawn, or null if it isn't drawn here. See UnitVisuals.TransformOf — a ship is
+    /// rendered by EITHER this or UnitTokenRenderer, so neither can answer the question alone.
+    public Transform TransformOf(Unit u)
+        => u != null && models.TryGetValue(u, out var m) && m != null && m.go != null ? m.go.transform : null;
+
     public void Rebuild()
     {
         var live = new HashSet<Unit>();

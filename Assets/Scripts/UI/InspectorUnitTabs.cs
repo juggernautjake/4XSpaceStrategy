@@ -56,6 +56,16 @@ public partial class InspectorWindow
         // Actions. Each explains itself when it can't be used.
         Header(p, "ACTIONS");
 
+        // Same Focus offered on right-click, here for a ship you already have selected.
+        var focusBtn = UIFactory.Button(p, "Focus Camera", () =>
+        {
+            var t = UnitVisuals.TransformOf(u);
+            if (t != null) CameraController.Instance?.FocusAndZoom(t, 3f, true);
+        }, 26);
+        live.Button(focusBtn, () => UnitVisuals.TransformOf(u) != null
+            ? (true, $"Focus on {u.name}")
+            : (false, "Focus — this ship isn't on screen"));
+
         var surveyBtn = UIFactory.Button(p, "", () =>
         {
             if (u.location != null) UnitManager.Instance?.IssueAction(new List<Unit> { u }, OrderKind.Survey, u.location, false);

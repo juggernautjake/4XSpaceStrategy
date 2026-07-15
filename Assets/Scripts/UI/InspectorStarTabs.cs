@@ -47,6 +47,17 @@ public partial class InspectorWindow
         }
 
         Header(p, "ACTIONS");
+        // Focus is offered wherever a thing is selected, not only on right-click: having selected it,
+        // "take me to it" shouldn't require finding it on the map again to right-click it.
+        var focusBtn = UIFactory.Button(p, "Focus Camera", () =>
+        {
+            var t = StarInteraction.TransformOf(s);
+            if (t != null) CameraController.Instance?.FocusAndZoom(t, t.lossyScale.x, true);
+        }, 26);
+        live.Button(focusBtn, () => StarInteraction.TransformOf(s) != null
+            ? (true, $"Focus on {s.name}")
+            : (false, "Focus — this star isn't rendered"));
+
         UIFactory.Button(p, "Toggle Habitable Zone Rings", () => SystemContext.Zone?.Toggle(), 26);
     }
 
