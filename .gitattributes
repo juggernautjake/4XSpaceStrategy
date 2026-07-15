@@ -1,0 +1,11 @@
+# Shell scripts always check out with LF endings, on every platform.
+#
+# This repo is developed on Windows with core.autocrlf=true, and the CI that runs these
+# scripts is Linux. A .sh file that arrives with CRLF fails there on the shebang line —
+# `bad interpreter: /usr/bin/env bash^M` — which is an unusually opaque error for what is
+# really just a line-ending mismatch. Git happens to normalize correctly today; this makes
+# it a guarantee rather than a coincidence.
+#
+# Deliberately narrow: no repo-wide rules, so Unity's assets and .meta files keep whatever
+# handling they have now.
+*.sh text eol=lf

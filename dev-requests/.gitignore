@@ -1,0 +1,10 @@
+# Nothing dropped in here is ever ignored.
+#
+# The root .gitignore is Unity's, and it excludes things by extension across the whole
+# repo — *.log, *.tmp, *.suo and friends. That's right for a Unity tree and wrong here:
+# `errors.log` is one of the most useful things somebody can send (it's the compile error
+# the AI can't see for itself), and it would have been dropped silently. No warning, no
+# file, just a request that arrives with its evidence missing.
+#
+# This folder is an inbox for arbitrary human uploads, so it opts out entirely.
+!*
