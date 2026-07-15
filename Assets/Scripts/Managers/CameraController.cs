@@ -139,21 +139,54 @@ public class CameraController : MonoBehaviour
         // The ground is reached at h/sin(pitch); everything beyond that still has to be drawn, so give
         // the far plane the slant range plus the galaxy's own extent plus headroom.
         float slant = h / Mathf.Sin(Pitch * Mathf.Deg2Rad);
-        cam.farClipPlane = Mathf.Max(MinFarClip, slant + GalaxyRadius() * 2.5f + 1000f);
+
         // Near plane has to grow with distance or z-fighting sets in at galaxy scale. What matters for
         // depth precision is the far:near RATIO, not either number, so the near plane has to keep pace
         // as the ceiling rises — pinning it at 5 while the far plane runs past 100,000 is a 20,000:1
         // ratio and the depth buffer starts tearing. Nothing is within 240 units of the camera when it's
-        // 120,000 up, so a near plane that far out clips nothing you could see anyway.
+        // 120,000 up, so a near plane that far out clips nothing you could see anyway. The 0.01 floor is
+        // what lets the other end work: at minHeight the camera is centimetres off a moon's surface.
         //
-        // The 0.01 floor is what lets the other end work: at minHeight the camera is a few centimetres
-        // off a moon's surface, and a near plane any further out would clip the moon itself away.
-        cam.nearClipPlane = Mathf.Clamp(h * 0.002f, 0.01f, 240f);
+        // QUANTIZED, and that's the anti-jitter part.
+        //
+        // The near plane is what decides how depth-buffer precision is distributed across the scene.
+        // Computed straight from h, it slid a little EVERY FRAME while zooming — so every surface's depth
+        // quantisation shifted every frame, and the z-fighting boundaries between near-coplanar surfaces
+        // (a planet and its atmosphere shell, a ring and the plane it lies in) crawled. That reads as a
+        // faint shimmer on the assets, and only while zooming, because h is only moving then.
+        //
+        // Snapping to powers of two means the planes hold still through a whole octave of zoom and change
+        // once, briefly, when you cross a boundary — one discrete step instead of a continuous crawl. The
+        // cost is up to 2x more near-plane than strictly needed, which is far cheaper than the shimmer.
+        cam.nearClipPlane = QuantizeUp(h * 0.002f, 0.01f, 240f);
+        cam.farClipPlane = QuantizeUp(slant + GalaxyRadius() * 2.5f + 1000f, MinFarClip, 1e7f);
+    }
+
+    /// Round `v` UP to the next power-of-two multiple of `min`, clamped to [min, max].
+    ///
+    /// Up, never down, and that matters for the far plane: rounding down would clip away scenery that
+    /// was meant to be visible, which is the bug this whole method exists to avoid. Rounding up only ever
+    /// draws slightly more than needed.
+    static float QuantizeUp(float v, float min, float max)
+    {
+        if (v <= min) return min;
+        if (v >= max) return max;
+        float steps = Mathf.Ceil(Mathf.Log(v / min, 2f));
+        return Mathf.Clamp(min * Mathf.Pow(2f, steps), min, max);
     }
 
     // Recenters the view on a world position (used by notifications to jump to a discovery).
     public void FocusOn(Vector3 worldPos)
     {
+        // Any deliberate move invalidates the zoom anchor — it's a stale answer to "where should the
+        // camera be so the thing under the cursor stays put", and the cursor was somewhere else when it
+        // was computed. Left set, it would drag the view back mid-flight.
+        //
+        // Cleared HERE because FocusOn is the choke point: ViewWholeGalaxy, JumpTo, FocusAndZoom and the
+        // notification jumps all route through it. Clearing at each of those instead would be four places
+        // to remember and one to forget.
+        ClearAnchor();
+
         Vector3 f = transform.forward;
         if (Mathf.Abs(f.y) < 0.001f)
         {
@@ -335,6 +368,12 @@ public class CameraController : MonoBehaviour
         // Unscaled time so panning speed is constant regardless of the simulation speed (and works
         // while paused). Scale with height so panning stays usable when zoomed far out — the cap is
         // generous enough to cross the whole galaxy at galaxy-scale zoom without feeling glacial.
+        if (h == 0f && v == 0f) return;
+
+        // Panning is the player saying where to look, which overrides where the zoom was heading. Without
+        // this the anchor keeps easing X/Z back and WASD fights it.
+        ClearAnchor();
+
         float heightFactor = Mathf.Clamp(transform.position.y / 20f, 1f, 200f);
         Vector3 move = new Vector3(h, 0, v) * panSpeed * heightFactor * Time.unscaledDeltaTime;
         transform.Translate(move, Space.World);
@@ -366,8 +405,44 @@ public class CameraController : MonoBehaviour
             Debug.Log($"[Zoom] scroll={scroll:F3} x{factor:F2}  {targetHeight:F1} -> want {want:F1} -> got {got:F1}  [{why}]");
         }
 
+        // Solve the cursor anchor ONCE, here, for the height we're heading to — rather than nudging the
+        // camera sideways a little every frame on the way there. See SmoothHeightMovement.
+        if (!following && ZoomToCursor && CursorGround(out Vector3 g, out float kx, out float kz))
+        {
+            // Ground under the cursor is  hit = pos - h * k  (k = dir.xz / dir.y), so the camera has to
+            // be at  pos = hit + h * k  for that same ground to still be under the cursor at height h.
+            anchorXZ = new Vector2(g.x + got * kx, g.z + got * kz);
+            haveAnchor = true;
+        }
+
         targetHeight = got;
     }
+
+    // Where the zoom is heading in X/Z, so the point under the cursor lands under the cursor.
+    Vector2 anchorXZ;
+    bool haveAnchor;
+
+    /// Ground point under the cursor, plus the ray's xz/y slope — everything needed to solve for where
+    /// the camera must be at any other height.
+    bool CursorGround(out Vector3 ground, out float kx, out float kz)
+    {
+        ground = default; kx = kz = 0f;
+        if (cam == null) cam = GetComponent<Camera>();
+        if (cam == null) return false;
+
+        Vector3 dir = cam.ScreenPointToRay(Input.mousePosition).direction;
+        if (dir.y > -0.0001f) return false;      // level with or above the horizon: never meets the plane
+
+        kx = dir.x / dir.y;
+        kz = dir.z / dir.y;
+
+        Vector3 pos = transform.position;
+        ground = new Vector3(pos.x - pos.y * kx, 0f, pos.z - pos.y * kz);
+        return true;
+    }
+
+    /// Drop the anchor — the camera is being sent somewhere else and shouldn't drift back.
+    void ClearAnchor() { haveAnchor = false; }
 
     // ============================================================================================
     // ZOOM DIAGNOSTICS — F9 toggles.
@@ -461,60 +536,50 @@ public class CameraController : MonoBehaviour
     // The maths: the camera looks along `forward` at Pitch, so the ground point under a screen ray is
     // found by walking that ray to y=0. Do it before the height changes and again after; the difference
     // is how far the world slid, so translating back by it pins the point.
+    // ============================================================================================
+    // ONE EASING, ALL THREE AXES — and this is what killed the zoom jitter.
+    //
+    // The first cut anchored the cursor by DIFFERENCING per frame: find the ground point under the
+    // cursor, move the height a step, find it again, translate by the difference. It's exactly correct
+    // on paper and it jittered visibly, because of what it does to frame-time noise.
+    //
+    // The height step is Lerp(y, target, rate * dt), so it's proportional to dt, and dt is never
+    // steady — 8ms, 13ms, 9ms. Jitter in the height step is invisible: it just means the zoom advances
+    // slightly unevenly, and nobody can see a 2% variation in zoom speed. But the differencing CONVERTS
+    // that jitter into horizontal camera movement, and sideways judder against a starfield is one of the
+    // most visible things there is. The bug wasn't the anchoring maths, it was feeding frame-time noise
+    // into an axis the eye is good at.
+    //
+    // So: solve the destination ONCE when the wheel turns (HandleHeightChange), then ease X, Y and Z
+    // toward it with a single factor. Now dt noise only affects how fast we approach — which is the
+    // invisible kind again — and the anchor is exact at the destination rather than accumulated.
+    //
+    // The easing is also genuinely frame-rate independent now: 1 - exp(-rate*dt) is the real form. The
+    // old `rate * dt` was linear in dt and only approximates it for small dt, so the effective smoothing
+    // changed with framerate — the comment claimed "time-independent" while the code wasn't.
     private void SmoothHeightMovement()
     {
+        float k = 1f - Mathf.Exp(-ZoomEaseRate * Time.unscaledDeltaTime);
         Vector3 pos = transform.position;
-        float before = pos.y;
-        float after = Mathf.Lerp(before, targetHeight, 10f * Time.unscaledDeltaTime);
-        if (Mathf.Approximately(before, after)) return;
 
-        // Following a body means the camera is pinned to IT — LateUpdate re-centres on it every frame,
-        // so any correction here would be overwritten and just fight the follow.
-        //
-        // groundBefore is declared and initialised OUTSIDE the condition rather than as an inline `out`.
-        // The && short-circuits, so when `following` is true GroundPoint never runs and never assigns it
-        // — and the compiler is right to refuse: it can't know that `anchor` being true implies the call
-        // happened. That correlation is only in my head.
-        Vector3 groundBefore = Vector3.zero;
-        bool anchor = !following && ZoomToCursor && GroundPoint(Input.mousePosition, before, out groundBefore);
+        pos.y = Mathf.Lerp(pos.y, targetHeight, k);
 
-        pos.y = after;
-        transform.position = pos;
-
-        if (anchor && GroundPoint(Input.mousePosition, after, out Vector3 groundAfter))
+        // Following pins X/Z to the body (LateUpdate re-centres every frame), so an anchor would only
+        // fight it.
+        if (haveAnchor && !following)
         {
-            Vector3 slide = groundBefore - groundAfter;
-            slide.y = 0f;
-            transform.position += slide;
+            pos.x = Mathf.Lerp(pos.x, anchorXZ.x, k);
+            pos.z = Mathf.Lerp(pos.z, anchorXZ.y, k);
         }
+
+        transform.position = pos;
     }
+
+    /// How fast the camera converges on its zoom target, in e-folds per second.
+    const float ZoomEaseRate = 10f;
 
     /// Toggle for cursor-anchored zoom. On by default; here so the behaviour has a name.
     public static bool ZoomToCursor = true;
-
-    /// Where the ray through `screenPos` meets the orbital plane (y=0), for a camera at height h.
-    ///
-    /// Computed from the camera's own ray rather than Physics.Raycast: the plane is what the zoom is
-    /// anchored to, and it exists whether or not there's a collider under the cursor. Raycasting would
-    /// make zoom-to-cursor work over planets and silently fall back to centre-zoom over empty space,
-    /// which is most of the map.
-    bool GroundPoint(Vector3 screenPos, float h, out Vector3 hit)
-    {
-        hit = default;
-        if (cam == null) cam = GetComponent<Camera>();
-        if (cam == null) return false;
-
-        // Build the ray from a camera at height h without moving the real one.
-        Vector3 origin = transform.position; origin.y = h;
-        Ray r = cam.ScreenPointToRay(screenPos);
-        Vector3 dir = r.direction;
-        if (Mathf.Abs(dir.y) < 0.0001f) return false;    // parallel to the plane: never meets it
-
-        float t = -origin.y / dir.y;
-        if (t <= 0f) return false;                        // the plane is behind the camera
-        hit = origin + dir * t;
-        return true;
-    }
 
     private void KeepCameraAngle()
     {
