@@ -292,6 +292,35 @@ public class PlanetViewWindow : MonoBehaviour
         root.SetActive(false);
     }
 
+    /// Re-draw this window if it happens to be showing `b`, after something ELSE changed that world.
+    ///
+    /// The three callers all own their change and have already made it: terraforming and the terrain
+    /// editor have regenerated the surface and dropped the derived caches themselves, and a finished
+    /// research task has rewritten a site in place. So this only REPAINTS. It deliberately regenerates
+    /// nothing — a window that re-derived a world every time someone asked it to redraw would be doing
+    /// the caller's job with the caller's data, and would sometimes reach a different answer.
+    ///
+    /// The `body != b` test is what makes this safe to call from a tick: terraforming fires it every
+    /// time a world gains 1.5 habitability, and the window is nearly always closed or looking at
+    /// somewhere else, so the common case costs one reference compare.
+    ///
+    /// (This is the counterpart of DetailedSurfaceWindow.RefreshIfShowing, which these callers used to
+    /// reach. When that window was retired into this one's Sites and Terrain tabs, the calls were
+    /// repointed here but the method never came with them.)
+    public void RefreshIfShowing(CelestialBody b)
+    {
+        if (root == null || !root.activeSelf) return;
+        if (b == null || body != b) return;
+
+        RefreshMapTexture();   // terraforming can remodel a world outright, not just retint it
+
+        // Force the side panel, the structures and the overlay to re-read on the next Update. Going
+        // through the signature rather than calling Rebuild() straight away keeps ONE rebuild path, so
+        // this can't drift from the one everything else uses — and it collapses naturally if several
+        // things ask on the same frame.
+        lastSig = null;
+    }
+
     void RefreshMapTexture()
     {
         if (body == null) return;
