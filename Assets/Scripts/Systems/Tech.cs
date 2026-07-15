@@ -411,7 +411,10 @@ public static class TechManager
     public static string Active => ActiveOrder?.id;
 
     // ---- Research capacity ----
-    public static int TotalCapacity => ResearchCapacity.PlayerTotal();
+    // Dev Mode has unlimited lab capacity — otherwise CanQueue would admit a tech that Schedule then
+    // marks Impossible because your one starting laboratory can't hold it, which is the same
+    // available-but-unfinishable trap PrereqsMet had.
+    public static int TotalCapacity => GameMode.DevMode ? 9999 : ResearchCapacity.PlayerTotal();
 
     public static int UsedCapacity
     { get { int n = 0; foreach (var o in queue) if (o.Active) n += o.Cost; return n; } }
@@ -452,6 +455,16 @@ public static class TechManager
         if (t == null) { reason = "unknown"; return false; }
         if (researched.Contains(t.id)) { reason = "researched"; return false; }
         if (IsQueued(t.id)) { reason = "queued"; return false; }
+
+        // DEV MODE: everything is available. Only the two checks above survive, because they aren't
+        // gates — "already researched" and "already queued" are statements about the queue itself, and
+        // bypassing them would let you queue the same tech twice.
+        //
+        // The rest (empire level, lab capacity, prerequisites, ore discovery, ancient schematics) are the
+        // progression, and Dev Mode exists to skip the progression. This had NO Dev Mode bypass at all,
+        // which is why Dev Mode could afford any tech and still not research it.
+        if (GameMode.DevMode) return true;
+
         if (EmpireTech.Level < t.minEmpireLevel) { reason = $"needs Empire Tech Level {t.minEmpireLevel}"; return false; }
         if (t.CapacityCost > TotalCapacity)
         { reason = $"needs {t.CapacityCost} research capacity (your labs total {TotalCapacity})"; return false; }
@@ -606,6 +619,10 @@ public static class TechManager
 
     public static bool PrereqsMet(Tech t)
     {
+        // Dev Mode skips the tree. Without this, CanQueue would let a tech in and then Schedule would
+        // park it on WaitingForPrereq forever — available to queue and impossible to finish, which is
+        // worse than not offering it.
+        if (GameMode.DevMode) return true;
         foreach (var p in t.prereqs) if (!researched.Contains(p)) return false;
         return true;
     }

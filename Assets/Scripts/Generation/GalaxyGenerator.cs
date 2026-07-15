@@ -109,6 +109,10 @@ public static class GalaxyGenerator
         var htp = planet.terrainParams;
         htp.heat = Mathf.Lerp(0.55f, 1.7f, Mathf.Clamp01(species.idealTemp));
         planet.terrainParams = htp;
+        // Re-capture AFTER the override: this is the home world's natural climate, not what SeedTerrain
+        // rolled a moment ago. It's already the species' ideal — a cradle needs no terraforming — and
+        // recording it as anything else would mean terraforming it "improved" it away from itself.
+        TerraformVisuals.CaptureNatural(planet);
         planet.surface = PlanetTerrainGenerator.GenerateSurface(planet);
         OreGenerator.Populate(planet);
         planet.resources = new ResourceDeposit();
@@ -232,5 +236,8 @@ public static class GalaxyGenerator
         body.terrainSeed = Random.Range(0f, 10000f);
         body.continentFrequency = Mathf.Clamp(body.surfaceSize * 0.32f, 2.5f, 8f);
         TerrainVariance.Apply(body);
+        // The climate nature gave it. Terraforming lerps FROM here (TerraformVisuals), so it has to be
+        // captured before anything moves it.
+        TerraformVisuals.CaptureNatural(body);
     }
 }

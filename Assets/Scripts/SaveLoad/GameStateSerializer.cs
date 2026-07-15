@@ -100,6 +100,8 @@ public static class GameStateSerializer
             continentFrequency = b.continentFrequency,
             tScale = b.terrainParams.scale, tElev = b.terrainParams.elevation,
             tMoist = b.terrainParams.moisture, tHeat = b.terrainParams.heat, tRidge = b.terrainParams.ridge,
+            nScale = b.naturalParams.scale, nElev = b.naturalParams.elevation,
+            nMoist = b.naturalParams.moisture, nHeat = b.naturalParams.heat, nRidge = b.naturalParams.ridge,
             orbitRadius = b.orbitRadius, orbitSpeed = b.orbitSpeed, orbitPhase = b.orbitPhase,
             orbitDirection = b.orbitDirection, inclination = b.inclination, eccentricity = b.eccentricity,
             verticalOffset = b.verticalOffset, spinSpeed = b.spinSpeed, showRing = b.showRing,
@@ -299,6 +301,23 @@ public static class GameStateSerializer
             heat = dto.tHeat <= 0f ? 1f : dto.tHeat,
             ridge = dto.tRidge <= 0f ? 1f : dto.tRidge
         };
+
+        // The untouched climate terraforming lerps FROM. A save written before this existed has zeros,
+        // and the only honest answer there is the current params: such a save has no record of what the
+        // world looked like before, so we call where it is now its natural state. It costs that world its
+        // terraforming history and nothing else — progress from here still works.
+        bool hasNatural = dto.nHeat > 0f || dto.nMoist > 0f || dto.nElev > 0f;
+        b.naturalParams = hasNatural
+            ? new PlanetTerrainGenerator.NoiseParams
+            {
+                scale = dto.nScale <= 0f ? 1f : dto.nScale,
+                elevation = dto.nElev <= 0f ? 1f : dto.nElev,
+                moisture = dto.nMoist <= 0f ? 1f : dto.nMoist,
+                heat = dto.nHeat <= 0f ? 1f : dto.nHeat,
+                ridge = dto.nRidge <= 0f ? 1f : dto.nRidge
+            }
+            : b.terrainParams;
+        b.lastTerraformRenderHab = b.habitability;   // don't regenerate on the first tick after loading
 
         b.surface = PlanetTerrainGenerator.GenerateSurface(b);
 

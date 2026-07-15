@@ -14,6 +14,15 @@ public class CelestialBody
     // Terrain field identity. Both the low-res grid and the high-res detailed map are sampled from
     // this same seed/frequency/params, so the two views ALWAYS match (including live edits).
     public float terrainSeed = 0f;
+
+    // The climate nature gave this world, before any terraforming moved it. Terraforming lerps
+    // terrainParams from HERE toward what the species would build for itself (TerraformVisuals), so this
+    // has to be the untouched original — once terrainParams starts moving, the origin is gone otherwise.
+    public PlanetTerrainGenerator.NoiseParams naturalParams = PlanetTerrainGenerator.NoiseParams.Default;
+
+    // Habitability the last time the surface was actually rebuilt. Regenerating is ~12,000 cells of
+    // noise, so it happens per RegenStep of progress rather than per frame.
+    [System.NonSerialized] public float lastTerraformRenderHab = -999f;
     public float continentFrequency = 4f;
     public PlanetTerrainGenerator.NoiseParams terrainParams = PlanetTerrainGenerator.NoiseParams.Default;
 
