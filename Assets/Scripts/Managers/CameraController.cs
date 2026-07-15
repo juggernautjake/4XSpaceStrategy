@@ -11,15 +11,15 @@ public class CameraController : MonoBehaviour
     // The absolute floor. Low, because a moon is only ~0.35 world units across and filling the screen
     // with one genuinely needs the camera this close. It was 4, which is further away than some whole
     // planets are wide — you could never get near anything.
-    public float minHeight = 0.08f;
-    // The floor when nothing is selected. Kept off the orbital plane so free-look never ends up inside
-    // it, but low enough to get right down among the bodies — it was 3, which is further away than a
-    // whole planet is wide, so free-look could never get close to anything.
-    public float freeLookMinHeight = 0.7f;
+    public float minHeight = 0.04f;
+    // The floor when nothing is selected — and the one that actually governs "how far can I zoom in",
+    // since with a body selected the limit is that body's own surface (see ZoomFloor). Low enough to get
+    // right down among the planets: it was 3, which is further away than a whole planet is wide.
+    public float freeLookMinHeight = 0.35f;
     // Farthest view. Generous on purpose: this is a hard ceiling on how far back you can ever pull, and
     // the only cost of headroom is a bigger far clip, which UpdateClipPlanes already tracks. The galaxy
     // is framed by HeightToFrame, not by this — so this only ever needs to be comfortably beyond it.
-    public float maxHeight = 60000f;
+    public float maxHeight = 120000f;
 
     private float targetHeight;            // For smooth movement
 
@@ -118,10 +118,13 @@ public class CameraController : MonoBehaviour
         cam.farClipPlane = Mathf.Max(MinFarClip, slant + GalaxyRadius() * 2.5f + 1000f);
         // Near plane has to grow with distance or z-fighting sets in at galaxy scale. What matters for
         // depth precision is the far:near RATIO, not either number, so the near plane has to keep pace
-        // as the ceiling rises — pinning it at 5 while the far plane runs to ~74,000 is a 15,000:1 ratio
-        // and the depth buffer starts tearing. Nothing is within 100 units of the camera when it's
-        // 60,000 up, so a near plane that far out clips nothing you can see.
-        cam.nearClipPlane = Mathf.Clamp(h * 0.002f, 0.02f, 120f);
+        // as the ceiling rises — pinning it at 5 while the far plane runs past 100,000 is a 20,000:1
+        // ratio and the depth buffer starts tearing. Nothing is within 240 units of the camera when it's
+        // 120,000 up, so a near plane that far out clips nothing you could see anyway.
+        //
+        // The 0.01 floor is what lets the other end work: at minHeight the camera is a few centimetres
+        // off a moon's surface, and a near plane any further out would clip the moon itself away.
+        cam.nearClipPlane = Mathf.Clamp(h * 0.002f, 0.01f, 240f);
     }
 
     // Recenters the view on a world position (used by notifications to jump to a discovery).
@@ -301,12 +304,26 @@ public class CameraController : MonoBehaviour
     private float ZoomFloor()
     {
         if (followTarget == null) return Mathf.Max(minHeight, freeLookMinHeight);
+
+        // Stop just off the SURFACE of the thing you're looking at — worked from the geometry, not
+        // picked.
+        //
+        // The camera sits at height h and looks down at Pitch, so its distance to the target is
+        // d = h / sin(Pitch). To stay outside a body of radius R we need d > R, i.e. h > R * sin(Pitch).
+        // FillHeight returns h = 2.01 * R (it solves for the object subtending 80% of the FOV), so the
+        // surface sits at R * sin(55) = 0.82R, which is 0.41 * FillHeight.
+        //
+        // This is the hard limit on zooming in on an object: closer than the surface is INSIDE it, where
+        // there is nothing to see but backfaces and the near plane. A previous pass set this to
+        // fill * 0.2 to "get closer" — that is d = 0.49R, half way to the core, and it is why zooming
+        // in on a planet stopped showing you the planet.
         float fill = FillHeight(WorldRadius(followTarget));
-        // A fifth of the fill height: close enough that the body overflows the screen and you're looking
-        // at its surface rather than at it. This was half, which stopped you at roughly "it fills the
-        // view" — the point you'd want to start zooming in FROM.
-        return Mathf.Max(minHeight, fill * 0.2f);
+        return Mathf.Max(minHeight, fill * SurfaceFrac);
     }
+
+    /// Fraction of FillHeight at which the camera grazes the target's surface — see ZoomFloor. Slightly
+    /// above the true 0.41 so there's a hair of clearance rather than a plane through the crust.
+    const float SurfaceFrac = 0.44f;
 
     private void SmoothHeightMovement()
     {

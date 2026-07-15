@@ -209,14 +209,9 @@ public class PlanetViewWindow : MonoBehaviour
     {
         if (body == null) return;
 
-        // The SAME map the detailed world viewer draws, at its full resolution, unchanged. Build(), not
-        // BuildGrid(): this is the detailed map, used here as the surface you build on.
-        //
-        // A 1x1 building covers exactly one grid cell, which is one terrain tile — one to one, and
-        // always has been. The thing that made buildings look oversized was never the footprint, it was
-        // the on-screen SCALE: a small world's grid was stretched to fill the window, so a tile could be
-        // 67 screen pixels. That's the zoom's job to bound, and DetailTilePx now bounds it at exactly
-        // the size the detailed map draws a tile — so the two views are the same map at the same scale.
+        // One texel per build cell, read straight off the grid — so a 1x1 structure covers exactly one
+        // terrain pixel. The grid is now as fine as the detail render (see MapMetrics.Subdiv), so this
+        // is the detailed map AND the build grid at once, rather than two maps six times apart.
         //
         // Rebuilt on every open rather than cached by body id, because terraforming can remodel a
         // world's terrain outright and a cache keyed only on identity would show the planet it used
@@ -227,7 +222,7 @@ public class PlanetViewWindow : MonoBehaviour
         // This used to post-process a second copy of the texture here, which both duplicated the tone
         // (letting the two maps drift apart) and doubled the allocation.
         if (mapTex != null) Destroy(mapTex);
-        mapTex = SurfaceTextureRenderer.Build(body, pastel: true);
+        mapTex = SurfaceTextureRenderer.BuildGrid(body, pastel: true);
         mapImage.texture = mapTex;
         titleText.text = $"Planet View — {body.name}";
         ApplyMapSize();
@@ -260,32 +255,31 @@ public class PlanetViewWindow : MonoBehaviour
     Vector2 mapPan;                // map offset within the viewport
     Vector2 lastViewportSize;      // re-fit when the window is laid out or resized
 
-    /// The size a tile is drawn at on the detailed world map. NOTHING here is ever allowed to draw a
-    /// tile bigger than this, so the build grid and the detailed map are the same map at the same
-    /// resolution — which is the whole point of building on it.
+    /// Pixels per cell at which the ENTIRE surface is visible. This is the zoomed-all-the-way-out end.
     ///
-    /// Without this ceiling, "fit the surface to the viewport" makes tile size depend on how small the
-    /// world is: a 12x6 moon fitted to an 812x554 viewport is 67px per tile, three times the detailed
-    /// map's. Small worlds got the biggest tiles, which is exactly backwards.
-    float DetailTilePx() => MapMetrics.DetailTile(body != null ? body.surfaceSize : 12);
-
-    /// Pixels per tile at which the entire surface is visible — never above detail resolution, so a
-    /// small world simply letterboxes inside the window instead of being blown up to fill it.
+    /// No ceiling on it any more. There used to be one — capped at the detailed map's own tile size —
+    /// because a coarse 12x6 moon fitted to the viewport gave 67px tiles. With the grid at detail
+    /// resolution that can't happen: the smallest world is 96x48 cells, so fitting it is ~7px a cell.
+    /// The cap was also what crushed the zoom range down to about 2.4x, since it was clamping both ends
+    /// to nearly the same number.
     float FitTilePx()
     {
-        if (body?.surface == null) return 8f;
+        if (body?.surface == null) return 4f;
         var vp = gridHolder.rect;
-        float fit = Mathf.Min(vp.width / body.surface.width, vp.height / body.surface.height);
-        return Mathf.Min(fit, DetailTilePx());
+        if (vp.width < 1f || vp.height < 1f) return 4f;
+        return Mathf.Min(vp.width / body.surface.width, vp.height / body.surface.height);
     }
 
-    /// Pixels per tile at which roughly MaxVisibleTiles cells fill the viewport.
+    /// Pixels per cell at the zoomed-all-the-way-IN end: roughly MaxVisibleTiles cells fill the
+    /// viewport, so the closest view shows the same amount of ground on every world rather than
+    /// depending on how big the planet happens to be.
+    ///
     /// visibleTiles = (w/px) * (h/px) = area / px^2  ->  px = sqrt(area / visibleTiles)
     float MaxTilePx()
     {
         var vp = gridHolder.rect;
         float area = Mathf.Max(1f, vp.width * vp.height);
-        return Mathf.Min(Mathf.Sqrt(area / MaxVisibleTiles), DetailTilePx());
+        return Mathf.Sqrt(area / MaxVisibleTiles);
     }
 
     void ApplyMapSize()

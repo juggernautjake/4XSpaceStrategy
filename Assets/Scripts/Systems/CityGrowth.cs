@@ -88,17 +88,35 @@ public class CityGrowth : MonoBehaviour
         float coverage = Mathf.Lerp(0.04f, 0.55f, Mathf.Pow(live, 1.8f));
         float tilesForCities = buildableTiles * coverage;
 
-        // A mature settlement averages ~5 tiles.
-        return Mathf.Max(1, Mathf.FloorToInt(tilesForCities / 5f));
+        // A mature settlement averages ~5 cells.
+        int byLand = Mathf.FloorToInt(tilesForCities / 5f);
+
+        // HARD CAP, and it is doing real work. A cell is now 36 times smaller in area than it was (see
+        // MapMetrics.Subdiv), so a world has 36 times the cells and this arithmetic — which is a
+        // fraction of the cell COUNT — would ask for 36 times the settlements. The coverage would still
+        // be right, but a paradise would want thousands of them, and every one is a PlacedBuilding whose
+        // footprint is drawn as its own quad. That is a framerate cliff, not a city.
+        //
+        // Capped rather than rescaled by Subdiv on purpose: more, smaller towns IS the look we want on a
+        // finer map. This just stops it running away.
+        return Mathf.Clamp(byLand, 1, SettlementCap);
     }
 
-    /// Seconds between new settlements appearing. A paradise sprouts one every half-minute or so; a
-    /// marginal world takes many minutes.
+    /// The most settlements any one world may grow. Tuned against how many quads the Planet View can
+    /// draw without stuttering, not against anything in the fiction.
+    public const int SettlementCap = 160;
+
+    /// Seconds between new settlements appearing. A paradise sprouts one every few seconds; a marginal
+    /// world takes many minutes.
+    ///
+    /// Faster than it was, because there is far more room to fill now: at the old 35s floor a paradise
+    /// would need over an hour and a half to reach the cap, and organic growth you cannot watch happen
+    /// is just a number going up while you are somewhere else.
     public static float SpawnInterval(CelestialBody b)
     {
         float live = Liveability(b);
         if (live <= 0.01f) return float.MaxValue;
-        return Mathf.Lerp(420f, 35f, Mathf.Pow(live, 1.35f));
+        return Mathf.Lerp(180f, 6f, Mathf.Pow(live, 1.35f));
     }
 
     /// The biggest a settlement may become here. Only a properly habitable world grows true cities;

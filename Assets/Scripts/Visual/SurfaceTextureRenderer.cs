@@ -29,15 +29,13 @@ public static class SurfaceTextureRenderer
     // ============================================================================================
     // GRID-RESOLUTION render: EXACTLY ONE TEXEL PER GRID CELL.
     //
-    // Build() below renders at 6x the grid (surfaceSize * 2 * 6 wide) because it's a pretty read-only
-    // map. That is fine there — but the Planet View is a BUILD grid, and a building's footprint is
-    // measured in grid cells. Showing 6x6 terrain texels underneath a one-cell tile is what made the
-    // structures look six times too big: they weren't wrong, the terrain was finer than the grid.
+    // Reads body.surface.tiles DIRECTLY rather than re-sampling the noise field at a resolution that
+    // ought to match. That's a stronger guarantee than matching numbers: the terrain you see IS the grid
+    // the placement code tests against, so a tile and a footprint cell cannot drift apart even if
+    // somebody changes the dimensions later.
     //
-    // This reads body.surface.tiles DIRECTLY rather than re-sampling the noise at a matching
-    // resolution. That's a stronger guarantee than matching numbers: the terrain you see IS the grid
-    // the placement code tests against, so a tile and a footprint cell cannot drift apart — there is
-    // only one grid.
+    // Build() below now samples at the same resolution (both take it from MapMetrics), so the two agree
+    // — but only this one agrees BY CONSTRUCTION. Prefer it for anything you can build on.
     // ============================================================================================
     public static Texture2D BuildGrid(CelestialBody body, bool pastel = true)
     {
@@ -80,8 +78,11 @@ public static class SurfaceTextureRenderer
 
     public static Texture2D Build(CelestialBody body, bool pastel = false)
     {
-        int w = Mathf.Clamp(body.surfaceSize * 2 * 6, 96, 384);
-        int h = Mathf.Max(48, w / 2);
+        // From MapMetrics, which is also what the grid is built at — so this renders exactly one texel
+        // per cell, same as BuildGrid. The bare `* 6` that used to live here was the whole bug: it made
+        // this render six times finer than the grid it was supposed to be depicting.
+        int w = MapMetrics.SurfW(body.surfaceSize);
+        int h = MapMetrics.SurfH(body.surfaceSize);
 
         var tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
         {

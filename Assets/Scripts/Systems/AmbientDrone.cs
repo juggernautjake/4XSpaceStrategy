@@ -67,20 +67,30 @@ public class AmbientDrone : MonoBehaviour
 
     const int Voices = 6;
 
-    // E1 — a perfect fourth below the old A1. The bed sits deeper now, and the sub under it lands
-    // around 20Hz, which is past hearing and into the range you feel through the cups.
-    const float RootHzBase = 41.20f;
+    // C#1 — nearly an octave below the original A1. EVERY voice lives between here and roughly 130Hz,
+    // which is two octaves below middle C: the whole chord is sub-bass and low bass, with nothing in
+    // the register where a pad would normally sit.
+    const float RootHzBase = 34.65f;
     const int RootMin = -5, RootMax = 5;  // semitone window the root wanders inside
 
+    // The HIGHEST any voice may ever sound. A hard ceiling, enforced in Hz rather than trusted to fall
+    // out of the octave maths, because that's exactly what went wrong before: the root was lowered to
+    // 41Hz but a per-voice octave table simultaneously pushed four of the six voices up one or two
+    // octaves, so voices ran to 330Hz and the bed came out HIGHER than the 55-110Hz it replaced. Lower
+    // the floor and raise the ceiling and you have not made anything deeper. A ceiling can't drift.
+    const float MaxVoiceHz = 132f;
+
     // ---- Register plan ----
-    // Which octave each voice sits in, relative to the root. This exists because "make it deeper" and
-    // "keep it harmonic" pull against each other: at 41Hz, a minor third above the root is ~49Hz, and
-    // the ear cannot resolve two pitches that close together that low — it hears a beating rumble, not
-    // a chord. So the bottom carries only fundamentals (root and, when the chord has one, its perfect
-    // fifth), and every colour tone — thirds, sevenths, ninths — is voiced an octave or two up where
-    // it's actually legible as harmony. Spreading like this is why the chord still reads as a chord
-    // even though its floor dropped a fourth.
-    static readonly int[] VoiceOctave = { 0, 0, 1, 1, 1, 2 };
+    // Which octave a tone sits in is decided by the TONE, not by the voice's index — that was the bug.
+    //
+    // Only the root and a perfect fifth may sound at the very bottom: those two beat against each other
+    // slowly and cleanly (a 3:2 ratio), so they read as one deep note rather than as mud. Colour tones —
+    // thirds, sevenths, ninths — go up ONE octave, because a minor third stacked directly on a 35Hz root
+    // is ~41Hz, a 6Hz difference the ear cannot resolve as harmony; it just hears a wobble.
+    //
+    // One octave, never two, and never above MaxVoiceHz. That keeps the entire chord inside roughly
+    // 35-130Hz while still being a real chord.
+    static int OctaveFor(int semi) => (semi == 0 || semi == 7) ? 0 : 1;
 
     // ---- Audio-thread state ----
     // Touched from OnAudioFilterRead. Only plain floats: no Unity API is legal on the audio thread.
@@ -102,7 +112,7 @@ public class AmbientDrone : MonoBehaviour
     float changeTimer;
 
     /// The chord currently sounding, in Hz. Read by AmbientChirps so its notes belong to this chord.
-    public static float[] CurrentTones = { 41.2f, 49.0f, 61.7f };   // E1 minor, until the first chord lands
+    public static float[] CurrentTones = { 34.65f, 41.2f, 51.9f };  // C#1 minor, until the first chord lands
     /// Semitone offsets of the current chord (root-relative), and the root's own offset from A.
     public static int[] CurrentSemitones = { 0, 3, 7 };
     public static int CurrentRootSemi;
@@ -235,13 +245,17 @@ public class AmbientDrone : MonoBehaviour
         for (int v = 0; v < Voices; v++)
         {
             // Bottom two voices: root and its fifth (or the root doubled, when the chord hasn't got a
-            // clean fifth to lend). Everything above: the chord's own tones, cycled, up an octave or
-            // two. See VoiceOctave.
+            // clean fifth to lend). Everything above: the chord's own tones, cycled, placed by
+            // OctaveFor — colour tones up exactly one octave, root and fifth left at the bottom.
             int semi = v == 0 ? tones[0]
                      : v == 1 ? fifth
                      : tones[(v - 2) % tones.Length];
 
-            float f = root * Mathf.Pow(2f, (semi + VoiceOctave[v] * 12) / 12f);
+            float f = root * Mathf.Pow(2f, (semi + OctaveFor(semi) * 12) / 12f);
+
+            // Fold anything that still lands too high back down an octave at a time. A voice an octave
+            // down is the same note, so this can never break the harmony — it only enforces the ceiling.
+            while (f > MaxVoiceHz) f *= 0.5f;
 
             // Detune every other voice very slightly. Two near-identical sines beat against each other
             // at their difference frequency — a slow, organic shimmer no LFO reproduces.
@@ -303,12 +317,17 @@ public class AmbientDrone : MonoBehaviour
                 norm += amp[v];
             }
 
-            // A sub an octave below the root: felt more than heard, and the reason it works on headphones.
-            // Weightier than it was, to hold up the deeper bed above it.
+            // A sub an octave below the root: felt more than heard.
+            //
+            // Quieter than the voices now, and deliberately so. With the root down at ~35Hz this sits
+            // near 17Hz, which almost nothing actually reproduces — so every unit of level given to it
+            // is level taken out of the normalisation below and returned as silence. It earns its keep
+            // as weight on hardware that can move that much air, and costs little on hardware that
+            // can't.
             subPhase += (curFreq[0] * 0.5f) / sr;
             if (subPhase > 1.0) subPhase -= 1.0;
-            sample += Mathf.Sin((float)(subPhase * 6.2831853)) * 0.62f;
-            norm += 0.62f;
+            sample += Mathf.Sin((float)(subPhase * 6.2831853)) * 0.35f;
+            norm += 0.35f;
 
             sample = sample / Mathf.Max(0.001f, norm) * gain;
             // Gentle soft-clip: keeps a chord whose partials line up from ever spiking.
