@@ -357,12 +357,10 @@ public class FleetMovementController : MonoBehaviour
         {
             var b = pc.data;
             opts.Add(Focus($"Focus on {b.name}", b.visualObject != null ? b.visualObject.transform : hit.collider.transform, b.surfaceSize));
-            opts.Add(new ContextMenu.Option($"{b.name} info", () =>
-                InspectorWindow.Instance?.Inspect(InspectorTarget.Of(b), resetTrail: true)));
-
-            if (b.Surveyed)
-                opts.Add(new ContextMenu.Option("Planet View (build / survey)",
-                    () => PlanetViewWindow.Instance?.ShowFor(b)));
+            // The old "info" pop-up (the tabbed body Inspector) is retired — its tabs are folded into the
+            // Planet View. Both the info and the build/survey context options now open that one window.
+            opts.Add(new ContextMenu.Option($"Planet View — {b.name}",
+                () => PlanetViewWindow.Instance?.ShowFor(b)));
 
             // Claiming is the one action worth offering straight off the map — it's the thing you do to a
             // world you just found, and it's a single click that would otherwise mean opening a panel.

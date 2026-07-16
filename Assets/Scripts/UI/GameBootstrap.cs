@@ -53,7 +53,12 @@ public static class GameBootstrap
         // "Around Homeworld" (AssociatedObjectsWindow) retired at Raptok's request: its moon-hopping list
         // is superseded by the Planet View's moon tabs. Not instantiated, so it never subscribes to
         // selection and never appears. The class is left in the tree as dead code for now.
-        ColonyWindow.Create(canvas.transform);
+        //
+        // "Colony — Homeworld" (ColonyWindow) likewise retired: its shipyard controls moved to the Planet
+        // View's Orbit tab, the research-centre and society/objectives readouts to Overview, and the
+        // Farm/Mine building to surface Build Mode. Not instantiated, so it never subscribes to selection
+        // and never pops up. Left as dead code for now.
+        //   ColonyWindow.Create(canvas.transform);
         SystemSummaryWindow.Create(canvas.transform);
         GalaxyLOD.Create(canvas.transform);
         BoxSelectController.Create(canvas.transform);

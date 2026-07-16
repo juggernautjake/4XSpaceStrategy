@@ -72,7 +72,10 @@ public class PlanetViewWindow : MonoBehaviour
                 return true;
 
             case Tab.Survey:
-                if (!body.Surveyed) { why = "survey this world first"; return false; }
+                // Always open now that it also carries Climate and Terraform, which are known from orbit
+                // (name, type, orbit and host star are free on any world). The index overlays and the ore
+                // list inside gate themselves on the survey state, so an unsurveyed world lands here on a
+                // readable Climate/Terraform page rather than a locked tab.
                 return true;
 
             case Tab.Build:
@@ -527,6 +530,13 @@ public class PlanetViewWindow : MonoBehaviour
         sb.Append(body.owner != null ? body.owner.id : -1).Append('|');
         sb.Append(body.units != null ? body.units.Count : 0).Append('|');
 
+        // Species and terraform projects reshape the Survey tab's Climate/Terraform sections (habitability
+        // re-scores, the fault list changes) and the Overview's claim/settle road — all structural, and
+        // both change rarely, so they belong in the signature rather than in per-frame live text.
+        sb.Append(SpeciesManager.CurrentIndex).Append('|');
+        if (body.terraformProjects != null) foreach (int pr in body.terraformProjects) sb.Append(pr).Append(',');
+        sb.Append('|');
+
         // The Orbit tab's INBOUND list is drawn from ships in transit toward this world — a set that
         // isn't in body.units, so a ship dispatched here (or diverted away) wouldn't otherwise rebuild
         // the panel. This count only moves on depart/arrive/retarget, never per-frame, so it can't strobe.
@@ -819,6 +829,10 @@ public class PlanetViewWindow : MonoBehaviour
         });
         Stat(card, "Habitability", () => $"<color={Habitability.ScoreColorHex(body.habitability)}>{body.habitability:F0}%</color> for {SpeciesManager.Current.name}");
 
+        // The ownership road — claim, then settle — folded from the retired Inspector body window, plus
+        // the direct "establish city" path the Colony/Production windows offered for an owned world.
+        BuildOwnershipSection();
+
         Header("CLIMATE & WEATHER");
         var w = Card();
         var t = UIFactory.WrapText(w, "", UITheme.SmallSize, UITheme.Text);
@@ -872,6 +886,65 @@ public class PlanetViewWindow : MonoBehaviour
             Stat(soc, "Cities", () => body.cities.ToString());
             Stat(soc, "Development", () => $"<b>{Colony.ClaimProgress(body) * 100f:F0}%</b>" +
                 (Colony.IsFullyEstablished(body) ? "  <color=#4DFF6E>fully established</color>" : ""));
+            Bar(soc, () =>
+            {
+                int popCap = Colony.PopTarget(body);
+                float f = popCap > 0 ? body.population / (float)popCap : 0f;
+                var c = f >= 1f ? UITheme.Bad : f > 0.9f ? UITheme.Warn : UITheme.Accent;
+                return (f, $"Population {body.population}/{popCap}", c);
+            });
+            // The three ceilings are shown apart: "capacity" is a min() of three different problems, and
+            // the number alone doesn't say which one you have — land wants terraforming, housing wants
+            // building, food wants farms.
+            Stat(soc, "Land supports", () => Population.Format(Carrying.LandCap(body)));
+            Stat(soc, "Housing for", () => Population.Format(Carrying.HousingCap(body)));
+            Stat(soc, "Food", () => Carrying.FoodLine(body));
+
+            // Satisfaction, with the full reasoning — an unhappy colony should say exactly what it's
+            // unhappy about, and whether that's stalling its growth. Folded from the Inspector's Society tab.
+            Header("SATISFACTION");
+            Bar(sidePanel, () =>
+            {
+                float sat = Satisfaction.For(body);
+                return (sat / 100f, $"{Satisfaction.Label(sat)} — {sat:F0}%", Satisfaction.Color(sat));
+            });
+            var breakdown = Card();
+            var bt = UIFactory.WrapText(breakdown, "", UITheme.SmallSize, UITheme.Text);
+            live.Text(bt, () =>
+            {
+                var sb = new System.Text.StringBuilder();
+                foreach (var f in Satisfaction.Breakdown(body))
+                {
+                    string hex = ColorUtility.ToHtmlStringRGB(f.delta >= 0f ? UITheme.Good : UITheme.Bad);
+                    sb.AppendLine($"<color=#{hex}>{(f.delta >= 0f ? "+" : "")}{f.delta:F0}</color>  <b>{f.label}</b>  <color=#9FB4C8>{f.detail}</color>");
+                }
+                float mult = Satisfaction.GrowthMultiplier(body);
+                string stall = Population.StallReason(body, InfrastructureGrowth(body));
+                sb.AppendLine(stall != null
+                    ? $"\n<color=#FF6659>Not growing — {stall}.</color>"
+                    : $"\n<color=#9FB4C8>Birth rate ×{mult:0.00} from satisfaction · " +
+                      $"{Population.Format(Mathf.RoundToInt(Population.BirthRate(body, InfrastructureGrowth(body)) * 60f))} per minute</color>");
+                return sb.ToString();
+            });
+
+            // What this colony can actually DO — food/power/research/industry/housing counted across BOTH
+            // colony facilities and surface structures. The Production tab's rollup, folded here.
+            Header("CAPABILITY");
+            var capCard = Card();
+            var ct = UIFactory.WrapText(capCard, "", UITheme.SmallSize, UITheme.Text);
+            live.Text(ct, () =>
+            {
+                int food = ColonyFacilities.FoodSources(body);
+                int power = ColonyFacilities.PowerSources(body);
+                int res = ColonyFacilities.ResearchSources(body);
+                int ind = ColonyFacilities.IndustrySources(body);
+                int hou = ColonyFacilities.HousingSources(body);
+                string F(int n, string good, string bad) =>
+                    n > 0 ? $"<color=#4DFF6E>{good}</color>" : $"<color=#FF7A6E>{bad}</color>";
+                return $"{F(food, $"{food} food source(s)", "no food")}  ·  {F(power, $"{power} generator(s)", "no power")}\n" +
+                       $"{F(res, $"{res} research tier(s)", "no research")}  ·  {F(ind, $"{ind} industry tier(s)", "no industry")}  ·  " +
+                       $"{F(hou, $"{hou} housing", "no housing")}";
+            });
 
             Header("OBJECTIVES TO FULLY ESTABLISH");
             var obj = Card();
@@ -897,6 +970,98 @@ public class PlanetViewWindow : MonoBehaviour
                                           "<color=#FFBF4D>No deep survey yet</color> — send a research ship to study this world and unlock the Heat, Fertile and Weather indexes.";
             return "<color=#4DFF6E>Fully surveyed.</color> Every index overlay is available.";
         });
+    }
+
+    // The two-stage road to owning a world — CLAIM it, then SETTLE it once it's liveable — plus the
+    // direct "establish city" founding an owned world can use. Folded from the Inspector body window's
+    // claim section and the Colony/Production windows. Nothing shows on a world that's already settled
+    // or belongs to someone else.
+    void BuildOwnershipSection()
+    {
+        var b = body;
+        var mgr = ColonyManager.Instance;
+
+        if (!Claim.IsSettled(b) && (b.owner == null || b.owner == FactionManager.Player))
+        {
+            if (!Claim.IsMine(b))
+            {
+                Header("CLAIM THIS WORLD");
+                var card = Card();
+                Note(card, "A claim is a flag, not a colony. Habitability doesn't matter — it's what keeps the world yours while you terraform it.");
+                ConditionList(card, () => Claim.ClaimConditions(b));
+
+                var btn = UIFactory.Button(sidePanel, "", () => { if (Claim.DoClaim(b)) lastSig = null; }, 26);
+                live.Button(btn, () => Claim.CanClaim(b, out string why)
+                    ? (true, $"Claim {b.name}  ({Claim.BeaconMetal(b)}m {Claim.BeaconEnergy(b)}e)")
+                    : (false, $"Claim — {why}"));
+            }
+            else
+            {
+                Header("SETTLE THIS WORLD");
+                var card = Card();
+                Note(card, "Claimed. Nobody lives here yet — a world has to be liveable before anyone can, and until it's settled you can't build on its surface.");
+                ConditionList(card, () => Claim.SettleConditions(b));
+
+                var btn = UIFactory.Button(sidePanel, "", () =>
+                {
+                    var ship = FirstColonyShip(b);
+                    if (ship != null)
+                        UnitManager.Instance?.IssueAction(new List<Unit> { ship }, OrderKind.Colonize, b, false);
+                }, 26);
+                live.Button(btn, () => Claim.CanSettle(b, out string why)
+                    ? (true, $"Settle {b.name} — land the colony ship")
+                    : (false, $"Settle — {why}"));
+            }
+        }
+
+        // An owned world without a city can found one directly (a home moon, say) — the Colony/Production
+        // windows' "Establish City" path, kept alive now those windows are retired.
+        if (mgr != null && b.owner == FactionManager.Player && !b.buildings.Contains((int)BuildingType.City))
+        {
+            var cityBtn = UIFactory.Button(sidePanel, "", () => { if (mgr.StartEstablishCity(b)) lastSig = null; }, 26);
+            live.Button(cityBtn, () =>
+            {
+                bool can = mgr.CanEstablishCity(b, out string why);
+                return (can, can ? $"Establish City ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {ColonyManager.CityBuildTime:F0}s)"
+                                 : $"Establish City — {why}");
+            });
+        }
+    }
+
+    // A live tick-list of conditions — re-read every refresh, so it updates as a ship arrives or
+    // terraforming lands. Ported from the Inspector.
+    void ConditionList(Transform parent, System.Func<List<ColonyObjective>> src)
+    {
+        var t = UIFactory.WrapText(parent, "", UITheme.SmallSize, UITheme.Text);
+        live.Text(t, () =>
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var c in src())
+            {
+                string hex = ColorUtility.ToHtmlStringRGB(c.done ? UITheme.Good : UITheme.Bad);
+                sb.AppendLine($"<color=#{hex}>{(c.done ? "+" : "×")}</color> {c.label}  <color=#9FB4C8>{c.detail}</color>");
+            }
+            return sb.ToString().TrimEnd();
+        });
+    }
+
+    static Unit FirstColonyShip(CelestialBody b)
+    {
+        if (b?.units == null) return null;
+        foreach (var u in b.units)
+            if (u != null && u.owner == FactionManager.Player && u.Info.canColonize) return u;
+        return null;
+    }
+
+    // The colony's total capacity to raise people — every building's popGrowthPerSec scaled by siting,
+    // plus surface structures. Mirrors what ColonyManager feeds Population.BirthRate, so the readout and
+    // the simulation can't disagree. Ported from the Inspector's Society tab.
+    static float InfrastructureGrowth(CelestialBody b)
+    {
+        float g = 0f;
+        foreach (int id in b.buildings) g += BuildingDatabase.Get((BuildingType)id).popGrowthPerSec;
+        g += SurfaceBuildManager.PopGrowthPerSec(b);
+        return g;
     }
 
     // The research-centre ladder, folded from the Colony window. A tier of research centre adds a point
@@ -1800,6 +1965,13 @@ public class PlanetViewWindow : MonoBehaviour
 
     void BuildSurveyPanel()
     {
+        // Folded from the retired Inspector body window (Raptok's mapping: Climate, Ores, Terraform all
+        // land on the Survey tab). Climate first (what the world IS), then its ores, then how to fix it,
+        // then the index overlays that were always here.
+        BuildSurveyClimate();
+        BuildSurveyOres();
+        BuildSurveyTerraform();
+
         Header("INDEX OVERLAYS");
         Note("Each overlay paints the grid with where a kind of building actually belongs. Survey a world to read its minerals; a deep survey by a research ship unlocks the rest.");
 
@@ -1859,6 +2031,201 @@ public class PlanetViewWindow : MonoBehaviour
             if (!SurfaceIndex.Unlocked(body, k)) return (false, $"{nm} — {SurfaceIndex.LockReason(body, k)}");
             return (true, activeIndex == k ? $"• {nm} (showing)" : $"Show {nm}");
         }, group);
+    }
+
+    // ---- Folded from the Inspector body window (Climate / Ores / Terraform) ----
+
+    // The world as a PLACE: what the sky looks like, how long a day is, and how well it fits your species.
+    void BuildSurveyClimate()
+    {
+        var b = body;
+        var s = SpeciesManager.Current;
+
+        Header("THE WORLD");
+        var card = Card();
+        UIFactory.WrapText(card, ClimateProse(b, s), UITheme.SmallSize, UITheme.Text);
+
+        Header("STARLIGHT & ORBIT");
+        var orbit = Card();
+        Stat(orbit, "Distance from star", () => $"{b.distanceFromStar:F1} units");
+        Stat(orbit, "Orbital radius", () => $"{b.orbitRadius:F1}");
+        Stat(orbit, "Year", () => $"{OrbitalMechanics.PeriodSeconds(b.orbitSpeed):F1}s");
+        Stat(orbit, "Eccentricity", () => $"{b.eccentricity:F2}");
+        Stat(orbit, "Axial tilt", () => $"{b.inclination:F0}°" + (Mathf.Abs(b.inclination) > 28f ? "  <color=#FFBF4D>(severe seasons)</color>" : ""));
+        Stat(orbit, "Day length", () =>
+        {
+            float spin = Mathf.Abs(b.spinSpeed);
+            if (spin < 3f) return $"{spin:F1}°/s  <color=#FFBF4D>(near tidally locked)</color>";
+            if (spin > 45f) return $"{spin:F1}°/s  <color=#FFBF4D>(violently fast)</color>";
+            return $"{spin:F1}°/s";
+        });
+
+        if (b.hostStar != null)
+        {
+            Header("HOST STAR");
+            var star = Card();
+            Stat(star, "Temperature", () => $"{b.hostStar.temperatureK:F0} K");
+            Stat(star, "Luminosity", () => $"{b.hostStar.luminosity:F2}×");
+            Stat(star, "Habitable zone", () =>
+                Habitability.GetZone(b.hostStar, s, out float inner, out float outer)
+                    ? $"{inner:F1} – {outer:F1} for {s.name}" + (b.distanceFromStar >= inner && b.distanceFromStar <= outer
+                        ? "  <color=#4DFF6E>(this world is inside it)</color>"
+                        : "  <color=#FFBF4D>(this world is outside it)</color>")
+                    : "none — this star has no habitable band");
+        }
+
+        Header("HOW YOUR SPECIES SEES IT");
+        var spec = Card();
+        Note(spec, $"{s.name}: {s.habitat}");
+        Stat(spec, "Affinity for this world type", () =>
+        {
+            float a = s.Affinity(b.type);
+            string hex = Habitability.ScoreColorHex(a * 100f);
+            return $"<color={hex}>{a * 100f:F0}%</color>" +
+                   (a < Habitability.HabitableAffinity ? "  <color=#FFBF4D>— the wrong kind of world for them</color>" : "");
+        });
+        Note(spec, $"They would rather be on a {TerraformDiagnosis.Pretty(s.BestType())}. " +
+                   (s.PrefersDry ? "They need it dry." : "They need liquid water."));
+    }
+
+    // A readable paragraph — what it would actually be like to stand here. Ported from the Inspector.
+    static string ClimateProse(CelestialBody b, Species s)
+    {
+        var parts = new List<string>();
+
+        switch (b.type)
+        {
+            case CelestialBodyType.OceanPlanet: parts.Add("A world of open ocean, broken only by island chains and storm fronts."); break;
+            case CelestialBodyType.IcePlanet: parts.Add("A frozen world. Its water is all here — locked in glaciers kilometres deep."); break;
+            case CelestialBodyType.VolcanicPlanet: parts.Add("A furnace world of magma fields and ash skies, lit from below as much as above."); break;
+            case CelestialBodyType.BarrenPlanet: parts.Add("A dead rock. No air, no water, no magnetic field — just dust and hard radiation."); break;
+            case CelestialBodyType.RockyPlanet: parts.Add("A rocky world with real ground underfoot and weather worth the name."); break;
+            case CelestialBodyType.GasGiant: parts.Add("A gas giant: banded storms the size of continents, and no surface to stand on at all."); break;
+            case CelestialBodyType.Moon: parts.Add("A moon, locked to its primary."); break;
+            default: parts.Add("A small body."); break;
+        }
+
+        if (b.hostStar != null && Habitability.GetZone(b.hostStar, s, out float inner, out float outer))
+        {
+            if (b.distanceFromStar < inner) parts.Add($"It sits closer to its star than {s.name} can comfortably bear — too much light, too much heat.");
+            else if (b.distanceFromStar > outer) parts.Add($"It orbits out beyond the light {s.name} needs; the sun here is a bright star and little more.");
+            else parts.Add($"It sits squarely in the band {s.name} can live in.");
+        }
+
+        float water = b.resources != null ? b.resources.Get(ResourceType.Water) : 0f;
+        if (water < 60f) parts.Add("There is essentially no accessible water.");
+        else if (water > 300f) parts.Add("Water is abundant — arguably too abundant.");
+        else parts.Add("There is some accessible water.");
+
+        if (b.surfaceSize <= 4) parts.Add("It is small enough that gravity is a suggestion and any atmosphere drifts away.");
+        else if (b.surfaceSize >= 14) parts.Add("It is massive, and holds a deep, heavy atmosphere.");
+
+        return string.Join(" ", parts);
+    }
+
+    // What is in the ground, and whether you have researched it. Discovering happens on survey; the Codex
+    // is where an ore's uses are unlocked. Gated on the survey state, since orbit can't read the seams.
+    void BuildSurveyOres()
+    {
+        var b = body;
+
+        Header("MINERAL SURVEY");
+        if (!b.Surveyed) { Note("Survey this world to reveal the ore deposits in its crust."); return; }
+
+        var ores = OreGenerator.OresOnBody(b);
+        if (ores.Count == 0) { Note("No ore deposits were found on this world."); return; }
+
+        Note($"{ores.Count} ore type(s) present. Surveying DISCOVERS an ore; researching it in the Codex unlocks its uses.");
+
+        foreach (var ore in ores)
+        {
+            var captured = ore;
+            var info = OreDatabase.Get(ore);
+            var card = Card();
+            var title = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
+            live.Text(title, () =>
+            {
+                bool k = ResearchManager.IsDiscovered(captured);
+                bool r = ResearchManager.IsResearched(captured);
+                string state = r ? "<color=#4DFF6E>researched</color>"
+                             : k ? "<color=#FFBF4D>discovered — not yet researched</color>"
+                                 : "<color=#9FB4C8>undiscovered</color>";
+                return $"<b>{(k ? info.displayName : "??? — unidentified")}</b>  <size=10>Tier {info.tier} · {info.baseValue}cr · {state}</size>";
+            });
+
+            if (!ResearchManager.IsDiscovered(ore)) { Note(card, "Click its deposits on the surface map, or survey this world, to identify it."); continue; }
+            Note(card, info.description);
+            if (ResearchManager.IsResearched(ore))
+            {
+                UIFactory.WrapText(card, $"<color=#8FD0FF>Uses:</color> {info.uses}", UITheme.SmallSize, UITheme.Text);
+                UIFactory.WrapText(card, $"<color=#FFBF4D>Refining:</color> {info.refining}", UITheme.SmallSize, UITheme.Text);
+            }
+            else
+            {
+                var btn = UIFactory.Button(card, "", () => ResearchManager.Research(captured), 24);
+                live.Button(btn, () =>
+                {
+                    bool can = ResearchManager.CanResearch(captured);
+                    return (can, can ? $"Research {info.displayName} ({info.researchCost} pts)"
+                                     : $"Research — need {info.researchCost} pts (have {ResearchManager.ResearchPoints})");
+                });
+            }
+        }
+    }
+
+    // What is wrong with this world for your species, its habitability ceiling, and the road to fixing it:
+    // a live terraform toggle, the fault list, and a link to the full projects console.
+    void BuildSurveyTerraform()
+    {
+        var b = body;
+        var s = SpeciesManager.Current;
+
+        // The Inspector hid its Terraform tab for gas giants — there is no surface to terraform.
+        if (b.type == CelestialBodyType.GasGiant) return;
+
+        Header("HABITABILITY CEILING");
+        var card = Card();
+        var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
+        live.Text(t, () =>
+        {
+            float now = b.habitability, ceiling = Colony.TerraformCeiling(b);
+            float reach = TerraformProjects.ReachableCeiling(b, s), pot = TerraformProjects.PotentialCeiling(b, s);
+            return $"Now <color={Habitability.ScoreColorHex(now)}><b>{now:F0}%</b></color>  ->  " +
+                   $"ceiling today <color={Habitability.ScoreColorHex(ceiling)}><b>{ceiling:F0}%</b></color>  ->  " +
+                   $"with researched projects <color={Habitability.ScoreColorHex(reach)}><b>{reach:F0}%</b></color>  ->  " +
+                   $"with all known science <color={Habitability.ScoreColorHex(pot)}><b>{pot:F0}%</b></color>\n" +
+                   $"<color=#9FB4C8>Colonizable at {Colony.FoundThreshold:F0}%.</color>";
+        });
+
+        Bar(sidePanel, () => (b.habitability / 100f, $"{b.habitability:F0}% habitable", Habitability.ScoreColor(b.habitability)));
+
+        var mgr = ColonyManager.Instance;
+        if (mgr != null)
+        {
+            var tf = UIFactory.Button(sidePanel, "", () => { mgr.ToggleTerraform(b); lastSig = null; }, 26);
+            live.Button(tf, () =>
+            {
+                if (b.habitability >= Colony.FoundThreshold && !b.terraforming) return (false, "Already habitable");
+                if (!Colony.CanReachLivable(b) && !b.terraforming) return (false, $"Can't be made livable for {s.name} — run projects below first");
+                return (true, b.terraforming ? "Stop terraforming" : "Start terraforming (consumes water, energy, metal)");
+            });
+        }
+
+        Header("WHAT IS WRONG WITH THIS WORLD");
+        var issues = TerraformDiagnosis.Analyze(b, s);
+        if (issues.Count == 0) UIFactory.WrapText(sidePanel, $"<color=#4DFF6E>Nothing — this world already suits {s.name}.</color>", UITheme.SmallSize, UITheme.Good);
+        foreach (var i in issues)
+        {
+            var ic = Card();
+            string hex = ColorUtility.ToHtmlStringRGB(Color.Lerp(UITheme.Warn, UITheme.Bad, i.severity));
+            UIFactory.WrapText(ic, $"<b><color=#{hex}>{TerraformDiagnosis.Describe(i.problem)}</color></b>  <size=10><color=#9FB4C8>severity {i.severity * 100f:F0}%</color></size>",
+                UITheme.SmallSize, UITheme.Text);
+            Note(ic, i.detail);
+        }
+
+        Header("PROJECTS");
+        Note("Projects raise this world's ceiling permanently. The full console has costs, durations and progress.");
+        UIFactory.Button(sidePanel, "Open Terraforming Console »", () => TerraformWindow.Instance?.ShowFor(b), 26);
     }
 
     // ---- Overlay texture ----

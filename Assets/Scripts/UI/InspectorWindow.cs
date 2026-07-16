@@ -153,7 +153,13 @@ public partial class InspectorWindow : MonoBehaviour
     }
 
     // ---- Selection routing ----
-    void OnBodySelected(CelestialBody b) => Inspect(InspectorTarget.Of(b), resetTrail: true);
+    // Selecting a BODY no longer opens this window (Raptok's request): the "Homeworld" tabbed pop-up is
+    // retired and everything it showed — Overview/Society/Production, Climate/Ores/Terraform, Objects and
+    // the shipyard — now lives in the Planet View, which PlanetViewWindow opens on the same event. Units,
+    // fleets and stars still inspect here exactly as before (OnUnitSelectionChanged, StarInteraction).
+    // A currently-open unit/fleet inspection is deliberately left alone — selecting a world doesn't force
+    // an unrelated ship panel shut.
+    void OnBodySelected(CelestialBody b) { /* body UI is the Planet View now — nothing to open here */ }
 
     void OnSelectionCleared()
     {
@@ -213,7 +219,10 @@ public partial class InspectorWindow : MonoBehaviour
             // Nothing inspected yet: fall back to whatever is currently selected.
             if (UnitSelection.Selected.Count == 1) target = InspectorTarget.Of(UnitSelection.Selected[0]);
             else if (UnitSelection.Selected.Count > 1) target = InspectorTarget.FleetTarget();
-            else if (PlanetUI.Selected != null) target = InspectorTarget.Of(PlanetUI.Selected);
+            // A selected BODY opens the Planet View instead — the body Inspector is retired (see
+            // OnBodySelected). This keeps the HUD "Inspect" button useful with a planet selected rather
+            // than reopening the window we just retired.
+            else if (PlanetUI.Selected != null) { PlanetViewWindow.Instance?.ShowFor(PlanetUI.Selected); return; }
             else return;
             lastSig = null;
         }
