@@ -75,7 +75,11 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - uses: actions/checkout@v4
+      # v5 runs on Node 24. v4 targets Node 20, which GitHub is retiring from its runners
+      # (default flipped to Node 24 on 2026-06-16, full removal in fall 2026) — v4 still runs,
+      # but emits the yellow "Node.js 20 is deprecated" warning on every run. Bumping to v5
+      # clears that warning. Note: the warning was never what failed the build.
+      - uses: actions/checkout@v5
         with:
           # Full history: the agent identifies who submitted a request by asking git
           # who committed the file. A shallow clone can't answer that.
@@ -110,8 +114,15 @@ jobs:
           # How many objectives are open BEFORE the agent touches anything. The auto-resume
           # step compares against this to answer the only question that matters when deciding
           # whether to spend money on another run: did this one actually get anywhere?
-          open=$(grep -rhoE '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' "$DIR" \
-            --include='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.md' 2>/dev/null | wc -l | tr -d ' ')
+          #
+          # `|| true` is load-bearing: on a FRESH request there is no dated planning doc yet
+          # (the agent writes it), so `--include` filters out every file and grep matches
+          # nothing, which grep reports as exit status 1. Under the `set -o pipefail` + `set -e`
+          # at the top of this step that non-zero status kills the whole step — which is the
+          # "failed in 5s" crash this line used to cause on every first-time request. Swallow
+          # it so "no objectives open yet" reads as the number 0, not as a fatal error.
+          open=$( { grep -rhoE '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' "$DIR" \
+            --include='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.md' 2>/dev/null || true; } | wc -l | tr -d ' ')
           echo "open_before=${open:-0}" >> "$GITHUB_OUTPUT"
           echo "Objectives open at start: ${open:-0}"
 
