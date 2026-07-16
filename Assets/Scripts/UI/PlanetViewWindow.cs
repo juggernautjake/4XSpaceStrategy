@@ -25,7 +25,7 @@ public class PlanetViewWindow : MonoBehaviour
 {
     public static PlanetViewWindow Instance;
 
-    public enum Tab { Info, Sites, Build, Infrastructure, Power, Survey, Terrain }
+    public enum Tab { Overview, Sites, Build, Infrastructure, Power, Survey, Orbit, Terrain }
 
     // ============================================================================================
     // WHAT EACH TAB NEEDS, AND WHY
@@ -60,8 +60,12 @@ public class PlanetViewWindow : MonoBehaviour
 
         switch (t)
         {
-            case Tab.Info:
+            case Tab.Overview:
                 return true;                       // always: name, type, orbit and host star are free
+
+            case Tab.Orbit:
+                return true;                       // always: what's in orbit is visible from up here, and
+                                                   // the shipyard section explains itself when there's none
 
             case Tab.Sites:
                 if (!body.Surveyed) { why = "survey this world to see what's on it"; return false; }
@@ -106,7 +110,7 @@ public class PlanetViewWindow : MonoBehaviour
     TMP_Text statusText;
 
     CelestialBody body;
-    Tab tab = Tab.Info;
+    Tab tab = Tab.Overview;
 
     // Build-mode state.
     SurfaceBuildingType? selected;      // null = nothing picked up
@@ -284,7 +288,7 @@ public class PlanetViewWindow : MonoBehaviour
         // barren rock, and Build has to give way to something readable rather than showing an empty
         // build list on a world nobody lives on.
         if (openOn.HasValue && TabAvailable(openOn.Value, out _)) tab = openOn.Value;
-        else if (!TabAvailable(tab, out _)) tab = Tab.Info;
+        else if (!TabAvailable(tab, out _)) tab = Tab.Overview;
         // Open showing the WHOLE world, centred — the zoom of the last planet you looked at means
         // nothing on this one.
         tilePx = 0f;            // ApplyMapSize resolves this to the fit-everything zoom
@@ -515,6 +519,25 @@ public class PlanetViewWindow : MonoBehaviour
         sb.Append(selected.HasValue ? (int)selected.Value : -1).Append('|');
         sb.Append((int)activeIndex).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
 
+        // The Overview and Orbit tabs fold in the colony/shipyard structure, so their SHAPE changes when
+        // a shipyard or research centre is built or upgraded, when a city appears, when ownership flips,
+        // or when a ship arrives or leaves orbit. A count/level alone here is enough — the per-value text
+        // (costs, progress, ship status) refreshes in place through the LiveSet.
+        sb.Append(body.shipyardLevel).Append('|').Append(body.researchCenterLevel).Append('|').Append(body.cities).Append('|');
+        sb.Append(body.owner != null ? body.owner.id : -1).Append('|');
+        sb.Append(body.units != null ? body.units.Count : 0).Append('|');
+
+        // The Orbit tab's INBOUND list is drawn from ships in transit toward this world — a set that
+        // isn't in body.units, so a ship dispatched here (or diverted away) wouldn't otherwise rebuild
+        // the panel. This count only moves on depart/arrive/retarget, never per-frame, so it can't strobe.
+        if (tab == Tab.Orbit && UnitManager.Instance != null)
+        {
+            int inbound = 0;
+            foreach (var u in UnitManager.Instance.Units)
+                if (u.status == UnitStatus.Traveling && u.travelTarget == body) inbound++;
+            sb.Append(inbound).Append('|');
+        }
+
         // The buildings, by TYPE and LEVEL rather than just how many there are. A count alone misses the
         // two mutations that change what's standing here without changing how much of it there is: a
         // structure upgrading a tier, and a settlement growing into a town. Both matter to the Power
@@ -714,12 +737,13 @@ public class PlanetViewWindow : MonoBehaviour
         BuildTabStrip();
         switch (tab)
         {
-            case Tab.Info: BuildInfoPanel(); break;
+            case Tab.Overview: BuildOverviewPanel(); break;
             case Tab.Sites: BuildSitesPanel(); break;
             case Tab.Build: BuildBuildPanel(); break;
             case Tab.Infrastructure: BuildInfrastructurePanel(); break;
             case Tab.Power: BuildPowerPanel(); break;
             case Tab.Survey: BuildSurveyPanel(); break;
+            case Tab.Orbit: BuildOrbitPanel(); break;
             case Tab.Terrain: BuildTerrainPanel(); break;
         }
 
@@ -772,8 +796,13 @@ public class PlanetViewWindow : MonoBehaviour
         }
     }
 
-    // ---------------- INFO ----------------
-    void BuildInfoPanel()
+    // ---------------- OVERVIEW ----------------
+    // What this world IS, and — for a world you own — how its colony is doing. The Society/Production
+    // summary (population, cities, development, objectives) and the research-centre ladder were folded in
+    // here from the retired "Colony" and Inspector windows. The shipyard, being a space construct, went
+    // to the Orbit tab instead (Raptok's mapping); the research centre is ground infrastructure, so its
+    // upgrade stays on this colony-side tab.
+    void BuildOverviewPanel()
     {
         Header("THIS WORLD");
         var card = Card();
@@ -832,6 +861,32 @@ public class PlanetViewWindow : MonoBehaviour
                    $"{CityGrowth.SpawnInterval(body):F0}s once there are people to fill it.</color></size>";
         });
 
+        // ---- Society & Production (folded from the retired Colony window) ----
+        // Only for a world you own: population, cities and the objectives that establish a colony are
+        // meaningless on somebody else's planet or a dead rock.
+        if (body.owner == FactionManager.Player)
+        {
+            Header("SOCIETY");
+            var soc = Card();
+            Stat(soc, "Population", () => $"{Population.Format(body.population)} <color=#9FB4C8>of {Population.Format(Colony.PopTarget(body))} capacity</color>");
+            Stat(soc, "Cities", () => body.cities.ToString());
+            Stat(soc, "Development", () => $"<b>{Colony.ClaimProgress(body) * 100f:F0}%</b>" +
+                (Colony.IsFullyEstablished(body) ? "  <color=#4DFF6E>fully established</color>" : ""));
+
+            Header("OBJECTIVES TO FULLY ESTABLISH");
+            var obj = Card();
+            var ot = UIFactory.WrapText(obj, "", UITheme.SmallSize, UITheme.Text);
+            live.Text(ot, () =>
+            {
+                var sb = new System.Text.StringBuilder();
+                foreach (var o in Colony.Objectives(body))
+                    sb.AppendLine($"{(o.done ? "<color=#4DFF6E>[x]</color>" : "<color=#FF7A6E>[ ]</color>")} {o.label}  <color=#9FB4C8>({o.detail})</color>");
+                return sb.ToString().TrimEnd();
+            });
+
+            BuildResearchCentreSection();
+        }
+
         Header("SURVEY STATE");
         var s = Card();
         var st = UIFactory.WrapText(s, "", UITheme.SmallSize, UITheme.Text);
@@ -842,6 +897,177 @@ public class PlanetViewWindow : MonoBehaviour
                                           "<color=#FFBF4D>No deep survey yet</color> — send a research ship to study this world and unlock the Heat, Fertile and Weather indexes.";
             return "<color=#4DFF6E>Fully surveyed.</color> Every index overlay is available.";
         });
+    }
+
+    // The research-centre ladder, folded from the Colony window. A tier of research centre adds a point
+    // of research CAPACITY (how many technologies can study at once). It's ground infrastructure, so it
+    // lives on Overview rather than Orbit. If the world hasn't got one yet, offer to build one.
+    void BuildResearchCentreSection()
+    {
+        var mgr = ColonyManager.Instance;
+        Header("RESEARCH CENTRE");
+
+        if (body.researchCenterLevel < 1)
+        {
+            var card = Card();
+            Note(card, "No research centre here. Build one to add research capacity to your empire.");
+            if (mgr != null)
+            {
+                var group = card.gameObject.AddComponent<CanvasGroup>();
+                var btn = UIFactory.Button(card, "", () => { if (mgr.StartBuilding(body, BuildingType.ResearchCenter)) lastSig = null; }, 24);
+                live.Button(btn, () =>
+                {
+                    bool can = mgr.CanBuild(body, BuildingType.ResearchCenter, out string why);
+                    var info = BuildingDatabase.Get(BuildingType.ResearchCenter);
+                    return (can, can ? $"Build Research Centre ({ColonyManager.DiscCost(info.costMetal)}m {ColonyManager.DiscCost(info.costEnergy)}e)"
+                                     : $"Build Research Centre — {why}");
+                }, group);
+            }
+            return;
+        }
+
+        var rc = Card();
+        Stat(rc, "Tier", () => $"Level <b>{body.researchCenterLevel}</b> / {Colony.MaxResearchCenterLevel}");
+        Stat(rc, "Research capacity", () => $"<color=#8FD0FF><b>{ResearchCapacity.ForBody(body)}</b></color>");
+
+        if (mgr != null && body.researchCenterLevel < Colony.MaxResearchCenterLevel)
+        {
+            int next = body.researchCenterLevel + 1;
+            var btn = UIFactory.Button(rc, "", () => { if (mgr.StartLabUpgrade(body)) lastSig = null; }, 24);
+            live.Button(btn, () =>
+            {
+                bool can = mgr.CanUpgradeLab(body, out string why, out _);
+                return (can, can
+                    ? $"Upgrade -> Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {ColonyManager.LabUpgradeTime(next):F0}s) -> {ResearchCapacity.ForLevel(next)} capacity"
+                    : $"Upgrade -> Lv{next} — {why}");
+            });
+        }
+        else if (body.researchCenterLevel >= Colony.MaxResearchCenterLevel)
+            UIFactory.WrapText(rc, "<color=#4DFF6E>At maximum tier.</color>", UITheme.SmallSize, UITheme.Good);
+    }
+
+    // ---------------- ORBIT ----------------
+    // Space constructs and everything in dock or orbit around this world, folded from the retired Colony
+    // window's shipyard controls and the Inspector's "Objects" tab (Raptok's mapping). The shipyard is
+    // the headline: a tier of it is PARALLELISM — how many hulls it can hold on the stocks at once,
+    // pooled with every other yard you own. Moons are NOT listed here; they get their own tabs under the
+    // map (see the moon-tab work), so this is ships, stations and inbound traffic.
+    void BuildOrbitPanel()
+    {
+        var mgr = ColonyManager.Instance;
+
+        Header("SHIPYARD");
+        if (body.shipyardLevel < 1)
+        {
+            var card = Card();
+            Note(card, "No shipyard in orbit of this world. A shipyard is where hulls are laid down; every one you own pools its build power.");
+            if (mgr != null && body.owner == FactionManager.Player)
+            {
+                var group = card.gameObject.AddComponent<CanvasGroup>();
+                var btn = UIFactory.Button(card, "", () => { if (mgr.StartBuilding(body, BuildingType.Shipyard)) lastSig = null; }, 24);
+                live.Button(btn, () =>
+                {
+                    bool can = mgr.CanBuild(body, BuildingType.Shipyard, out string why);
+                    var info = BuildingDatabase.Get(BuildingType.Shipyard);
+                    return (can, can ? $"Build Shipyard ({ColonyManager.DiscCost(info.costMetal)}m {ColonyManager.DiscCost(info.costEnergy)}e)"
+                                     : $"Build Shipyard — {why}");
+                }, group);
+            }
+        }
+        else
+        {
+            var card = Card();
+            Stat(card, "Tier", () => $"Level <b>{body.shipyardLevel}</b> / {Colony.MaxShipyardLevel}  <color=#9FB4C8>({Colony.ShipyardPerk(body.shipyardLevel)})</color>");
+            Stat(card, "Build power", () => $"<color=#8FD0FF><b>{BuildPower.ForBody(body)}</b></color>" +
+                (TechEffects.ShipyardPowerBonus > 0 ? $"  <color=#9FB4C8>(+{TechEffects.ShipyardPowerBonus} from research)</color>" : ""));
+
+            // The tier/build-power readout above is informational and shows for any world (an enemy
+            // yard's tier is intel). The interactive controls — upgrade and the build-ships link — are
+            // gated to worlds you own, matching the "Build Shipyard" path and the retired Colony window.
+            if (body.owner == FactionManager.Player)
+            {
+                if (mgr != null && body.shipyardLevel < Colony.MaxShipyardLevel)
+                {
+                    int next = body.shipyardLevel + 1;
+                    var up = UIFactory.Button(card, "", () => { if (mgr.StartShipyardUpgrade(body)) lastSig = null; }, 24);
+                    live.Button(up, () =>
+                    {
+                        bool can = mgr.CanUpgradeShipyard(body, out string why, out _);
+                        return (can, can
+                            ? $"Upgrade -> Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {ColonyManager.ShipyardUpgradeTime(next):F0}s) -> {BuildPower.ForLevel(next)} build power"
+                            : $"Upgrade -> Lv{next} — {why}");
+                    });
+                }
+                else UIFactory.WrapText(card, "<color=#4DFF6E>This yard is at its maximum tier.</color>", UITheme.SmallSize, UITheme.Good);
+
+                // Laying down hulls is the empire-wide Shipyard window's job (yards pool their power, so
+                // the catalogue isn't per-world). Link straight to it rather than re-implementing stocks.
+                UIFactory.Button(sidePanel, "Open Shipyard (build ships) »", () => ShipyardWindow.Instance?.Toggle(), 26);
+            }
+        }
+
+        // ---- What's in orbit ----
+        // Stations are infrastructure; ships are a fleet. Listed apart, like the Objects tab did, plus
+        // what's inbound so you can see traffic before you decide anything.
+        var ships = new List<Unit>();
+        var stations = new List<Unit>();
+        if (body.units != null)
+            foreach (var u in body.units) (u.Info.isStation ? stations : ships).Add(u);
+
+        Header("STATIONS & CONSTRUCTS");
+        if (stations.Count == 0) Note("No stations deployed here.");
+        else foreach (var u in stations) OrbitUnitRow(u);
+
+        Header("SHIPS IN ORBIT");
+        if (ships.Count == 0) Note("No ships here.");
+        else foreach (var u in ships) OrbitUnitRow(u);
+
+        var inbound = new List<Unit>();
+        if (UnitManager.Instance != null)
+            foreach (var u in UnitManager.Instance.Units)
+                if (u.status == UnitStatus.Traveling && u.travelTarget == body) inbound.Add(u);
+        if (inbound.Count > 0)
+        {
+            Header("INBOUND");
+            foreach (var u in inbound)
+            {
+                var cap = u;
+                var card = Card();
+                var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.SubText);
+                live.Text(t, () => $"<b>{cap.name}</b> — arriving in {Mathf.Max(0f, cap.travelDuration - cap.travelElapsed):F0}s");
+                UIFactory.Button(card, "Select »", () => UnitSelection.SelectOnly(cap), 22);
+            }
+        }
+    }
+
+    // A selectable ship/station row for the Orbit tab. Selecting it hands off to the unit selection
+    // system, exactly as the Inspector's Objects tab did.
+    void OrbitUnitRow(Unit u)
+    {
+        var cap = u;
+        var card = Card();
+        var row = UIFactory.NewUI(card, "Row"); UIFactory.AddLayout(row, 22);
+        var h = row.AddComponent<HorizontalLayoutGroup>();
+        h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true;
+        h.childForceExpandWidth = false; h.childAlignment = TextAnchor.MiddleLeft;
+
+        var icon = UIFactory.NewUI(row.transform, "Icon");
+        var img = icon.AddComponent<Image>();
+        img.sprite = UnitIconRenderer.Sprite(u.type);
+        img.preserveAspect = true; img.raycastTarget = false;
+        var ile = icon.AddComponent<LayoutElement>();
+        ile.preferredWidth = 18; ile.minWidth = 18; ile.preferredHeight = 18; ile.flexibleWidth = 0;
+
+        var t = UIFactory.Text(row.transform, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
+        var tle = t.gameObject.AddComponent<LayoutElement>(); tle.flexibleWidth = 1;
+        live.Text(t, () =>
+        {
+            int g = ControlGroups.GroupOf(cap);
+            string badge = g > 0 ? $"<color=#5AB4F0>[{g}]</color> " : "";
+            return $"{badge}<b>{cap.name}</b>  <size=10><color=#9FB4C8>{cap.Info.name} · {cap.RankName} · {cap.status}</color></size>";
+        });
+
+        UIFactory.Button(card, "Select »", () => UnitSelection.SelectOnly(cap), 22);
     }
 
     static string SizeWord(int size)
