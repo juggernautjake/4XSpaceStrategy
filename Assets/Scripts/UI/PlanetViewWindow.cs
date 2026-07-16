@@ -154,7 +154,11 @@ public class PlanetViewWindow : MonoBehaviour
             Mathf.Max(400f, screen.y - ScreenMargin * 2f));
     }
 
-    const float SidePanelW = 300f;
+    // Raptok's layout: the surface map anchors to the LEFT and never takes more than 3/4 of the window
+    // width; the far-right 1/4 is the selected tab's panel. Expressed as an anchor fraction rather than a
+    // pixel width so it scales with the full-screen window and can never creep past three-quarters.
+    const float MapFraction = 0.75f;
+    const float PanelGap = 8f;      // gap between the map's right edge and the panel
 
     public static void Create(Transform parent)
     {
@@ -170,20 +174,21 @@ public class PlanetViewWindow : MonoBehaviour
         var content = UIFactory.Window(parent, "Planet View", WindowSize(parent), out root, out titleText);
         root.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
 
-        // Tabs.
+        // Tabs — sit ABOVE THE MAP (the left 3/4), not the whole window, per Raptok's layout.
         tabStrip = UIFactory.NewUI(content, "Tabs").GetComponent<RectTransform>();
-        tabStrip.anchorMin = new Vector2(0, 1); tabStrip.anchorMax = new Vector2(1, 1);
+        tabStrip.anchorMin = new Vector2(0, 1); tabStrip.anchorMax = new Vector2(MapFraction, 1);
         tabStrip.pivot = new Vector2(0.5f, 1); tabStrip.sizeDelta = new Vector2(0, 26);
         var th = tabStrip.gameObject.AddComponent<HorizontalLayoutGroup>();
         th.spacing = 4; th.childControlWidth = true; th.childControlHeight = true; th.childForceExpandWidth = false;
 
-        // The VIEWPORT: a fixed window onto the surface. It never changes size — zooming scales the map
-        // INSIDE it, which is what a map window should do. It used to resize the window itself, so
-        // zooming in on a big world grew the panel off the edge of the screen.
+        // The VIEWPORT: a fixed window onto the surface, anchored to the LEFT and capped at 3/4 of the
+        // window width (MapFraction). It never changes size — zooming scales the map INSIDE it, which is
+        // what a map window should do. It used to resize the window itself, so zooming in on a big world
+        // grew the panel off the edge of the screen.
         gridHolder = UIFactory.NewUI(content, "Viewport").GetComponent<RectTransform>();
-        gridHolder.anchorMin = new Vector2(0, 0); gridHolder.anchorMax = new Vector2(1, 1);
+        gridHolder.anchorMin = new Vector2(0, 0); gridHolder.anchorMax = new Vector2(MapFraction, 1);
         gridHolder.offsetMin = new Vector2(0, 34);                 // clear the status line
-        gridHolder.offsetMax = new Vector2(-(SidePanelW + 8f), -32); // clear the tabs and the side panel
+        gridHolder.offsetMax = new Vector2(-PanelGap, -32);        // clear the tabs; gap before the panel
         var vpImg = gridHolder.gameObject.AddComponent<Image>();
         vpImg.color = new Color(0.02f, 0.03f, 0.05f, 1f);          // letterbox behind a small map
         gridHolder.gameObject.AddComponent<RectMask2D>();          // the map is clipped to the viewport
@@ -226,20 +231,20 @@ public class PlanetViewWindow : MonoBehaviour
 
         BuildZoomBar();
 
-        // Side panel: the tab's controls.
-        // Pinned to the RIGHT edge at a fixed width, rather than inset from the left by the map's size.
-        // The map now grows with the world (ApplyMapSize), so a left-inset panel would be shoved off
-        // the window by any world bigger than the old fixed 720px map.
+        // Side panel: the selected tab's controls — the far-right 1/4 of the window (Raptok's layout).
+        // Anchored across [MapFraction .. 1] so it's exactly the quarter the map doesn't use and scales
+        // with the window, rather than a fixed pixel width.
         var sideHolder = UIFactory.NewUI(content, "SideHolder").GetComponent<RectTransform>();
-        sideHolder.anchorMin = new Vector2(1, 0); sideHolder.anchorMax = new Vector2(1, 1);
-        sideHolder.pivot = new Vector2(1, 0.5f);
-        sideHolder.sizeDelta = new Vector2(SidePanelW, -66f);   // 32 top chrome + 34 bottom status bar
-        sideHolder.anchoredPosition = new Vector2(0, -1f);
+        sideHolder.anchorMin = new Vector2(MapFraction, 0); sideHolder.anchorMax = new Vector2(1, 1);
+        sideHolder.pivot = new Vector2(0.5f, 0.5f);
+        sideHolder.offsetMin = new Vector2(0f, 34f);    // clear the status bar; the map's PanelGap is on its side
+        sideHolder.offsetMax = new Vector2(0f, -32f);   // clear the tab strip / title chrome
         UIFactory.ScrollView(sideHolder, out sidePanel);
 
+        // Status line sits BELOW THE MAP (the left 3/4), leaving the bottom-right quarter to the panel.
         statusText = UIFactory.Text(content, "", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.TopLeft);
         var srt = statusText.rectTransform;
-        srt.anchorMin = new Vector2(0, 0); srt.anchorMax = new Vector2(1, 0);
+        srt.anchorMin = new Vector2(0, 0); srt.anchorMax = new Vector2(MapFraction, 0);
         srt.pivot = new Vector2(0.5f, 0); srt.sizeDelta = new Vector2(0, 30); srt.anchoredPosition = Vector2.zero;
 
         PlanetUI.OnBodySelected += OnBodySelected;
