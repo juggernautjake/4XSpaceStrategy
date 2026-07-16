@@ -25,7 +25,9 @@ public class PlanetViewWindow : MonoBehaviour
 {
     public static PlanetViewWindow Instance;
 
-    public enum Tab { Overview, Sites, Build, Infrastructure, Power, Survey, Orbit, Terrain }
+    // Exactly the four tabs Raptok asked for, plus the Dev-Mode-only Terrain sandbox (hidden in normal
+    // play). Sites and the Power grid folded into Survey; the Infrastructure list folded into Build.
+    public enum Tab { Overview, Build, Survey, Orbit, Terrain }
 
     // ============================================================================================
     // WHAT EACH TAB NEEDS, AND WHY
@@ -67,15 +69,11 @@ public class PlanetViewWindow : MonoBehaviour
                 return true;                       // always: what's in orbit is visible from up here, and
                                                    // the shipyard section explains itself when there's none
 
-            case Tab.Sites:
-                if (!body.Surveyed) { why = "survey this world to see what's on it"; return false; }
-                return true;
-
             case Tab.Survey:
-                // Always open now that it also carries Climate and Terraform, which are known from orbit
-                // (name, type, orbit and host star are free on any world). The index overlays and the ore
-                // list inside gate themselves on the survey state, so an unsurveyed world lands here on a
-                // readable Climate/Terraform page rather than a locked tab.
+                // Always open: it carries Climate and Terraform (known from orbit — name, type, orbit and
+                // host star are free on any world), plus the folded Sites and Power sections. The index
+                // overlays, ore list and power section inside gate themselves on survey/ownership state,
+                // so an unsurveyed world lands here on a readable Climate/Terraform page, not a locked tab.
                 return true;
 
             case Tab.Build:
@@ -88,18 +86,6 @@ public class PlanetViewWindow : MonoBehaviour
                         : $"terraform to {Colony.FoundThreshold:F0}% (now {body.habitability:F0}%), then settle it";
                     return false;
                 }
-                return true;
-
-            case Tab.Infrastructure:
-                if (body.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
-                if (!body.settled) { why = "nothing is built here — settle the world first"; return false; }
-                return true;
-
-            case Tab.Power:
-                // Same bar as Infrastructure: it reports on what's standing here, and on a world with
-                // nothing standing on it there is no grid to report.
-                if (body.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
-                if (!body.settled) { why = "nothing is built here — settle the world first"; return false; }
                 return true;
         }
         return true;
@@ -138,6 +124,9 @@ public class PlanetViewWindow : MonoBehaviour
 
     // Survey-mode state.
     SurfaceIndexKind activeIndex = SurfaceIndexKind.None;
+    // The Power grid is now a Survey overlay rather than its own tab: this flag is the "showing the power
+    // grid" option, mutually exclusive with the index ramps (picking one clears the other).
+    bool showPowerOverlay;
 
     readonly LiveSet live = new LiveSet();
     string lastSig = null;
@@ -336,6 +325,7 @@ public class PlanetViewWindow : MonoBehaviour
     {
         body = b;
         selected = null; rotation = 0;
+        showPowerOverlay = false;   // a fresh world opens on the plain map, not the last world's power view
         CancelPlace();          // a confirm from the last world means nothing on this one
         lastSig = null;
 
@@ -576,7 +566,7 @@ public class PlanetViewWindow : MonoBehaviour
         var sb = new System.Text.StringBuilder();
         sb.Append(body.id).Append('|').Append((int)tab).Append('|');
         sb.Append(selected.HasValue ? (int)selected.Value : -1).Append('|');
-        sb.Append((int)activeIndex).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
+        sb.Append((int)activeIndex).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
 
         // The Overview and Orbit tabs fold in the colony/shipyard structure, so their SHAPE changes when
         // a shipyard or research centre is built or upgraded, when a city appears, when ownership flips,
@@ -695,7 +685,7 @@ public class PlanetViewWindow : MonoBehaviour
         // economy moves rather than only when the window rebuilds. A few times a second is plenty: it's
         // following a number that drifts, and repainting up to 70,000 texels every frame to do it would
         // be a real cost for something the eye can't see happening anyway.
-        if (tab == Tab.Power && body.surface != null)
+        if (tab == Tab.Survey && showPowerOverlay && body.surface != null)
         {
             powerRepaintIn -= Time.unscaledDeltaTime;
             if (powerRepaintIn <= 0f) { powerRepaintIn = 0.25f; RefreshPowerOverlay(); }
@@ -747,14 +737,10 @@ public class PlanetViewWindow : MonoBehaviour
                 }
                 break;
             case Tab.Survey:
-                statusText.text = activeIndex == SurfaceIndexKind.None
-                    ? "<color=#9FB4C8>Pick an index on the right to overlay it on the map.</color>"
-                    : $"<b>{SurfaceIndex.Name(activeIndex)}</b> — {SurfaceIndex.Describe(activeIndex)}";
-                break;
-            case Tab.Power:
+                // When the power overlay is on, the status line explains the POWER map (legend + balance);
+                // otherwise it describes the selected index overlay.
+                if (showPowerOverlay)
                 {
-                    // The legend belongs here rather than in the panel: it explains the MAP, and this is
-                    // the line that sits under the map.
                     var nets = PowerGrid.Nets(body);
                     if (nets.Count == 0)
                     {
@@ -778,6 +764,10 @@ public class PlanetViewWindow : MonoBehaviour
                     }
                     statusText.text = sb.ToString();
                 }
+                else
+                    statusText.text = activeIndex == SurfaceIndexKind.None
+                        ? "<color=#9FB4C8>Pick an index (or the power grid) on the right to overlay it on the map.</color>"
+                        : $"<b>{SurfaceIndex.Name(activeIndex)}</b> — {SurfaceIndex.Describe(activeIndex)}";
                 break;
             default:
                 statusText.text = body.Surveyed
@@ -805,10 +795,7 @@ public class PlanetViewWindow : MonoBehaviour
         switch (tab)
         {
             case Tab.Overview: BuildOverviewPanel(); break;
-            case Tab.Sites: BuildSitesPanel(); break;
             case Tab.Build: BuildBuildPanel(); break;
-            case Tab.Infrastructure: BuildInfrastructurePanel(); break;
-            case Tab.Power: BuildPowerPanel(); break;
             case Tab.Survey: BuildSurveyPanel(); break;
             case Tab.Orbit: BuildOrbitPanel(); break;
             case Tab.Terrain: BuildTerrainPanel(); break;
@@ -1347,7 +1334,10 @@ public class PlanetViewWindow : MonoBehaviour
             }
         }
 
-        BuildPlacedList();
+        // The built-here list is the (richer) Infrastructure panel, folded in now that Infrastructure is
+        // no longer its own tab: per-structure health, siting, power draw, select-on-map, upgrade and
+        // demolish. This replaces the simpler BuildPlacedList (kept below, unused, as reference).
+        BuildInfrastructurePanel();
     }
 
     static string CategoryName(SurfaceBuildingCategory c)
@@ -2024,16 +2014,26 @@ public class PlanetViewWindow : MonoBehaviour
     {
         // Folded from the retired Inspector body window (Raptok's mapping: Climate, Ores, Terraform all
         // land on the Survey tab). Climate first (what the world IS), then its ores, then how to fix it,
-        // then the index overlays that were always here.
+        // then Sites (points of interest), then the index overlays and the power grid.
         BuildSurveyClimate();
         BuildSurveyOres();
         BuildSurveyTerraform();
+        // Points of interest — folded from the retired Sites tab, which required a survey to reveal what's
+        // on the world. Keep that gate now that Survey itself is always open.
+        if (body.Surveyed || GameMode.DevMode) BuildSitesPanel();
 
         Header("INDEX OVERLAYS");
         Note("Each overlay paints the grid with where a kind of building actually belongs. Survey a world to read its minerals; a deep survey by a research ship unlocks the rest.");
 
         AddIndexToggle(SurfaceIndexKind.None, "None (plain terrain)");
         foreach (var k in SurfaceIndex.All) AddIndexToggle(k, null);
+
+        // The power grid — folded from the retired Power tab. Its map overlay is a Survey overlay now,
+        // reachable from this toggle (mutually exclusive with the index ramps); the diagnostic panel is
+        // shown below for a world of yours that's settled, since a grid only exists once something's built.
+        AddPowerToggle();
+        if (body.owner == FactionManager.Player && body.settled)
+            BuildPowerPanel();
 
         // Read the exact numbers under the cursor — the overlay shows you the region, this confirms it.
         Header("UNDER THE CURSOR");
@@ -2080,13 +2080,36 @@ public class PlanetViewWindow : MonoBehaviour
             Note(card, SurfaceIndex.Describe(k));
         }
 
-        var btn = UIFactory.Button(card, "", () => { activeIndex = k; lastSig = null; }, 24);
+        var btn = UIFactory.Button(card, "", () => { activeIndex = k; showPowerOverlay = false; lastSig = null; }, 24);
         live.Button(btn, () =>
         {
+            bool on = activeIndex == k && !showPowerOverlay;
             string nm = labelOverride ?? SurfaceIndex.Name(k);
-            if (k == SurfaceIndexKind.None) return (true, activeIndex == k ? $"• {nm}" : nm);
+            if (k == SurfaceIndexKind.None) return (true, on ? $"• {nm}" : nm);
             if (!SurfaceIndex.Unlocked(body, k)) return (false, $"{nm} — {SurfaceIndex.LockReason(body, k)}");
-            return (true, activeIndex == k ? $"• {nm} (showing)" : $"Show {nm}");
+            return (true, on ? $"• {nm} (showing)" : $"Show {nm}");
+        }, group);
+    }
+
+    // The power-grid overlay toggle — the Power tab's map view, now one of the Survey overlays. Picking
+    // it clears any index ramp; picking an index clears it. Only meaningful on a settled world of yours,
+    // so it disables itself elsewhere with the reason on the button.
+    void AddPowerToggle()
+    {
+        var card = Card();
+        var group = card.gameObject.AddComponent<CanvasGroup>();
+        Note(card, "<color=#F5F58C>■</color> grid   <color=#4DC8FF>■</color> plants & relays — where the electricity reaches.");
+        var btn = UIFactory.Button(card, "", () =>
+        {
+            showPowerOverlay = !showPowerOverlay;
+            if (showPowerOverlay) activeIndex = SurfaceIndexKind.None;
+            lastSig = null;
+        }, 24);
+        live.Button(btn, () =>
+        {
+            if (body.owner != FactionManager.Player || !body.settled)
+                return (false, "Power grid — settle this world first");
+            return (true, showPowerOverlay ? "• Power grid (showing)" : "Show power grid");
         }, group);
     }
 
@@ -2298,8 +2321,9 @@ public class PlanetViewWindow : MonoBehaviour
         //  BUILD  — holding a structure highlights the best 10% of sites for it on this world.
         //  SURVEY — the raw index ramp.
         // The power grid is its own overlay entirely: it isn't a ramp over an index, it's a map of what
-        // the electricity reaches, so it gets its own pass rather than being forced through Ramp().
-        if (tab == Tab.Power && body.surface != null)
+        // the electricity reaches, so it gets its own pass rather than being forced through Ramp(). It's
+        // now a Survey overlay, chosen by the power toggle rather than a dedicated tab.
+        if (tab == Tab.Survey && showPowerOverlay && body.surface != null)
         {
             overlayImage.gameObject.SetActive(true);
             RefreshPowerOverlay();
@@ -2315,7 +2339,7 @@ public class PlanetViewWindow : MonoBehaviour
             if (info.index != SurfaceIndexKind.None && SurfaceIndex.Unlocked(body, info.index))
             { kind = info.index; bestSites = true; }
         }
-        else if (tab == Tab.Survey && SurfaceIndex.Unlocked(body, activeIndex))
+        else if (tab == Tab.Survey && !showPowerOverlay && SurfaceIndex.Unlocked(body, activeIndex))
         {
             kind = activeIndex;
         }
