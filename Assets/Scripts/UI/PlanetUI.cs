@@ -93,7 +93,10 @@ public class PlanetUI : MonoBehaviour
 
     void Update()
     {
-        if (infoPanel == null || !infoPanel.activeSelf) return;
+        // Gated on the SELECTION, not on the (now-retired) bottom-left panel's visibility. This is what
+        // still clears the selection — and fires OnClosed so every follower window closes — when you
+        // click empty space, even though the panel that used to drive it is gone.
+        if (Selected == null) return;
 
         // Esc is handled by EscapeMenu (pause menu); planet UI closes via click-outside or the X button.
         if (Input.GetMouseButtonDown(0) && !justOpened && EventSystem.current != null &&
@@ -121,7 +124,10 @@ public class PlanetUI : MonoBehaviour
         // player's attention between two views of one world.
         if (gridWindow != null) gridWindow.SetActive(false);
 
-        if (infoPanel != null) infoPanel.SetActive(true);
+        // The bottom-left info panel is retired too (Raptok's request): the Planet View's Overview tab
+        // shows all of this and more. PlanetUI stays the selection HUB — it still broadcasts the
+        // selection, focuses the camera and floats labels below — it just no longer paints the old panel.
+        if (infoPanel != null) infoPanel.SetActive(false);
 
         justOpened = true;
         SimpleAudio.Instance?.PlaySelect();

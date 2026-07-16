@@ -50,7 +50,9 @@ public static class GameBootstrap
         InspectorWindow.Create(canvas.transform);   // the tabbed panel for whatever you click on
         PlanetViewWindow.Create(canvas.transform);  // surface grid: info / build / survey overlays
         BodyUnitsPanel.Create(canvas.transform);
-        AssociatedObjectsWindow.Create(canvas.transform);
+        // "Around Homeworld" (AssociatedObjectsWindow) retired at Raptok's request: its moon-hopping list
+        // is superseded by the Planet View's moon tabs. Not instantiated, so it never subscribes to
+        // selection and never appears. The class is left in the tree as dead code for now.
         ColonyWindow.Create(canvas.transform);
         SystemSummaryWindow.Create(canvas.transform);
         GalaxyLOD.Create(canvas.transform);
