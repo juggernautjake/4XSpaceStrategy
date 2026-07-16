@@ -46,7 +46,11 @@ jobs:
   build:
     if: "!contains(github.event.head_commit.message, '[dev-requests bot]')"
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # 4 hours. Raised from 2 after the first big request (a whole UI restructure) built three
+    # slices and ran out — not stuck, just out of budget. The three limits below have to move
+    # together or the smallest one silently becomes the only one that matters: turns without
+    # minutes just means the job gets killed mid-slice instead of stopping cleanly.
+    timeout-minutes: 240
 
     steps:
       - uses: actions/checkout@v4
@@ -129,12 +133,12 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # Bounds the Stop-hook loop: how many times the agent may be sent back to work.
           # Sized against --max-turns, not wishfully — a slice is read → review subagents →
-          # edit → commit → push, realistically 20-40 turns. At 300 turns, ~12 continuations
+          # edit → commit → push, realistically 20-40 turns. At 600 turns, ~20 continuations
           # is what actually fits; a larger number would just mean turns run out first and
           # the limit never does anything. A job with more slices than this builds what it
           # can, pushes it, and leaves the rest unticked for the next run.
-          # (Also read by the "Did the slice gate fire?" step below.)
-          SLICE_GATE_MAX_CONTINUATIONS: '12'
+          # (Also read by the "What happened?" step below.)
+          SLICE_GATE_MAX_CONTINUATIONS: '20'
         run: |
           set -euo pipefail
 
@@ -181,7 +185,7 @@ jobs:
           )" \
             --model claude-opus-4-8 \
             --settings .github/claude/settings.json \
-            --max-turns 300 \
+            --max-turns 600 \
             --allowedTools "Read,Write,Edit,Glob,Grep,Agent,Bash(mkdir *),Bash(git add *),Bash(git commit *),Bash(git mv *),Bash(git status *),Bash(git diff *),Bash(git log *),Bash(git rev-parse *),Bash(git pull --rebase *),Bash(git push),Bash(git push origin main)"
           #
           # Notes on the flags above, each of which is load-bearing:
