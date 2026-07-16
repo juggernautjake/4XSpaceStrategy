@@ -29,18 +29,35 @@ on:
     branches: [main]
     paths:
       - 'dev-requests/in-progress/**'
-  # Lets you re-run a stalled job by hand from the Actions tab without re-uploading.
+  # Two jobs at once:
+  #   - You, re-running a stalled request by hand from the Actions tab.
+  #   - THIS WORKFLOW, calling itself to carry on where it left off (see "Keep going").
+  # `chain` is the auto-resume depth. Leave it blank when running by hand.
   workflow_dispatch:
+    inputs:
+      chain:
+        description: 'Auto-resume depth (leave blank — the workflow sets this itself)'
+        required: false
+        default: '0'
 
 # One at a time. Two runs editing the same planning doc would fight over it, and
 # cancelling a half-built slice mid-flight would leave the repo in a worse state than
-# letting it finish — so queue rather than cancel.
+# letting it finish — so queue rather than cancel. This also serialises the auto-resume
+# chain: a successor waits for its predecessor to finish rather than racing it.
 concurrency:
   group: dev-requests
   cancel-in-progress: false
 
 permissions:
   contents: write
+  # Lets the run trigger its own successor via `gh workflow run` (see "Keep going").
+  # This is exactly why that step uses workflow_dispatch and not, say, an empty commit:
+  # GitHub blocks GITHUB_TOKEN-triggered events from starting new runs specifically to
+  # prevent runaway recursion — "events triggered by the GITHUB_TOKEN will not create a
+  # new workflow run" — but names workflow_dispatch and repository_dispatch as the two
+  # exceptions that "always create workflow runs". So this is the sanctioned door, not a
+  # loophole. The runaway guards are in the step itself.
+  actions: write
 
 jobs:
   build:
@@ -89,6 +106,14 @@ jobs:
             printf 'Found %d file(s) to work on:\n' "${#found[@]}"
             printf '  %s\n' "${found[@]}"
           fi
+
+          # How many objectives are open BEFORE the agent touches anything. The auto-resume
+          # step compares against this to answer the only question that matters when deciding
+          # whether to spend money on another run: did this one actually get anywhere?
+          open=$(grep -rhoE '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' "$DIR" \
+            --include='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.md' 2>/dev/null | wc -l | tr -d ' ')
+          echo "open_before=${open:-0}" >> "$GITHUB_OUTPUT"
+          echo "Objectives open at start: ${open:-0}"
 
       # Claude can see images but cannot watch video, so any clip becomes stills first
       # and the agent reads those. Doing it here rather than asking the agent to shell
@@ -289,7 +314,77 @@ jobs:
             echo "This is normal for a big request and nothing is lost — every finished slice"
             echo "was pushed to main as it was built. The doc records exactly what's left."
             echo
-            echo "TO RESUME: Actions tab -> Dev Requests -> 'Run workflow'. No upload needed."
-            echo "It picks up the existing doc and carries on from the first unticked box."
+            echo "A successor run should be starting automatically — see the next step."
           fi
           echo "═══════════════════════════════════════════════════════"
+
+      # AUTO-RESUME: if objectives remain, start another run and carry on.
+      #
+      # This is what "just keep going until it's done" actually looks like, because it can't
+      # be one long job — GitHub hard-caps any job at 6 hours, and a request bigger than that
+      # is not a limit you can raise, it's a limit you have to chain past. So each run is
+      # bounded, pushes its slices, and hands off to the next.
+      #
+      # ---- The guard that matters: PROGRESS, not a counter ----
+      # A chain that resumes unconditionally is a money incinerator: an objective the agent
+      # cannot finish would spin forever at ~$3-5 a lap, and the failure mode is a bill rather
+      # than an error. So the test is "did the last run tick anything off?" If a full run made
+      # zero progress, another identical run will too — that's not perseverance, it's a loop.
+      # Stop and let a human look.
+      #
+      # MAX_CHAIN is the backstop underneath that, for the case where each run makes ONE tick
+      # of progress and would otherwise chain twenty times.
+      #
+      # `if: always()` because the runs most needing a successor are the ones that ran out of
+      # turns or timed out — precisely the ones a plain step would skip.
+      - name: Keep going if work remains
+        if: always() && steps.triage.outputs.work == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAX_CHAIN: '10'
+        run: |
+          DIR="dev-requests/in-progress"
+          DOCS='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.md'
+
+          open=$(grep -rhoE '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' "$DIR" --include="$DOCS" 2>/dev/null | wc -l | tr -d ' ')
+          open="${open:-0}"
+          before="${{ steps.triage.outputs.open_before }}"
+          before="${before:-0}"
+          chain="${{ github.event.inputs.chain || '0' }}"
+          case "$chain" in ''|*[!0-9]*) chain=0 ;; esac
+          next=$((chain + 1))
+
+          echo "Objectives: $before open at start -> $open open now. Chain depth: $chain."
+          echo
+
+          if [ "$open" -eq 0 ]; then
+            echo "FINISHED — nothing left to build. Not resuming."
+            exit 0
+          fi
+
+          if [ "$open" -ge "$before" ]; then
+            echo "STOPPING: $open objective(s) open, and this run ticked NOTHING off."
+            echo
+            echo "Another identical run would do the same thing and bill you for it, so the"
+            echo "chain stops here rather than spinning. Something needs a human:"
+            echo "  - Read the 'Build the requests' step — did the agent error out early?"
+            echo "  - Read the planning doc — is a remaining objective impossible or ambiguous?"
+            echo "    (The agent is told to mark those '- [!]' with a reason rather than stall.)"
+            echo "  - Was the run cancelled, or did it die before it could tick anything?"
+            echo
+            echo "To try again anyway: Actions -> Dev Requests -> Run workflow."
+            exit 0
+          fi
+
+          if [ "$next" -gt "$MAX_CHAIN" ]; then
+            echo "STOPPING: hit the chain cap ($MAX_CHAIN consecutive runs) with $open still open."
+            echo "Progress is being made, just slowly — this is a backstop, not a failure."
+            echo "Re-run by hand to continue: Actions -> Dev Requests -> Run workflow."
+            exit 0
+          fi
+
+          echo "PROGRESS: $((before - open)) objective(s) ticked this run, $open still open."
+          echo "Starting run $next of at most $MAX_CHAIN to carry on."
+          gh workflow run dev-requests.yml --ref main -f chain="$next"
+          echo "Queued. It waits for this job to finish (concurrency group), then picks up"
+          echo "the doc and continues from the first unticked box."
