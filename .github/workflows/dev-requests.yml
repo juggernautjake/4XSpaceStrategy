@@ -205,14 +205,23 @@ jobs:
           #   `git -c core.pager=...` — arbitrary execution wearing a git costume.
           #   Comma-separated here; the GitHub Action took a space-separated list instead.
 
-      # Answers "is the Stop hook actually working?" without anyone having to squint at a
-      # transcript. `always()` matters: the runs where you most want this are the ones that
-      # timed out or died, and a plain step would be skipped on exactly those.
-      - name: Did the slice gate fire?
+      # The run's verdict, in one place, in plain words.
+      #
+      # `always()` is the whole point: the runs you most need this on are the ones that
+      # timed out, ran out of turns, or crashed — and a plain step is skipped on exactly
+      # those. Without it, "finished everything" and "died two thirds of the way through"
+      # both look like a job that ended, and the difference only shows up as a file quietly
+      # sitting in in-progress/ that nobody notices for a week.
+      - name: What happened?
         if: always() && steps.triage.outputs.work == 'true'
         run: |
+          DIR="dev-requests/in-progress"
           LOG="${TMPDIR:-/tmp}/claude-slice-gate.log"
-          echo "──────────────────────────────────────────────"
+          DOCS='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.md'
+
+          echo "═══════════════════════════════════════════════════════"
+          echo " SLICE GATE"
+          echo "═══════════════════════════════════════════════════════"
           if [ -s "$LOG" ]; then
             echo "The Stop hook ran $(wc -l < "$LOG" | tr -d ' ') time(s):"
             echo
@@ -223,13 +232,43 @@ jobs:
           else
             echo "The Stop hook NEVER RAN."
             echo
-            echo "If the agent did real work above, this is a problem — it means the loop"
-            echo "isn't running and it only ever built whatever it managed in one go."
-            echo "Likely causes, in order:"
+            echo "If the agent did real work above, that's a problem — the loop isn't running"
+            echo "and it only built whatever it managed in one pass. Likely causes:"
             echo "  1. --settings .github/claude/settings.json didn't load."
             echo "  2. .github/claude/slice-gate.sh isn't executable (needs mode 100755)."
-            echo "  3. The agent hit --max-turns and was killed before it ever tried to stop."
-            echo
-            echo "If the agent did nothing, the run failed earlier — read the step above."
+            echo "  3. The agent hit --max-turns and was killed before it tried to stop."
+            echo "If the agent did nothing at all, the run failed earlier — read the step above."
           fi
-          echo "──────────────────────────────────────────────"
+
+          echo
+          echo "═══════════════════════════════════════════════════════"
+          echo " OUTSTANDING WORK"
+          echo "═══════════════════════════════════════════════════════"
+          open=$(grep -rhoE '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' "$DIR" --include="$DOCS" 2>/dev/null | wc -l | tr -d ' ')
+          open="${open:-0}"
+
+          if [ "$open" -eq 0 ]; then
+            if ls "$DIR"/$DOCS >/dev/null 2>&1; then
+              echo "A planning doc is still in $DIR with everything ticked."
+              echo "It should have been moved to dev-requests/completed/ — if it wasn't, the"
+              echo "run died between the last tick and the file move. Re-run to finish it."
+            else
+              echo "DONE. No planning docs left in $DIR — everything was built and filed."
+            fi
+          else
+            echo "NOT FINISHED: $open objective(s) still open."
+            echo
+            for f in "$DIR"/$DOCS; do
+              [ -e "$f" ] || continue
+              n=$(grep -cE '^[[:space:]]*[-*][[:space:]]+\[[[:space:]]\]' "$f" 2>/dev/null || echo 0)
+              d=$(grep -cE '^[[:space:]]*[-*][[:space:]]+\[[x!]\]' "$f" 2>/dev/null || echo 0)
+              echo "  $(basename "$f"): $d done, $n to go"
+            done
+            echo
+            echo "This is normal for a big request and nothing is lost — every finished slice"
+            echo "was pushed to main as it was built. The doc records exactly what's left."
+            echo
+            echo "TO RESUME: Actions tab -> Dev Requests -> 'Run workflow'. No upload needed."
+            echo "It picks up the existing doc and carries on from the first unticked box."
+          fi
+          echo "═══════════════════════════════════════════════════════"
