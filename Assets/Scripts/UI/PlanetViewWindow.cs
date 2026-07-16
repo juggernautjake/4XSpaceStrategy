@@ -129,13 +129,12 @@ public class PlanetViewWindow : MonoBehaviour
     float markerRingBase, markerArrowBaseY;
     PlacedBuilding lastMarkedSelection;
 
-    // A FIXED window, a quarter of the screen BY AREA — which is half the screen on each axis, not a
-    // quarter on each axis (that would be a sixteenth). Measured from the live canvas rather than
-    // assuming the 1920x1080 reference resolution, so it's a quarter of the actual screen.
-    //
-    // It never resizes with the world — the map zooms inside its viewport instead. The resize grip and
-    // the draggable title bar still work, so it can be moved and sized by hand afterwards.
-    const float ScreenFraction = 0.5f;     // per axis -> 0.25 of the area
+    // A FULL-SCREEN window (Raptok's request: selecting a planet fills the screen with the Planet
+    // View). Measured from the live canvas rather than the 1920x1080 reference so it fills the ACTUAL
+    // screen, with a small margin so the frame isn't flush to the edge. Re-measured on every open
+    // (ShowFor) since the canvas rect isn't known at bootstrap. The map zooms inside its viewport; the
+    // resize grip and draggable title bar still work, so it can be shrunk by hand afterwards.
+    const float ScreenMargin = 8f;
     static Vector2 WindowSize(Transform parent)
     {
         var canvas = parent != null ? parent.GetComponentInParent<Canvas>() : null;
@@ -144,8 +143,8 @@ public class PlanetViewWindow : MonoBehaviour
             ? crt.rect.size
             : new Vector2(1920f, 1080f);   // fallback: the canvas reference resolution
         return new Vector2(
-            Mathf.Clamp(screen.x * ScreenFraction, 640f, 1600f),
-            Mathf.Clamp(screen.y * ScreenFraction, 400f, 900f));
+            Mathf.Max(640f, screen.x - ScreenMargin * 2f),
+            Mathf.Max(400f, screen.y - ScreenMargin * 2f));
     }
 
     const float SidePanelW = 300f;
@@ -237,16 +236,37 @@ public class PlanetViewWindow : MonoBehaviour
         srt.pivot = new Vector2(0.5f, 0); srt.sizeDelta = new Vector2(0, 30); srt.anchoredPosition = Vector2.zero;
 
         PlanetUI.OnBodySelected += OnBodySelected;
+        PlanetUI.OnClosed += HideOnDeselect;
+
+        // The title-bar 'X' bakes in a bare root.SetActive(false). Now that this window IS the planet
+        // selection, closing it should also clear the selection — otherwise the camera stays locked on a
+        // world whose window is gone and the labels linger until the next empty-space click. Route the X
+        // through CloseAll so it's symmetric with click-away; the factory's own hide still fires too,
+        // which is harmless.
+        var closeBtn = root.transform.Find("TitleBar")?.GetComponentInChildren<Button>();
+        if (closeBtn != null)
+            closeBtn.onClick.AddListener(() => { if (PlanetUI.Selected != null) PlanetUI.Instance?.CloseAll(); });
+
         root.SetActive(false);
     }
 
-    void OnDestroy() { PlanetUI.OnBodySelected -= OnBodySelected; }
+    void OnDestroy()
+    {
+        PlanetUI.OnBodySelected -= OnBodySelected;
+        PlanetUI.OnClosed -= HideOnDeselect;
+    }
 
+    // Selecting a body now OPENS the Planet View full-screen (Raptok's request), rather than only
+    // updating the stored body when the window already happened to be open.
     void OnBodySelected(CelestialBody b)
     {
-        if (root != null && root.activeSelf) ShowFor(b);
+        if (b != null) ShowFor(b);
         else body = b;
     }
+
+    // Clearing the selection (click-away, Esc-driven CloseAll) closes the window with it, so the
+    // full-screen view doesn't stay up over a deselected world.
+    void HideOnDeselect() { if (root != null) root.SetActive(false); }
 
     public void ShowFor(CelestialBody b) => ShowFor(b, null);
 
@@ -271,9 +291,12 @@ public class PlanetViewWindow : MonoBehaviour
         mapPan = Vector2.zero;
         root.SetActive(true);
 
-        // Always open centred. If you dragged it into a corner last time, that was for last time — a
-        // window that opens off where you left it is a window you have to go find.
+        // Always open centred AND re-sized to fill the current screen. The canvas rect isn't known at
+        // bootstrap, so the size is re-measured here where it's real. If you dragged it into a corner
+        // last time, that was for last time — a window that opens off where you left it is one you have
+        // to go find.
         var rrt = root.GetComponent<RectTransform>();
+        rrt.sizeDelta = WindowSize(root.transform);
         rrt.anchoredPosition = Vector2.zero;
         rrt.SetAsLastSibling();
         RefreshMapTexture();
