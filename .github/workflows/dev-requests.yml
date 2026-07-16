@@ -46,11 +46,16 @@ jobs:
   build:
     if: "!contains(github.event.head_commit.message, '[dev-requests bot]')"
     runs-on: ubuntu-latest
-    # 4 hours. Raised from 2 after the first big request (a whole UI restructure) built three
-    # slices and ran out — not stuck, just out of budget. The three limits below have to move
-    # together or the smallest one silently becomes the only one that matters: turns without
-    # minutes just means the job gets killed mid-slice instead of stopping cleanly.
-    timeout-minutes: 240
+    # 2 hours. This and the two limits further down (--max-turns, SLICE_GATE_MAX_CONTINUATIONS)
+    # are one budget expressed three ways and must move TOGETHER — the smallest silently becomes
+    # the only one that matters, and turns without minutes just means the job gets killed
+    # mid-slice instead of stopping cleanly at a checkpoint.
+    #
+    # Briefly raised to 240/600/20 to push a big request over the line, then put back: at Opus
+    # rates that was heading for ~$20 a run. Finishing 60% of a request for $10 and finishing
+    # 100% for $20 are the same trade, and the doc + resume path already make a partial run
+    # cheap to continue. Better to run smaller and more often than to buy one long run.
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4
@@ -133,12 +138,12 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # Bounds the Stop-hook loop: how many times the agent may be sent back to work.
           # Sized against --max-turns, not wishfully — a slice is read → review subagents →
-          # edit → commit → push, realistically 20-40 turns. At 600 turns, ~20 continuations
+          # edit → commit → push, realistically 20-40 turns. At 300 turns, ~12 continuations
           # is what actually fits; a larger number would just mean turns run out first and
           # the limit never does anything. A job with more slices than this builds what it
           # can, pushes it, and leaves the rest unticked for the next run.
           # (Also read by the "What happened?" step below.)
-          SLICE_GATE_MAX_CONTINUATIONS: '20'
+          SLICE_GATE_MAX_CONTINUATIONS: '12'
         run: |
           set -euo pipefail
 
@@ -183,12 +188,24 @@ jobs:
             Start now.
           PROMPT
           )" \
-            --model claude-opus-4-8 \
+            --model claude-sonnet-5 \
             --settings .github/claude/settings.json \
-            --max-turns 600 \
+            --max-turns 300 \
             --allowedTools "Read,Write,Edit,Glob,Grep,Agent,Bash(mkdir *),Bash(git add *),Bash(git commit *),Bash(git mv *),Bash(git status *),Bash(git diff *),Bash(git log *),Bash(git rev-parse *),Bash(git pull --rebase *),Bash(git push),Bash(git push origin main)"
           #
           # Notes on the flags above, each of which is load-bearing:
+          #
+          # --model is the cost dial, and it's the one worth understanding before touching.
+          #   Sonnet 5 is $3/$15 per Mtok against Opus 4.8's $5/$25 — roughly 40% cheaper per
+          #   token, and it is genuinely strong at agentic coding. Opus built the first requests
+          #   here at about $10 a run; that is not a malfunction, it is what metered Opus costs
+          #   for 20+ minutes of work with review subagents (each subagent is its own context
+          #   and its own bill). It only looks expensive next to Claude Code on a subscription,
+          #   which is a flat fee with usage bundled — a different meter, not a cheaper one.
+          #
+          #   The trade is real: nothing here can compile, so model quality is doing work that
+          #   a compiler would otherwise do. If Sonnet starts shipping slices that don't build,
+          #   that's the signal to go back to claude-opus-4-8 and pay for it.
           #
           # --settings is how the Stop hook gets loaded. It is NOT auto-discovered from
           #   .github/, and that's deliberate (see settings.json: at .claude/settings.json it
