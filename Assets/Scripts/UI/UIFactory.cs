@@ -108,6 +108,11 @@ public static class UIFactory
         // Keep the window within the screen at any resolution.
         rootGO.AddComponent<WindowFit>();
 
+        // Dev-Mode layout watchdog: logs any clipped text / off-screen / too-small control in this window
+        // with its element path, so "the button/slider/text isn't fully visible" bugs are found and fixed
+        // rather than eyeballed. Read-only; does nothing outside Dev Mode. (See UISanity.)
+        rootGO.AddComponent<UISanityGuard>();
+
         return content;
     }
 

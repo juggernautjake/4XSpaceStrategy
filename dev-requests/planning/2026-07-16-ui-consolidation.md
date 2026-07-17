@@ -181,3 +181,14 @@ hook must keep working through the restructure.
   only — safe and reversible. The textural pass (panel gradients, glow borders, 9-slice sprites via
   `UIFactory.Panel`/`Button`/window `Outline`) is deferred to a build-and-screenshot loop, since blind
   global texture work across every window is the highest-blast-radius change to get wrong. Not compiled.
+
+- **Slice J — UISanity layout watchdog — built 2026-07-16.** New `UISanity` (static scanner) + `UISanityGuard`
+  (auto-added to every `UIFactory.Window`). In Dev Mode, each window scans its own subtree ~0.25s after it
+  opens and on resize, logging any element that is: text clipped (TMP `preferredHeight` > its box, with no
+  ScrollView/ContentSizeFitter to reveal it — the exact "thinks it's bigger than it is" case), off-canvas
+  (mask-aware, so it doesn't false-flag scroll content below the fold), a too-small/zero-size interactable,
+  or a **ContentSizeFitter with no LayoutGroup** (collapses to ~0 and clips its children — the classic
+  broken-vertical-scroll cause). Each logged with its full element path. Read-only (never mutates layout,
+  so it can't make things worse); `UISanity.ScanAll()` sweeps every canvas for a dev hotkey. Reviewed clean.
+  Verified the scroll infrastructure is sound: `UIFactory.ScrollView` and every `Card` helper add both a
+  VerticalLayoutGroup and a ContentSizeFitter, so vertical scrolling self-sizes and reveals content.
