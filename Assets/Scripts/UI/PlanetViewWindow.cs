@@ -3811,7 +3811,7 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
 {
     public CelestialBody moon;
 
-    RectTransform rt, light;
+    RectTransform rt, borderLight;
     Outline outline;
     bool hover;
     float t;
@@ -3832,10 +3832,10 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
 
         // A small bright light that travels the border clockwise — built once, moved every frame.
         var go = UIFactory.NewUI(rt, "BorderLight");
-        light = go.GetComponent<RectTransform>();
-        light.anchorMin = light.anchorMax = new Vector2(0.5f, 0.5f);
-        light.pivot = new Vector2(0.5f, 0.5f);
-        light.sizeDelta = new Vector2(5f, 5f);
+        borderLight = go.GetComponent<RectTransform>();
+        borderLight.anchorMin = borderLight.anchorMax = new Vector2(0.5f, 0.5f);
+        borderLight.pivot = new Vector2(0.5f, 0.5f);
+        borderLight.sizeDelta = new Vector2(5f, 5f);
         var img = go.AddComponent<Image>();
         img.color = Spark;
         img.raycastTarget = false;
@@ -3867,7 +3867,7 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
 
         // Clockwise around the border.
         t += Time.unscaledDeltaTime * LapsPerSec;
-        if (light != null) light.anchoredPosition = Perimeter(Mathf.Repeat(t, 1f));
+        if (borderLight != null) borderLight.anchoredPosition = Perimeter(Mathf.Repeat(t, 1f));
 
         // Hover: a subtle grow so the tab reads as clickable. localScale (not layout size) so it never
         // reflows the neighbours — the other tabs keep sitting neatly together.
@@ -3938,7 +3938,7 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
         if (m.settled && m.population > 0)
             sb.Append($"\n<color=#9FB4C8>Colony</color> {Population.Format(m.population)}");
         else if (m.owner != null)
-            sb.Append($"\n<color=#9FB4C8>Claimed by</color> {Faction.OwnerName(m.owner)}");
+            sb.Append($"\n<color=#9FB4C8>Claimed by</color> {FactionManager.OwnerName(m.owner)}");
 
         return sb.ToString();
     }

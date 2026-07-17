@@ -167,7 +167,7 @@ public class CursorManager : MonoBehaviour
     {
         int s = 32;
         var px = New(s, s);
-        int m = 5, len = 8, cx = s / 2, cy = s / 2, gap = 6;
+        int len = 8, cx = s / 2, cy = s / 2, gap = 6;
         // Four L-shaped brackets pulled out from the centre by `gap`.
         Bracket(px, s, s, cx - gap, cy - gap, -1, -1, len, Cyan);
         Bracket(px, s, s, cx + gap, cy - gap, 1, -1, len, Cyan);
