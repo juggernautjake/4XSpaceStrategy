@@ -5,7 +5,9 @@ using UnityEngine;
 // bodies that should have one. Airless worlds (moons, asteroids, barren rock) get no atmosphere.
 public static class PlanetAppearance
 {
-    // Updates ONLY the surface texture (no atmosphere churn) — used for live terrain editing.
+    // Updates ONLY the surface texture (no atmosphere churn) — used for live terrain editing and, now,
+    // for every terraforming morph tick (so the orbiting 3D model reflects terraforming exactly as the
+    // 2D map does — both go through SurfaceTextureRenderer/SampleNormalized on body.terrainParams).
     public static void RefreshTexture(CelestialBody body, GameObject go)
     {
         if (go == null) return;
@@ -14,8 +16,14 @@ public static class PlanetAppearance
         Texture2D tex = SurfaceTextureRenderer.Build(body);
         tex.wrapMode = TextureWrapMode.Repeat;
         var m = rend.material;
+        // Build() allocates a fresh Texture2D every call, and terraforming refreshes the globe ~once a
+        // second for minutes — so the previous surface texture has to be released or it leaks steadily
+        // (the 2D map path already destroys its old texture; this one didn't). The old texture is always
+        // one we made here on a prior call (or null on first apply), never a shared asset.
+        var old = m.mainTexture as Texture2D;
         m.mainTexture = tex;
         if (m.HasProperty("_BaseMap")) m.SetTexture("_BaseMap", tex);
+        if (old != null && old != tex) Object.Destroy(old);
     }
 
     public static void Apply(CelestialBody body, GameObject go)
