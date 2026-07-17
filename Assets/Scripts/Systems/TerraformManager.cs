@@ -10,6 +10,12 @@ public class TerraformJob
     public bool paused;
     public int metalPaid, energyPaid, waterPaid;   // exact refund if cancelled
 
+    // Orbit-migration animation. An orbit-shift project walks the world from orbitStart to the
+    // pre-clamped orbitTarget over its duration so you SEE it move. -1 means "not an orbit migration"
+    // (or a pre-feature save), which falls back to the old instant jump at completion.
+    public float orbitStart = -1f, orbitTarget = -1f;
+    public bool IsOrbitShift => orbitTarget >= 0f;
+
     public TerraformProjectInfo Info => TerraformProjectDatabase.Get(type);
     public float Progress => duration > 0f ? Mathf.Clamp01(elapsed / duration) : 1f;
     public float Remaining => Mathf.Max(0f, duration - elapsed);
@@ -107,14 +113,16 @@ public class TerraformManager : MonoBehaviour
             if (w > 0) PlayerEconomy.Add(ResourceType.Water, -w);
         }
 
-        jobs.Add(new TerraformJob
+        var job = new TerraformJob
         {
             body = b, type = t,
             duration = TerraformProjects.Duration(p, b),
             metalPaid = GameMode.DevMode ? 0 : m,
             energyPaid = GameMode.DevMode ? 0 : e,
             waterPaid = GameMode.DevMode ? 0 : w
-        });
+        };
+        InitOrbitMigration(job);
+        jobs.Add(job);
 
         NotificationManager.Instance?.Push($"{p.name} begun on {b.name}", p.description, Fly(b), NotifKind.Info);
         OnChanged?.Invoke();
@@ -156,6 +164,26 @@ public class TerraformManager : MonoBehaviour
             changed = true;
         }
 
+        // Animate any orbit-migration jobs smoothly every frame — cheap (orbit ring + habitability
+        // rescore, no surface regen). This is what makes a migrating world visibly spiral in or out.
+        //
+        // Collision safety: the radius is re-clamped against the neighbours' CURRENT positions every
+        // frame, not just against where they sat when the project began. So even two worlds migrating in
+        // the same system at once can never overlap mid-animation — each simply stops at the other's band
+        // edge rather than passing through it, and resumes when the other moves on. A lone migrator is
+        // unaffected (its lerp already lies inside the allowed band).
+        for (int i = 0; i < jobs.Count; i++)
+        {
+            var j = jobs[i];
+            if (j == null || j.paused || !j.IsOrbitShift || j.body == null) continue;
+            if (Mathf.Approximately(j.orbitStart, j.orbitTarget)) continue;   // no room to move: nothing to animate
+
+            float r = Mathf.Lerp(j.orbitStart, j.orbitTarget, j.Progress);
+            var sys = j.body.system != null ? j.body.system.bodies : null;
+            if (sys != null && OrbitSafety.ClampRadius(sys, j.body, j.body.hostStar, r, out float rSafe)) r = rSafe;
+            SetOrbitRadiusLive(j.body, r);
+        }
+
         // Progressive morph: while projects load, walk each affected world's climate toward the sum of
         // what its projects will do — previewed by their loading bars via TerraformClimate/Compose — so
         // water fills WHILE a Water Convoy runs and the seas recede WHILE Hydrosphere Venting runs.
@@ -195,6 +223,15 @@ public class TerraformManager : MonoBehaviour
         var b = j.body;
         var p = j.Info;
         TerraformProjects.MarkDone(b, j.type);
+
+        // Orbit migrations were animated over the project's duration (see Update). Finalize by snapping
+        // to the pre-clamped target and re-asserting system spacing. A pre-feature job that never
+        // animated (orbitTarget < 0) falls back to the old instant jump so old saves still complete.
+        if (j.type == TerraformProjectType.OrbitShiftOut || j.type == TerraformProjectType.OrbitShiftIn)
+        {
+            float factor = j.type == TerraformProjectType.OrbitShiftOut ? 1.45f : 0.68f;
+            MigrateTo(b, j.IsOrbitShift ? j.orbitTarget : b.orbitRadius * factor);
+        }
 
         // Some projects physically change the world, so the model has to change with them — otherwise
         // the diagnosis would keep reporting the same fault forever.
@@ -249,12 +286,8 @@ public class TerraformManager : MonoBehaviour
             // only thing in the game that moves an orbit at RUNTIME, so they're the one place a planet
             // could be walked straight into a neighbour: the move is clamped to the room its neighbours
             // leave (see MigrateTo).
-            case TerraformProjectType.OrbitShiftOut:
-                MigrateTo(b, b.orbitRadius * 1.45f);
-                break;
-            case TerraformProjectType.OrbitShiftIn:
-                MigrateTo(b, b.orbitRadius * 0.68f);
-                break;
+            // OrbitShiftOut / OrbitShiftIn are handled in Complete (animated over the project's duration
+            // and finalized there), so they intentionally do nothing here.
 
             // Stripping a world's oceans really does dry it out — and an ocean world without an ocean
             // is a rocky one. The recovered water is shipped home rather than thrown away.
@@ -323,6 +356,40 @@ public class TerraformManager : MonoBehaviour
     // Walk a planet to a new orbit, but never through one of its neighbours. If the neighbours leave no
     // room at all the planet stays put — the project still counts as done (it raised the ceiling), it
     // just couldn't move as far as it wanted. Better a short migration than two worlds sharing an orbit.
+    // Work out where an orbit-shift project will end up, ONCE, when it begins — the desired 45% out / 32%
+    // in, clamped into the room the neighbours actually leave (OrbitSafety). Storing start+target on the
+    // job lets Update animate a straight, collision-free walk between them, and lets a mid-migration save
+    // resume exactly. If there's no room at all, target == the current radius and the world simply doesn't
+    // move (the project still completes and still raised the ceiling — same as the old MigrateTo).
+    static void InitOrbitMigration(TerraformJob j)
+    {
+        if (j == null) return;
+        if (j.type != TerraformProjectType.OrbitShiftOut && j.type != TerraformProjectType.OrbitShiftIn) return;
+        var b = j.body;
+        if (b == null) return;
+
+        float desired = j.type == TerraformProjectType.OrbitShiftOut ? b.orbitRadius * 1.45f : b.orbitRadius * 0.68f;
+        float target = b.orbitRadius;
+        var sys = b.system != null ? b.system.bodies : null;
+        if (sys != null) OrbitSafety.ClampRadius(sys, b, b.hostStar, desired, out target);
+
+        j.orbitStart = b.orbitRadius;
+        j.orbitTarget = target;
+    }
+
+    // Move a world to a radius RIGHT NOW without re-clamping or re-asserting the whole system — the
+    // per-frame step of an animated migration, whose endpoints were already made safe. Keeps moons on the
+    // planet's solar distance and refreshes the orbit ring + habitability (RescoreOrbit).
+    static void SetOrbitRadiusLive(CelestialBody b, float r)
+    {
+        if (b == null) return;
+        b.orbitRadius = r;
+        b.distanceFromStar = r;
+        if (b.moons != null)
+            foreach (var m in b.moons) if (m != null) m.distanceFromStar = r;
+        RescoreOrbit(b);
+    }
+
     static void MigrateTo(CelestialBody b, float desiredRadius)
     {
         var sys = b.system;
@@ -403,7 +470,8 @@ public class TerraformManager : MonoBehaviour
             {
                 bodyId = j.body != null ? j.body.id : -1, type = (int)j.type,
                 elapsed = j.elapsed, duration = j.duration, paused = j.paused,
-                metalPaid = j.metalPaid, energyPaid = j.energyPaid, waterPaid = j.waterPaid
+                metalPaid = j.metalPaid, energyPaid = j.energyPaid, waterPaid = j.waterPaid,
+                orbitStart = j.orbitStart, orbitTarget = j.orbitTarget
             });
         return l;
     }
@@ -419,7 +487,8 @@ public class TerraformManager : MonoBehaviour
                 {
                     body = b, type = (TerraformProjectType)d.type,
                     elapsed = d.elapsed, duration = d.duration, paused = d.paused,
-                    metalPaid = d.metalPaid, energyPaid = d.energyPaid, waterPaid = d.waterPaid
+                    metalPaid = d.metalPaid, energyPaid = d.energyPaid, waterPaid = d.waterPaid,
+                    orbitStart = d.orbitStart, orbitTarget = d.orbitTarget
                 });
             }
         OnChanged?.Invoke();

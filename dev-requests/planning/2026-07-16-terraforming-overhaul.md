@@ -226,6 +226,14 @@ nearly-right one.
   water (ice) can't grow liquid seas from a knob alone — that needs the directed TYPE transition, which
   makes **slice 3a a priority**, not an afterthought. Not compiled (no Unity in this env).
 
+- **Slice 4 — real-time animated orbit migration — built 2026-07-16.** `OrbitShiftOut/In` now walk the
+  world from its start radius to the `OrbitSafety.ClampRadius` target over the project's duration
+  (animated per frame in `TerraformManager.Update`, finalized in `Complete`; the instant jump was removed
+  from `ApplyPhysicalEffect`). `TerraformJob`/`TerraformJobDTO` carry `orbitStart`/`orbitTarget` so a
+  mid-migration save resumes exactly (the animation is a stateless lerp from `elapsed/duration`).
+  Reviewed clean by a subagent; hardened past its one caveat by re-clamping every frame so two worlds
+  migrating in the same system at once can never overlap. Not compiled (no Unity in this env).
+
 ## Order & dependencies
 
 1a → 1b → 1c is the critical path. 2, 3, 4, 5, 6, 7 build on it and can land in any order after 1c

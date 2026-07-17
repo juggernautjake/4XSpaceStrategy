@@ -74,6 +74,11 @@ public class TerraformJobDTO
     public float elapsed, duration;
     public bool paused;
     public int metalPaid, energyPaid, waterPaid;
+
+    // Animated orbit migration (see TerraformJob). Default -1 so a pre-feature save deserializes as
+    // "not an orbit migration" and completes via the legacy instant jump. JsonUtility leaves an absent
+    // field at this initializer value, so old saves stay correct.
+    public float orbitStart = -1f, orbitTarget = -1f;
 }
 
 [System.Serializable]
