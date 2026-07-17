@@ -3337,8 +3337,12 @@ public class PlanetViewWindow : MonoBehaviour
 
         float bandH = Mathf.Max(20f, band.height - 2f * MoonMapMargin);
         int n = moonImages.Count;
+        // A lone moon gets most of the band width rather than a stingy 60% — most moons are height-bound
+        // anyway, but a tall/narrow one now fills the space instead of floating in a letterbox. The map is
+        // centred on the band, so the cap is symmetric (tab-column width reserved on BOTH sides) to keep a
+        // width-bound map from sliding left under the moon-tab column. Two moons share the band half each.
         float slotW = n >= 2 ? Mathf.Max(20f, (band.width - MoonMapGap) * 0.5f - MoonMapMargin)
-                             : band.width * 0.6f;
+                             : Mathf.Max(20f, band.width - 2f * (MoonTabSize + MoonMapMargin));
 
         var size = new Vector2[n];
         for (int i = 0; i < n; i++)
@@ -3408,6 +3412,18 @@ public class PlanetViewWindow : MonoBehaviour
                 float next = Mathf.Clamp(zoom * Mathf.Pow(MoonZoomStep, scroll * 10f), MoonMinZoom, MoonMaxZoom);
                 if (!Mathf.Approximately(next, zoom))
                 {
+                    // Zoom TOWARD THE CURSOR, exactly like the host map: keep whatever cell is under the
+                    // pointer pinned there instead of zooming to the moon's centre. The moon image is
+                    // centre-anchored in moonLayer, so its anchoredPosition IS its centre offset; the point
+                    // under the cursor moves by mapPoint*(1-ratio) as the image scales by `ratio`.
+                    var mrt = moonImages[i].rectTransform;
+                    Vector2 pan0 = moonPan.TryGetValue(m, out Vector2 pv0) ? pv0 : Vector2.zero;
+                    if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                            moonLayer, Input.mousePosition, null, out Vector2 curLocal))
+                    {
+                        Vector2 mapPoint = curLocal - mrt.anchoredPosition;   // cursor, relative to image centre
+                        moonPan[m] = pan0 + mapPoint * (1f - next / zoom);    // LayoutMoonViews clamps it
+                    }
                     moonZoom[m] = next;
                     LayoutMoonViews();
                 }
