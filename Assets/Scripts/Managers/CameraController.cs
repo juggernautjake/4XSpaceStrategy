@@ -298,7 +298,18 @@ public class CameraController : MonoBehaviour
     {
         followTarget = target;
         following = follow;
-        targetHeight = Mathf.Clamp(FillHeight(WorldRadius(target, objectSizeHint)), minHeight, maxHeight);
+
+        float radius = WorldRadius(target, objectSizeHint);
+        // For a PLANET, frame its whole neighbourhood — the planet AND its moons / orbiting stations —
+        // rather than filling the screen with just the globe (which read as "too zoomed in"). Use the
+        // system's orbital reach (its outermost moon); for a moonless world still pull back a couple of
+        // radii so there's room to see whatever is in orbit around it. The zoom FLOOR is unchanged (it's
+        // still the planet's own surface), so you can hand-zoom right down onto it afterwards.
+        var pc = target != null ? target.GetComponent<PlanetClick>() : null;
+        if (pc != null && pc.data != null)
+            radius = Mathf.Max(OrbitSafety.SystemReach(pc.data), radius * 2.2f);
+
+        targetHeight = Mathf.Clamp(FillHeight(radius), minHeight, maxHeight);
         if (target == null) return;
 
         FocusOn(target.position);
