@@ -154,26 +154,32 @@ public static class TerraformDiagnosis
         }
 
         // ---- Water ----
-        float water = 0f;
-        if (b.resources != null && b.resources.resources.TryGetValue(ResourceType.Water, out var w)) water = w;
-        if (NeedsWater(s) && water < 140f && b.type != CelestialBodyType.GasGiant)
+        // The stored Water resource number can drift out of step with what the world actually IS — so a
+        // visibly-blue OCEAN planet must never read as "no water". An ocean world is liquid water by
+        // definition; treat it as saturated regardless of the stored amount. (An ICE world has water too,
+        // but frozen and useless until melted, so it deliberately still reads as needing water — that's
+        // what keeps "Melt the Ice Caps" on offer for it.)
+        float water = b.resources != null ? b.resources.Get(ResourceType.Water) : 0f;
+        bool oceanWorld = b.type == CelestialBodyType.OceanPlanet;
+        float effWater = oceanWorld ? Mathf.Max(water, 400f) : water;
+        if (NeedsWater(s) && effWater < 140f && b.type != CelestialBodyType.GasGiant)
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.NoWater,
-                severity = Mathf.Clamp01(1f - water / 140f),
-                detail = $"Almost no accessible water ({water:F0} units). {s.name} cannot live without it."
+                severity = Mathf.Clamp01(1f - effWater / 140f),
+                detail = $"Almost no accessible water ({effWater:F0} units). {s.name} cannot live without it."
             });
 
         // The mirror image: to a silicate, heat-loving race an ocean world is not a paradise, it is a
         // drowning hazard. The same planet the Aquarii would score in the eighties is worthless to the
         // Pyrothians until the water is gone.
         if (s.PrefersDry && b.type != CelestialBodyType.GasGiant &&
-            (b.type == CelestialBodyType.OceanPlanet || water > 260f))
+            (oceanWorld || water > 260f))
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.TooMuchWater,
-                severity = Mathf.Clamp01(water / 420f + (b.type == CelestialBodyType.OceanPlanet ? 0.45f : 0f)),
-                detail = $"Drowned in water ({water:F0} units). {s.name} needs it arid — the hydrosphere has to go."
+                severity = Mathf.Clamp01(effWater / 420f + (oceanWorld ? 0.45f : 0f)),
+                detail = $"Drowned in water ({effWater:F0} units). {s.name} needs it arid — the hydrosphere has to go."
             });
 
         // ---- Atmosphere ----
