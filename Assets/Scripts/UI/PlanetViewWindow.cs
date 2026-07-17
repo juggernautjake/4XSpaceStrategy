@@ -102,37 +102,49 @@ public class PlanetViewWindow : MonoBehaviour
     // is open); moon maps are drawn in moonLayer's top band; moonTabStrip is the row of moon tabs under
     // the map. See the MOON MAPS section near the bottom of the file.
     RectTransform hostViewport, moonLayer, moonTabStrip;
+    TMP_Text emptyHint;              // shown in the map area when no map tab is open
 
     CelestialBody body;
     Tab tab = Tab.Overview;
 
-    // Moons whose surface map is currently shown above the host, in the order they were opened (left to
-    // right). Capped at two — the request's dual-map layout is host + up to two moons straddling the
-    // host's centreline.
-    readonly List<CelestialBody> openMoons = new List<CelestialBody>();
-    const int MaxOpenMoons = 2;
-    // The map GameObjects/textures for the open moons, parallel to openMoons; cleared and rebuilt on any
-    // open/close so their textures are freed rather than leaked.
-    readonly List<RawImage> moonImages = new List<RawImage>();
-    readonly List<Texture2D> moonTextures = new List<Texture2D>();
-    // Downscaled moon thumbnails on the tab strip itself — a separate list from the two above (those
-    // are only for OPEN moon maps), rebuilt whenever the tab strip is, and freed the same way.
+    // ---- Map panes (the planet AND its moons) ----
+    // Every map is a toggleable pane now: the planet has its own (bigger) tab alongside the moon tabs, and
+    // any mix of up to five can be open at once. The open panes TILE the whole map area with no gaps, sized
+    // purely by how many are open, and each pane zooms its CONTENTS inside a fixed frame — cover-fit at the
+    // fullest-out end, so a map always fills its frame instead of floating in letterbox. The host planet
+    // keeps its own tilePx / mapPan / mapRT and all its placement machinery; each open moon carries its own
+    // frame, content image, texture, zoom and pan in the dictionaries below (keyed by the moon, so opening
+    // or closing one never disturbs another's view).
+    readonly List<CelestialBody> openMaps = new List<CelestialBody>();   // in open order; host is `body`
+    const int MaxOpenMaps = 5;
+
+    readonly Dictionary<CelestialBody, RectTransform> moonFrame = new Dictionary<CelestialBody, RectTransform>();
+    readonly Dictionary<CelestialBody, RawImage> moonImg = new Dictionary<CelestialBody, RawImage>();
+    readonly Dictionary<CelestialBody, Texture2D> moonTex = new Dictionary<CelestialBody, Texture2D>();
+    readonly Dictionary<CelestialBody, float> moonTilePx = new Dictionary<CelestialBody, float>();   // px/cell, like the host's tilePx
+    readonly Dictionary<CelestialBody, Vector2> moonPan = new Dictionary<CelestialBody, Vector2>();
+
+    // Downscaled planet/moon thumbnails on the tab strip itself, rebuilt whenever the strip is and freed
+    // the same way.
     readonly List<Texture2D> moonTabThumbTextures = new List<Texture2D>();
 
-    // Per-moon zoom/pan (Raptok's follow-up: give the moon maps the same zoom/pan the host map already
-    // has). Independent of the host's own zoom/pan state and of each other — moon maps have no
-    // placement/confirm machinery to share it with (see the ambiguity note in the planning doc), so this
-    // is a small, self-contained addition rather than a shared refactor of the host's zoom/pan fields.
-    // Keyed by the moon itself so re-opening a second moon doesn't reset the first one's view; cleared
-    // per-world in SetupMoonUI, same as the tab strip and the open-moon list.
-    readonly Dictionary<CelestialBody, float> moonZoom = new Dictionary<CelestialBody, float>();
-    readonly Dictionary<CelestialBody, Vector2> moonPan = new Dictionary<CelestialBody, Vector2>();
-    const float MoonZoomStep = 1.5f;
-    const float MoonMinZoom = 1f;    // 1 = the auto-fit size LayoutMoonViews already computes
-    const float MoonMaxZoom = 3f;
-    int? moonPanIndex;               // index into openMoons/moonImages currently being dragged, if any
+    // The pane the wheel / zoom bar currently acts on — whichever open frame the cursor is over, latched so
+    // the bar's own buttons (which the cursor sits on) keep acting on the last map hovered.
+    CelestialBody activePane;
+    CelestialBody moonPanDrag;       // the moon whose map is being dragged, if any
     Vector2 moonPanGrabScreen;
     Vector2 moonPanGrabOffset;
+
+    // How the open panes are arranged in the map area, cycled by the "Change Map View" button. Four formats,
+    // each working with the planet plus any number (0–4) of moons, in any open/closed combination:
+    //   MoonsAbove — planet large on the bottom, moons in a row across the top
+    //   MoonsBelow — planet large on the top, moons in a row across the bottom
+    //   MoonsSplit — planet large in the middle, moons split into a row above AND a row below
+    //   MoonsSide  — planet large on the left, moons stacked in a column down the right
+    enum MapLayout { MoonsAbove, MoonsBelow, MoonsSplit, MoonsSide }
+    MapLayout mapLayout = MapLayout.MoonsAbove;
+    RectTransform viewFormatBtn;
+    TMP_Text viewFormatLabel;
 
     // Build-mode state.
     SurfaceBuildingType? selected;      // null = nothing picked up
@@ -212,15 +224,19 @@ public class PlanetViewWindow : MonoBehaviour
         gridHolder.offsetMin = new Vector2(0, 34f);                 // clear the thin status line below
         gridHolder.offsetMax = new Vector2(-PanelGap, -32);        // clear the tabs; gap before the panel
         var vpImg = gridHolder.gameObject.AddComponent<Image>();
-        vpImg.color = new Color(0.02f, 0.03f, 0.05f, 1f);          // letterbox behind a small map
-        gridHolder.gameObject.AddComponent<RectMask2D>();          // the map is clipped to the viewport
+        vpImg.color = new Color(0.06f, 0.08f, 0.11f, 1f);          // themed grout that shows between tiled panes
+        gridHolder.gameObject.AddComponent<RectMask2D>();          // panes are clipped to the map area
 
-        // The HOST map lives in its own sub-viewport rather than in the gridHolder directly. With no moon
-        // maps open this fills the whole gridHolder, so the map behaves exactly as before; when a moon tab
-        // is opened it shrinks to the BOTTOM of the gridHolder (LayoutMaps) to make room for the moon maps
-        // above it — "the main planet map scales downward from the top". Every fit/pan/zoom/confirm
-        // calculation measures THIS rect, so the host map re-fits into whatever space it's given and its
-        // clicks keep mapping correctly.
+        // Shown when no map tab is open — the map area is otherwise blank, so it says what to do.
+        emptyHint = UIFactory.Text(gridHolder, "Click a planet or moon tab to view its map.",
+                                   UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.Center);
+        UIFactory.Stretch(emptyHint.rectTransform);
+        emptyHint.gameObject.SetActive(false);
+
+        // The HOST planet map lives in its own sub-viewport — one pane among the tiled panes. LayoutPanes
+        // positions it into its grid cell (the whole area when it's the only one open) and hides it when the
+        // planet tab is closed. Every fit/pan/zoom/confirm calculation measures THIS rect, so the host map
+        // re-fits into whatever cell it's given and its clicks keep mapping correctly.
         hostViewport = UIFactory.NewUI(gridHolder, "HostViewport").GetComponent<RectTransform>();
         UIFactory.Stretch(hostViewport);
         hostViewport.gameObject.AddComponent<RectMask2D>();
@@ -261,29 +277,22 @@ public class PlanetViewWindow : MonoBehaviour
         var probe = mapGO.AddComponent<SurfaceGridProbe>();
         probe.Init(this, mapRT);
 
-        // Moon maps live in their own layer above the host viewport, occupying ONLY the TOP band of the
-        // gridHolder (from MoonBandBottomFrac to the top) when any moon tab is open — not the whole
-        // gridHolder. Its own RectMask2D therefore clips a zoomed-in moon map to the band itself; sizing
-        // it to the whole gridHolder (as an earlier pass did) left the mask clipping to the same rect
-        // gridHolder's own mask already covers, which didn't stop a zoomed moon from rendering right over
-        // the host map below. Inactive (and out of the way) when no moon tab is open.
+        // The moon panes live in this full-area container, a sibling of the host viewport that stretches the
+        // whole map area. It carries no mask of its own — each moon FRAME has its own RectMask2D — and each
+        // frame is positioned into its own grid cell (disjoint from the host's), so the panes never overlap.
         moonLayer = UIFactory.NewUI(gridHolder, "MoonLayer").GetComponent<RectTransform>();
-        moonLayer.anchorMin = new Vector2(0f, MoonBandBottomFrac);
-        moonLayer.anchorMax = new Vector2(1f, 1f);
-        moonLayer.offsetMin = Vector2.zero; moonLayer.offsetMax = Vector2.zero;
-        moonLayer.gameObject.AddComponent<RectMask2D>();
-        moonLayer.gameObject.SetActive(false);
+        UIFactory.Stretch(moonLayer);
 
         BuildZoomBar();
+        BuildViewFormatButton();
 
-        // The moon tab strip is anchored inside the viewport's TOP-LEFT corner and stacks vertically,
-        // closest moon topmost (moved here from the bottom-centre row per Raptok's follow-up request).
-        // Rebuilt per world in SetupMoonUI.
+        // The map tab strip is anchored inside the area's TOP-LEFT corner and stacks vertically: the planet
+        // tab (bigger) first, then a tab per moon closest-first. Rebuilt per world in SetupMapTabs.
         moonTabStrip = UIFactory.NewUI(gridHolder, "MoonTabs").GetComponent<RectTransform>();
         moonTabStrip.anchorMin = new Vector2(0, 1); moonTabStrip.anchorMax = new Vector2(0, 1);
         moonTabStrip.pivot = new Vector2(0, 1);
         moonTabStrip.anchoredPosition = new Vector2(6f, -6f);
-        moonTabStrip.sizeDelta = new Vector2(MoonTabSize, 0);
+        moonTabStrip.sizeDelta = new Vector2(PlanetTabSize, 0);   // wide enough for the bigger planet tab
         var mth = moonTabStrip.gameObject.AddComponent<VerticalLayoutGroup>();
         mth.spacing = 7; mth.childControlWidth = true; mth.childControlHeight = true;
         mth.childForceExpandWidth = false; mth.childForceExpandHeight = false; mth.childAlignment = TextAnchor.UpperLeft;
@@ -331,7 +340,7 @@ public class PlanetViewWindow : MonoBehaviour
     {
         PlanetUI.OnBodySelected -= OnBodySelected;
         PlanetUI.OnClosed -= HideOnDeselect;
-        ClearMoonViews();
+        ClearMoonPanes();
         foreach (var tx in moonTabThumbTextures) if (tx != null) Destroy(tx);
         moonTabThumbTextures.Clear();
         if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
@@ -389,9 +398,9 @@ public class PlanetViewWindow : MonoBehaviour
         rrt.SetAsLastSibling();
         RefreshMapTexture();
 
-        // Rebuild the moon tabs for THIS world and close any moon maps left open from the last one — the
-        // moons on the previous world mean nothing here.
-        SetupMoonUI();
+        // Rebuild the tab strip for THIS world (planet + moons), close any panes left open from the last
+        // one, and open the planet's own map by default.
+        SetupMapTabs();
     }
 
     /// Is the full-screen viewer currently open? Used by the compact selection panel to get out of the
@@ -506,7 +515,7 @@ public class PlanetViewWindow : MonoBehaviour
         ZoomButton(bar, "–", () => ZoomBy(1f / ZoomStep));
         ZoomButton(bar, "+", () => ZoomBy(ZoomStep));
 
-        var fit = UIFactory.Button(bar.transform, "Fit", () => { tilePx = 0f; mapPan = Vector2.zero; ApplyMapSize(); DrawSelectionMarker(); }, 20f);
+        var fit = UIFactory.Button(bar.transform, "Fit", FitActive, 20f);
         var fle = fit.gameObject.AddComponent<LayoutElement>();
         fle.preferredWidth = 40f; fle.flexibleWidth = 0f;
 
@@ -525,43 +534,99 @@ public class PlanetViewWindow : MonoBehaviour
     /// How much one button press (or one wheel notch) changes the zoom.
     const float ZoomStep = 1.5f;
 
-    /// Zoom about the CENTRE of the viewport — the buttons have no cursor to zoom toward, and pulling
-    /// the view sideways when someone presses "+" would be its own bug.
+    /// Which pane the zoom bar acts on: the last one the cursor was over (if still open), else the host if
+    /// it's open, else the first open pane. The bar's own buttons sit under the cursor, so without the latch
+    /// the target would flip to "nothing" the moment you moved off a map to press a button.
+    CelestialBody ZoomTarget =>
+        (activePane != null && openMaps.Contains(activePane)) ? activePane
+        : HostOpen ? body
+        : (openMaps.Count > 0 ? openMaps[0] : null);
+
+    /// Zoom the active pane about the CENTRE of its frame — the buttons have no cursor to zoom toward, and
+    /// pulling the view sideways when someone presses "+" would be its own bug. Dispatches to the host or
+    /// the relevant moon.
     public void ZoomBy(float factor)
+    {
+        var t = ZoomTarget;
+        if (t == null) return;
+        if (t == body) ZoomHostBy(factor); else ZoomMoonBy(t, factor);
+    }
+
+    void ZoomHostBy(float factor)
     {
         if (body?.surface == null) return;
         float fit = FitTilePx();
-        float max = Mathf.Max(fit, MaxTilePx());
+        float max = Mathf.Max(CoverTilePx(), MaxTilePx());
         float next = Mathf.Clamp(tilePx * factor, fit, max);
         if (Mathf.Approximately(next, tilePx)) return;
-
-        // The centre of the viewport stays put: scale the pan by the same ratio the map scaled by.
-        mapPan *= next / tilePx;
+        mapPan *= next / tilePx;   // centre stays put: scale the pan by the same ratio the map scaled by
         tilePx = next;
         ApplyMapSize();
         DrawSelectionMarker();
     }
 
-    /// Current zoom as a percentage of "the whole world fits", for the readout.
-    float ZoomPercent()
+    void ZoomMoonBy(CelestialBody m, float factor)
     {
-        float fit = FitTilePx();
-        return fit > 0.001f ? tilePx / fit * 100f : 100f;
+        if (!moonFrame.TryGetValue(m, out var frame) || frame == null) return;
+        Rect fr = frame.rect;
+        float floor = ContainFit(fr, m);
+        float max = Mathf.Max(CoverFit(fr, m), CeilTilePx(fr));
+        float cur = moonTilePx.TryGetValue(m, out float z) ? z : CoverFit(fr, m);
+        float next = Mathf.Clamp(cur * factor, floor, max);
+        if (Mathf.Approximately(next, cur)) return;
+        Vector2 pan = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
+        moonPan[m] = pan * (next / cur);   // centre stays put, same as the host
+        moonTilePx[m] = next;
+        ApplyMoonSize(m);
     }
 
-    /// Pixels per cell at which the ENTIRE surface is visible. This is the zoomed-all-the-way-out end.
-    ///
-    /// No ceiling on it any more. There used to be one — capped at the detailed map's own tile size —
-    /// because a coarse 12x6 moon fitted to the viewport gave 67px tiles. With the grid at detail
-    /// resolution that can't happen: the smallest world is 96x48 cells, so fitting it is ~7px a cell.
-    /// The cap was also what crushed the zoom range down to about 2.4x, since it was clamping both ends
-    /// to nearly the same number.
+    /// Reset the active pane to its framed default (cover fit, centred). Zoom out from here to see the whole
+    /// map within the fixed frame.
+    void FitActive()
+    {
+        var t = ZoomTarget;
+        if (t == null) return;
+        if (t == body) { tilePx = 0f; mapPan = Vector2.zero; ApplyMapSize(); DrawSelectionMarker(); }
+        else { moonTilePx[t] = 0f; moonPan[t] = Vector2.zero; ApplyMoonSize(t); }
+    }
+
+    /// Current zoom of the active pane as a percentage of its CONTAIN fit (100% = the whole map fits the
+    /// frame). The cover default reads above 100%; zooming out toward the whole map approaches 100%.
+    float ZoomPercent()
+    {
+        var t = ZoomTarget;
+        if (t == null) return 100f;
+        if (t == body) { float fit = FitTilePx(); return fit > 0.001f ? tilePx / fit * 100f : 100f; }
+        if (moonFrame.TryGetValue(t, out var frame) && frame != null)
+        {
+            float fit = ContainFit(frame.rect, t);
+            float cur = moonTilePx.TryGetValue(t, out float z) ? z : CoverFit(frame.rect, t);
+            return fit > 0.001f ? cur / fit * 100f : 100f;
+        }
+        return 100f;
+    }
+
+    /// Pixels per cell at the zoomed-all-the-way-OUT end: a CONTAIN fit, where the WHOLE map fits inside the
+    /// frame (letterboxed on whichever axis is proportionally shorter). This is the floor you can zoom out
+    /// to so you can always see the entire map within its fixed window, and the 100% reference for the zoom
+    /// readout. The DEFAULT view on open is CoverTilePx (fills the frame, no dead space); you zoom out from
+    /// there to this to see the whole map, or in past it to see fewer, larger cells.
     float FitTilePx()
     {
         if (body?.surface == null) return 4f;
         var vp = hostViewport.rect;
         if (vp.width < 1f || vp.height < 1f) return 4f;
         return Mathf.Min(vp.width / body.surface.width, vp.height / body.surface.height);
+    }
+
+    /// Pixels per cell at which the map exactly COVERS the frame (fills it, cropping the longer axis) — the
+    /// framed default view, so there's no dead space around a map until you deliberately zoom out to fit.
+    float CoverTilePx()
+    {
+        if (body?.surface == null) return 4f;
+        var vp = hostViewport.rect;
+        if (vp.width < 1f || vp.height < 1f) return 4f;
+        return Mathf.Max(vp.width / body.surface.width, vp.height / body.surface.height);
     }
 
     /// Pixels per cell at the zoomed-all-the-way-IN end: roughly MaxVisibleTiles cells fill the
@@ -580,9 +645,9 @@ public class PlanetViewWindow : MonoBehaviour
     {
         if (body?.surface == null) return;
 
-        float fit = FitTilePx();
-        float max = Mathf.Max(fit, MaxTilePx());     // a tiny world may already show <200 tiles when fitted
-        tilePx = Mathf.Clamp(tilePx <= 0f ? fit : tilePx, fit, max);
+        float floor = FitTilePx();                          // fully zoomed out = whole map fits (contain)
+        float max = Mathf.Max(CoverTilePx(), MaxTilePx());  // in past cover to ~200 cells
+        tilePx = Mathf.Clamp(tilePx <= 0f ? CoverTilePx() : tilePx, floor, max);   // default view = cover
 
         mapRT.sizeDelta = new Vector2(body.surface.width * tilePx, body.surface.height * tilePx);
         ClampPan();
@@ -660,15 +725,13 @@ public class PlanetViewWindow : MonoBehaviour
         string sig = Signature();
         if (sig != lastSig) { lastSig = sig; Rebuild(); }
 
-        // The zoom limits are derived from the VIEWPORT'S size, which isn't known until Unity has laid
-        // the window out — so the first ApplyMapSize (from ShowFor) can run against a zero rect. Re-fit
-        // once it's real, and again whenever the window is resized by its grip.
-        if (hostViewport != null && hostViewport.rect.size != lastViewportSize)
+        // The pane sizes are derived from the map area's size, which isn't known until Unity has laid the
+        // window out — so the first layout (from ShowFor) can run against a zero rect. Re-tile once it's
+        // real, and again whenever the window is resized by its grip. LayoutPanes re-fits every open pane.
+        if (gridHolder != null && gridHolder.rect.size != lastViewportSize)
         {
-            lastViewportSize = hostViewport.rect.size;
-            ApplyMapSize();
-            DrawSelectionMarker();
-            LayoutMoonViews();   // the moon band is sized off the same viewport
+            lastViewportSize = gridHolder.rect.size;
+            LayoutPanes();
         }
 
         live.Tick();
@@ -2923,16 +2986,17 @@ public class PlanetViewWindow : MonoBehaviour
     // cursor is over the viewport, so scrolling the side panel still scrolls the side panel.
     void PollMapZoom()
     {
-        if (body?.surface == null || mapRT == null) return;
+        if (!HostOpen || body?.surface == null || mapRT == null) return;
         float scroll = Input.GetAxis("Mouse ScrollWheel");
         if (Mathf.Approximately(scroll, 0f)) return;
         // A scrollable menu dragged OVER the map owns the wheel — let it scroll, don't also zoom the map.
         // A non-scrolling panel over the map does NOT block the zoom (the wheel passes through to the map).
         if (UIScroll.PointerOverScroller()) return;
         if (!RectTransformUtility.RectangleContainsScreenPoint(hostViewport, Input.mousePosition, null)) return;
+        activePane = body;
 
-        float fit = FitTilePx();
-        float max = Mathf.Max(fit, MaxTilePx());
+        float fit = FitTilePx();                            // zoom-out floor = whole map fits
+        float max = Mathf.Max(CoverTilePx(), MaxTilePx());
 
         // One wheel notch = one press of + or -, so the two controls agree. Unity's ScrollWheel axis is
         // ~0.1 per notch, hence the 10x before raising ZoomStep to it: pow(1.5, 0.1*10) = 1.5.
@@ -2975,7 +3039,7 @@ public class PlanetViewWindow : MonoBehaviour
     // piece", so rotating nudged the map and panning rotated the piece.
     void PollMapPan()
     {
-        if (body?.surface == null) return;
+        if (!HostOpen || body?.surface == null) return;
 
         // Cleared on ANY press, not just one that starts a pan. It has to be: a piece-holding press
         // never starts a pan (see leftPans below), so if the flag only reset when a pan began, one drag
@@ -2993,10 +3057,9 @@ public class PlanetViewWindow : MonoBehaviour
             // region too. Without this, pressing + or a moon tab and twitching would drag the map.
             !RectTransformUtility.RectangleContainsScreenPoint(zoomBar, Input.mousePosition, null) &&
             !RectTransformUtility.RectangleContainsScreenPoint(moonTabStrip, Input.mousePosition, null) &&
-            // A zoomed-in moon map's RectTransform can extend past its band and geometrically overlap
-            // hostViewport even though moonLayer's mask keeps it from ever being drawn there — without
-            // this, one drag over that overlap would pan the host AND a moon map at once.
-            !OverAnyMoonImage(Input.mousePosition))
+            // The host frame and the moon frames tile disjoint cells, but guard the seam anyway so a press
+            // right on the boundary can't start a host pan while the cursor is over a moon frame.
+            !OverAnyMoonFrame(Input.mousePosition))
         {
             panning = true;
             panGrabScreen = Input.mousePosition;
@@ -3048,29 +3111,28 @@ public class PlanetViewWindow : MonoBehaviour
         if (moonTabStrip != null && RectTransformUtility.RectangleContainsScreenPoint(moonTabStrip, Input.mousePosition, null))
             return;
 
-        // Over an open MOON map? Show that moon's tile info in the docked panel — the same biome / ore /
-        // temperature readout the main map gives — so a moon's surface is as inspectable as the planet's.
-        // Scoped to the visible moon band so a zoomed moon map's off-band overflow doesn't count.
-        if (moonLayer != null && moonLayer.gameObject.activeSelf &&
-            RectTransformUtility.RectangleContainsScreenPoint(moonLayer, Input.mousePosition, null))
+        // Over an open MOON map's frame? Show that moon's tile info in the floating tooltip — the same
+        // biome / ore / temperature readout the main map gives, so a moon's surface is as inspectable as
+        // the planet's. Each moon has its own framed pane now, so this just tests each frame in turn.
+        foreach (var m in openMaps)
         {
-            for (int i = 0; i < moonImages.Count && i < openMoons.Count; i++)
-            {
-                var img = moonImages[i];
-                var moon = openMoons[i];
-                if (img == null || moon?.surface == null) continue;
-                if (RectTransformUtility.RectangleContainsScreenPoint(img.rectTransform, Input.mousePosition, null) &&
-                    ScreenToCellIn(img.rectTransform, moon, Input.mousePosition, null, out int mx, out int my))
-                {
-                    MapHoverPanel.Instance.ShowAtCursor(
-                        $"<size=11><color=#8FD0FF>{moon.name}</color></size>\n" + TileHoverText(moon, mx, my));
-                    return;
-                }
-            }
+            if (m == body) continue;
+            if (!moonFrame.TryGetValue(m, out var frame) || frame == null) continue;
+            if (!moonImg.TryGetValue(m, out var img) || img == null || m.surface == null) continue;
+            if (!RectTransformUtility.RectangleContainsScreenPoint(frame, Input.mousePosition, null)) continue;
+            activePane = m;
+            if (ScreenToCellIn(img.rectTransform, m, Input.mousePosition, null, out int mx, out int my))
+                MapHoverPanel.Instance.ShowAtCursor(
+                    $"<size=11><color=#8FD0FF>{m.name}</color></size>\n" + TileHoverText(m, mx, my));
+            else
+                MapHoverPanel.Instance.Hide();
+            return;
         }
 
-        if (ScreenToCell(Input.mousePosition, null, out int x, out int y))
+        // Otherwise the host planet's map, if it's open.
+        if (HostOpen && ScreenToCell(Input.mousePosition, null, out int x, out int y))
         {
+            activePane = body;
             if (x != hoverCell.x || y != hoverCell.y)
             {
                 hoverCell = new Vector2Int(x, y);
@@ -3079,9 +3141,6 @@ public class PlanetViewWindow : MonoBehaviour
             // Suppressed over the zoom bar / confirm dialog: they float over the same part of the map the
             // tooltip targets, and covering their own buttons and text would be worse than no tooltip
             // there. Re-shown every frame (not just on cell change) so it tracks the mouse WITHIN a cell.
-            // Tile info follows the cursor in a small floating tooltip that changes tile to tile (the
-            // readout the earlier build had). Suppressed over a floating map control (zoom bar / confirm
-            // dialog) so it doesn't cover their own buttons.
             if (!OverFloatingMapControl()) MapHoverPanel.Instance.ShowAtCursor(TileHoverText(x, y));
             else MapHoverPanel.Instance.Hide();
         }
@@ -3171,23 +3230,18 @@ public class PlanetViewWindow : MonoBehaviour
     public bool BuildMode => tab == Tab.Build && selected.HasValue;
 
     // ============================================================================================
-    // MOON MAPS (Raptok's request) — a tab per moon on the underside of the map; clicking one shows that
-    // moon's grid ABOVE the host, with the host map shrinking down from the top to make room.
-    //
-    //   · Tabs are ordered closest-moon-leftmost.
-    //   · Opening a moon shrinks hostViewport to the bottom (LayoutMaps) and draws the moon's grid in the
-    //     top band, centred over the host's centreline.
-    //   · A second moon opens to the RIGHT of the first; the two straddle the centreline with the gap
-    //     between them over the host's centre. Closing one recentres the survivor.
-    //   · Capped at two open maps — the dual-map layout the request describes.
+    // MAP PANES — the planet and each of its moons are toggleable tabs (the planet's a touch bigger). Any
+    // mix of up to five open panes TILES the whole map area with no gaps, sized only by how many are open;
+    // closing a tab reflows the rest to fill the freed space. Each pane zooms its CONTENTS inside a fixed
+    // frame — cover-fit at the fullest-out end, so a map fills its frame rather than floating in letterbox.
+    // With nothing open the area shows a hint. The host planet keeps its own tilePx/mapPan/mapRT and all its
+    // placement machinery; each moon carries its own frame, zoom and pan.
     // ============================================================================================
-    const float HostFracWithMoons = 0.60f;   // host viewport keeps the bottom 60% when moons are shown
-    const float MoonBandBottomFrac = 0.64f;   // moon band spans [this .. 1] of the height (a gap between)
-    const float MoonMapMargin = 12f;
-    const float MoonMapGap = 18f;             // spacing between the two moon maps so they read as separate
-    const float MoonTabSize = 34f;            // square tab side — big enough to read the moon's terrain thumbnail
+    const float MoonTabSize = 34f;            // square moon tab — big enough to read its terrain thumbnail
+    const float PlanetTabSize = 46f;          // the planet's own tab, a touch bigger so it reads as the host
+    const float PaneGap = 3f;                 // hairline grout between tiled panes (the themed bg shows through)
 
-    // Moons closest to the host first (leftmost tab), ordered by orbit radius.
+    // Moons closest to the host first (topmost tab), ordered by orbit radius.
     List<CelestialBody> MoonsClosestFirst()
     {
         var list = new List<CelestialBody>();
@@ -3196,263 +3250,495 @@ public class PlanetViewWindow : MonoBehaviour
         return list;
     }
 
-    // Rebuild the moon tabs for the current world and close any maps left open from the previous one.
-    void SetupMoonUI()
+    // Rebuild the tab strip for the current world, close any panes left open from the previous one, and open
+    // the planet's own map by default so the window still lands on the world you clicked.
+    void SetupMapTabs()
     {
-        openMoons.Clear();
-        ClearMoonViews();
-        moonZoom.Clear(); moonPan.Clear(); moonPanIndex = null;
-        BuildMoonTabStrip();
-        LayoutMaps();
+        openMaps.Clear();
+        ClearMoonPanes();
+        moonTilePx.Clear(); moonPan.Clear(); moonPanDrag = null; activePane = null;
+        if (body != null) openMaps.Add(body);   // the planet map is open by default
+        BuildMapTabStrip();
+        LayoutPanes();
     }
 
-    void BuildMoonTabStrip()
+    void BuildMapTabStrip()
     {
         if (moonTabStrip == null) return;
         foreach (var tx in moonTabThumbTextures) if (tx != null) Destroy(tx);
         moonTabThumbTextures.Clear();
         for (int i = moonTabStrip.childCount - 1; i >= 0; i--) Destroy(moonTabStrip.GetChild(i).gameObject);
 
-        var moons = MoonsClosestFirst();
-        moonTabStrip.gameObject.SetActive(moons.Count > 0);
-        if (moons.Count == 0) return;
-
-        foreach (var m in moons)
-        {
-            var captured = m;
-            bool open = openMoons.Contains(m);
-            // No name label — a small square showing the moon itself, per Raptok's follow-up request.
-            var btn = UIFactory.Button(moonTabStrip, "", () => ToggleMoon(captured), MoonTabSize);
-            var le = btn.GetComponent<LayoutElement>();
-            if (le == null) le = btn.gameObject.AddComponent<LayoutElement>();
-            le.preferredWidth = MoonTabSize; le.minWidth = MoonTabSize;
-            le.flexibleWidth = 0; le.flexibleHeight = 0;
-
-            // Active-tab tint like the main strip: an open moon reads as the selected one.
-            var colors = btn.colors;
-            colors.normalColor = open ? UITheme.ButtonActive : UITheme.ButtonBg;
-            colors.highlightedColor = colors.normalColor;
-            colors.selectedColor = colors.normalColor;
-            btn.colors = colors;
-
-            // A downscaled image of the moon, fetched from the same renderer the open moon maps already
-            // use (SurfaceTextureRenderer.BuildGrid) — no new asset, just a smaller RawImage of it.
-            var thumbGO = UIFactory.NewUI(btn.transform, "Thumb");
-            var thumbImg = thumbGO.AddComponent<RawImage>();
-            thumbImg.raycastTarget = false;
-            UIFactory.Stretch(thumbImg.rectTransform, 2f, 2f, 2f, 2f);
-            Texture2D tex = m.surface != null ? SurfaceTextureRenderer.BuildGrid(m) : null;
-            thumbImg.texture = tex;
-            if (tex != null) moonTabThumbTextures.Add(tex);
-
-            // The name/description hover window (Raptok's follow-up), anchored the same way as the tile
-            // hover-info window since a name label no longer lives on the tab itself to read.
-            var hover = btn.gameObject.AddComponent<MoonTabHover>();
-            hover.Configure(m);
-        }
+        moonTabStrip.gameObject.SetActive(true);
+        if (body != null) BuildMapTab(body, PlanetTabSize);           // the planet's own (bigger) tab first
+        foreach (var m in MoonsClosestFirst()) BuildMapTab(m, MoonTabSize);
     }
 
-    // Open or close a moon's map. Opening a third pushes out the oldest, so at most two show at once.
-    void ToggleMoon(CelestialBody m)
+    // One tab: a square terrain thumbnail of the body it opens, tinted when that map is open, with a hover
+    // survey card. Used for both the planet (bigger) and each moon.
+    void BuildMapTab(CelestialBody target, float size)
     {
-        if (openMoons.Contains(m)) { openMoons.Remove(m); moonZoom.Remove(m); moonPan.Remove(m); }
+        var captured = target;
+        bool open = openMaps.Contains(target);
+        var btn = UIFactory.Button(moonTabStrip, "", () => ToggleMap(captured), size);
+        var le = btn.GetComponent<LayoutElement>() ?? btn.gameObject.AddComponent<LayoutElement>();
+        le.preferredWidth = size; le.minWidth = size;
+        le.preferredHeight = size; le.minHeight = size;
+        le.flexibleWidth = 0; le.flexibleHeight = 0;
+
+        // Active-tab tint like the main strip: an open map reads as the selected one.
+        var colors = btn.colors;
+        colors.normalColor = open ? UITheme.ButtonActive : UITheme.ButtonBg;
+        colors.highlightedColor = colors.normalColor;
+        colors.selectedColor = colors.normalColor;
+        btn.colors = colors;
+
+        // A downscaled image of the body itself, from the same renderer the open maps use.
+        var thumbGO = UIFactory.NewUI(btn.transform, "Thumb");
+        var thumbImg = thumbGO.AddComponent<RawImage>();
+        thumbImg.raycastTarget = false;
+        UIFactory.Stretch(thumbImg.rectTransform, 2f, 2f, 2f, 2f);
+        Texture2D tex = target.surface != null ? SurfaceTextureRenderer.BuildGrid(target) : null;
+        thumbImg.texture = tex;
+        if (tex != null) moonTabThumbTextures.Add(tex);
+
+        var hover = btn.gameObject.AddComponent<MoonTabHover>();
+        hover.Configure(target);
+    }
+
+    bool HostOpen => body != null && openMaps.Contains(body);
+
+    // Open or close a body's map (planet or moon). Opening a sixth pushes out the oldest, so at most five
+    // show at once. Closing a tab reflows the rest to fill the freed space (LayoutPanes).
+    void ToggleMap(CelestialBody m)
+    {
+        if (openMaps.Contains(m))
+        {
+            openMaps.Remove(m);
+            moonTilePx.Remove(m); moonPan.Remove(m);
+            if (activePane == m) activePane = null;
+        }
         else
         {
-            if (openMoons.Count >= MaxOpenMoons)
+            if (openMaps.Count >= MaxOpenMaps)
             {
-                var dropped = openMoons[0];
-                openMoons.RemoveAt(0);   // drop the oldest to make room
-                moonZoom.Remove(dropped); moonPan.Remove(dropped);
+                var dropped = openMaps[0];
+                openMaps.RemoveAt(0);   // drop the oldest to make room
+                moonTilePx.Remove(dropped); moonPan.Remove(dropped);
             }
-            openMoons.Add(m);
+            openMaps.Add(m);
         }
-        moonPanIndex = null;   // openMoons just reordered/resized — any in-flight drag no longer means anything
+        moonPanDrag = null;    // the open set just changed — any in-flight drag no longer means anything
         SimpleAudio.Instance?.PlayTick();
-        BuildMoonTabStrip();   // refresh the highlight
-        LayoutMaps();
+        BuildMapTabStrip();    // refresh the highlights
+        LayoutPanes();
     }
 
-    // Size the host viewport to leave room for the moon band, then (re)build the moon maps. With no moons
-    // open the host viewport fills the gridHolder, so the map behaves exactly as it did before this slice.
-    void LayoutMaps()
+    // Fractions used by the map-view formats.
+    const float MoonRowFrac = 0.42f;    // a single moon row's share of the height (planet takes the rest)
+    const float SplitRowFrac = 0.30f;   // each row's share when moons are split ABOVE and BELOW the planet
+    const float SideColFrac = 0.34f;    // the moon column's share of the width in the "beside" format
+
+    // A small "Change Map View" button floating in the map area's top-right corner. Clicking it cycles the
+    // arrangement of the open panes (moons above / below / split / beside the planet).
+    void BuildViewFormatButton()
     {
-        bool any = openMoons.Count > 0;
-        if (moonLayer != null) moonLayer.gameObject.SetActive(any);
-        if (hostViewport != null)
+        var b = UIFactory.Button(gridHolder, "", CycleMapLayout, 24f);
+        viewFormatBtn = b.GetComponent<RectTransform>();
+        viewFormatBtn.anchorMin = viewFormatBtn.anchorMax = new Vector2(1f, 1f);
+        viewFormatBtn.pivot = new Vector2(1f, 1f);
+        viewFormatBtn.anchoredPosition = new Vector2(-6f, -6f);
+        viewFormatBtn.sizeDelta = new Vector2(150f, 26f);
+        viewFormatLabel = b.GetComponentInChildren<TMP_Text>();
+        if (viewFormatLabel != null) viewFormatLabel.fontSize = UITheme.SmallSize;
+        UpdateViewFormatLabel();
+    }
+
+    void CycleMapLayout()
+    {
+        mapLayout = (MapLayout)(((int)mapLayout + 1) % 4);
+        SimpleAudio.Instance?.PlayTick();
+        UpdateViewFormatLabel();
+        LayoutPanes();
+    }
+
+    void UpdateViewFormatLabel()
+    {
+        if (viewFormatLabel == null) return;
+        string name = mapLayout switch
         {
-            hostViewport.anchorMin = new Vector2(0, 0);
-            hostViewport.anchorMax = new Vector2(1, any ? HostFracWithMoons : 1f);
-            hostViewport.offsetMin = Vector2.zero;
-            hostViewport.offsetMax = Vector2.zero;
-        }
-        // The host re-fits on the next resize-watcher tick when the shrunk rect resolves; nudge it now too.
-        ApplyMapSize();
-        DrawSelectionMarker();
-        RebuildMoonViews();
+            MapLayout.MoonsAbove => "Moons Above",
+            MapLayout.MoonsBelow => "Moons Below",
+            MapLayout.MoonsSplit => "Moons Split",
+            MapLayout.MoonsSide  => "Moons Beside",
+            _ => "Map View",
+        };
+        viewFormatLabel.text = $"View: {name}";
     }
 
-    void ClearMoonViews()
+    // Arrange the open panes according to the current map-view FORMAT (cycled by the Change Map View
+    // button). Every format keeps the planet as the large map and lays the moons out around it; each pane
+    // cover-fits its own fixed frame, so any mix of planet/moon sizes and counts fits — some maps just
+    // shrink more than others. The frames only ever CHANGE SIZE; zoom happens inside each fixed frame.
+    void LayoutPanes()
     {
-        foreach (var img in moonImages) if (img != null) Destroy(img.gameObject);
-        foreach (var tex in moonTextures) if (tex != null) Destroy(tex);
-        moonImages.Clear();
-        moonTextures.Clear();
-    }
+        if (gridHolder == null) return;
+        RebuildMoonPanes();
 
-    void RebuildMoonViews()
-    {
-        ClearMoonViews();
-        if (moonLayer == null || openMoons.Count == 0) return;
+        int k = openMaps.Count;
+        bool hostOpen = HostOpen;
+        if (hostViewport != null) hostViewport.gameObject.SetActive(hostOpen);
+        if (emptyHint != null) emptyHint.gameObject.SetActive(k == 0);
+        if (zoomBar != null) zoomBar.gameObject.SetActive(k > 0);
+        if (viewFormatBtn != null) viewFormatBtn.gameObject.SetActive(k > 0);
+        if (k == 0) { KeepControlsOnTop(); return; }
 
-        foreach (var m in openMoons)
+        var area = gridHolder.rect;
+        float W = area.width, H = area.height;
+        if (W < 1f || H < 1f) { KeepControlsOnTop(); return; }
+
+        // The open moons, in the order their tabs were opened.
+        var moons = new List<CelestialBody>();
+        foreach (var b in openMaps) if (b != body) moons.Add(b);
+        int n = moons.Count;
+
+        if (!hostOpen) LayoutMoonsNoPlanet(moons, W, H);
+        else if (n == 0) PlaceHost(new Rect(0f, 0f, W, H));   // planet only — fills the area
+        else switch (mapLayout)
         {
-            var go = UIFactory.NewUI(moonLayer, "MoonMap");
-            var img = go.AddComponent<RawImage>();
-            img.raycastTarget = true;   // a click on a moon map is UI, not a click-away that closes the window
-            Texture2D tex = m.surface != null ? SurfaceTextureRenderer.BuildGrid(m) : null;
-            img.texture = tex;
-            if (tex == null) img.color = new Color(0.10f, 0.12f, 0.16f, 1f);
-            var rt = img.rectTransform;
-            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
-            rt.pivot = new Vector2(0.5f, 0.5f);
-
-            moonImages.Add(img);
-            moonTextures.Add(tex);
-        }
-        LayoutMoonViews();
-    }
-
-    // Position the open moon maps in the top band, centred over the host centreline: one map centred; two
-    // side by side straddling the centre with the gap's midpoint on the centreline (so closing one leaves
-    // the survivor to recentre on the next call).
-    //
-    // moonLayer's OWN rect now IS the band (see Build()) — not the whole gridHolder — so every position
-    // here is relative to moonLayer's own centre, and moonLayer's RectMask2D genuinely confines a zoomed
-    // moon map to the band instead of merely re-covering the ground gridHolder's own mask already did.
-    void LayoutMoonViews()
-    {
-        if (moonLayer == null || moonImages.Count == 0) return;
-        var band = moonLayer.rect;
-        if (band.width < 1f || band.height < 1f) return;
-
-        float bandH = Mathf.Max(20f, band.height - 2f * MoonMapMargin);
-        int n = moonImages.Count;
-        // A lone moon gets most of the band width rather than a stingy 60% — most moons are height-bound
-        // anyway, but a tall/narrow one now fills the space instead of floating in a letterbox. The map is
-        // centred on the band, so the cap is symmetric (tab-column width reserved on BOTH sides) to keep a
-        // width-bound map from sliding left under the moon-tab column. Two moons share the band half each.
-        float slotW = n >= 2 ? Mathf.Max(20f, (band.width - MoonMapGap) * 0.5f - MoonMapMargin)
-                             : Mathf.Max(20f, band.width - 2f * (MoonTabSize + MoonMapMargin));
-
-        var size = new Vector2[n];
-        for (int i = 0; i < n; i++)
-        {
-            var m = openMoons[i];
-            int w = m.surface != null ? m.surface.width : 1;
-            int h = m.surface != null ? m.surface.height : 1;
-            float scale = Mathf.Min(slotW / w, bandH / h);
-            size[i] = new Vector2(w * scale, h * scale);
-        }
-
-        for (int i = 0; i < n; i++)
-        {
-            var m = openMoons[i];
-            // Slot placement always uses the BASE (zoom=1) size, so the two slots don't reflow into each
-            // other as one is zoomed — the zoomed image just grows in place, clipped by moonLayer's mask.
-            float x;
-            if (n == 1) x = 0f;
-            else if (i == 0) x = -(MoonMapGap * 0.5f) - size[0].x * 0.5f;   // first-opened: left of centre
-            else x = (MoonMapGap * 0.5f) + size[i].x * 0.5f;               // later-opened: right of centre
-
-            float zoom = moonZoom.TryGetValue(m, out float z) ? z : 1f;
-            Vector2 pan = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
-            Vector2 zoomedSize = size[i] * zoom;
-
-            // Same slack-based clamp the host map's own ClampPan uses: keep the zoomed image from
-            // drifting so far its slot shows nothing but letterbox.
-            Vector2 slack = Vector2.Max(Vector2.zero, (zoomedSize - new Vector2(slotW, bandH)) * 0.5f);
-            pan.x = Mathf.Clamp(pan.x, -slack.x, slack.x);
-            pan.y = Mathf.Clamp(pan.y, -slack.y, slack.y);
-            moonPan[m] = pan;
-
-            var rt = moonImages[i].rectTransform;
-            rt.sizeDelta = zoomedSize;
-            rt.anchoredPosition = new Vector2(x, 0f) + pan;   // y=0 is the band's own vertical centre
-        }
-    }
-
-    // Is the cursor over an open moon map's RectTransform? Used to keep PollMapPan from also starting a
-    // host-map drag when a zoomed-in moon map's (uncapped) rect extends past its band and overlaps
-    // hostViewport — the rect can reach there even though moonLayer's mask never actually draws it there.
-    bool OverAnyMoonImage(Vector2 screenPos)
-    {
-        foreach (var img in moonImages)
-            if (img != null && RectTransformUtility.RectangleContainsScreenPoint(img.rectTransform, screenPos, null))
-                return true;
-        return false;
-    }
-
-    // Scroll to zoom, drag to pan — independently per open moon map, the same gestures the host map
-    // already answers to. Own drag state (moonPanIndex etc.) rather than the host's `panning`/`mapPan`
-    // fields: those are wired to placement (ghost, confirm panel, selection marker), which moon maps
-    // don't have.
-    void PollMoonZoomPan()
-    {
-        if (moonImages.Count == 0) { moonPanIndex = null; return; }
-
-        float scroll = Input.GetAxis("Mouse ScrollWheel");
-        if (!Mathf.Approximately(scroll, 0f))
-        {
-            for (int i = 0; i < moonImages.Count; i++)
+            case MapLayout.MoonsBelow:
             {
-                if (!RectTransformUtility.RectangleContainsScreenPoint(moonImages[i].rectTransform, Input.mousePosition, null))
-                    continue;
-                var m = openMoons[i];
-                float zoom = moonZoom.TryGetValue(m, out float z) ? z : 1f;
-                float next = Mathf.Clamp(zoom * Mathf.Pow(MoonZoomStep, scroll * 10f), MoonMinZoom, MoonMaxZoom);
-                if (!Mathf.Approximately(next, zoom))
-                {
-                    // Zoom TOWARD THE CURSOR, exactly like the host map: keep whatever cell is under the
-                    // pointer pinned there instead of zooming to the moon's centre. The moon image is
-                    // centre-anchored in moonLayer, so its anchoredPosition IS its centre offset; the point
-                    // under the cursor moves by mapPoint*(1-ratio) as the image scales by `ratio`.
-                    var mrt = moonImages[i].rectTransform;
-                    Vector2 pan0 = moonPan.TryGetValue(m, out Vector2 pv0) ? pv0 : Vector2.zero;
-                    if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                            moonLayer, Input.mousePosition, null, out Vector2 curLocal))
-                    {
-                        Vector2 mapPoint = curLocal - mrt.anchoredPosition;   // cursor, relative to image centre
-                        moonPan[m] = pan0 + mapPoint * (1f - next / zoom);    // LayoutMoonViews clamps it
-                    }
-                    moonZoom[m] = next;
-                    LayoutMoonViews();
-                }
-                break;   // only the map under the cursor zooms
+                float rowH = H * MoonRowFrac;
+                LayoutMoonRow(moons, new Rect(0f, 0f, W, rowH));
+                PlaceHost(new Rect(0f, rowH, W, H - rowH));
+                break;
             }
-        }
-
-        if (Input.GetMouseButtonDown(0))
-        {
-            for (int i = 0; i < moonImages.Count; i++)
+            case MapLayout.MoonsSide:
             {
-                if (!RectTransformUtility.RectangleContainsScreenPoint(moonImages[i].rectTransform, Input.mousePosition, null))
-                    continue;
-                moonPanIndex = i;
-                moonPanGrabScreen = Input.mousePosition;
-                moonPanGrabOffset = moonPan.TryGetValue(openMoons[i], out Vector2 pv) ? pv : Vector2.zero;
+                float colW = W * SideColFrac;
+                PlaceHost(new Rect(0f, 0f, W - colW, H));
+                LayoutMoonColumn(moons, new Rect(W - colW, 0f, colW, H));
+                break;
+            }
+            case MapLayout.MoonsSplit:
+            {
+                int topN = (n + 1) / 2;                          // ceil: the top row gets the extra one
+                var top = moons.GetRange(0, topN);
+                var bot = moons.GetRange(topN, n - topN);
+                float rowH = H * SplitRowFrac;
+                bool hasBot = bot.Count > 0;
+                float planetY = hasBot ? rowH : 0f;
+                float planetH = H - rowH - (hasBot ? rowH : 0f);   // top row is always present (topN >= 1)
+                PlaceHost(new Rect(0f, planetY, W, planetH));
+                LayoutMoonRow(top, new Rect(0f, H - rowH, W, rowH));
+                if (hasBot) LayoutMoonRow(bot, new Rect(0f, 0f, W, rowH));
+                break;
+            }
+            default: // MoonsAbove
+            {
+                float rowH = H * MoonRowFrac;
+                PlaceHost(new Rect(0f, 0f, W, H - rowH));
+                LayoutMoonRow(moons, new Rect(0f, H - rowH, W, rowH));
                 break;
             }
         }
 
-        if (moonPanIndex.HasValue)
+        DrawSelectionMarker();
+        KeepControlsOnTop();
+    }
+
+    // With the planet closed, the moons fill the whole area themselves, matching the format's spirit: a
+    // single row (Above/Below), two rows top+bottom (Split), or a single column (Beside).
+    void LayoutMoonsNoPlanet(List<CelestialBody> moons, float W, float H)
+    {
+        int n = moons.Count;
+        if (n == 0) return;
+        switch (mapLayout)
         {
-            if (!Input.GetMouseButton(0)) moonPanIndex = null;
-            else if (moonPanIndex.Value < openMoons.Count)
+            case MapLayout.MoonsSplit:
             {
-                var m = openMoons[moonPanIndex.Value];
+                int topN = (n + 1) / 2;
+                var top = moons.GetRange(0, topN);
+                var bot = moons.GetRange(topN, n - topN);
+                if (bot.Count == 0) LayoutMoonRow(top, new Rect(0f, 0f, W, H));
+                else
+                {
+                    LayoutMoonRow(top, new Rect(0f, H * 0.5f, W, H * 0.5f));
+                    LayoutMoonRow(bot, new Rect(0f, 0f, W, H * 0.5f));
+                }
+                break;
+            }
+            case MapLayout.MoonsSide:
+                LayoutMoonColumn(moons, new Rect(0f, 0f, W, H));
+                break;
+            default:
+                LayoutMoonRow(moons, new Rect(0f, 0f, W, H));
+                break;
+        }
+    }
+
+    void PlaceHost(Rect r) { PlaceFrame(hostViewport, r); ApplyMapSize(); }
+
+    // Moons side by side across a region, column widths proportional to each moon's aspect (w/h) so a wide
+    // moon gets a wider column; the row fills the region exactly (last column absorbs rounding).
+    void LayoutMoonRow(List<CelestialBody> moons, Rect region)
+    {
+        int n = moons.Count;
+        if (n == 0) return;
+        float total = 0f;
+        for (int i = 0; i < n; i++) total += MoonAspect(moons[i]);
+        if (total < 0.001f) total = n;
+
+        float x = region.x;
+        for (int i = 0; i < n; i++)
+        {
+            var m = moons[i];
+            float cw = (i == n - 1) ? region.x + region.width - x : region.width * (MoonAspect(m) / total);
+            if (moonFrame.TryGetValue(m, out var f) && f != null)
+            {
+                PlaceFrame(f, new Rect(x, region.y, cw, region.height));
+                ApplyMoonSize(m);
+            }
+            x += cw;
+        }
+    }
+
+    // Moons stacked top-to-bottom in a region, row heights proportional to each moon's INVERSE aspect (h/w)
+    // so a tall moon gets a taller row; the column fills the region exactly (last row absorbs rounding).
+    void LayoutMoonColumn(List<CelestialBody> moons, Rect region)
+    {
+        int n = moons.Count;
+        if (n == 0) return;
+        float total = 0f;
+        for (int i = 0; i < n; i++) total += 1f / MoonAspect(moons[i]);
+        if (total < 0.001f) total = n;
+
+        float used = 0f;
+        for (int i = 0; i < n; i++)
+        {
+            var m = moons[i];
+            float ch = (i == n - 1) ? region.height - used : region.height * ((1f / MoonAspect(m)) / total);
+            float y = region.y + region.height - used - ch;   // first moon at the top
+            if (moonFrame.TryGetValue(m, out var f) && f != null)
+            {
+                PlaceFrame(f, new Rect(region.x, y, region.width, ch));
+                ApplyMoonSize(m);
+            }
+            used += ch;
+        }
+    }
+
+    // A body's surface aspect ratio (width / height), clamped to a sane band so one freakishly long map
+    // can't starve the others of column width (or height, when stacked).
+    static float MoonAspect(CelestialBody b)
+    {
+        if (b?.surface == null || b.surface.height < 1) return 1.5f;
+        return Mathf.Clamp(b.surface.width / (float)b.surface.height, 0.5f, 3f);
+    }
+
+    // The floating controls (zoom bar, view-format button, tab strip) have to stay above the panes, which
+    // are (re)ordered as tabs open and close.
+    void KeepControlsOnTop()
+    {
+        if (zoomBar != null) zoomBar.SetAsLastSibling();
+        if (viewFormatBtn != null) viewFormatBtn.SetAsLastSibling();
+        if (moonTabStrip != null) moonTabStrip.SetAsLastSibling();
+    }
+
+    // Is the cursor over one of the floating map controls (zoom bar, view-format button, tab strip, Build
+    // confirm)? The moon zoom/pan uses geometry, not raycasts, so it must skip these the way the host does —
+    // otherwise scrolling the zoom bar or pressing a tab that overlays a moon frame would also move that map.
+    bool OverMapChrome(Vector2 p)
+    {
+        if (zoomBar != null && zoomBar.gameObject.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(zoomBar, p, null)) return true;
+        if (viewFormatBtn != null && viewFormatBtn.gameObject.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(viewFormatBtn, p, null)) return true;
+        if (moonTabStrip != null && RectTransformUtility.RectangleContainsScreenPoint(moonTabStrip, p, null)) return true;
+        if (confirmPanel != null && confirmPanel.gameObject.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(confirmPanel, p, null)) return true;
+        return false;
+    }
+
+    // Place a frame into a grid cell, inset by the hairline gap so the themed background reads as thin grout
+    // rather than dead space. Cells are gridHolder-local, origin bottom-left; the frame is centre-pivoted so
+    // its content's centre-relative pan lines up with a cursor point measured against the frame (the same
+    // relationship the host map has with hostViewport).
+    void PlaceFrame(RectTransform f, Rect cell)
+    {
+        f.anchorMin = f.anchorMax = new Vector2(0f, 0f);
+        f.pivot = new Vector2(0.5f, 0.5f);
+        f.sizeDelta = new Vector2(Mathf.Max(1f, cell.width - PaneGap), Mathf.Max(1f, cell.height - PaneGap));
+        f.anchoredPosition = new Vector2(cell.x + cell.width * 0.5f, cell.y + cell.height * 0.5f);
+        f.gameObject.SetActive(true);
+    }
+
+    // Bring the moon frames in line with the open set: build one for each open moon that lacks one, destroy
+    // any whose tab was closed. The planet is not a moon frame — it uses hostViewport / mapRT.
+    void RebuildMoonPanes()
+    {
+        List<CelestialBody> stale = null;
+        foreach (var kv in moonFrame)
+            if (!openMaps.Contains(kv.Key)) (stale ??= new List<CelestialBody>()).Add(kv.Key);
+        if (stale != null)
+            foreach (var m in stale)
+            {
+                if (moonFrame.TryGetValue(m, out var f) && f != null) Destroy(f.gameObject);
+                if (moonTex.TryGetValue(m, out var t) && t != null) Destroy(t);
+                moonFrame.Remove(m); moonImg.Remove(m); moonTex.Remove(m);
+            }
+
+        foreach (var m in openMaps)
+        {
+            if (m == body || moonFrame.ContainsKey(m)) continue;
+
+            var frame = UIFactory.NewUI(moonLayer, "MoonFrame").GetComponent<RectTransform>();
+            frame.gameObject.AddComponent<RectMask2D>();
+
+            var contentGO = UIFactory.NewUI(frame, "MoonMap");
+            var img = contentGO.AddComponent<RawImage>();
+            img.raycastTarget = true;   // a click on a moon map is UI, not a click-away that closes the window
+            Texture2D tex = m.surface != null ? SurfaceTextureRenderer.BuildGrid(m) : null;
+            img.texture = tex;
+            if (tex == null) img.color = new Color(0.10f, 0.12f, 0.16f, 1f);
+            var crt = img.rectTransform;
+            crt.anchorMin = crt.anchorMax = new Vector2(0.5f, 0.5f);
+            crt.pivot = new Vector2(0.5f, 0.5f);
+            crt.anchoredPosition = Vector2.zero;
+
+            moonFrame[m] = frame; moonImg[m] = img; moonTex[m] = tex;
+        }
+    }
+
+    void ClearMoonPanes()
+    {
+        foreach (var kv in moonFrame) if (kv.Value != null) Destroy(kv.Value.gameObject);
+        foreach (var kv in moonTex) if (kv.Value != null) Destroy(kv.Value);
+        moonFrame.Clear(); moonImg.Clear(); moonTex.Clear();
+    }
+
+    // Fit a moon map inside its fixed frame and apply its own zoom (px per cell), clipped by the frame's
+    // mask. The DEFAULT view is cover (fills the frame, no dead space); you can zoom OUT to contain (the
+    // whole moon map visible inside the frame, letterboxed) or IN past cover to fewer, larger cells.
+    // Mirrors the host's ApplyMapSize / ClampPan.
+    void ApplyMoonSize(CelestialBody m)
+    {
+        if (m?.surface == null) return;
+        if (!moonFrame.TryGetValue(m, out var frame) || frame == null) return;
+        if (!moonImg.TryGetValue(m, out var img) || img == null) return;
+
+        Rect fr = frame.rect;
+        float floor = ContainFit(fr, m);                        // fully out = whole map fits
+        float cover = CoverFit(fr, m);                          // default view = fills the frame
+        float max = Mathf.Max(cover, CeilTilePx(fr));
+        float tpx = moonTilePx.TryGetValue(m, out float z) ? z : 0f;
+        tpx = Mathf.Clamp(tpx <= 0f ? cover : tpx, floor, max);
+        moonTilePx[m] = tpx;
+
+        img.rectTransform.sizeDelta = new Vector2(m.surface.width * tpx, m.surface.height * tpx);
+        Vector2 pan = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
+        ClampPanePan(fr, img.rectTransform, ref pan);
+        moonPan[m] = pan;
+    }
+
+    // Pixels per cell at which a map exactly COVERS a frame (fills it, cropping the proportionally longer
+    // axis) — the framed DEFAULT view, so there's no dead space around a map until you zoom out to fit.
+    float CoverFit(Rect frame, CelestialBody b)
+    {
+        if (b?.surface == null || frame.width < 1f || frame.height < 1f) return 4f;
+        return Mathf.Max(frame.width / b.surface.width, frame.height / b.surface.height);
+    }
+
+    // Pixels per cell at which the WHOLE map fits inside a frame (letterboxed on the shorter axis) — the
+    // zoom-out floor, so you can always pull back to see the entire map within its fixed window.
+    float ContainFit(Rect frame, CelestialBody b)
+    {
+        if (b?.surface == null || frame.width < 1f || frame.height < 1f) return 4f;
+        return Mathf.Min(frame.width / b.surface.width, frame.height / b.surface.height);
+    }
+
+    // Pixels per cell at the zoomed-all-the-way-IN end (~MaxVisibleTiles cells fill the frame).
+    float CeilTilePx(Rect frame) => Mathf.Sqrt(Mathf.Max(1f, frame.width * frame.height) / MaxVisibleTiles);
+
+    // Keep content covering its frame: clamp the pan so you can never drag past the map's own edge into
+    // letterbox. When the map is exactly frame-sized on an axis there's no slack, so it stays centred.
+    void ClampPanePan(Rect frame, RectTransform content, ref Vector2 pan)
+    {
+        Vector2 size = content.sizeDelta;
+        float sx = Mathf.Max(0f, (size.x - frame.width) * 0.5f);
+        float sy = Mathf.Max(0f, (size.y - frame.height) * 0.5f);
+        pan.x = Mathf.Clamp(pan.x, -sx, sx);
+        pan.y = Mathf.Clamp(pan.y, -sy, sy);
+        content.anchoredPosition = pan;
+    }
+
+    // Is the cursor over an open moon frame? Keeps PollMapPan from starting a host pan at a shared edge.
+    bool OverAnyMoonFrame(Vector2 screenPos)
+    {
+        foreach (var kv in moonFrame)
+            if (kv.Value != null && RectTransformUtility.RectangleContainsScreenPoint(kv.Value, screenPos, null))
+                return true;
+        return false;
+    }
+
+    // Scroll to zoom the cells inside a moon's fixed frame, drag to pan — independently per open moon, the
+    // same gestures and cursor-anchored zoom the host map answers to. The content is centre-anchored in its
+    // own frame, so the cursor pin is measured against the frame, exactly like the host's hostViewport.
+    void PollMoonZoomPan()
+    {
+        if (moonFrame.Count == 0) { moonPanDrag = null; return; }
+
+        float scroll = Input.GetAxis("Mouse ScrollWheel");
+        if (!Mathf.Approximately(scroll, 0f) && !UIScroll.PointerOverScroller() && !OverMapChrome(Input.mousePosition))
+        {
+            foreach (var m in openMaps)
+            {
+                if (m == body) continue;
+                if (!moonFrame.TryGetValue(m, out var frame) || frame == null) continue;
+                if (!RectTransformUtility.RectangleContainsScreenPoint(frame, Input.mousePosition, null)) continue;
+
+                Rect fr = frame.rect;
+                float floor = ContainFit(fr, m);                    // zoom-out floor = whole map fits
+                float cover = CoverFit(fr, m);                      // default view = fills the frame
+                float max = Mathf.Max(cover, CeilTilePx(fr));
+                float cur = moonTilePx.TryGetValue(m, out float z) ? z : cover;
+                float next = Mathf.Clamp(cur * Mathf.Pow(ZoomStep, scroll * 10f), floor, max);
+                if (!Mathf.Approximately(next, cur))
+                {
+                    Vector2 pan0 = moonPan.TryGetValue(m, out Vector2 pv0) ? pv0 : Vector2.zero;
+                    if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                            frame, Input.mousePosition, null, out Vector2 framePoint))
+                    {
+                        Vector2 mapPoint = framePoint - pan0;                    // cursor in map space, pre-zoom
+                        moonPan[m] = framePoint - mapPoint * (next / cur);       // ...still under the cursor after
+                    }
+                    moonTilePx[m] = next;
+                    ApplyMoonSize(m);
+                }
+                activePane = m;
+                break;   // only the map under the cursor zooms
+            }
+        }
+
+        if (Input.GetMouseButtonDown(0) && !OverMapChrome(Input.mousePosition))
+        {
+            foreach (var m in openMaps)
+            {
+                if (m == body) continue;
+                if (!moonFrame.TryGetValue(m, out var frame) || frame == null) continue;
+                if (!RectTransformUtility.RectangleContainsScreenPoint(frame, Input.mousePosition, null)) continue;
+                moonPanDrag = m;
+                moonPanGrabScreen = Input.mousePosition;
+                moonPanGrabOffset = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
+                break;
+            }
+        }
+
+        if (moonPanDrag != null)
+        {
+            if (!Input.GetMouseButton(0)) moonPanDrag = null;
+            else if (moonFrame.ContainsKey(moonPanDrag))
+            {
                 Vector2 delta = (Vector2)Input.mousePosition - moonPanGrabScreen;
-                moonPan[m] = moonPanGrabOffset + delta;
-                LayoutMoonViews();
+                moonPan[moonPanDrag] = moonPanGrabOffset + delta;
+                ApplyMoonSize(moonPanDrag);
             }
         }
     }
@@ -3613,13 +3899,13 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
         if (moon != null) MapHoverPanel.Instance.ShowAtCursor(Tooltip(moon));
     }
 
-    // Everything worth knowing about a moon at a glance, so hovering its tab reads like a survey card:
+    // Everything worth knowing about a world at a glance, so hovering its tab reads like a survey card:
     // what it IS, whether it could be lived on, how warm it runs, how big it is, what it's made of, and
     // whether anyone holds it yet. Detail is gated behind a survey (Dev Mode reveals all) — an unmapped
-    // moon says so honestly rather than inventing numbers.
+    // world says so honestly rather than inventing numbers. Used for the planet tab and the moon tabs.
     static string Tooltip(CelestialBody m)
     {
-        if (m == null) return "An uncharted moon.";
+        if (m == null) return "An uncharted world.";
         var sb = new System.Text.StringBuilder();
         sb.Append($"<b>{m.name}</b>  <color=#7E93A8>{TerraformDiagnosis.Pretty(m.type)}</color>");
 
@@ -3691,7 +3977,7 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
 
     static string Describe(CelestialBody m)
     {
-        if (m?.surface?.tiles == null) return "An uncharted moon.";
+        if (m?.surface?.tiles == null) return "Uncharted — no surface survey yet.";
 
         var counts = new Dictionary<TerrainType, int>();
         int w = m.surface.width, h = m.surface.height;
@@ -3707,6 +3993,6 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
         int best = -1;
         foreach (var kv in counts) if (kv.Value > best) { best = kv.Value; dominant = kv.Key; }
 
-        return $"A {dominant} moon — {TerrainColorMap.Describe(dominant)}";
+        return $"{dominant} terrain — {TerrainColorMap.Describe(dominant)}";
     }
 }
