@@ -285,7 +285,7 @@ public class PlanetViewWindow : MonoBehaviour
         moonTabStrip.anchoredPosition = new Vector2(6f, -6f);
         moonTabStrip.sizeDelta = new Vector2(MoonTabSize, 0);
         var mth = moonTabStrip.gameObject.AddComponent<VerticalLayoutGroup>();
-        mth.spacing = 4; mth.childControlWidth = true; mth.childControlHeight = true;
+        mth.spacing = 7; mth.childControlWidth = true; mth.childControlHeight = true;
         mth.childForceExpandWidth = false; mth.childForceExpandHeight = false; mth.childAlignment = TextAnchor.UpperLeft;
         var mtf = moonTabStrip.gameObject.AddComponent<ContentSizeFitter>();
         mtf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
@@ -3185,7 +3185,7 @@ public class PlanetViewWindow : MonoBehaviour
     const float MoonBandBottomFrac = 0.64f;   // moon band spans [this .. 1] of the height (a gap between)
     const float MoonMapMargin = 12f;
     const float MoonMapGap = 18f;             // spacing between the two moon maps so they read as separate
-    const float MoonTabSize = 18f;            // square tab side — the height of the OLD text tabs, never larger
+    const float MoonTabSize = 34f;            // square tab side — big enough to read the moon's terrain thumbnail
 
     // Moons closest to the host first (leftmost tab), ordered by orbit radius.
     List<CelestialBody> MoonsClosestFirst()
@@ -3248,7 +3248,7 @@ public class PlanetViewWindow : MonoBehaviour
             // The name/description hover window (Raptok's follow-up), anchored the same way as the tile
             // hover-info window since a name label no longer lives on the tab itself to read.
             var hover = btn.gameObject.AddComponent<MoonTabHover>();
-            hover.moon = m;
+            hover.Configure(m);
         }
     }
 
@@ -3509,12 +3509,169 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
 {
     public CelestialBody moon;
 
-    public void OnPointerEnter(PointerEventData e)
+    RectTransform rt, light;
+    Outline outline;
+    bool hover;
+    float t;
+
+    static readonly Color Spark = new Color(0.88f, 0.97f, 1.00f, 1.00f);    // the travelling light
+    const float LapsPerSec = 0.55f;   // how fast the light circles the border
+    const float HoverScale = 1.14f;
+
+    void Awake()
     {
-        if (moon != null) MapHoverPanel.Instance.ShowAtCursor($"<b>{moon.name}</b>\n{Describe(moon)}");
+        rt = GetComponent<RectTransform>();
+
+        // A standout border around the little terrain thumbnail, so a moon tab reads as its own thing.
+        // Its COLOUR is set per-moon in Configure() (each tab a different, stable colour).
+        outline = gameObject.GetComponent<Outline>() ?? gameObject.AddComponent<Outline>();
+        outline.effectDistance = new Vector2(1.6f, -1.6f);
+        outline.effectColor = new Color(0.55f, 0.85f, 1.00f, 0.95f);   // placeholder until Configure
+
+        // A small bright light that travels the border clockwise — built once, moved every frame.
+        var go = UIFactory.NewUI(rt, "BorderLight");
+        light = go.GetComponent<RectTransform>();
+        light.anchorMin = light.anchorMax = new Vector2(0.5f, 0.5f);
+        light.pivot = new Vector2(0.5f, 0.5f);
+        light.sizeDelta = new Vector2(5f, 5f);
+        var img = go.AddComponent<Image>();
+        img.color = Spark;
+        img.raycastTarget = false;
     }
 
-    public void OnPointerExit(PointerEventData e) => MapHoverPanel.Instance.Hide();
+    // Per-moon styling, applied once the moon is known (called right after the component is added, since
+    // Awake runs before `moon` is set): a stable, well-spread border COLOUR and a different STARTING point
+    // for the border light — so no two moon tabs share a colour or run their light in sync.
+    public void Configure(CelestialBody m)
+    {
+        moon = m;
+        float seed = m != null ? Mathf.Abs(m.terrainSeed) : 0f;
+        if (seed <= 0.0001f && m != null && m.name != null) seed = Mathf.Abs(m.name.GetHashCode() % 9973);
+        float hue = Frac(seed * 0.6180339887f);       // golden-ratio scatter -> well-separated hues
+        t = Frac(seed * 0.37f + 0.13f);               // this tab's light starts at a different point
+        if (outline != null)
+        {
+            var c = Color.HSVToRGB(hue, 0.6f, 1f);
+            c.a = 0.95f;
+            outline.effectColor = c;
+        }
+    }
+
+    static float Frac(float v) => v - Mathf.Floor(v);
+
+    void Update()
+    {
+        if (rt == null) return;
+
+        // Clockwise around the border.
+        t += Time.unscaledDeltaTime * LapsPerSec;
+        if (light != null) light.anchoredPosition = Perimeter(Mathf.Repeat(t, 1f));
+
+        // Hover: a subtle grow so the tab reads as clickable. localScale (not layout size) so it never
+        // reflows the neighbours — the other tabs keep sitting neatly together.
+        float target = hover ? HoverScale : 1f;
+        float k = 1f - Mathf.Exp(-16f * Time.unscaledDeltaTime);
+        rt.localScale = Vector3.Lerp(rt.localScale, Vector3.one * target, k);
+    }
+
+    // A point on the tab's border rectangle, clockwise from the top-left corner, `f` in [0,1).
+    Vector2 Perimeter(float f)
+    {
+        var r = rt.rect;
+        float hw = r.width * 0.5f - 2f, hh = r.height * 0.5f - 2f;
+        if (hw < 1f || hh < 1f) return Vector2.zero;
+        float eh = 2f * hw, ev = 2f * hh, per = 2f * (eh + ev);
+        float d = f * per;
+        if (d < eh) return new Vector2(-hw + d, hh);      // top    L -> R
+        d -= eh;
+        if (d < ev) return new Vector2(hw, hh - d);       // right  T -> B
+        d -= ev;
+        if (d < eh) return new Vector2(hw - d, -hh);      // bottom R -> L
+        d -= eh;
+        return new Vector2(-hw, -hh + d);                 // left   B -> T
+    }
+
+    public void OnPointerEnter(PointerEventData e)
+    {
+        hover = true;
+        if (moon != null) MapHoverPanel.Instance.ShowAtCursor(Tooltip(moon));
+    }
+
+    // Everything worth knowing about a moon at a glance, so hovering its tab reads like a survey card:
+    // what it IS, whether it could be lived on, how warm it runs, how big it is, what it's made of, and
+    // whether anyone holds it yet. Detail is gated behind a survey (Dev Mode reveals all) — an unmapped
+    // moon says so honestly rather than inventing numbers.
+    static string Tooltip(CelestialBody m)
+    {
+        if (m == null) return "An uncharted moon.";
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<b>{m.name}</b>  <color=#7E93A8>{TerraformDiagnosis.Pretty(m.type)}</color>");
+
+        if (!m.Surveyed)
+        {
+            sb.Append("\n<color=#9FB4C8>Unsurveyed</color> — survey to reveal details.");
+            return sb.ToString();
+        }
+
+        sb.Append('\n').Append(Describe(m));
+
+        // Habitability + whether it physically sits inside the star's habitable zone.
+        string zone = m.isHabitable ? "in the habitable zone" : "outside the habitable zone";
+        sb.Append($"\n<color=#9FB4C8>Habitability</color> {m.habitability:F0}%  <color=#7E93A8>({zone})</color>");
+
+        // Temperature, tinted by the same gradient the map uses.
+        float c = PlanetTemperature.BodyAverageCelsius(m);
+        string tempHex = ColorUtility.ToHtmlStringRGB(PlanetTemperature.GradientColor(c));
+        sb.Append($"\n<color=#9FB4C8>Temperature</color> <color=#{tempHex}>{PlanetTemperature.Label(c)}</color>");
+
+        // How far it could be pushed toward livable for the CURRENT species.
+        sb.Append($"\n<color=#9FB4C8>Terraformability</color> {m.terraformability:F0}%");
+
+        // Surface extent and what it's made of.
+        sb.Append($"\n<color=#9FB4C8>Size</color> {SizeWord(m.surfaceSize)}");
+        string res = ResourceSummary(m.resources);
+        if (res != null) sb.Append($"\n<color=#9FB4C8>Resources</color> {res}");
+
+        // Who, if anyone, holds or lives here.
+        if (m.settled && m.population > 0)
+            sb.Append($"\n<color=#9FB4C8>Colony</color> {Population.Format(m.population)}");
+        else if (m.owner != null)
+            sb.Append($"\n<color=#9FB4C8>Claimed by</color> {Faction.OwnerName(m.owner)}");
+
+        return sb.ToString();
+    }
+
+    static string SizeWord(int cells)
+    {
+        if (cells <= 0) return "unknown";
+        if (cells < 24) return "small";
+        if (cells < 40) return "medium";
+        if (cells < 56) return "large";
+        return "vast";
+    }
+
+    static string ResourceSummary(ResourceDeposit d)
+    {
+        if (d == null) return null;
+        var parts = new List<string>();
+        AddRes(parts, "Metal",  d.Get(ResourceType.Metal));
+        AddRes(parts, "Energy", d.Get(ResourceType.Energy));
+        AddRes(parts, "Water",  d.Get(ResourceType.Water));
+        return parts.Count > 0 ? string.Join(", ", parts) : "none of note";
+    }
+
+    static void AddRes(List<string> parts, string name, float v)
+    {
+        if (v <= 0f) return;
+        string grade = v >= 70f ? "rich" : v >= 35f ? "moderate" : "trace";
+        parts.Add($"{name} <color=#7E93A8>({grade})</color>");
+    }
+
+    public void OnPointerExit(PointerEventData e)
+    {
+        hover = false;
+        MapHoverPanel.Instance.Hide();
+    }
 
     static string Describe(CelestialBody m)
     {
