@@ -67,6 +67,27 @@ public static class TerraformVisuals
         return p;
     }
 
+    /// The climate a world of a given TYPE tends to have — the terrainParams a directed remodel walks
+    /// toward, so the map's temperature, moisture and relief match the world it is BECOMING. Amplitude
+    /// knobs against the Default of 1.0 (PlanetTerrainGenerator.NoiseParams); `scale` (continent size) is
+    /// left alone, exactly as Ideal does.
+    public static PlanetTerrainGenerator.NoiseParams TypeClimate(CelestialBodyType t)
+    {
+        var p = PlanetTerrainGenerator.NoiseParams.Default;
+        switch (t)
+        {
+            case CelestialBodyType.VolcanicPlanet: p.heat = 1.85f; p.moisture = 0.35f; p.elevation = 1.10f; p.ridge = 1.35f; break;
+            case CelestialBodyType.OceanPlanet:    p.heat = 1.05f; p.moisture = 1.70f; p.elevation = 0.60f; p.ridge = 0.70f; break;
+            case CelestialBodyType.IcePlanet:      p.heat = 0.50f; p.moisture = 1.00f; p.elevation = 1.00f; p.ridge = 0.95f; break;
+            case CelestialBodyType.RockyPlanet:    p.heat = 1.00f; p.moisture = 1.20f; p.elevation = 1.00f; p.ridge = 0.90f; break;
+            case CelestialBodyType.BarrenPlanet:   p.heat = 1.25f; p.moisture = 0.20f; p.elevation = 1.00f; p.ridge = 1.05f; break;
+            case CelestialBodyType.Moon:
+            case CelestialBodyType.Asteroid:       p.heat = 0.90f; p.moisture = 0.15f; p.elevation = 1.00f; p.ridge = 1.15f; break;
+            // GasGiant has no solid surface to reclassify toward; leave default.
+        }
+        return p;
+    }
+
     /// The single writer of a world's terraformed climate. Everything that reshapes a world flows
     /// through here so the knobs never have two owners fighting over them:
     ///   • the species-ideal grind (Blend by habitability progress) — the background morph that was
@@ -84,8 +105,15 @@ public static class TerraformVisuals
 
         float power = TerraformPower(b);
 
-        // Background: the species-ideal blend, its reach capped by how much terraforming tech you have.
-        var p = Blend(natural, Ideal(s), Progress(b) * power);
+        // Background blend. A directed Planetary Remodelling walks the whole climate toward the TARGET
+        // type's own profile (a lava world runs hot and dry, an ocean world wet and low) in lock-step with
+        // the surface transition. It's a paid, top-tier project, so its reach is the full transition
+        // progress, not the tech-gated `power` — once you can remodel a world, you remodel it fully.
+        // Otherwise it's the ordinary species-ideal grind, capped by how much terraforming tech you have.
+        PlanetTerrainGenerator.NoiseParams p =
+            b.remodelToType >= 0
+                ? Blend(natural, TypeClimate((CelestialBodyType)b.remodelToType), b.remodelT)
+                : Blend(natural, Ideal(s), Progress(b) * power);
 
         // Foreground: the specific projects run on THIS world, also scaled by power.
         var d = TerraformClimate.Accumulated(b);

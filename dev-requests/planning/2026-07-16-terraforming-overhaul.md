@@ -239,3 +239,25 @@ nearly-right one.
 1a → 1b → 1c is the critical path. 2, 3, 4, 5, 6, 7 build on it and can land in any order after 1c
 (4 is nearly independent). 8 is last. Every slice is committed AND pushed to the fork's `main` as it
 lands, so the buddy can pull at any checkpoint and a partial run loses nothing.
+
+- **Slice 3a — directed cross-type transition (engine) — built 2026-07-16.** Planetary Remodelling now
+  transforms a world's TYPE progressively: a low-frequency dither mask in `PlanetTerrainGenerator`
+  classifies each tile under the old type or the target type by `body.remodelT` (0..1), so the new world
+  (lava/ocean/ice) SPREADS across the old as the bar loads instead of snapping at completion. `Compose`
+  walks the climate toward `TerraformVisuals.TypeClimate(target)` in lockstep, so flipped tiles heat/wet
+  to match. `TerraformManager` drives the transient `remodelToType`/`remodelT` each frame from the running
+  WorldRemodelling job, finalizes at completion (clears the transition, sets `naturalParams` to the target
+  climate so it doesn't revert, `Reshape` to the new type), and reverts on cancel. Transient state is
+  NonSerialized (rebuilt from the resumed job on load). Reviewed clean by a subagent (compile + logic);
+  three low-severity cosmetic notes, no fix needed. Targets the species' best-fit type for now; the
+  DIRECTED any→any chooser (pick any target regardless of species) is the next sub-slice (3a-ui). Not
+  compiled (no Unity in this env).
+
+## Scope note (user, 2026-07-16)
+
+Reaffirmed/expanded: terraforming to be FULLY fleshed — costs, tech levels, species requirements,
+possible actions, habitability changes, and the per-tile real-time morph — "enjoyable to see the changes
+in real time." Costs (size×severity×tech), tech gating + the `power` magnitude curve, and species-relative
+diagnosis already exist; slices 1 + 3a deliver the real-time tile morph; slice 7 rounds out tech growth.
+Separately: consolidate ALL UI panels (not just planet ones) — tracked in the UI-consolidation doc, now
+extended to the empire/ship windows too.

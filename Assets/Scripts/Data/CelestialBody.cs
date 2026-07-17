@@ -31,6 +31,15 @@ public class CelestialBody
     public float continentFrequency = 4f;
     public PlanetTerrainGenerator.NoiseParams terrainParams = PlanetTerrainGenerator.NoiseParams.Default;
 
+    // --- Directed remodelling transition (transient render state) ---
+    // While a Planetary Remodelling project runs, the surface is dithered from the world's CURRENT type
+    // toward remodelToType as remodelT (0..1) rises — so the new world (lava, ocean, ice…) spreads across
+    // the old one on the map rather than snapping at completion. NonSerialized: rebuilt from the resumed
+    // job on load (the job is saved), and cleared when the project finishes (the world then simply IS the
+    // new type, so no dithering is needed).
+    [System.NonSerialized] public int remodelToType = -1;   // (CelestialBodyType) ordinal; -1 = no transition
+    [System.NonSerialized] public float remodelT = 0f;      // 0..1 transition progress
+
     public List<PointOfInterest> pointsOfInterest = new List<PointOfInterest>();
 
     // --- Orbit parameters (authoritative data; the OrbitController reads these) ---

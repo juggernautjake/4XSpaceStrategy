@@ -106,7 +106,20 @@ public static class PlanetTerrainGenerator
 
         float fine = Mathf.PerlinNoise(fx * 6f + seed, fy * 6f + seed);
 
-        TerrainType t = Classify(body.type, elevation, moisture, temperature, ridge, lat);
+        // A directed Planetary Remodelling project spreads a NEW world type across the old one. Tiles
+        // whose low-frequency mask value has been overtaken by the transition progress (body.remodelT,
+        // 0..1) are classified as the target type, so the new world grows as smooth, contiguous regions —
+        // lava creeping across a jungle — rather than the whole planet snapping over at completion. The
+        // mask is a stable function of position + seed, so the transition is deterministic and identical
+        // at any resolution (grid and globe agree), and survives save/load.
+        CelestialBodyType classifyType = body.type;
+        if (body.remodelToType >= 0 && body.remodelT > 0.001f && body.remodelToType != (int)body.type)
+        {
+            float mask = FBm(fx * 0.6f + seed + 211f, fy * 0.6f + seed + 173f, 3);
+            if (mask < body.remodelT) classifyType = (CelestialBodyType)body.remodelToType;
+        }
+
+        TerrainType t = Classify(classifyType, elevation, moisture, temperature, ridge, lat);
 
         return new Sample
         {

@@ -143,7 +143,25 @@ public class TerraformManager : MonoBehaviour
         if (j.metalPaid > 0) PlayerEconomy.Add(ResourceType.Metal, j.metalPaid);
         if (j.energyPaid > 0) PlayerEconomy.Add(ResourceType.Energy, j.energyPaid);
         if (j.waterPaid > 0) PlayerEconomy.Add(ResourceType.Water, j.waterPaid);
+
+        // Abandoning a remodel drops the transition: the world keeps its original type and the half-formed
+        // new world melts back off the map on the next regen.
+        if (j.type == TerraformProjectType.WorldRemodelling && j.body != null)
+        {
+            j.body.remodelToType = -1; j.body.remodelT = 0f;
+            TerraformVisuals.Advance(j.body, SpeciesManager.Current, force: true);
+        }
+
         OnChanged?.Invoke();
+    }
+
+    // The type a Planetary Remodelling turns a world INTO. Undirected today (the species' best-fit type);
+    // the directed target chooser will store an explicit choice on the job in a later slice.
+    static CelestialBodyType ResolveRemodelTarget(TerraformJob j)
+    {
+        var s = SpeciesManager.Current;
+        if (s != null) return s.BestType();
+        return j != null && j.body != null ? j.body.type : CelestialBodyType.RockyPlanet;
     }
 
     void Update()
@@ -182,6 +200,17 @@ public class TerraformManager : MonoBehaviour
             var sys = j.body.system != null ? j.body.system.bodies : null;
             if (sys != null && OrbitSafety.ClampRadius(sys, j.body, j.body.hostStar, r, out float rSafe)) r = rSafe;
             SetOrbitRadiusLive(j.body, r);
+        }
+
+        // Keep each directed-remodel transition current every frame so the generator can dither the world
+        // from its old type toward the target as the project loads, and Compose can walk the climate to
+        // match. Cheap (two field writes per remodel job); completion/cancel clear it.
+        for (int i = 0; i < jobs.Count; i++)
+        {
+            var j = jobs[i];
+            if (j == null || j.type != TerraformProjectType.WorldRemodelling || j.body == null) continue;
+            j.body.remodelToType = (int)ResolveRemodelTarget(j);
+            if (!j.paused) j.body.remodelT = j.Progress;
         }
 
         // Progressive morph: while projects load, walk each affected world's climate toward the sum of
@@ -231,6 +260,20 @@ public class TerraformManager : MonoBehaviour
         {
             float factor = j.type == TerraformProjectType.OrbitShiftOut ? 1.45f : 0.68f;
             MigrateTo(b, j.IsOrbitShift ? j.orbitTarget : b.orbitRadius * factor);
+        }
+
+        // Planetary Remodelling: the surface has been dithering toward the target type as the project ran
+        // (see Update + PlanetTerrainGenerator). Finalize by clearing the transition (so the generator
+        // stops dithering — the world simply IS the new type now) and actually converting the world's
+        // TYPE. Its NEW natural baseline becomes the target type's climate, so the ongoing habitability
+        // grind blends from there, not from the world's long-gone original, and it doesn't visibly revert
+        // the instant the project finishes.
+        if (j.type == TerraformProjectType.WorldRemodelling)
+        {
+            var target = ResolveRemodelTarget(j);
+            b.remodelToType = -1; b.remodelT = 0f;
+            b.naturalParams = TerraformVisuals.TypeClimate(target);
+            Reshape(b, target);
         }
 
         // Some projects physically change the world, so the model has to change with them — otherwise
@@ -309,12 +352,8 @@ public class TerraformManager : MonoBehaviour
                 else RescoreType(b);
                 break;
 
-            // The big one: rebuild the world into the kind of place this species actually wants. This is
-            // the only thing that moves a species' TYPE AFFINITY, which is what a low score really is.
-            case TerraformProjectType.WorldRemodelling:
-                var want = SpeciesManager.Current != null ? SpeciesManager.Current.BestType() : b.type;
-                Reshape(b, want);
-                break;
+            // WorldRemodelling is handled in Complete (dithered over the project's duration and finalized
+            // there — see the remodel block), so it intentionally does nothing here.
         }
     }
 
