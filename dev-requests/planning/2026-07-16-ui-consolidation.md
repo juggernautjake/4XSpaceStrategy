@@ -164,3 +164,14 @@ Order: A → B → C → D → E → F, then G (restyle) and H (cleanup), then I
 to the fork's `main` as a standalone checkpoint. This is separate from the terraforming overhaul (slices
 1 & 4 shipped, rest parked) — the two share `PlanetViewWindow`, so terraforming's `RefreshIfShowing`
 hook must keep working through the restructure.
+
+## Build log
+
+- **Slice B — decouple the click — built 2026-07-16.** Single-click a world = select + camera focus +
+  new right-edge `CompactBodyPanel` (type/owner/habitability/resources + "Open Planetary View" button);
+  it no longer throws the full viewer open. Double-click the world, or the panel button, opens the full
+  viewer. `PlanetViewWindow.OnBodySelected` now only remembers the world (repaints if already open) and
+  gained `IsOpen`; `PlanetClick` got an unscaled-time double-click timer. Reviewed clean by a subagent
+  (all UIFactory/UITheme/PlanetUI APIs verified; double-click state machine correct). Follow-ups noted:
+  Dev-Mode `OrbitControlPanel` still auto-opens on select; closing the full viewer still deselects
+  entirely (to become "back to compact panel" in the layout slice). Not compiled (no Unity in this env).

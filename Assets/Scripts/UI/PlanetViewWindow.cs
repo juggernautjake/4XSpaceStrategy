@@ -334,12 +334,14 @@ public class PlanetViewWindow : MonoBehaviour
         if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
     }
 
-    // Selecting a body now OPENS the Planet View full-screen (Raptok's request), rather than only
-    // updating the stored body when the window already happened to be open.
+    // A single selection no longer throws the full-screen viewer open — that clutters the map. It just
+    // remembers the world, and repaints only if the viewer already happens to be open. The viewer is now
+    // opened deliberately: a double-click on the world (PlanetClick) or the compact panel's "Open
+    // Planetary View" button.
     void OnBodySelected(CelestialBody b)
     {
-        if (b != null) ShowFor(b);
-        else body = b;
+        body = b;
+        if (b != null && root != null && root.activeSelf) ShowFor(b);
     }
 
     // Clearing the selection (click-away, Esc-driven CloseAll) closes the window with it, so the
@@ -388,6 +390,10 @@ public class PlanetViewWindow : MonoBehaviour
         // moons on the previous world mean nothing here.
         SetupMoonUI();
     }
+
+    /// Is the full-screen viewer currently open? Used by the compact selection panel to get out of the
+    /// way while the full view is up.
+    public bool IsOpen => root != null && root.activeSelf;
 
     public void Toggle()
     {

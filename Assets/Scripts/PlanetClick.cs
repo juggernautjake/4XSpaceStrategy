@@ -4,6 +4,13 @@ public class PlanetClick : MonoBehaviour
 {
     public CelestialBody data;           // This should be set when spawning the visual
 
+    // Double-click detection. A single click selects a world (camera focus + compact info panel); a
+    // double-click on the SAME world opens the full-screen Planetary Viewer. unscaledTime so it still
+    // works while the sim is paused.
+    static PlanetClick lastClicked;
+    static float lastClickTime;
+    const float DoubleClickWindow = 0.35f;
+
     private void OnMouseDown()
     {
         if (data == null)
@@ -28,13 +35,25 @@ public class PlanetClick : MonoBehaviour
         UnitSelection.Clear();
 
         PlanetUI ui = FindFirstObjectByType<PlanetUI>(FindObjectsInactive.Include); // include inactive
-        if (ui != null)
+        if (ui == null)
         {
-            ui.Show(data);
+            Debug.LogError("PlanetUI script not found in scene! Create a GameObject with PlanetUI component.");
+            return;
+        }
+        ui.Show(data);
+
+        // A second click on the same world within the window OPENS the full Planetary Viewer; a lone
+        // click leaves it selected with the compact panel showing, so clicking a world no longer throws
+        // the whole full-screen view over the map.
+        if (lastClicked == this && Time.unscaledTime - lastClickTime <= DoubleClickWindow)
+        {
+            PlanetViewWindow.Instance?.ShowFor(data);
+            lastClicked = null;   // consume, so a third click doesn't read as another double-click
         }
         else
         {
-            Debug.LogError("PlanetUI script not found in scene! Create a GameObject with PlanetUI component.");
+            lastClicked = this;
+            lastClickTime = Time.unscaledTime;
         }
     }
 }

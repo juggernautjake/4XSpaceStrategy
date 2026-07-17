@@ -49,6 +49,7 @@ public static class GameBootstrap
         TerraformWindow.Create(canvas.transform);
         InspectorWindow.Create(canvas.transform);   // the tabbed panel for whatever you click on
         PlanetViewWindow.Create(canvas.transform);  // surface grid: info / build / survey overlays
+        CompactBodyPanel.Create(canvas.transform);  // right-edge readout on select; opens the full view
         BodyUnitsPanel.Create(canvas.transform);
         // "Around Homeworld" (AssociatedObjectsWindow) retired at Raptok's request: its moon-hopping list
         // is superseded by the Planet View's moon tabs. Not instantiated, so it never subscribes to
