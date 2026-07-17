@@ -175,3 +175,9 @@ hook must keep working through the restructure.
   (all UIFactory/UITheme/PlanetUI APIs verified; double-click state machine correct). Follow-ups noted:
   Dev-Mode `OrbitControlPanel` still auto-opens on select; closing the full viewer still deselects
   entirely (to become "back to compact panel" in the layout slice). Not compiled (no Unity in this env).
+
+- **Slice G-v1 — palette restyle — built 2026-07-16.** Retuned the `UITheme` palette toward a deeper,
+  higher-contrast space/tech look (darker panels for map/text readability, brighter cyan accent). Palette
+  only — safe and reversible. The textural pass (panel gradients, glow borders, 9-slice sprites via
+  `UIFactory.Panel`/`Button`/window `Outline`) is deferred to a build-and-screenshot loop, since blind
+  global texture work across every window is the highest-blast-radius change to get wrong. Not compiled.
