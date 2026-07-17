@@ -44,6 +44,13 @@ public class CompactBodyPanel : MonoBehaviour
 
         title = UIFactory.Label(rt, "", UITheme.HeaderSize, UITheme.Accent, 26f);
         info = UIFactory.WrapText(rt, "", UITheme.BodySize, UITheme.Text);
+        // Focus is now DELIBERATE — a click just selects and shows this panel; the camera only flies to
+        // and locks onto the world when you press this.
+        UIFactory.Button(rt, "Focus camera", () =>
+        {
+            if (body != null && body.visualObject != null)
+                CameraController.Instance?.FocusAndZoom(body.visualObject.transform, body.surfaceSize, true);
+        }, 30f);
         UIFactory.Button(rt, "Open Planetary View »", () =>
         {
             if (PlanetUI.Selected != null) PlanetViewWindow.Instance?.ShowFor(PlanetUI.Selected);

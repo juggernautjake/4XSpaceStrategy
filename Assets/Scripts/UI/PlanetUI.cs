@@ -156,9 +156,10 @@ public class PlanetUI : MonoBehaviour
         justOpened = true;
         SimpleAudio.Instance?.PlaySelect();
 
-        // Zoom in on the selection (smaller bodies zoom closer) and float its labels.
-        if (CameraController.Instance != null && body.visualObject != null)
-            CameraController.Instance.FocusAndZoom(body.visualObject.transform, body.surfaceSize, CameraController.AutoFollow);
+        // Selecting a body no longer moves the camera — being yanked across the system on every click was
+        // disorienting. The view stays exactly where it is; flying to a world is now a deliberate act: the
+        // compact panel's "Focus camera" button, or a double-click to open the full Planet View. Labels
+        // still float on selection so you can see WHAT you picked without the camera lurching to it.
         ObjectLabelManager.Instance?.ShowForBody(body);
         BodyUnitsPanel.Instance?.ShowFor(body);   // ships present here, as selectable icons
 

@@ -44,12 +44,9 @@ public class StarInteraction : MonoBehaviour
         // The tabbed Inspector is the primary readout for anything you click, stars included.
         InspectorWindow.Instance?.Inspect(InspectorTarget.Of(star, system), resetTrail: true);
 
-        // AutoFollow, like a planet click — not IsFollowing. Passing the CURRENT follow state meant
-        // clicking a star only followed it if you already happened to be following something else, which
-        // is not a rule anybody could have guessed. A star sits at its system's pivot and doesn't move,
-        // so following it costs nothing and keeps it centred.
-        if (CameraController.Instance != null)
-            CameraController.Instance.FocusAndZoom(transform, transform.lossyScale.x, CameraController.AutoFollow);
+        // Clicking a star no longer moves the camera either (it just shows the info + the Inspector, which
+        // has its own "Focus" button). Auto-focusing on click was disorienting and was also what let a star
+        // "lock" the camera onto itself. Labels still float so you can see what you clicked.
         ObjectLabelManager.Instance?.ShowForStar(transform, transform.lossyScale.x * 0.5f, Name(), Category());
     }
 
