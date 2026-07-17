@@ -222,25 +222,20 @@ public class CameraController : MonoBehaviour
     {
         bool menuOpen = (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen)
                      || (StartMenu.Instance != null && StartMenu.Instance.IsOpen);
-        bool planetSelected = PlanetUI.Selected != null;
+        bool planetViewOpen = PlanetViewWindow.Instance != null && PlanetViewWindow.Instance.IsOpen;
 
-        // WASD pans the camera ONLY when nothing else wants the keys:
-        //  - a planet is selected  -> WASD drives the mini-map tile cursor instead
-        //  - the pause menu is open -> WASD navigates the menu instead
-        //  - following an object    -> camera is locked
-        // ...except once you're pulled back to a system/galaxy-wide view, where the mini-map cursor is
-        // irrelevant and being unable to pan across the map is simply broken.
-        bool wideView = transform.position.y > 120f;
-        bool canPan = !following && !menuOpen && (!planetSelected || wideView);
+        // WASD pans the world camera whenever the keys aren't wanted elsewhere: not while the pause menu is
+        // open, not while actively FOLLOWING a body (the camera is locked to it — press F again or click
+        // away to release), and not while the full-screen Planet View is up (it has its own map). Selecting
+        // a planet no longer blocks panning — the old mini-map tile cursor that used to claim WASD is gone,
+        // so a selected planet pans just like a selected star.
+        bool canPan = !following && !menuOpen && !planetViewOpen;
         if (canPan) HandlePanning();
 
-        // Mouse-wheel zoom is suppressed only when the cursor is over UI (so scrolling a window
-        // doesn't also zoom the world) and while the menu is open.
         // Wheel-zoom the WORLD only when the wheel isn't wanted elsewhere: not while a modal menu is open,
         // not while the full-screen Planet View is up (its own map owns the wheel there), and — the fix for
-        // the weird double action — not while the cursor is over a SCROLLABLE menu, which consumes the
-        // wheel to scroll itself. Over a NON-scrolling panel the wheel still zooms the world behind it.
-        bool planetViewOpen = PlanetViewWindow.Instance != null && PlanetViewWindow.Instance.IsOpen;
+        // the weird double action — not while the cursor is over a SCROLLABLE menu, which consumes the wheel
+        // to scroll itself. Over a NON-scrolling panel the wheel still zooms the world behind it.
         bool overScroller = UIScroll.PointerOverScroller();
         if (!menuOpen && !planetViewOpen && !overScroller) HandleHeightChange();
         else if (ZoomLog && Input.GetAxis("Mouse ScrollWheel") != 0f)
