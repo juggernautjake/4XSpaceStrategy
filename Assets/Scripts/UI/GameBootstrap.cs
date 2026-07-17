@@ -31,6 +31,9 @@ public static class GameBootstrap
 
         var _ = TooltipManager.Instance; // ensure tooltip exists
 
+        // Context-aware custom cursor (stylized pointer + select / send / loading graphics).
+        CursorManager.Create();
+
         // Main window canvas (above the scene's own UI).
         var canvas = UIFactory.CreateCanvas("RuntimeUICanvas", 100);
 
