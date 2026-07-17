@@ -70,8 +70,10 @@ public class TerraformManager : MonoBehaviour
         if (TerraformProjects.IsDone(b, t)) { reason = "already completed here"; return false; }
         if (IsRunning(b, t)) { reason = "already under way"; return false; }
 
-        // You have to be there to do the work.
-        if (b.owner != FactionManager.Player && !HasPlayerPresence(b))
+        // You have to be there to do the work — EXCEPT in Dev Mode, which disables prerequisites like this
+        // (just as it already waives the research and resource-cost gates below) so any project can be
+        // triggered for testing without staging a ship at the world first.
+        if (!GameMode.DevMode && b.owner != FactionManager.Player && !HasPlayerPresence(b))
         { reason = "send a ship to this world first"; return false; }
 
         if (!GameMode.DevMode && !string.IsNullOrEmpty(p.requiredTech) && !TechManager.IsResearched(p.requiredTech))

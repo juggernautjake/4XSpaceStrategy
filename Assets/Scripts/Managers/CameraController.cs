@@ -220,7 +220,6 @@ public class CameraController : MonoBehaviour
 
     private void Update()
     {
-        bool overUI = EventSystem.current != null && EventSystem.current.IsPointerOverGameObject();
         bool menuOpen = (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen)
                      || (StartMenu.Instance != null && StartMenu.Instance.IsOpen);
         bool planetSelected = PlanetUI.Selected != null;
@@ -237,10 +236,15 @@ public class CameraController : MonoBehaviour
 
         // Mouse-wheel zoom is suppressed only when the cursor is over UI (so scrolling a window
         // doesn't also zoom the world) and while the menu is open.
-        if (!overUI && !menuOpen) HandleHeightChange();
+        // Wheel-zoom the WORLD only when the wheel isn't wanted elsewhere: not while a modal menu is open,
+        // not while the full-screen Planet View is up (its own map owns the wheel there), and — the fix for
+        // the weird double action — not while the cursor is over a SCROLLABLE menu, which consumes the
+        // wheel to scroll itself. Over a NON-scrolling panel the wheel still zooms the world behind it.
+        bool planetViewOpen = PlanetViewWindow.Instance != null && PlanetViewWindow.Instance.IsOpen;
+        bool overScroller = UIScroll.PointerOverScroller();
+        if (!menuOpen && !planetViewOpen && !overScroller) HandleHeightChange();
         else if (ZoomLog && Input.GetAxis("Mouse ScrollWheel") != 0f)
-            Debug.Log($"[Zoom] scroll IGNORED — overUI={overUI} menuOpen={menuOpen}. " +
-                      "The wheel never reached the camera.");
+            Debug.Log($"[Zoom] scroll IGNORED — menuOpen={menuOpen} planetView={planetViewOpen} overScroller={overScroller}.");
 
         // F9 = dump the whole zoom chain. See LogZoomReport.
         if (Input.GetKeyDown(KeyCode.F9))
@@ -251,6 +255,22 @@ public class CameraController : MonoBehaviour
 
         // Home = pull back to the whole galaxy. A one-key way to see the entire map.
         if (!menuOpen && Input.GetKeyDown(KeyCode.Home)) ViewWholeGalaxy();
+
+        // F / Q = focus the current selection (fly to it and lock on). Selection no longer auto-focuses the
+        // camera, so this and the Inspector's "Focus" button are how you deliberately fly to a body/star.
+        // A selected planet goes through PlanetUI.Selected; a selected star/facility/etc. through the
+        // Inspector's current subject. Suppressed while typing into a text field so renaming a world (or a
+        // save name) doesn't yank the camera.
+        bool typingField = EventSystem.current != null && EventSystem.current.currentSelectedGameObject != null &&
+                           EventSystem.current.currentSelectedGameObject.GetComponent<TMPro.TMP_InputField>() != null;
+        if (!menuOpen && !typingField && (Input.GetKeyDown(KeyCode.F) || Input.GetKeyDown(KeyCode.Q)))
+        {
+            var sel = PlanetUI.Selected;
+            if (sel != null && sel.visualObject != null)
+                FocusAndZoom(sel.visualObject.transform, sel.surfaceSize, true);
+            else
+                InspectorWindow.Instance?.FocusCurrent();   // a selected star / facility / etc.
+        }
 
         SmoothHeightMovement();   // identical zoom smoothing whether following or not
         KeepCameraAngle();
@@ -358,22 +378,23 @@ public class CameraController : MonoBehaviour
     {
         if (t != null)
         {
-            var rends = t.GetComponentsInChildren<Renderer>();
-            bool have = false; Bounds b = default;
-            foreach (var rend in rends)
+            // Measure the BODY, not its decorations. GetComponentsInChildren would pull in the atmosphere
+            // shell, floating labels, fog, AND the orbit-ring LineRenderer — which spans the whole orbit,
+            // tens of units across. Encapsulating those set the zoom floor way out at the orbit's scale, so
+            // you could never zoom in on the planet at all — the "zoom is broken when a planet is focused"
+            // bug. The body's OWN renderer (or, failing that, its transform scale, which is set to the body
+            // size) is the true radius, and it excludes every child decoration.
+            // The first NON-LINE renderer on the body itself — its sphere mesh. Skipping LineRenderer /
+            // TrailRenderer guards against a stray line component (e.g. a prefab's leftover world-space
+            // ring) being measured instead of the body, which would blow the radius up to orbit scale and
+            // stop you zooming in at all.
+            Renderer own = null;
+            foreach (var rr in t.GetComponents<Renderer>())
+                if (rr != null && !(rr is LineRenderer) && !(rr is TrailRenderer)) { own = rr; break; }
+            if (own != null)
             {
-                if (rend == null) continue;
-                // The atmosphere shell is a child renderer LARGER than the planet (PlanetAppearance names
-                // it "Atmosphere"). Including it would put the zoom floor at the atmosphere's edge — about
-                // 1.17x the surface radius — so you could never zoom down onto the actual surface. That is
-                // the "can't zoom in close to a selected planet" bug. Measure the body, not its haze.
-                if (rend.gameObject.name == "Atmosphere") continue;
-                if (!have) { b = rend.bounds; have = true; }
-                else b.Encapsulate(rend.bounds);
-            }
-            if (have)
-            {
-                float r = Mathf.Max(b.extents.x, Mathf.Max(b.extents.y, b.extents.z));
+                var e = own.bounds.extents;
+                float r = Mathf.Max(e.x, Mathf.Max(e.y, e.z));
                 if (r > 0.0001f) return r;
             }
             float s = t.lossyScale.x * 0.5f;

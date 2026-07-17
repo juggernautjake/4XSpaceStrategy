@@ -39,7 +39,10 @@ public static class GameBootstrap
         NotificationManager.Create(canvas.transform);
 
         OrbitControlPanel.Create(canvas.transform);
-        StarInfoPanel.Create(canvas.transform);
+        // StarInfoPanel retired: clicking a star now shows only the tabbed InspectorWindow (star tabs);
+        // the simpler StarInfoPanel was a duplicate that popped up alongside it. Not instantiated. (Its
+        // habitable-zone toggle also lives on the Inspector's star Overview tab, so nothing is lost.)
+        //   StarInfoPanel.Create(canvas.transform);
         ResearchWindow.Create(canvas.transform);
         SaveLoadMenu.Create(canvas.transform);
         SpeciesWindow.Create(canvas.transform);
@@ -49,7 +52,10 @@ public static class GameBootstrap
         TerraformWindow.Create(canvas.transform);
         InspectorWindow.Create(canvas.transform);   // the tabbed panel for whatever you click on
         PlanetViewWindow.Create(canvas.transform);  // surface grid: info / build / survey overlays
-        CompactBodyPanel.Create(canvas.transform);  // right-edge readout on select; opens the full view
+        // CompactBodyPanel retired: single-clicking a body now opens the fleshed-out tabbed InspectorWindow
+        // on it (InspectorWindow.OnBodySelected) instead of a compact readout, per the user's request to
+        // keep the panel with more info and tabs. Not instantiated, so it never appears.
+        //   CompactBodyPanel.Create(canvas.transform);
         BodyUnitsPanel.Create(canvas.transform);
         // "Around Homeworld" (AssociatedObjectsWindow) retired at Raptok's request: its moon-hopping list
         // is superseded by the Planet View's moon tabs. Not instantiated, so it never subscribes to

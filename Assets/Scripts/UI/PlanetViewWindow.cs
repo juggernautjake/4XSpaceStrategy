@@ -2904,19 +2904,25 @@ public class PlanetViewWindow : MonoBehaviour
     // ---- Hover ----
     /// Screen point -> grid cell. Public so the click probe shares exactly this mapping.
     public bool ScreenToCell(Vector2 screenPos, Camera cam, out int x, out int y)
+        => ScreenToCellIn(mapRT, body, screenPos, cam, out x, out y);
+
+    // Map a screen point over ANY surface RawImage (the host map OR a moon map) to a cell in that body's
+    // surface. The texture always fills its rect (uv 0..1), so normalising the local point against the
+    // rect's own bounds yields the cell directly, at any zoom/pan.
+    bool ScreenToCellIn(RectTransform mapRect, CelestialBody b, Vector2 screenPos, Camera cam, out int x, out int y)
     {
         x = y = -1;
-        if (body?.surface == null || mapRT == null) return false;
-        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(mapRT, screenPos, cam, out Vector2 lp)) return false;
+        if (b?.surface == null || mapRect == null) return false;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(mapRect, screenPos, cam, out Vector2 lp)) return false;
 
         // The local point is relative to the rect's pivot; normalize against the rect's own bounds.
-        var r = mapRT.rect;
+        var r = mapRect.rect;
         float u = (lp.x - r.xMin) / r.width;
         float v = (lp.y - r.yMin) / r.height;
         if (u < 0f || u > 1f || v < 0f || v > 1f) return false;
 
-        x = Mathf.Clamp(Mathf.FloorToInt(u * body.surface.width), 0, body.surface.width - 1);
-        y = Mathf.Clamp(Mathf.FloorToInt(v * body.surface.height), 0, body.surface.height - 1);
+        x = Mathf.Clamp(Mathf.FloorToInt(u * b.surface.width), 0, b.surface.width - 1);
+        y = Mathf.Clamp(Mathf.FloorToInt(v * b.surface.height), 0, b.surface.height - 1);
         return true;
     }
 
@@ -2928,6 +2934,9 @@ public class PlanetViewWindow : MonoBehaviour
         if (body?.surface == null || mapRT == null) return;
         float scroll = Input.GetAxis("Mouse ScrollWheel");
         if (Mathf.Approximately(scroll, 0f)) return;
+        // A scrollable menu dragged OVER the map owns the wheel — let it scroll, don't also zoom the map.
+        // A non-scrolling panel over the map does NOT block the zoom (the wheel passes through to the map).
+        if (UIScroll.PointerOverScroller()) return;
         if (!RectTransformUtility.RectangleContainsScreenPoint(hostViewport, Input.mousePosition, null)) return;
 
         float fit = FitTilePx();
@@ -3047,6 +3056,28 @@ public class PlanetViewWindow : MonoBehaviour
         if (moonTabStrip != null && RectTransformUtility.RectangleContainsScreenPoint(moonTabStrip, Input.mousePosition, null))
             return;
 
+        // Over an open MOON map? Show that moon's tile info in the docked panel — the same biome / ore /
+        // temperature readout the main map gives — so a moon's surface is as inspectable as the planet's.
+        // Scoped to the visible moon band so a zoomed moon map's off-band overflow doesn't count.
+        if (moonLayer != null && moonLayer.gameObject.activeSelf &&
+            RectTransformUtility.RectangleContainsScreenPoint(moonLayer, Input.mousePosition, null))
+        {
+            for (int i = 0; i < moonImages.Count && i < openMoons.Count; i++)
+            {
+                var img = moonImages[i];
+                var moon = openMoons[i];
+                if (img == null || moon?.surface == null) continue;
+                if (RectTransformUtility.RectangleContainsScreenPoint(img.rectTransform, Input.mousePosition, null) &&
+                    ScreenToCellIn(img.rectTransform, moon, Input.mousePosition, null, out int mx, out int my))
+                {
+                    if (hoverInfo != null)
+                        hoverInfo.text = $"<size=11><color=#8FD0FF>{moon.name}</color></size>\n" + TileHoverText(moon, mx, my);
+                    MapHoverPanel.Instance.Hide();
+                    return;
+                }
+            }
+        }
+
         if (ScreenToCell(Input.mousePosition, null, out int x, out int y))
         {
             if (x != hoverCell.x || y != hoverCell.y)
@@ -3090,9 +3121,13 @@ public class PlanetViewWindow : MonoBehaviour
     // Tile type (coloured like the tile), its ore if one has been discovered here, and this spot's
     // temperature (coloured on PlanetTemperature's global gradient) — every field fetched from data the
     // game already tracks, nothing new stored per tile.
-    string TileHoverText(int x, int y)
+    string TileHoverText(int x, int y) => TileHoverText(body, x, y);
+
+    // Tile readout for ANY body's surface (the main planet or an open moon), so a moon map's tiles show
+    // the same biome / ore / temperature info the main map does.
+    string TileHoverText(CelestialBody b, int x, int y)
     {
-        var tile = body.surface.tiles[x, y];
+        var tile = b.surface.tiles[x, y];
         string typeHex = ColorUtility.ToHtmlStringRGB(TerrainColorMap.Get(tile.type));
         var sb = new System.Text.StringBuilder();
         sb.Append($"<b><color=#{typeHex}>{tile.type}</color></b>");
@@ -3100,7 +3135,7 @@ public class PlanetViewWindow : MonoBehaviour
         if (tile.HasOre && ResearchManager.IsDiscovered(tile.ore))
             sb.Append($"\n<color=#8FD0FF>{OreDatabase.Get(tile.ore).displayName}</color> ({tile.oreRichness * 100f:F0}% rich)");
 
-        float celsius = PlanetTemperature.CelsiusAt(body, y);
+        float celsius = PlanetTemperature.CelsiusAt(b, y);
         string tempHex = ColorUtility.ToHtmlStringRGB(PlanetTemperature.GradientColor(celsius));
         sb.Append($"\n<color=#{tempHex}>{PlanetTemperature.Label(celsius)}</color>");
 

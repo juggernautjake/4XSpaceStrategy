@@ -153,13 +153,11 @@ public partial class InspectorWindow : MonoBehaviour
     }
 
     // ---- Selection routing ----
-    // Selecting a BODY no longer opens this window (Raptok's request): the "Homeworld" tabbed pop-up is
-    // retired and everything it showed — Overview/Society/Production, Climate/Ores/Terraform, Objects and
-    // the shipyard — now lives in the Planet View, which PlanetViewWindow opens on the same event. Units,
-    // fleets and stars still inspect here exactly as before (OnUnitSelectionChanged, StarInteraction).
-    // A currently-open unit/fleet inspection is deliberately left alone — selecting a world doesn't force
-    // an unrelated ship panel shut.
-    void OnBodySelected(CelestialBody b) { /* body UI is the Planet View now — nothing to open here */ }
+    // Single-clicking a body now opens the tabbed Inspector ON it — the fleshed-out readout the user asked
+    // to keep — instead of the retired compact panel. The full-screen Planet View is the DOUBLE-click /
+    // "Open Planet View" action instead. The Inspector is right-edge anchored, so it never sits over the
+    // clicked world and can't eat the second click of a double-click.
+    void OnBodySelected(CelestialBody b) { if (b != null) Inspect(InspectorTarget.Of(b), resetTrail: true); }
 
     void OnSelectionCleared()
     {
@@ -177,6 +175,33 @@ public partial class InspectorWindow : MonoBehaviour
         if (n == 1) Inspect(InspectorTarget.Of(UnitSelection.Selected[0]), resetTrail: true);
         else if (n > 1) Inspect(InspectorTarget.FleetTarget(), resetTrail: true);
         else if (target.kind == InspectorKind.Unit || target.kind == InspectorKind.Fleet) Hide();
+    }
+
+    // Fly the camera to whatever the Inspector is currently looking at — the global "focus selection" (F)
+    // gesture routes here for a selected star / facility / etc. (planets go through PlanetUI.Selected).
+    // Resolves the subject to its on-screen transform per kind; a subject with no single transform (a
+    // fleet, or a unit whose token this window doesn't cache) is simply skipped.
+    public void FocusCurrent()
+    {
+        if (!target.IsValid) return;
+        Transform tr = null;
+        float hint = 3f;
+        switch (target.kind)
+        {
+            case InspectorKind.Body:
+            case InspectorKind.City:
+            case InspectorKind.Shipyard:
+            case InspectorKind.ResearchCenter:
+            case InspectorKind.Structure:
+                if (target.body != null && target.body.visualObject != null)
+                { tr = target.body.visualObject.transform; hint = target.body.surfaceSize; }
+                break;
+            case InspectorKind.Star:
+                tr = StarInteraction.TransformOf(target.star);
+                if (tr != null) hint = tr.lossyScale.x;
+                break;
+        }
+        if (tr != null) CameraController.Instance?.FocusAndZoom(tr, hint, true);
     }
 
     public void Inspect(InspectorTarget t, bool resetTrail = false)

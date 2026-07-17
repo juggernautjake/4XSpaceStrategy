@@ -40,8 +40,9 @@ public class StarInteraction : MonoBehaviour
                 SystemContext.Zone.Retarget(system.combinedStar, system.pivot, system.bodies);
         }
 
-        if (StarInfoPanel.Instance != null) StarInfoPanel.Instance.Show(star);
-        // The tabbed Inspector is the primary readout for anything you click, stars included.
+        // The tabbed Inspector is the ONE readout for anything you click, stars included. The old simpler
+        // StarInfoPanel was a duplicate that popped up alongside it; it's retired, so only the fleshed-out
+        // tabbed window shows now.
         InspectorWindow.Instance?.Inspect(InspectorTarget.Of(star, system), resetTrail: true);
 
         // Clicking a star no longer moves the camera either (it just shows the info + the Inspector, which
