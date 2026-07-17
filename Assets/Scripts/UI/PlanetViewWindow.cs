@@ -115,6 +115,9 @@ public class PlanetViewWindow : MonoBehaviour
     // open/close so their textures are freed rather than leaked.
     readonly List<RawImage> moonImages = new List<RawImage>();
     readonly List<Texture2D> moonTextures = new List<Texture2D>();
+    // Downscaled moon thumbnails on the tab strip itself — a separate list from the two above (those
+    // are only for OPEN moon maps), rebuilt whenever the tab strip is, and freed the same way.
+    readonly List<Texture2D> moonTabThumbTextures = new List<Texture2D>();
 
     // Build-mode state.
     SurfaceBuildingType? selected;      // null = nothing picked up
@@ -252,19 +255,19 @@ public class PlanetViewWindow : MonoBehaviour
 
         BuildZoomBar();
 
-        // The moon tab strip floats along the BOTTOM of the viewport ("the underside of the map"), one
-        // tab per moon, closest moon leftmost. Centred so it clears the bottom-left zoom bar. Rebuilt per
-        // world in SetupMoonUI.
+        // The moon tab strip is anchored inside the viewport's TOP-LEFT corner and stacks vertically,
+        // closest moon topmost (moved here from the bottom-centre row per Raptok's follow-up request).
+        // Rebuilt per world in SetupMoonUI.
         moonTabStrip = UIFactory.NewUI(gridHolder, "MoonTabs").GetComponent<RectTransform>();
-        moonTabStrip.anchorMin = new Vector2(0.5f, 0); moonTabStrip.anchorMax = new Vector2(0.5f, 0);
-        moonTabStrip.pivot = new Vector2(0.5f, 0);
-        moonTabStrip.anchoredPosition = new Vector2(0, 4f);
-        moonTabStrip.sizeDelta = new Vector2(0, 22f);
-        var mth = moonTabStrip.gameObject.AddComponent<HorizontalLayoutGroup>();
+        moonTabStrip.anchorMin = new Vector2(0, 1); moonTabStrip.anchorMax = new Vector2(0, 1);
+        moonTabStrip.pivot = new Vector2(0, 1);
+        moonTabStrip.anchoredPosition = new Vector2(6f, -6f);
+        moonTabStrip.sizeDelta = new Vector2(MoonTabSize, 0);
+        var mth = moonTabStrip.gameObject.AddComponent<VerticalLayoutGroup>();
         mth.spacing = 4; mth.childControlWidth = true; mth.childControlHeight = true;
-        mth.childForceExpandWidth = false; mth.childAlignment = TextAnchor.LowerCenter;
+        mth.childForceExpandWidth = false; mth.childForceExpandHeight = false; mth.childAlignment = TextAnchor.UpperLeft;
         var mtf = moonTabStrip.gameObject.AddComponent<ContentSizeFitter>();
-        mtf.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+        mtf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
         // Side panel: the selected tab's controls — the far-right 1/4 of the window (Raptok's layout).
         // Anchored across [MapFraction .. 1] so it's exactly the quarter the map doesn't use and scales
@@ -292,7 +295,10 @@ public class PlanetViewWindow : MonoBehaviour
         // which is harmless.
         var closeBtn = root.transform.Find("TitleBar")?.GetComponentInChildren<Button>();
         if (closeBtn != null)
+        {
             closeBtn.onClick.AddListener(() => { if (PlanetUI.Selected != null) PlanetUI.Instance?.CloseAll(); });
+            closeBtn.onClick.AddListener(() => MapHoverPanel.Instance.Hide());
+        }
 
         root.SetActive(false);
     }
@@ -302,6 +308,9 @@ public class PlanetViewWindow : MonoBehaviour
         PlanetUI.OnBodySelected -= OnBodySelected;
         PlanetUI.OnClosed -= HideOnDeselect;
         ClearMoonViews();
+        foreach (var tx in moonTabThumbTextures) if (tx != null) Destroy(tx);
+        moonTabThumbTextures.Clear();
+        if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
     }
 
     // Selecting a body now OPENS the Planet View full-screen (Raptok's request), rather than only
@@ -314,7 +323,11 @@ public class PlanetViewWindow : MonoBehaviour
 
     // Clearing the selection (click-away, Esc-driven CloseAll) closes the window with it, so the
     // full-screen view doesn't stay up over a deselected world.
-    void HideOnDeselect() { if (root != null) root.SetActive(false); }
+    void HideOnDeselect()
+    {
+        if (root != null) root.SetActive(false);
+        MapHoverPanel.Instance.Hide();
+    }
 
     public void ShowFor(CelestialBody b) => ShowFor(b, null);
 
@@ -366,6 +379,7 @@ public class PlanetViewWindow : MonoBehaviour
             return;
         }
         root.SetActive(false);
+        MapHoverPanel.Instance.Hide();
     }
 
     /// Re-draw this window if it happens to be showing `b`, after something ELSE changed that world.
@@ -2131,6 +2145,12 @@ public class PlanetViewWindow : MonoBehaviour
         Stat(orbit, "Orbital radius", () => $"{b.orbitRadius:F1}");
         Stat(orbit, "Year", () => $"{OrbitalMechanics.PeriodSeconds(b.orbitSpeed):F1}s");
         Stat(orbit, "Eccentricity", () => $"{b.eccentricity:F2}");
+        Stat(orbit, "Average Temperature", () =>
+        {
+            float c = PlanetTemperature.BodyAverageCelsius(b);
+            string hex = ColorUtility.ToHtmlStringRGB(PlanetTemperature.GradientColor(c));
+            return $"<color=#{hex}>{PlanetTemperature.Label(c)}</color>";
+        });
         Stat(orbit, "Axial tilt", () => $"{b.inclination:F0}°" + (Mathf.Abs(b.inclination) > 28f ? "  <color=#FFBF4D>(severe seasons)</color>" : ""));
         Stat(orbit, "Day length", () =>
         {
@@ -2984,12 +3004,56 @@ public class PlanetViewWindow : MonoBehaviour
                 hoverCell = new Vector2Int(x, y);
                 RecomputeHoverValidity();
             }
+            // Suppressed over the zoom bar / moon tabs / confirm dialog: they float over the same part of
+            // the map the tooltip targets, and covering their own buttons and text would be worse than no
+            // tooltip there. Re-shown every frame (not just on cell change) so it tracks the mouse WITHIN a
+            // cell.
+            if (OverFloatingMapControl()) MapHoverPanel.Instance.Hide();
+            else MapHoverPanel.Instance.ShowAtCursor(TileHoverText(x, y));
         }
-        else if (hoverCell.x >= 0)
+        else
         {
-            hoverCell = new Vector2Int(-1, -1);
-            hoverValid = false;
+            if (hoverCell.x >= 0)
+            {
+                hoverCell = new Vector2Int(-1, -1);
+                hoverValid = false;
+            }
+            MapHoverPanel.Instance.Hide();
         }
+    }
+
+    // Is the cursor over one of the small floating controls that sit ON TOP of the map (the zoom bar,
+    // the moon-tab strip, the Build confirm dialog)? Mirrors the same three rects PollMapPan already
+    // excludes from dragging, for the same reason: they float inside the viewport the tile hover-info
+    // window targets.
+    bool OverFloatingMapControl()
+    {
+        var p = Input.mousePosition;
+        if (zoomBar != null && RectTransformUtility.RectangleContainsScreenPoint(zoomBar, p, null)) return true;
+        if (moonTabStrip != null && RectTransformUtility.RectangleContainsScreenPoint(moonTabStrip, p, null)) return true;
+        if (confirmPanel != null && confirmPanel.gameObject.activeInHierarchy &&
+            RectTransformUtility.RectangleContainsScreenPoint(confirmPanel, p, null)) return true;
+        return false;
+    }
+
+    // Tile type (coloured like the tile), its ore if one has been discovered here, and this spot's
+    // temperature (coloured on PlanetTemperature's global gradient) — every field fetched from data the
+    // game already tracks, nothing new stored per tile.
+    string TileHoverText(int x, int y)
+    {
+        var tile = body.surface.tiles[x, y];
+        string typeHex = ColorUtility.ToHtmlStringRGB(TerrainColorMap.Get(tile.type));
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<b><color=#{typeHex}>{tile.type}</color></b>");
+
+        if (tile.HasOre && ResearchManager.IsDiscovered(tile.ore))
+            sb.Append($"\n<color=#8FD0FF>{OreDatabase.Get(tile.ore).displayName}</color> ({tile.oreRichness * 100f:F0}% rich)");
+
+        float celsius = PlanetTemperature.CelsiusAt(body, y);
+        string tempHex = ColorUtility.ToHtmlStringRGB(PlanetTemperature.GradientColor(celsius));
+        sb.Append($"\n<color=#{tempHex}>{PlanetTemperature.Label(celsius)}</color>");
+
+        return sb.ToString();
     }
 
     void RecomputeHoverValidity()
@@ -3045,6 +3109,7 @@ public class PlanetViewWindow : MonoBehaviour
     const float MoonBandBottomFrac = 0.64f;   // moon band spans [this .. 1] of the height (a gap between)
     const float MoonMapMargin = 12f;
     const float MoonMapGap = 18f;             // spacing between the two moon maps so they read as separate
+    const float MoonTabSize = 18f;            // square tab side — the height of the OLD text tabs, never larger
 
     // Moons closest to the host first (leftmost tab), ordered by orbit radius.
     List<CelestialBody> MoonsClosestFirst()
@@ -3067,6 +3132,8 @@ public class PlanetViewWindow : MonoBehaviour
     void BuildMoonTabStrip()
     {
         if (moonTabStrip == null) return;
+        foreach (var tx in moonTabThumbTextures) if (tx != null) Destroy(tx);
+        moonTabThumbTextures.Clear();
         for (int i = moonTabStrip.childCount - 1; i >= 0; i--) Destroy(moonTabStrip.GetChild(i).gameObject);
 
         var moons = MoonsClosestFirst();
@@ -3077,10 +3144,12 @@ public class PlanetViewWindow : MonoBehaviour
         {
             var captured = m;
             bool open = openMoons.Contains(m);
-            var btn = UIFactory.Button(moonTabStrip, m.name, () => ToggleMoon(captured), 18);
+            // No name label — a small square showing the moon itself, per Raptok's follow-up request.
+            var btn = UIFactory.Button(moonTabStrip, "", () => ToggleMoon(captured), MoonTabSize);
             var le = btn.GetComponent<LayoutElement>();
             if (le == null) le = btn.gameObject.AddComponent<LayoutElement>();
-            le.preferredWidth = 96; le.minWidth = 60; le.flexibleWidth = 0;
+            le.preferredWidth = MoonTabSize; le.minWidth = MoonTabSize;
+            le.flexibleWidth = 0; le.flexibleHeight = 0;
 
             // Active-tab tint like the main strip: an open moon reads as the selected one.
             var colors = btn.colors;
@@ -3088,8 +3157,16 @@ public class PlanetViewWindow : MonoBehaviour
             colors.highlightedColor = colors.normalColor;
             colors.selectedColor = colors.normalColor;
             btn.colors = colors;
-            var lbl = btn.GetComponentInChildren<TMP_Text>();
-            if (lbl != null) { lbl.fontSize = UITheme.SmallSize; lbl.color = open ? Color.white : UITheme.SubText; }
+
+            // A downscaled image of the moon, fetched from the same renderer the open moon maps already
+            // use (SurfaceTextureRenderer.BuildGrid) — no new asset, just a smaller RawImage of it.
+            var thumbGO = UIFactory.NewUI(btn.transform, "Thumb");
+            var thumbImg = thumbGO.AddComponent<RawImage>();
+            thumbImg.raycastTarget = false;
+            UIFactory.Stretch(thumbImg.rectTransform, 2f, 2f, 2f, 2f);
+            Texture2D tex = m.surface != null ? SurfaceTextureRenderer.BuildGrid(m) : null;
+            thumbImg.texture = tex;
+            if (tex != null) moonTabThumbTextures.Add(tex);
         }
     }
 
