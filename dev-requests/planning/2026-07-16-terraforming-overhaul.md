@@ -261,3 +261,12 @@ in real time." Costs (size×severity×tech), tech gating + the `power` magnitude
 diagnosis already exist; slices 1 + 3a deliver the real-time tile morph; slice 7 rounds out tech growth.
 Separately: consolidate ALL UI panels (not just planet ones) — tracked in the UI-consolidation doc, now
 extended to the empire/ship windows too.
+
+- **Slice 5 — map "terraform on arrival" order — built 2026-07-16.** Added the Terraform verb to the map
+  right-click order menu (`FleetMovementController`), beside survey/research/colonize — enabled when the
+  selected fleet has a terraformer, the world isn't already terraforming, and it's not a gas giant. Issues
+  `OrderKind.Terraform`; `ToggleTerraform` still has the final say on feasibility. Reviewed.
+- **Slice 2 — temperature-driven water — built 2026-07-16.** Open water now freezes to FrozenSea/Snow when
+  a world runs cold (`Classify` Terran + OceanWorld read the same `temp` PlanetTemperature reads), so
+  cooling projects visibly ice a world's seas over and warming thaws them. Biosphere/green was already
+  temperature-gated in the classifier. Reviewed.

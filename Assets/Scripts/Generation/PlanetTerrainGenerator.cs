@@ -210,6 +210,7 @@ public static class PlanetTerrainGenerator
         if (elev > 0.70f) return TerrainType.Island;
         if (elev > 0.64f) return TerrainType.Beach;
         if (lat > 0.85f)  return TerrainType.FrozenSea;
+        if (temp < 0.25f) return TerrainType.FrozenSea;   // a cooled ocean world freezes over, pole to pole
         if (elev < 0.40f && temp > 0.6f) return TerrainType.Reef;
         return TerrainType.Ocean;
     }
@@ -237,8 +238,11 @@ public static class PlanetTerrainGenerator
 
     static TerrainType Terran(float elev, float moist, float temp, float ridge)
     {
-        if (elev < 0.36f) return TerrainType.Ocean;
-        if (elev < 0.40f) return TerrainType.Beach;
+        // Open water freezes when the world runs cold — so cooling a world (orbital shades, core cooling,
+        // moving it outward) visibly ices its seas over, and warming one thaws them back. Temperature is
+        // the same value PlanetTemperature reads, so the map and the °C readout always agree.
+        if (elev < 0.36f) return temp < 0.22f ? TerrainType.FrozenSea : TerrainType.Ocean;
+        if (elev < 0.40f) return temp < 0.22f ? TerrainType.Snow : TerrainType.Beach;
 
         if (ridge > 0.82f) return TerrainType.Mountains;
         if (elev > 0.74f)  return TerrainType.Highlands;

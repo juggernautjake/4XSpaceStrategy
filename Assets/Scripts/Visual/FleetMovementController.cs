@@ -245,9 +245,16 @@ public class FleetMovementController : MonoBehaviour
             bool canSurvey = reach && !body.Surveyed && Any(group, u => u.Info.canExplore);
             bool canResearch = reach && body.Surveyed && Any(group, u => u.Info.canResearch);
             bool canColonize = reach && body.owner != FactionManager.Player && Any(group, u => u.Info.canColonize);
+            // Sending a terraformer to a world is now a first-class map order (it used to live only in the
+            // ship panel). Offered when a terraformer is present, the world isn't already terraforming, and
+            // it's a world you can actually work — a gas giant has no surface to grind. ToggleTerraform
+            // still has the final say on feasibility when the ship arrives.
+            bool canTerraform = reach && body.type != CelestialBodyType.GasGiant && !body.terraforming &&
+                                Any(group, u => u.Info.canTerraform);
             if (canSurvey) options.Add(new ContextMenu.Option($"{verb}: survey {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Survey, body, queue)));
             if (canResearch) options.Add(new ContextMenu.Option($"{verb}: research {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Research, body, queue)));
             if (canColonize) options.Add(new ContextMenu.Option($"{verb}: colonize {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Colonize, body, queue)));
+            if (canTerraform) options.Add(new ContextMenu.Option($"{verb}: terraform {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Terraform, body, queue)));
             options.Add(new ContextMenu.Option("Cancel", () => TargetIndicator.Instance?.Hide()));
             ContextMenu.Instance?.Show(mp, options);
         }
