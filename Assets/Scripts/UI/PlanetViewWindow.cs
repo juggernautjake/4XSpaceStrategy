@@ -97,6 +97,7 @@ public class PlanetViewWindow : MonoBehaviour
     RawImage mapImage, overlayImage;
     RectTransform mapRT, pieceLayer, ghostLayer;
     TMP_Text statusText;
+    TMP_Text hoverInfo;   // the docked bottom panel's "what the cursor is over" readout
 
     // Host map + moon maps. The host map lives in hostViewport (which shrinks to the bottom when any moon
     // is open); moon maps are drawn in moonLayer's top band; moonTabStrip is the row of moon tabs under
@@ -181,6 +182,8 @@ public class PlanetViewWindow : MonoBehaviour
     // pixel width so it scales with the full-screen window and can never creep past three-quarters.
     const float MapFraction = 0.75f;
     const float PanelGap = 8f;      // gap between the map's right edge and the panel
+    const float BottomPanelHeight = 96f;   // docked hover-info panel beneath the map
+    const string HoverHint = "<color=#7C8CA0>Hover a tile, structure, or point of interest for details.</color>";
 
     public static void Create(Transform parent)
     {
@@ -209,7 +212,7 @@ public class PlanetViewWindow : MonoBehaviour
         // grew the panel off the edge of the screen.
         gridHolder = UIFactory.NewUI(content, "Viewport").GetComponent<RectTransform>();
         gridHolder.anchorMin = new Vector2(0, 0); gridHolder.anchorMax = new Vector2(MapFraction, 1);
-        gridHolder.offsetMin = new Vector2(0, 34);                 // clear the status line
+        gridHolder.offsetMin = new Vector2(0, BottomPanelHeight + 4f);   // clear the docked hover panel below
         gridHolder.offsetMax = new Vector2(-PanelGap, -32);        // clear the tabs; gap before the panel
         var vpImg = gridHolder.gameObject.AddComponent<Image>();
         vpImg.color = new Color(0.02f, 0.03f, 0.05f, 1f);          // letterbox behind a small map
@@ -296,15 +299,23 @@ public class PlanetViewWindow : MonoBehaviour
         var sideHolder = UIFactory.NewUI(content, "SideHolder").GetComponent<RectTransform>();
         sideHolder.anchorMin = new Vector2(MapFraction, 0); sideHolder.anchorMax = new Vector2(1, 1);
         sideHolder.pivot = new Vector2(0.5f, 0.5f);
-        sideHolder.offsetMin = new Vector2(0f, 34f);    // clear the status bar; the map's PanelGap is on its side
+        sideHolder.offsetMin = new Vector2(0f, 8f);     // full-height control column (the docked hover panel sits under the MAP — a separate column)
         sideHolder.offsetMax = new Vector2(0f, -32f);   // clear the tab strip / title chrome
         UIFactory.ScrollView(sideHolder, out sidePanel);
 
-        // Status line sits BELOW THE MAP (the left 3/4), leaving the bottom-right quarter to the panel.
-        statusText = UIFactory.Text(content, "", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.TopLeft);
-        var srt = statusText.rectTransform;
-        srt.anchorMin = new Vector2(0, 0); srt.anchorMax = new Vector2(MapFraction, 0);
-        srt.pivot = new Vector2(0.5f, 0); srt.sizeDelta = new Vector2(0, 30); srt.anchoredPosition = Vector2.zero;
+        // Docked info panel BENEATH THE MAP (the left 3/4): shows details for whatever the cursor is over
+        // on the surface — a tile's biome/temperature/resources, a structure, or a point of interest —
+        // above the current build/survey/power status line. It replaces the floating hover popup for MAP
+        // hovers, so the readout has a fixed, readable home under the map instead of chasing the cursor. A
+        // ScrollView so a long readout is always fully visible (never clipped — UISanity would flag it).
+        var bottomHolder = UIFactory.Panel(content, "HoverPanel", UITheme.RowBg).rectTransform;
+        bottomHolder.anchorMin = new Vector2(0, 0); bottomHolder.anchorMax = new Vector2(MapFraction, 0);
+        bottomHolder.pivot = new Vector2(0.5f, 0);
+        bottomHolder.sizeDelta = new Vector2(-PanelGap, BottomPanelHeight);   // match the map's right gap
+        bottomHolder.anchoredPosition = new Vector2(-PanelGap * 0.5f, 0f);
+        UIFactory.ScrollView(bottomHolder, out RectTransform bottomContent);
+        statusText = UIFactory.WrapText(bottomContent, "", UITheme.SmallSize, UITheme.SubText);
+        hoverInfo = UIFactory.WrapText(bottomContent, HoverHint, UITheme.SmallSize, UITheme.Text);
 
         PlanetUI.OnBodySelected += OnBodySelected;
         PlanetUI.OnClosed += HideOnDeselect;
@@ -3046,8 +3057,11 @@ public class PlanetViewWindow : MonoBehaviour
             // Suppressed over the zoom bar / confirm dialog: they float over the same part of the map the
             // tooltip targets, and covering their own buttons and text would be worse than no tooltip
             // there. Re-shown every frame (not just on cell change) so it tracks the mouse WITHIN a cell.
-            if (OverFloatingMapControl()) MapHoverPanel.Instance.Hide();
-            else MapHoverPanel.Instance.ShowAtCursor(TileHoverText(x, y));
+            // The hover readout now lives in the DOCKED panel below the map, not a floating popup chasing
+            // the cursor. Over a floating map control (zoom bar / confirm dialog) there's nothing new to
+            // report, so the last readout stays up.
+            if (!OverFloatingMapControl() && hoverInfo != null) hoverInfo.text = TileHoverText(x, y);
+            MapHoverPanel.Instance.Hide();
         }
         else
         {
@@ -3056,6 +3070,7 @@ public class PlanetViewWindow : MonoBehaviour
                 hoverCell = new Vector2Int(-1, -1);
                 hoverValid = false;
             }
+            if (hoverInfo != null) hoverInfo.text = HoverHint;
             MapHoverPanel.Instance.Hide();
         }
     }

@@ -192,3 +192,12 @@ hook must keep working through the restructure.
   so it can't make things worse); `UISanity.ScanAll()` sweeps every canvas for a dev hotkey. Reviewed clean.
   Verified the scroll infrastructure is sound: `UIFactory.ScrollView` and every `Card` helper add both a
   VerticalLayoutGroup and a ContentSizeFitter, so vertical scrolling self-sizes and reveals content.
+
+- **Slice A/C — full-screen viewer + docked bottom hover panel — built 2026-07-16.** Found the 4-zone
+  full-screen layout already existed (full-screen window, tabs above the map, map = left ¾, right control
+  panel = right ¼). Added the missing docked bottom hover panel: a scroll-backed info panel beneath the
+  map showing what the cursor is over (tile biome/temperature/resources + the build/survey/power status),
+  replacing the floating popup for MAP hovers so the readout has a fixed home instead of chasing the
+  cursor. Map region resized to clear it; right control column now uses full height. ScrollView + WrapText
+  so it's never clipped (UISanity-clean). Moon-tab hover still uses the floating panel (disjoint). Reviewed
+  clean by a subagent. Not compiled (no Unity here).
