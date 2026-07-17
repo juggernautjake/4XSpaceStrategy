@@ -74,9 +74,13 @@ public static class UISanity
         var selectable = go.GetComponent<Selectable>();
         var tmp = go.GetComponent<TMP_Text>();
 
-        // 1) Zero / negative size on something meant to be seen or clicked — it renders nothing.
-        if ((graphic != null || selectable != null) && (size.x < 1f || size.y < 1f))
-            Add(issues, rt, "zero-size", $"{size.x:F0}x{size.y:F0} — will not render / cannot be clicked");
+        // 1) A CONTROL too collapsed to click (a Selectable with either axis gone), or a graphic that is
+        //    FULLY collapsed (both axes ~0). A single zero axis is normal and correct for a progress-bar
+        //    fill at 0% (0 x height) or a layout spacer, so those are deliberately NOT flagged.
+        if (selectable != null && (size.x < 1f || size.y < 1f))
+            Add(issues, rt, "zero-size", $"{size.x:F0}x{size.y:F0} — control cannot be clicked");
+        else if (selectable == null && graphic != null && size.x < 1f && size.y < 1f)
+            Add(issues, rt, "zero-size", $"{size.x:F0}x{size.y:F0} — fully collapsed, will not render");
 
         // 2) Text taller than its box, with no ScrollView/ContentSizeFitter to reveal it -> clipped.
         //    This is the exact "the element thinks it's bigger than it is" case: preferredHeight is what
