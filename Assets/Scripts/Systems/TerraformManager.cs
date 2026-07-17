@@ -29,6 +29,12 @@ public class TerraformManager : MonoBehaviour
     public IReadOnlyList<TerraformJob> Jobs => jobs;
     public event System.Action OnChanged;
 
+    // Progressive morph throttle. Regenerating a surface is ~12k cells; doing it every frame would melt
+    // the CPU, but ~once a second reads as motion, and it matches the cadence the habitability grind
+    // (ColonyManager.TickTerraform) already regenerates at.
+    const float MorphInterval = 1f;
+    float morphTimer;
+
     public static void Create()
     {
         if (Instance != null) return;
@@ -149,7 +155,39 @@ public class TerraformManager : MonoBehaviour
             Complete(j);
             changed = true;
         }
+
+        // Progressive morph: while projects load, walk each affected world's climate toward the sum of
+        // what its projects will do — previewed by their loading bars via TerraformClimate/Compose — so
+        // water fills WHILE a Water Convoy runs and the seas recede WHILE Hydrosphere Venting runs.
+        // Throttled to MorphInterval across ALL jobs (not per job) to protect the frame budget.
+        morphTimer += dt;
+        if (morphTimer >= MorphInterval)
+        {
+            morphTimer = 0f;
+            MorphActiveWorlds();
+        }
+
         if (changed) OnChanged?.Invoke();
+    }
+
+    // Recompose + regenerate every distinct world that has an unpaused job, once per throttle tick. A
+    // paused job contributes nothing to the preview (TerraformClimate.Accumulated skips it), so a world
+    // whose only jobs are paused is left alone.
+    void MorphActiveWorlds()
+    {
+        var s = SpeciesManager.Current;
+        for (int i = 0; i < jobs.Count; i++)
+        {
+            var j = jobs[i];
+            if (j == null || j.paused || j.body == null) continue;
+
+            // Only the first unpaused job per body triggers the regen — the regen already reflects every
+            // running job on that world through Compose, so a second pass would just repaint the same map.
+            bool firstForBody = true;
+            for (int k = 0; k < i; k++)
+                if (jobs[k] != null && !jobs[k].paused && jobs[k].body == j.body) { firstForBody = false; break; }
+            if (firstForBody) TerraformVisuals.Advance(j.body, s, force: true);
+        }
     }
 
     void Complete(TerraformJob j)
@@ -161,6 +199,13 @@ public class TerraformManager : MonoBehaviour
         // Some projects physically change the world, so the model has to change with them — otherwise
         // the diagnosis would keep reporting the same fault forever.
         ApplyPhysicalEffect(b, j.type);
+
+        // Bake the finished project's climate into the world. The running-job preview was pulling the
+        // world most of the way there already (delta × progress, progress ≈ 1 at the end); now the job
+        // leaves the list and its FULL delta is counted as completed instead, so recomposing here makes
+        // the hand-off seamless rather than a snap. (Reshape already regenerated for type changes; this
+        // just re-asserts terrainParams from the completed-project set.)
+        TerraformVisuals.Advance(b, SpeciesManager.Current, force: true);
 
         float ceiling = Colony.TerraformCeiling(b);
         SimpleAudio.Instance?.PlayNotify(NotifKind.Discovery);

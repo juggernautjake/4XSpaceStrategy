@@ -67,6 +67,62 @@ public static class TerraformVisuals
         return p;
     }
 
+    /// The single writer of a world's terraformed climate. Everything that reshapes a world flows
+    /// through here so the knobs never have two owners fighting over them:
+    ///   • the species-ideal grind (Blend by habitability progress) — the background morph that was
+    ///     already here, now capped by `power` so a low-tech empire can only nudge a world;
+    ///   • plus each project's own signature push (TerraformClimate.Accumulated) — completed projects at
+    ///     full strength, running ones scaled by their loading bar, which is what makes the ACTION you
+    ///     took the thing you see change: seas fill under a Water Convoy, recede under Hydrosphere Venting.
+    ///
+    /// Pure and deterministic — reads only naturalParams, habitability, completed projects and live job
+    /// progress — so it round-trips through save/load with no new per-tile state.
+    public static PlanetTerrainGenerator.NoiseParams Compose(CelestialBody b, Species s)
+    {
+        var natural = b != null ? b.naturalParams : PlanetTerrainGenerator.NoiseParams.Default;
+        if (b == null) return natural;
+
+        float power = TerraformPower(b);
+
+        // Background: the species-ideal blend, its reach capped by how much terraforming tech you have.
+        var p = Blend(natural, Ideal(s), Progress(b) * power);
+
+        // Foreground: the specific projects run on THIS world, also scaled by power.
+        var d = TerraformClimate.Accumulated(b);
+        p.heat      = Mathf.Clamp(p.heat      + d.heat      * power, 0.30f, 2.20f);
+        p.moisture  = Mathf.Clamp(p.moisture  + d.moisture  * power, 0.20f, 2.00f);
+        p.elevation = Mathf.Clamp(p.elevation + d.elevation * power, 0.30f, 2.00f);
+        p.ridge     = Mathf.Clamp(p.ridge     + d.ridge     * power, 0.30f, 2.00f);
+        return p;
+    }
+
+    /// How far your civilization can push a world away from what nature made it — the transformation
+    /// MAGNITUDE, distinct from SpeedFactor's transformation SPEED. This is the "small nudges early, total
+    /// reshaping only at max tech" curve the design asks for: an early empire can lift an almost-habitable
+    /// world the last few points, but genuinely remaking a world waits on the deep Expansion tree.
+    ///
+    /// Ceiling bonus stands in for "how much terraforming tech you have" (it sums across the whole X-series
+    /// and the Expansion doctrines), empire level for civilizational reach; a big or badly-suited world is
+    /// harder to move than a small nearly-right one, so it needs more tech to reach the same power.
+    public static float TerraformPower(CelestialBody b)
+    {
+        float techPart  = Mathf.Clamp01(TechEffects.TerraformCeilingBonus / 150f);
+        float levelPart = Mathf.Clamp01((EmpireTech.Level - 1) / 10f);
+        float progress  = 0.5f * techPart + 0.5f * levelPart;   // 0 raw start .. 1 deep tree + high level
+        float power = Mathf.Lerp(0.15f, 1f, progress);
+
+        // A big world is harder to reshape EARLY, but tech buys that back: the size penalty is itself
+        // lerped away by `progress`, so a giant still reaches full power once the deep tree is in — it
+        // just needs more tech to get there than a small world does, rather than being permanently capped.
+        if (b != null)
+        {
+            float sizePenalty = Mathf.Lerp(1f, 0.6f, Mathf.Clamp01((b.surfaceSize - 6f) / 12f));
+            power *= Mathf.Lerp(sizePenalty, 1f, progress);
+        }
+
+        return Mathf.Clamp(power, 0.12f, 1f);
+    }
+
     /// How far along the reshaping is, 0..1.
     ///
     /// Keyed on habitability against the colonisation floor rather than against 100: reaching the floor
@@ -100,7 +156,7 @@ public static class TerraformVisuals
         if (!force && Mathf.Abs(b.habitability - b.lastTerraformRenderHab) < RegenStep) return false;
 
         b.lastTerraformRenderHab = b.habitability;
-        b.terrainParams = Blend(b.naturalParams, Ideal(s), Progress(b));
+        b.terrainParams = Compose(b, s);
 
         // Same seed, so the same continents — only the climate on them changes.
         b.surface = PlanetTerrainGenerator.GenerateSurface(b);

@@ -214,6 +214,18 @@ nearly-right one.
 - **Determinism / saves.** No new per-tile save data. The only new persisted state is in-flight orbit
   migration (slice 4). Everything else is derived from already-saved fields.
 
+## Build log
+
+- **Slice 1 (1a+1b+1c) — built 2026-07-16.** `TerraformClimate.cs` (per-project knob deltas +
+  `Accumulated`), `TerraformVisuals.Compose`/`TerraformPower`, and the throttled morph + completion bake
+  in `TerraformManager`. Reviewed by two subagents (compile-clean; logic sound). Review caught that the
+  generator gates **open water on elevation, not moisture** — so water-in projects now LOWER elevation
+  (basins flood) and water-out RAISE it (land emerges); moisture is vegetation only. Also made the
+  `power` size-penalty tech-buy-back-able so big worlds still reach full power at max tech.
+  **Scope note:** this is WITHIN-TYPE morph. Worlds with no water biome (barren/airless) or frozen-only
+  water (ice) can't grow liquid seas from a knob alone — that needs the directed TYPE transition, which
+  makes **slice 3a a priority**, not an afterthought. Not compiled (no Unity in this env).
+
 ## Order & dependencies
 
 1a → 1b → 1c is the critical path. 2, 3, 4, 5, 6, 7 build on it and can land in any order after 1c
