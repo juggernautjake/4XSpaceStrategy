@@ -210,7 +210,12 @@ public class TerraformManager : MonoBehaviour
             var j = jobs[i];
             if (j == null || j.type != TerraformProjectType.WorldRemodelling || j.body == null) continue;
             j.body.remodelToType = (int)ResolveRemodelTarget(j);
-            if (!j.paused) j.body.remodelT = j.Progress;
+            // Unconditional (not gated on !paused): j.Progress is already frozen while paused — elapsed
+            // stops advancing — so this holds the transition during a pause in live play AND correctly
+            // rebuilds remodelT (which is NonSerialized) from the resumed job after a load, including a
+            // load of a remodel that was PAUSED when saved. The old !paused guard silently left a
+            // paused-then-saved remodel rendering at 0% until it was unpaused.
+            j.body.remodelT = j.Progress;
         }
 
         // Progressive morph: while projects load, walk each affected world's climate toward the sum of

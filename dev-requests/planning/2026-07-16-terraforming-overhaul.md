@@ -270,3 +270,17 @@ extended to the empire/ship windows too.
   a world runs cold (`Classify` Terran + OceanWorld read the same `temp` PlanetTemperature reads), so
   cooling projects visibly ice a world's seas over and warming thaws them. Biosphere/green was already
   temperature-gated in the classifier. Reviewed.
+
+- **Slice 8 — whole-diff review — done 2026-07-16.** A subagent reviewed all five terraforming slices
+  together for cross-slice interactions. Verdict: integration sound — correct Update ordering (remodel
+  state written before Compose reads it), no double-count at completion, mutually-exclusive orbit/remodel
+  finalizers, no per-frame surface regen (bounded ~1/s), deterministic, coherent freeze↔remodel↔morph
+  interaction, and save/load resumes a mid-(orbit+remodel+water) state. Found and FIXED one real
+  save/load bug: a remodel PAUSED at save time loaded rendering 0% because `remodelT` is NonSerialized
+  and a `!paused` guard skipped rebuilding it — the guard was unnecessary (Progress is frozen while
+  paused) and was removed. Remaining notes were low-severity/cosmetic (a tiny completion climate pop on
+  already-habitable worlds; venting not rebasing naturalParams like remodel does) — left as-is.
+
+**Terraforming engine: COMPLETE** (slices 1, 4, 3a, 5, 2 + whole-diff review). Remaining terraforming
+UX — the directed any→any target chooser, dramatic named options, and console polish — is UI and lands
+with the UI-consolidation Terraform tab, so it isn't built twice.
