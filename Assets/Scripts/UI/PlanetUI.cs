@@ -96,15 +96,39 @@ public class PlanetUI : MonoBehaviour
         // Gated on the SELECTION, not on the (now-retired) bottom-left panel's visibility. This is what
         // still clears the selection — and fires OnClosed so every follower window closes — when you
         // click empty space, even though the panel that used to drive it is gone.
-        if (Selected == null) return;
-
-        // Esc is handled by EscapeMenu (pause menu); planet UI closes via click-outside or the X button.
-        if (Input.GetMouseButtonDown(0) && !justOpened && EventSystem.current != null &&
-            !EventSystem.current.IsPointerOverGameObject())
-        {
-            CloseAll();
-        }
+        // A left-click on empty space (not over UI) means "I'm done looking at this". justOpened guards the
+        // very click that opened the current selection.
+        bool clickAway = Input.GetMouseButtonDown(0) && !justOpened && EventSystem.current != null &&
+                         !EventSystem.current.IsPointerOverGameObject();
         if (justOpened) justOpened = false;
+
+        if (Selected != null)
+        {
+            // Esc is handled by EscapeMenu (pause menu); planet UI closes via click-outside or the X button.
+            if (clickAway) CloseAll();
+            return;
+        }
+
+        // No planet selected — but clicking a STAR leaves the camera FOLLOWING it, and nothing here used to
+        // release that (CloseAll only ran with a planet selected), so a star stayed locked under the camera
+        // until you clicked another body. A genuine empty-space click (the world ray hits nothing) now lets
+        // go of it. The raycast is what stops the click that FOCUSED the star from also clearing it on the
+        // same frame — that click lands on the star's collider, not on empty space.
+        if (clickAway && CameraController.Instance != null && CameraController.Instance.IsFollowing)
+        {
+            var mainCam = Camera.main;
+            // Infinite range: a star focused from a galaxy-scale zoom-out is thousands of units away, and a
+            // short ray would fall short of it and wrongly read "empty space" — clearing the follow the
+            // same frame the click set it (OnMouseDown runs before this Update).
+            bool hitNothing = mainCam == null ||
+                              !Physics.Raycast(mainCam.ScreenPointToRay(Input.mousePosition), out _, Mathf.Infinity);
+            if (hitNothing)
+            {
+                CameraController.Instance.ClearFocus();
+                ObjectLabelManager.Instance?.Hide();
+                StarInfoPanel.Instance?.Hide();
+            }
+        }
     }
 
     public void Show(CelestialBody body)

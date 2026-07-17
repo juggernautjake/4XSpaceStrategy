@@ -359,10 +359,20 @@ public class CameraController : MonoBehaviour
         if (t != null)
         {
             var rends = t.GetComponentsInChildren<Renderer>();
-            if (rends.Length > 0)
+            bool have = false; Bounds b = default;
+            foreach (var rend in rends)
             {
-                var b = rends[0].bounds;
-                for (int i = 1; i < rends.Length; i++) b.Encapsulate(rends[i].bounds);
+                if (rend == null) continue;
+                // The atmosphere shell is a child renderer LARGER than the planet (PlanetAppearance names
+                // it "Atmosphere"). Including it would put the zoom floor at the atmosphere's edge — about
+                // 1.17x the surface radius — so you could never zoom down onto the actual surface. That is
+                // the "can't zoom in close to a selected planet" bug. Measure the body, not its haze.
+                if (rend.gameObject.name == "Atmosphere") continue;
+                if (!have) { b = rend.bounds; have = true; }
+                else b.Encapsulate(rend.bounds);
+            }
+            if (have)
+            {
                 float r = Mathf.Max(b.extents.x, Mathf.Max(b.extents.y, b.extents.z));
                 if (r > 0.0001f) return r;
             }
