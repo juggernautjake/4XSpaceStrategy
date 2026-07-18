@@ -16,6 +16,18 @@ public static class PlanetTerrainGenerator
         { scale = 1f, elevation = 1f, moisture = 1f, heat = 1f, ridge = 1f };
     }
 
+    // "Water Level" bounds — the Terrain Sandbox's Elevation slider's old range, kept as the amplitude
+    // window the Water Level slider maps onto (see WaterLevelFromElevation/ElevationFromWaterLevel).
+    public const float ElevationMin = 0.3f, ElevationMax = 2f;
+
+    // Lower elevation amplitude means more of the noise field falls below the biome classifiers' water
+    // thresholds (Terran/OceanWorld/Ice all threshold low elev as water), so "more water" is the LOW end
+    // of elevation. Water Level reads the opposite way round (full = fully covered), hence the inversion.
+    // Public/shared so both the sandbox UI (PlanetViewWindow) and terraforming gates (BiosphereRules) read
+    // "how much water" through the one place that knows how elevation maps to it.
+    public static float WaterLevelFromElevation(float elevation) => Mathf.InverseLerp(ElevationMax, ElevationMin, elevation);
+    public static float ElevationFromWaterLevel(float waterLevel) => Mathf.Lerp(ElevationMax, ElevationMin, waterLevel);
+
     public struct Sample
     {
         public TerrainType terrain;
@@ -118,6 +130,15 @@ public static class PlanetTerrainGenerator
             float mask = FBm(fx * 0.6f + seed + 211f, fy * 0.6f + seed + 173f, 3);
             if (mask < body.remodelT) classifyType = (CelestialBodyType)body.remodelToType;
         }
+
+        // A world with no active biosphere (CelestialBody.biosphereActive — see BiosphereRules) has no
+        // plant cover regardless of how wet its moisture noise field rolled. Clamped HERE, before both the
+        // classifier and the exposed Sample, so the rendered tile and the moisture value SurfaceIndex's
+        // Fertile/Solar overlays read never disagree with each other. Only Terran-classified (RockyPlanet)
+        // worlds care about this — GasGiant's cloud bands and Ice's crystal fields use moisture for
+        // reasons that have nothing to do with plant life, so they're deliberately left untouched.
+        if (classifyType == CelestialBodyType.RockyPlanet && !body.biosphereActive)
+            moisture = Mathf.Min(moisture, 0.1f);
 
         TerrainType t = Classify(classifyType, elevation, moisture, temperature, ridge, lat);
 
@@ -257,6 +278,11 @@ public static class PlanetTerrainGenerator
         if (ridge > 0.82f) return TerrainType.Mountains;
         if (elev > 0.74f)  return TerrainType.Highlands;
         if (elev > 0.66f)  return TerrainType.Hills;
+
+        // No-biosphere flooring (CelestialBody.biosphereActive) already happened in SampleNormalized
+        // before moist reached here, so this function doesn't need to know about it at all — moist is
+        // just moist, and the Sample exposed to SurfaceIndex's Fertile/Solar overlays used the same
+        // floored value, so the map and the overlays can't disagree.
 
         if (temp < 0.28f)
         {

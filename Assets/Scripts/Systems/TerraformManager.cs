@@ -90,6 +90,15 @@ public class TerraformManager : MonoBehaviour
         if (p.applies != null && !p.applies(b, s))
         { reason = "not possible on this kind of world"; return false; }
 
+        // Microbial Seeding is the one project whose success genuinely depends on the world's physical
+        // state (water level + temperature) rather than just its type — warn before the player spends
+        // resources on a seeding attempt that's going to fail.
+        if (t == TerraformProjectType.MicrobialSeeding)
+        {
+            string biosphereWarning = BiosphereRules.MicrobialSeedingWarning(b);
+            if (biosphereWarning != null) { reason = biosphereWarning; return false; }
+        }
+
         int m = TerraformProjects.MetalCost(p, b), e = TerraformProjects.EnergyCost(p, b), w = TerraformProjects.WaterCost(p, b);
         if (!GameMode.DevMode &&
             (PlayerEconomy.Get(ResourceType.Metal) < m || PlayerEconomy.Get(ResourceType.Energy) < e ||
@@ -357,6 +366,13 @@ public class TerraformManager : MonoBehaviour
                 if (b.resources != null) b.resources.Add(ResourceType.Water, -b.resources.Get(ResourceType.Water) * 0.7f);
                 if (b.type == CelestialBodyType.OceanPlanet) Reshape(b, CelestialBodyType.RockyPlanet);
                 else RescoreType(b);
+                break;
+
+            // The first step for a world that didn't generate with one — see BiosphereRules. Meeting the
+            // water/temperature band alone was never enough (CanStart already checked it was, here), this
+            // is what actually switches the world on.
+            case TerraformProjectType.MicrobialSeeding:
+                b.biosphereActive = true;
                 break;
 
             // WorldRemodelling is handled in Complete (dithered over the project's duration and finalized

@@ -111,6 +111,7 @@ public static class GameStateSerializer
             shipyardLevel = b.shipyardLevel, researchCenterLevel = b.researchCenterLevel,
             population = b.population, cities = b.cities,
             terraforming = b.terraforming, terraformability = b.terraformability,
+            biosphereActive = b.biosphereActive,
             terraformProjects = b.terraformProjects != null ? new List<int>(b.terraformProjects) : new List<int>(),
             placedBuildings = b.placedBuildings != null ? new List<PlacedBuilding>(b.placedBuildings) : new List<PlacedBuilding>(),
             deepSurveyed = b.deepSurveyed, cityGrowthTimer = b.cityGrowthTimer,
@@ -272,6 +273,7 @@ public static class GameStateSerializer
             shipyardLevel = dto.shipyardLevel, researchCenterLevel = dto.researchCenterLevel,
             population = dto.population, cities = dto.cities,
             terraforming = dto.terraforming, terraformability = dto.terraformability,
+            biosphereActive = dto.biosphereActive,
             birthrightClaim = dto.birthrightClaim, settled = dto.settled,
             visited = dto.visited, explorationProgress = dto.explorationProgress
         };

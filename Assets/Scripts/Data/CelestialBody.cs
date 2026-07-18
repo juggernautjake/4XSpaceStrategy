@@ -142,6 +142,13 @@ public class CelestialBody
     public bool terraforming = false;        // an active terraforming project raising habitability
     public float researchProgress = 0f;      // 0..1 deep-research completion (research ship / centre)
 
+    // Does this world have living plant life at all? Set once at generation time (see
+    // BiosphereRules.GeneratesWithBiosphere) for worlds that started out warm and wet enough to sustain
+    // one; everything else generates sterile. Meeting the water/temperature conditions LATER through
+    // terraforming does not turn this on by itself — a barren world needs Microbial Seeding (or Forest
+    // Seeding) to actually take the first step, same as in reality. See BiosphereRules.
+    public bool biosphereActive = false;
+
     [System.NonSerialized] public StarData hostStar;          // the star this body belongs to
     [System.NonSerialized] public StarSystemData system;      // the system this body belongs to
     [System.NonSerialized] public List<Unit> units = new List<Unit>();  // units currently here

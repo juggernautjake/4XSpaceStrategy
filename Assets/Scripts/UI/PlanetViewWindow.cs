@@ -2047,10 +2047,6 @@ public class PlanetViewWindow : MonoBehaviour
     // terrainParams and then had to remember to refresh three different viewers by name — the low-res
     // grid, the detailed map, and the 3D globe. Two of those are gone now, and living inside the map it
     // edits means the result is right there as you drag rather than in another window you have to find.
-    // Elevation amplitude bounds the Water Level slider maps onto (unchanged from the old Elevation
-    // slider's range, so terraforming's existing elevation deltas and TerrainVariance's random rolls
-    // stay inside what the slider can display).
-    const float ElevationMin = 0.3f, ElevationMax = 2f;
     // Widened mostly toward the cold end so an actually-frozen world is reachable (at 0.05 the equator
     // itself can't clear ~0.06, so every biome classifier's coldest branch fires everywhere). The hot end
     // was already saturating (SampleNormalized clamps temperature to 0..1) well below the old max in the
@@ -2062,13 +2058,6 @@ public class PlanetViewWindow : MonoBehaviour
     // that's actively terraforming — only on one that isn't.
     const float TempMin = 0.05f, TempMax = 2.2f;
 
-    // Lower elevation amplitude means more of the noise field falls below the biome classifiers' water
-    // thresholds (see PlanetTerrainGenerator's Terran/OceanWorld/Ice), so "more water" is the LOW end of
-    // elevation. Water Level should read the opposite way round (full right = fully covered), hence the
-    // inversion here rather than just relabelling the raw amplitude slider.
-    static float WaterLevelFromElevation(float elevation) => Mathf.InverseLerp(ElevationMax, ElevationMin, elevation);
-    static float ElevationFromWaterLevel(float waterLevel) => Mathf.Lerp(ElevationMax, ElevationMin, waterLevel);
-
     void BuildTerrainPanel()
     {
         Header("TERRAIN SANDBOX");
@@ -2076,9 +2065,20 @@ public class PlanetViewWindow : MonoBehaviour
 
         var p = body.terrainParams;
         SliderRow("Feature scale", "continent size", 0.4f, 3f, p.scale, v => SetTerrain(0, v));
-        SliderRow("Water Level", "dry world <-> fully covered", 0f, 1f, WaterLevelFromElevation(p.elevation),
-            v => SetTerrain(1, ElevationFromWaterLevel(v)));
-        SliderRow("Moisture", "dry vs lush", 0.3f, 2f, p.moisture, v => SetTerrain(2, v));
+        SliderRow("Water Level", "dry world <-> fully covered", 0f, 1f,
+            PlanetTerrainGenerator.WaterLevelFromElevation(p.elevation),
+            v => SetTerrain(1, PlanetTerrainGenerator.ElevationFromWaterLevel(v)));
+
+        bool canGrow = BiosphereRules.CanSustainBiosphere(body);
+        float bioCeiling = canGrow ? 2f : 0.3f;
+        SliderRow("BioSphere", canGrow ? "sparse <-> lush plant life" : "capped — see note below",
+            0.3f, bioCeiling, Mathf.Min(p.moisture, bioCeiling), v => SetTerrain(2, v));
+        if (!canGrow)
+        {
+            string why = BiosphereRules.WhyCapped(body) ?? "conditions aren't met";
+            Note($"<color=#FF8F5C>BioSphere capped:</color> {why}.");
+        }
+
         SliderRow("Temperature", "extreme cold <-> extreme heat", TempMin, TempMax, p.heat, v => SetTerrain(3, v));
 
         Header("SEED");
@@ -2109,7 +2109,7 @@ public class PlanetViewWindow : MonoBehaviour
         UIFactory.LabeledSlider(card, "", min, max, value, onChanged, "F2", 34f);
     }
 
-    // 0=scale 1=elevation 2=moisture 3=heat 4=ridge
+    // 0=scale 1=elevation(Water Level) 2=moisture(BioSphere) 3=heat 4=ridge
     void SetTerrain(int which, float v)
     {
         if (body == null) return;
@@ -2118,7 +2118,9 @@ public class PlanetViewWindow : MonoBehaviour
         {
             case 0: p.scale = v; break;
             case 1: p.elevation = v; break;
-            case 2: p.moisture = v; break;
+            // Re-checked here (not just at the slider's max bound) so a BioSphere value set before
+            // conditions changed can't linger above the ceiling once something else moves it.
+            case 2: p.moisture = Mathf.Min(v, BiosphereRules.CanSustainBiosphere(body) ? 2f : 0.3f); break;
             case 3: p.heat = v; break;
             case 4: p.ridge = v; break;
         }

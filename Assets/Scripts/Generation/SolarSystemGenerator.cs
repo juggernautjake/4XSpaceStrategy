@@ -45,6 +45,11 @@ public class SolarSystemGenerator : MonoBehaviour
             body.orbitRadius = currentRadius;
             BiasHeat(body, currentRadius, currentStar);                       // climate follows distance
             TerraformVisuals.CaptureNatural(body);   // re-capture: BiasHeat is the world's real natural climate, not the pre-bias variance SeedTerrain rolled
+            // Only worlds that start out warm and wet enough get a living biosphere for free; everything
+            // else stays sterile until something like Microbial Seeding starts one (see BiosphereRules).
+            // MUST be set before the surface below is baked, or the very first render of a qualifying
+            // world would still come out sterile (the flag the classifier reads would still be false).
+            body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body);
             body.surface = PlanetTerrainGenerator.GenerateSurface(body);      // regenerate with correct heat
             body.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
             body.spinSpeed = OrbitalMechanics.Spin(body, Random.Range(0.7f, 1.3f));
@@ -73,6 +78,9 @@ public class SolarSystemGenerator : MonoBehaviour
                 BiasHeat(moon, moon.distanceFromStar, currentStar);           // same climate band as its planet
                 TerraformVisuals.CaptureNatural(moon);   // re-capture the post-bias climate as this moon's natural state
                 moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
+                // Every moon is CelestialBodyType.Moon today (no Ocean/Rocky moon subtype exists — see
+                // the Advanced Planet Generation slice), so GeneratesWithBiosphere would always be false
+                // here; biosphereActive's own default already covers that, so there's nothing to set.
                 OreGenerator.Populate(moon);
                 ResourceGenerator.GenerateResources(moon);
 
@@ -191,6 +199,11 @@ public class SolarSystemGenerator : MonoBehaviour
         bool cool = currentStarType == StarType.M || currentStarType == StarType.K;
         best.type = cool ? CelestialBodyType.OceanPlanet : CelestialBodyType.RockyPlanet;
         SeedTerrain(best);
+        // This world was just force-retyped to a habitable Rocky/Ocean type specifically to guarantee the
+        // system has one — it deserves the same biosphere check as any other qualifying world, computed
+        // fresh under its NEW type rather than left at whatever its old type produced (or the false
+        // default), and before the surface below bakes so the rendered terrain agrees with the flag.
+        best.biosphereActive = BiosphereRules.GeneratesWithBiosphere(best);
         best.surface = PlanetTerrainGenerator.GenerateSurface(best);
         OreGenerator.Populate(best);
         best.resources = new ResourceDeposit();

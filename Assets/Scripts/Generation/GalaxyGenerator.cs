@@ -113,6 +113,11 @@ public static class GalaxyGenerator
         // rolled a moment ago. It's already the species' ideal — a cradle needs no terraforming — and
         // recording it as anything else would mean terraforming it "improved" it away from itself.
         TerraformVisuals.CaptureNatural(planet);
+        // The home world is generated exactly like any other body as far as its biosphere goes — a
+        // species whose ideal cradle is Rocky/Ocean and within the liquid-water band gets one for free,
+        // same rule as everywhere else (see BiosphereRules). Set before GenerateSurface so the baked
+        // terrain reflects it immediately rather than shipping sterile-looking on turn one.
+        planet.biosphereActive = BiosphereRules.GeneratesWithBiosphere(planet);
         planet.surface = PlanetTerrainGenerator.GenerateSurface(planet);
         OreGenerator.Populate(planet);
         planet.resources = new ResourceDeposit();

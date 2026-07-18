@@ -92,6 +92,66 @@ public class TerraformProjectInfo
 }
 
 // ---------------------------------------------------------------------------------------------
+// Whether a world can grow (or start with) a BioSphere at all. Species-INDEPENDENT — this is about the
+// planet's own physical state (water, temperature), not whether any particular species wants it there.
+// ---------------------------------------------------------------------------------------------
+public static class BiosphereRules
+{
+    // Heuristic liquid-water band. No evaporation/vapour-pressure model exists anywhere in this codebase,
+    // so this is a plain "warm enough, not boiling away" Celsius window rather than a physically exact
+    // curve — good enough to gate Microbial Seeding and the sandbox's BioSphere slider.
+    public const float MinLiquidC = 0f, MaxLiquidC = 50f;
+    public const float MinWaterLevel = 0.15f;   // needs real coverage, not a token puddle
+
+    public static bool HasLiquidWaterClimate(CelestialBody b)
+    {
+        if (b == null) return false;
+        float c = PlanetTemperature.BodyAverageCelsius(b);
+        return c >= MinLiquidC && c <= MaxLiquidC;
+    }
+
+    public static bool HasEnoughWaterLevel(CelestialBody b) =>
+        b != null && PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation) >= MinWaterLevel;
+
+    // What a world generates WITH. Being in the liquid-water band isn't enough on its own — Rocky/Ocean
+    // worlds that roll into it start alive, everything else (barren/ice/volcanic/gas/moons/asteroids)
+    // starts sterile even if it happens to sit in the band, because meeting the band later through
+    // terraforming should NOT be enough by itself (that's the whole reason Microbial Seeding exists).
+    public static bool GeneratesWithBiosphere(CelestialBody b) =>
+        b != null &&
+        (b.type == CelestialBodyType.RockyPlanet || b.type == CelestialBodyType.OceanPlanet) &&
+        HasLiquidWaterClimate(b) && HasEnoughWaterLevel(b);
+
+    // Can this world's BioSphere value grow (or stay) above a bare floor right now?
+    public static bool CanSustainBiosphere(CelestialBody b) =>
+        b != null && b.biosphereActive && HasLiquidWaterClimate(b) && HasEnoughWaterLevel(b);
+
+    // Null = Microbial Seeding would succeed; otherwise the reason it's likely to fail, surfaced by
+    // TerraformManager.CanStart so the project button warns before the player spends resources on it.
+    public static string MicrobialSeedingWarning(CelestialBody b)
+    {
+        if (b == null) return "no world selected";
+        if (b.biosphereActive) return "already has an active biosphere";
+        if (!HasEnoughWaterLevel(b)) return "not enough water level for life to take hold";
+        if (!HasLiquidWaterClimate(b)) return "too hot or too cold for liquid water";
+        return null;
+    }
+
+    // Null = the sandbox's BioSphere slider is free to reach full lushness right now; otherwise the
+    // reason it's capped. Distinct from MicrobialSeedingWarning above: that one explains why STARTING a
+    // biosphere would fail, this one explains why an EXISTING (or not-yet-existing) one can't grow —
+    // "already active" isn't a blocker here, it's the first requirement.
+    public static string WhyCapped(CelestialBody b)
+    {
+        if (b == null) return "no world selected";
+        if (!b.biosphereActive) return "this world has no active biosphere yet — Microbial Seeding starts one on a barren world";
+        if (!HasEnoughWaterLevel(b)) return "not enough water level";
+        if (!HasLiquidWaterClimate(b)) return "too hot or too cold for liquid water";
+        return null;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Diagnosis: read a world through the current species' biology and list what's wrong with it.
 // ---------------------------------------------------------------------------------------------
 public static class TerraformDiagnosis
