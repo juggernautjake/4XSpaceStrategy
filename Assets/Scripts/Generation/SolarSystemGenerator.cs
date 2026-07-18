@@ -35,10 +35,22 @@ public class SolarSystemGenerator : MonoBehaviour
         for (int i = 0; i < bodyCount; i++)
         {
             // Type is chosen by ACTUAL temperature at this radius for this star.
-            CelestialBodyType type = RollBodyByTemperature(currentRadius, currentStar);
+            CelestialBodyType type = RollBodyByTemperature(currentRadius, currentStar, out float rolledWaterLevel);
 
             CelestialBody body = MakeBody(type);
             body.name = NameGenerator.PlanetName(systemName, i);
+
+            // The SAME roll that decided Ocean/Rocky/Barren in the temperate band also sets the body's
+            // actual water coverage, so the type and the map agree (a bare-minimum "Ocean" world reads as
+            // mostly islands; a maxed-out one is fully drowned — exactly the request's own description
+            // of the Water Level slider). Bands where waterLevel wasn't rolled (-1 sentinel) are
+            // untouched, keeping their existing TerrainVariance-rolled elevation exactly as before.
+            if (rolledWaterLevel >= 0f)
+            {
+                var wp = body.terrainParams;
+                wp.elevation = PlanetTerrainGenerator.ElevationFromWaterLevel(rolledWaterLevel);
+                body.terrainParams = wp;
+            }
 
             // Orbital layout (data-authoritative so save/load & sandbox can round-trip it).
             body.distanceFromStar = currentRadius;
@@ -51,6 +63,11 @@ public class SolarSystemGenerator : MonoBehaviour
             // world would still come out sterile (the flag the classifier reads would still be false).
             body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body);
             body.surface = PlanetTerrainGenerator.GenerateSurface(body);      // regenerate with correct heat
+            // Ore has to be populated against THIS surface, not the provisional one MakeBody baked —
+            // that one is already gone (a fresh grid, no tile carryover). Pre-existing bug, found while
+            // reviewing an unrelated change: every top-level planet was generating with zero ore, because
+            // OreGenerator.Populate used to run inside MakeBody, against the surface this line replaces.
+            OreGenerator.Populate(body);
             body.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
             body.spinSpeed = OrbitalMechanics.Spin(body, Random.Range(0.7f, 1.3f));
             body.orbitPhase = Random.Range(0f, 360f);
@@ -223,6 +240,11 @@ public class SolarSystemGenerator : MonoBehaviour
         foreach (var m in best.moons) { m.distanceFromStar = best.distanceFromStar; ApplyHabitability(m); }
     }
 
+    // NOTE: this bake is provisional — the caller (GenerateSystem) always regenerates body.surface a
+    // second time once BiasHeat sets the world's real climate, which builds an entirely new
+    // PlanetSurface/TerrainTile grid. Populating ore against THIS surface would place it on tiles that
+    // get thrown away a moment later, so ore population deliberately happens in GenerateSystem instead,
+    // against the final surface, once — not here.
     CelestialBody MakeBody(CelestialBodyType type)
     {
         CelestialBody body = new(type) { id = _idCounter++ };
@@ -231,7 +253,6 @@ public class SolarSystemGenerator : MonoBehaviour
         body.hasTectonics = TectonicsRules.Roll(body.type, body.surfaceSize);
         SeedTerrain(body);
         body.surface = PlanetTerrainGenerator.GenerateSurface(body);
-        OreGenerator.Populate(body);
         ResourceGenerator.GenerateResources(body);
         return body;
     }
@@ -282,10 +303,24 @@ public class SolarSystemGenerator : MonoBehaviour
 
     // Body type by ACTUAL temperature (physical distance vs the star's warmth) rather than ordinal
     // slot. Oceans only ever form in the temperate band, so no water worlds hug the star.
-    CelestialBodyType RollBodyByTemperature(float distance, StarData star)
+    //
+    // `waterLevel` (out param) is -1 except in the temperate band, where it's a genuine, independent
+    // Water Level roll (0 driest .. 1 fully covered) that the CALLER then feeds straight into the body's
+    // actual terrain (see GenerateSystem, PlanetTerrainGenerator.ElevationFromWaterLevel). This is the
+    // one band where the request's "planet type should emerge from Water Level" is safe to do exactly:
+    // the cutoffs below (0.55 / 0.15) are chosen so a uniform roll reproduces the IDENTICAL Ocean/Rocky/
+    // Barren proportions (45%/40%/15%) the old bare `r` draw already had — so this is a like-for-like
+    // rewire (the type and the world's actual water coverage now come from the SAME number, instead of
+    // two unrelated rolls that could disagree, e.g. an "OceanPlanet" that TerrainVariance happened to
+    // roll bone-dry), not a balance change. Gas Giant / Ice / Asteroid frequency (the bands below) still
+    // comes from Size/temperature-band weighting exactly as before — reworking those into a fully
+    // attribute-driven pick would change how often each type appears across the whole galaxy, which
+    // needs real playtesting to calibrate and isn't attempted here (see the dev-request planning doc).
+    CelestialBodyType RollBodyByTemperature(float distance, StarData star, out float waterLevel)
     {
         float rel = distance / Mathf.Max(0.5f, TempReference(star));   // <1 hot, ~1 temperate, >1 cold
         float r = Random.value;
+        waterLevel = -1f;
 
         if (rel < 0.45f)                       // scorching — right by the star
             return r < 0.65f ? CelestialBodyType.VolcanicPlanet : CelestialBodyType.BarrenPlanet;
@@ -299,8 +334,9 @@ public class SolarSystemGenerator : MonoBehaviour
 
         if (rel <= 1.5f)                       // temperate (habitable band) — the ONLY place oceans form
         {
-            if (r < 0.45f) return CelestialBodyType.OceanPlanet;
-            if (r < 0.85f) return CelestialBodyType.RockyPlanet;
+            waterLevel = r;   // the SAME draw that decides the type also becomes its water coverage
+            if (waterLevel > 0.55f) return CelestialBodyType.OceanPlanet;
+            if (waterLevel > 0.15f) return CelestialBodyType.RockyPlanet;
             return CelestialBodyType.BarrenPlanet;
         }
 
