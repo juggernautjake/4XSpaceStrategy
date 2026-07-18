@@ -189,7 +189,7 @@ public static class PlanetTerrainGenerator
             case CelestialBodyType.OceanPlanet:    return OceanWorld(elev, temp, lat);
             case CelestialBodyType.BarrenPlanet:   return Barren(elev, ridge);
             case CelestialBodyType.Moon:
-            case CelestialBodyType.Asteroid:       return Airless(elev, ridge);
+            case CelestialBodyType.Asteroid:       return Airless(elev, temp, ridge);
             case CelestialBodyType.RockyPlanet:
             default:                               return Terran(elev, moist, temp, ridge);
         }
@@ -257,13 +257,18 @@ public static class PlanetTerrainGenerator
         return TerrainType.Wasteland;
     }
 
-    static TerrainType Airless(float elev, float ridge)
+    static TerrainType Airless(float elev, float temp, float ridge)
     {
         if (ridge > 0.85f) return TerrainType.Highlands;
         if (elev > 0.7f)   return TerrainType.MetallicCrust;
         if (elev < 0.28f)  return TerrainType.Crater;
         if (ridge > 0.72f) return TerrainType.CrystalField;
-        if (elev < 0.4f)   return TerrainType.Ice;
+        // A moon's own orbital heat (SolarSystemGenerator.BiasHeat sets terrainParams.heat from its
+        // distance from the star, same as its parent planet's band) used to be computed and stored but
+        // never actually read here — every moon showed frost in its low ground regardless of how hot its
+        // orbit ran. Same freeze threshold Terran/Ice already use, so a moon's look agrees with its own
+        // °C reading (PlanetTemperature) the same way a planet's does.
+        if (elev < 0.4f)   return temp < 0.22f ? TerrainType.Ice : TerrainType.CrackedGround;
         return TerrainType.Barren;
     }
 
