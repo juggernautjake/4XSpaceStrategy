@@ -71,11 +71,21 @@ public static class OreGenerator
         }
     }
 
+    // A tectonically active world folds richer deposits up from depth — real fault lines would make this
+    // a per-tile "near the boundary" bonus (see the request's "rare or high quality mineral deposits are
+    // more common there"), but no fault-line geometry exists yet (Advanced Planet Generation slice), so
+    // this is an honest whole-world proxy: more likely to have ore at all, and more likely for it to be
+    // a higher tier, everywhere on the planet rather than concentrated at boundaries specifically.
+    const float TectonicAffinityMul = 1.35f, TectonicTierMul = 1.25f;
+
     public static void Populate(CelestialBody body)
     {
         if (body.surface == null) return;
         var pool = PoolFor(body.type);
         if (pool.Count == 0) return;
+
+        float affinityMul = body.hasTectonics ? TectonicAffinityMul : 1f;
+        float tierMul = body.hasTectonics ? TectonicTierMul : 1f;
 
         var surface = body.surface;
         for (int x = 0; x < surface.width; x++)
@@ -85,13 +95,13 @@ public static class OreGenerator
                 var tile = surface.tiles[x, y];
                 if (tile == null) continue;
 
-                if (Random.value >= TerrainAffinity(tile.type)) continue;
+                if (Random.value >= Mathf.Min(1f, TerrainAffinity(tile.type) * affinityMul)) continue;
 
                 // Weighted pick: common ores (low tier) more likely to be selected.
                 OreType picked = WeightedPick(pool);
                 var info = OreDatabase.Get(picked);
 
-                if (Random.value > TierAcceptance(info.tier)) continue; // gated out -> stays plain
+                if (Random.value > Mathf.Min(1f, TierAcceptance(info.tier) * tierMul)) continue; // gated out -> stays plain
 
                 tile.ore = picked;
                 tile.oreRichness = Mathf.Clamp01(Random.Range(0.3f, 1f));
