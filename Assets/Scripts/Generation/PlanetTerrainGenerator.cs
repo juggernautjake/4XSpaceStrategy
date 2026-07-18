@@ -164,7 +164,7 @@ public static class PlanetTerrainGenerator
         {
             case CelestialBodyType.GasGiant:       return GasGiant(lat, elev, moist);
             case CelestialBodyType.VolcanicPlanet: return Volcanic(elev, temp, ridge, lat);
-            case CelestialBodyType.IcePlanet:      return Ice(elev, moist, ridge, lat);
+            case CelestialBodyType.IcePlanet:      return Ice(elev, moist, temp, ridge, lat);
             case CelestialBodyType.OceanPlanet:    return OceanWorld(elev, temp, lat);
             case CelestialBodyType.BarrenPlanet:   return Barren(elev, ridge);
             case CelestialBodyType.Moon:
@@ -194,14 +194,24 @@ public static class PlanetTerrainGenerator
         return TerrainType.GeyserField;
     }
 
-    static TerrainType Ice(float elev, float moist, float ridge, float lat)
+    static TerrainType Ice(float elev, float moist, float temp, float ridge, float lat)
     {
+        // Same liquid-water threshold Terran freezes its oceans at (elev<0.36 -> FrozenSea below 0.22),
+        // so warming an Ice world through terraforming melts these tiles at the point Terran would
+        // refreeze them — one shared threshold rather than two climates that quietly disagree. This is
+        // what turns a maxed-out Water Level slider from an ice-covered world into an ocean world as the
+        // Temperature slider (or terraforming) pushes it above freezing.
+        bool frozen = temp < 0.22f;
         if (ridge > 0.8f)  return TerrainType.Mountains;
-        if (elev > 0.72f)  return TerrainType.Glacier;
-        if (elev < 0.3f)   return TerrainType.FrozenSea;
-        if (moist > 0.72f) return TerrainType.CrystalField;
-        if (lat < 0.25f && elev > 0.5f) return TerrainType.Snow;
-        return TerrainType.Ice;
+        if (elev > 0.72f)  return frozen ? TerrainType.Glacier : TerrainType.Highlands;
+        if (elev < 0.3f)   return frozen ? TerrainType.FrozenSea : TerrainType.Ocean;
+        if (moist > 0.72f) return frozen ? TerrainType.CrystalField : TerrainType.Lake;
+        if (lat < 0.25f && elev > 0.5f) return frozen ? TerrainType.Snow : TerrainType.Beach;
+        // The bulk mid-elevation band is genuine ice SHEET, not a frozen sea — only the low-elevation
+        // band above is actually water once melted (elev<0.3, handled above). Melting the rest into
+        // Tundra keeps "how much of the map is water" tied to elevation the same way every other
+        // classifier in this file does, instead of quietly turning a third of the map into ocean.
+        return frozen ? TerrainType.Ice : TerrainType.Tundra;
     }
 
     static TerrainType OceanWorld(float elev, float temp, float lat)
