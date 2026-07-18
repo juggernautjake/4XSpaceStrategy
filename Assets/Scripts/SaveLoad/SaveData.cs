@@ -133,6 +133,7 @@ public class BodyDTO
     public bool terraforming;
     public bool biosphereActive;    // did this world generate with (or get Microbial-Seeded into) plant life
     public float atmosphereThickness;   // 0 (vacuum) .. 1 (crushingly thick) — see AtmosphereRules
+    public bool hasTectonics;       // active plate tectonics — see TectonicsRules
     public float terraformability;
     public List<int> terraformProjects = new List<int>();   // completed TerraformProjectType ids
     public List<PlacedBuilding> placedBuildings = new List<PlacedBuilding>();   // surface-grid structures

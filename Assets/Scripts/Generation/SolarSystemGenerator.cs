@@ -74,6 +74,7 @@ public class SolarSystemGenerator : MonoBehaviour
                 moon.name = NameGenerator.MoonName(body.name, m);
                 moon.surfaceSize = Random.Range(3, 13);
                 moon.atmosphereThickness = AtmosphereRules.ForBody(moon.type, moon.surfaceSize);
+                moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.surfaceSize);
                 moon.distanceFromStar = body.distanceFromStar;   // shares the planet's solar distance
                 SeedTerrain(moon);
                 BiasHeat(moon, moon.distanceFromStar, currentStar);           // same climate band as its planet
@@ -200,8 +201,11 @@ public class SolarSystemGenerator : MonoBehaviour
         bool cool = currentStarType == StarType.M || currentStarType == StarType.K;
         best.type = cool ? CelestialBodyType.OceanPlanet : CelestialBodyType.RockyPlanet;
         // Recomputed under the NEW type (atmosphere thickness depends on type, not just size) before the
-        // biosphere check below reads it.
+        // biosphere check below reads it. Tectonics is re-rolled too — "best" may originally have been
+        // whatever type happened to orbit near the zone centre (even a GasGiant/Asteroid, which never
+        // roll tectonics), so its old roll doesn't carry over to a freshly-retyped Rocky/Ocean world.
         best.atmosphereThickness = AtmosphereRules.ForBody(best.type, best.surfaceSize);
+        best.hasTectonics = TectonicsRules.Roll(best.type, best.surfaceSize);
         SeedTerrain(best);
         // This world was just force-retyped to a habitable Rocky/Ocean type specifically to guarantee the
         // system has one — it deserves the same biosphere check as any other qualifying world, computed
@@ -224,6 +228,7 @@ public class SolarSystemGenerator : MonoBehaviour
         CelestialBody body = new(type) { id = _idCounter++ };
         body.surfaceSize = RollSurfaceSize(type, currentStarType);
         body.atmosphereThickness = AtmosphereRules.ForBody(body.type, body.surfaceSize);
+        body.hasTectonics = TectonicsRules.Roll(body.type, body.surfaceSize);
         SeedTerrain(body);
         body.surface = PlanetTerrainGenerator.GenerateSurface(body);
         OreGenerator.Populate(body);
@@ -238,6 +243,7 @@ public class SolarSystemGenerator : MonoBehaviour
         body.terrainSeed = Random.Range(0f, 10000f);
         body.continentFrequency = Mathf.Clamp(body.surfaceSize * 0.32f, 2.5f, 8f);
         TerrainVariance.Apply(body);   // give every world a distinct terrain character
+        if (body.hasTectonics) TectonicsRules.BoostRidge(body);   // active plates fold up more mountains
         // The climate nature gave it. Terraforming lerps FROM here (TerraformVisuals), so it has to be
         // captured before anything moves it.
         TerraformVisuals.CaptureNatural(body);

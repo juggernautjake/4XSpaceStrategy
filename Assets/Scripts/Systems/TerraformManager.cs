@@ -391,6 +391,14 @@ public class TerraformManager : MonoBehaviour
         // forever (wrong greenhouse warmth, wrong Solar/Wind indexes, and a former small moon reshaped
         // into a Rocky planet would stay stuck failing BiosphereRules' atmosphere gate).
         b.atmosphereThickness = AtmosphereRules.ForBody(b.type, b.surfaceSize);
+        // Same reasoning for Tectonics — Roll() is keyed on type (GasGiant/Asteroid always false), so a
+        // remodelled world needs a fresh roll under its NEW type rather than carrying over a flag that
+        // its old type earned. Note this does NOT re-apply TectonicsRules.BoostRidge's terrain effect —
+        // that only runs once, during SeedTerrain at initial generation, so the ridge amplitude a newly
+        // tectonically-active remodelled world "should" have doesn't retroactively show up here; doing so
+        // would mean re-rolling this world's whole terrain variance, which would break the "same
+        // continents, new climate" guarantee GenerateSurface below is relying on.
+        b.hasTectonics = TectonicsRules.Roll(b.type, b.surfaceSize);
 
         // The surface is derived from the body type, so it has to be rebuilt — deterministically, from
         // the same terrain seed, so the world keeps its identity (same continents, new climate).

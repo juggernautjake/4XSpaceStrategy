@@ -154,6 +154,14 @@ public class CelestialBody
     // hold thicker air. Feeds the Solar/Wind survey indexes and the BioSphere atmosphere gate.
     public float atmosphereThickness = 0f;
 
+    // Does this world have active plate tectonics? Rolled once at generation (see TectonicsRules) —
+    // ~1/3 of terrestrial planets, weighted toward larger ones; gas giants/asteroids never; moons only
+    // if large enough. Currently only feeds a mountain-building bias in the terrain noise
+    // (TectonicsRules.BoostRidge); the fault-line overlay, mountain/volcano placement ALONG faults,
+    // earthquake events and the Mineral-overlay interaction the request also asks for are unbuilt — see
+    // the Advanced Planet Generation slice in the dev-request planning doc.
+    public bool hasTectonics = false;
+
     [System.NonSerialized] public StarData hostStar;          // the star this body belongs to
     [System.NonSerialized] public StarSystemData system;      // the system this body belongs to
     [System.NonSerialized] public List<Unit> units = new List<Unit>();  // units currently here
