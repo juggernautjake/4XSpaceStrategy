@@ -2047,6 +2047,28 @@ public class PlanetViewWindow : MonoBehaviour
     // terrainParams and then had to remember to refresh three different viewers by name — the low-res
     // grid, the detailed map, and the 3D globe. Two of those are gone now, and living inside the map it
     // edits means the result is right there as you drag rather than in another window you have to find.
+    // Elevation amplitude bounds the Water Level slider maps onto (unchanged from the old Elevation
+    // slider's range, so terraforming's existing elevation deltas and TerrainVariance's random rolls
+    // stay inside what the slider can display).
+    const float ElevationMin = 0.3f, ElevationMax = 2f;
+    // Widened mostly toward the cold end so an actually-frozen world is reachable (at 0.05 the equator
+    // itself can't clear ~0.06, so every biome classifier's coldest branch fires everywhere). The hot end
+    // was already saturating (SampleNormalized clamps temperature to 0..1) well below the old max in the
+    // tropics, so 2.2 barely changes anything there; it does still shrink the polar cold cap a bit
+    // further than 2.0 did, so it's not purely inert, just mostly cold-end headroom.
+    //
+    // NOTE: on a body with active terraforming (body.terraforming == true), TerraformVisuals.Compose
+    // clamps heat back to [0.30, 2.20] every tick, so a sandbox value below 0.30 won't stick on a world
+    // that's actively terraforming — only on one that isn't.
+    const float TempMin = 0.05f, TempMax = 2.2f;
+
+    // Lower elevation amplitude means more of the noise field falls below the biome classifiers' water
+    // thresholds (see PlanetTerrainGenerator's Terran/OceanWorld/Ice), so "more water" is the LOW end of
+    // elevation. Water Level should read the opposite way round (full right = fully covered), hence the
+    // inversion here rather than just relabelling the raw amplitude slider.
+    static float WaterLevelFromElevation(float elevation) => Mathf.InverseLerp(ElevationMax, ElevationMin, elevation);
+    static float ElevationFromWaterLevel(float waterLevel) => Mathf.Lerp(ElevationMax, ElevationMin, waterLevel);
+
     void BuildTerrainPanel()
     {
         Header("TERRAIN SANDBOX");
@@ -2054,10 +2076,10 @@ public class PlanetViewWindow : MonoBehaviour
 
         var p = body.terrainParams;
         SliderRow("Feature scale", "continent size", 0.4f, 3f, p.scale, v => SetTerrain(0, v));
-        SliderRow("Elevation", "land vs water", 0.3f, 2f, p.elevation, v => SetTerrain(1, v));
+        SliderRow("Water Level", "dry world <-> fully covered", 0f, 1f, WaterLevelFromElevation(p.elevation),
+            v => SetTerrain(1, ElevationFromWaterLevel(v)));
         SliderRow("Moisture", "dry vs lush", 0.3f, 2f, p.moisture, v => SetTerrain(2, v));
-        SliderRow("Temperature", "cold vs hot", 0.3f, 2f, p.heat, v => SetTerrain(3, v));
-        SliderRow("Mountains", "ridged terrain", 0.3f, 2f, p.ridge, v => SetTerrain(4, v));
+        SliderRow("Temperature", "extreme cold <-> extreme heat", TempMin, TempMax, p.heat, v => SetTerrain(3, v));
 
         Header("SEED");
         var seed = Card();
