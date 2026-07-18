@@ -58,7 +58,7 @@ public static class SurfaceIndex
             case SurfaceIndexKind.Mineral: return Mineral(f, t);
             case SurfaceIndexKind.Heat: return Heat(b, f);
             case SurfaceIndexKind.Fertile: return Fertile(f);
-            case SurfaceIndexKind.Wind: return Wind(f);
+            case SurfaceIndexKind.Wind: return Wind(b, f);
             case SurfaceIndexKind.Solar: return Solar(b, f);
             case SurfaceIndexKind.Water: return Water(b, f, x, y);
             default: return 0f;
@@ -175,7 +175,9 @@ public static class SurfaceIndex
     // ---- WIND: where turbines pay ----
     // Exposure. High, open ground and coastlines get the wind; forests and valleys are sheltered.
     // Big temperature swings drive weather, so poles and coasts (land next to sea) are gusty.
-    static float Wind(PlanetTerrainGenerator.Sample f)
+    // Wind needs AIR to move at all — a thin-to-no atmosphere body (most moons, all asteroids) can't
+    // generate any real weather regardless of how exposed its terrain looks.
+    static float Wind(CelestialBody b, PlanetTerrainGenerator.Sample f)
     {
         float exposure = f.elevation * 0.5f + f.ridge * 0.18f;
         float open = 1f - Shelter(f.terrain);
@@ -184,7 +186,7 @@ public static class SurfaceIndex
 
         float v = exposure * 0.42f + open * 0.24f + thermal * 0.2f + polar * 0.24f;
         if (f.water) v += 0.18f;                                   // nothing to break the wind at sea
-        return Mathf.Clamp01(v * 1.25f);
+        return Mathf.Clamp01(v * 1.25f) * Mathf.Clamp01(b.atmosphereThickness);
     }
 
     static float Shelter(TerrainType t)
@@ -212,7 +214,11 @@ public static class SurfaceIndex
         // star, so a far, cold world's sunniest desert still can't match a close one's.
         float insolation = Mathf.Clamp01(b.terrainParams.heat / 1.4f);
 
-        float v = (sunAngle * 0.45f + clear * 0.4f + altitude) * Mathf.Lerp(0.45f, 1.15f, insolation);
+        // A thick atmosphere blocks/reflects sunlight before it reaches the panels (Venus, not Mercury);
+        // a thin-to-no atmosphere world loses nothing on the way down.
+        float atmBlock = Mathf.Lerp(1f, 0.1f, Mathf.Clamp01(b.atmosphereThickness));
+
+        float v = (sunAngle * 0.45f + clear * 0.4f + altitude) * Mathf.Lerp(0.45f, 1.15f, insolation) * atmBlock;
         if (f.terrain == TerrainType.Storm) v *= 0.25f;            // permanent cloud
         return Mathf.Clamp01(v);
     }

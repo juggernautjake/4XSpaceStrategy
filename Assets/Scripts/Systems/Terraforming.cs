@@ -103,6 +103,11 @@ public static class BiosphereRules
     public const float MinLiquidC = 0f, MaxLiquidC = 50f;
     public const float MinWaterLevel = 0.15f;   // needs real coverage, not a token puddle
 
+    // Below this, CelestialBody.atmosphereThickness reads as "too thin to hold onto anything living"
+    // (a vacuum world, or a small moon that never got one — see AtmosphereRules). Slice 3 originally left
+    // this gate out because no atmosphere attribute existed yet; it does now.
+    public const float MinAtmosphere = 0.12f;
+
     public static bool HasLiquidWaterClimate(CelestialBody b)
     {
         if (b == null) return false;
@@ -113,6 +118,8 @@ public static class BiosphereRules
     public static bool HasEnoughWaterLevel(CelestialBody b) =>
         b != null && PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation) >= MinWaterLevel;
 
+    public static bool HasAtmosphere(CelestialBody b) => b != null && b.atmosphereThickness >= MinAtmosphere;
+
     // What a world generates WITH. Being in the liquid-water band isn't enough on its own — Rocky/Ocean
     // worlds that roll into it start alive, everything else (barren/ice/volcanic/gas/moons/asteroids)
     // starts sterile even if it happens to sit in the band, because meeting the band later through
@@ -120,11 +127,11 @@ public static class BiosphereRules
     public static bool GeneratesWithBiosphere(CelestialBody b) =>
         b != null &&
         (b.type == CelestialBodyType.RockyPlanet || b.type == CelestialBodyType.OceanPlanet) &&
-        HasLiquidWaterClimate(b) && HasEnoughWaterLevel(b);
+        HasLiquidWaterClimate(b) && HasEnoughWaterLevel(b) && HasAtmosphere(b);
 
     // Can this world's BioSphere value grow (or stay) above a bare floor right now?
     public static bool CanSustainBiosphere(CelestialBody b) =>
-        b != null && b.biosphereActive && HasLiquidWaterClimate(b) && HasEnoughWaterLevel(b);
+        b != null && b.biosphereActive && HasLiquidWaterClimate(b) && HasEnoughWaterLevel(b) && HasAtmosphere(b);
 
     // Null = Microbial Seeding would succeed; otherwise the reason it's likely to fail, surfaced by
     // TerraformManager.CanStart so the project button warns before the player spends resources on it.
@@ -132,6 +139,7 @@ public static class BiosphereRules
     {
         if (b == null) return "no world selected";
         if (b.biosphereActive) return "already has an active biosphere";
+        if (!HasAtmosphere(b)) return "atmosphere too thin to hold a biosphere";
         if (!HasEnoughWaterLevel(b)) return "not enough water level for life to take hold";
         if (!HasLiquidWaterClimate(b)) return "too hot or too cold for liquid water";
         return null;
@@ -145,6 +153,7 @@ public static class BiosphereRules
     {
         if (b == null) return "no world selected";
         if (!b.biosphereActive) return "this world has no active biosphere yet — Microbial Seeding starts one on a barren world";
+        if (!HasAtmosphere(b)) return "atmosphere too thin";
         if (!HasEnoughWaterLevel(b)) return "not enough water level";
         if (!HasLiquidWaterClimate(b)) return "too hot or too cold for liquid water";
         return null;

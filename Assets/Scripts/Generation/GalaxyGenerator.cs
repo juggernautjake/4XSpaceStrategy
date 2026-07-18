@@ -101,6 +101,7 @@ public static class GalaxyGenerator
 
         planet.type = BestTypeFor(species);
         planet.surfaceSize = Random.Range(11, 17);
+        planet.atmosphereThickness = AtmosphereRules.ForBody(planet.type, planet.surfaceSize);
         planet.orbitPhase = Random.Range(0f, 360f);
         planet.spinSpeed = OrbitalMechanics.Spin(planet, Random.Range(0.7f, 1.3f));
         SeedTerrain(planet);
@@ -136,6 +137,7 @@ public static class GalaxyGenerator
         {
             var moon = new CelestialBody(CelestialBodyType.Moon) { name = $"Homeworld-{(char)('a' + m)}" };
             moon.surfaceSize = Random.Range(4, 12);
+            moon.atmosphereThickness = AtmosphereRules.ForBody(moon.type, moon.surfaceSize);
             SeedTerrain(moon);
             moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
             OreGenerator.Populate(moon);

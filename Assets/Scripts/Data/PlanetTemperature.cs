@@ -34,11 +34,16 @@ public static class PlanetTemperature
     // This is the explicit "planet Temperature setting" the request asks for.
     public static float BodyAverageCelsius(CelestialBody b) => Mathf.Clamp(BaseCelsius(b), -200f, 400f);
 
+    // How much extra warmth a thick atmosphere traps on top of what raw distance/heat would give —
+    // Venus, not Mercury, despite Venus sitting farther from the sun. A vacuum world gets none of this.
+    const float GreenhouseMaxC = 45f;
+
     static float BaseCelsius(CelestialBody b)
     {
         float heat = b.terrainParams.heat;
         float kelvin = ReferenceKelvin * Mathf.Sqrt(Mathf.Max(0.01f, heat));
-        return kelvin - 273.15f + TypeModifierC(b.type);
+        float greenhouseC = Mathf.Clamp01(b.atmosphereThickness) * GreenhouseMaxC;
+        return kelvin - 273.15f + TypeModifierC(b.type) + greenhouseC;
     }
 
     // Hot planet TYPES run hot everywhere (a furnace world's own internal heat), cold types run cold
@@ -61,7 +66,11 @@ public static class PlanetTemperature
     // Fixed, global anchors — deliberately NOT re-normalized per planet, so a planet's type and
     // distance decide which end of the scale it lands on rather than every world spanning the same
     // white-to-red range regardless of how hot or cold it actually is.
-    const float StopWhite = -130f;   // the coldest an IcePlanet's body average can ever read (heat floor 0.45)
+    // The coldest an IcePlanet's body average could read at heat's floor of 0.45 with no atmosphere.
+    // Real generated ice worlds now run warmer than this floor thanks to greenhouse warming (every ice
+    // world has SOME atmosphere per AtmosphereRules), so this is a safety anchor rather than a value any
+    // world actually reaches — GradientColor just never gets asked to show anything colder.
+    const float StopWhite = -130f;
     const float StopIceBlue = -30f;
     const float StopYellowOrange = 70f;
     const float StopRed = 180f;

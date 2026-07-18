@@ -73,6 +73,7 @@ public class SolarSystemGenerator : MonoBehaviour
                 CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
                 moon.name = NameGenerator.MoonName(body.name, m);
                 moon.surfaceSize = Random.Range(3, 13);
+                moon.atmosphereThickness = AtmosphereRules.ForBody(moon.type, moon.surfaceSize);
                 moon.distanceFromStar = body.distanceFromStar;   // shares the planet's solar distance
                 SeedTerrain(moon);
                 BiasHeat(moon, moon.distanceFromStar, currentStar);           // same climate band as its planet
@@ -198,6 +199,9 @@ public class SolarSystemGenerator : MonoBehaviour
 
         bool cool = currentStarType == StarType.M || currentStarType == StarType.K;
         best.type = cool ? CelestialBodyType.OceanPlanet : CelestialBodyType.RockyPlanet;
+        // Recomputed under the NEW type (atmosphere thickness depends on type, not just size) before the
+        // biosphere check below reads it.
+        best.atmosphereThickness = AtmosphereRules.ForBody(best.type, best.surfaceSize);
         SeedTerrain(best);
         // This world was just force-retyped to a habitable Rocky/Ocean type specifically to guarantee the
         // system has one — it deserves the same biosphere check as any other qualifying world, computed
@@ -219,6 +223,7 @@ public class SolarSystemGenerator : MonoBehaviour
     {
         CelestialBody body = new(type) { id = _idCounter++ };
         body.surfaceSize = RollSurfaceSize(type, currentStarType);
+        body.atmosphereThickness = AtmosphereRules.ForBody(body.type, body.surfaceSize);
         SeedTerrain(body);
         body.surface = PlanetTerrainGenerator.GenerateSurface(body);
         OreGenerator.Populate(body);

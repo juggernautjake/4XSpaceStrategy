@@ -386,6 +386,11 @@ public class TerraformManager : MonoBehaviour
     {
         if (b == null || b.type == to) { RescoreType(b); return; }
         b.type = to;
+        // Atmosphere thickness depends on Type as well as Size (AtmosphereRules) — a world that just
+        // changed type needs it recomputed, or a remodelled world keeps whatever air its OLD type had
+        // forever (wrong greenhouse warmth, wrong Solar/Wind indexes, and a former small moon reshaped
+        // into a Rocky planet would stay stuck failing BiosphereRules' atmosphere gate).
+        b.atmosphereThickness = AtmosphereRules.ForBody(b.type, b.surfaceSize);
 
         // The surface is derived from the body type, so it has to be rebuilt — deterministically, from
         // the same terrain seed, so the world keeps its identity (same continents, new climate).

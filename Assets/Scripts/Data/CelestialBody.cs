@@ -149,6 +149,11 @@ public class CelestialBody
     // Seeding) to actually take the first step, same as in reality. See BiosphereRules.
     public bool biosphereActive = false;
 
+    // 0 (vacuum) .. 1 (crushingly thick, gas-giant grade). Set once at generation from Size and Type
+    // (see AtmosphereRules) — asteroids never hold one, small moons hold none-to-thin, larger bodies
+    // hold thicker air. Feeds the Solar/Wind survey indexes and the BioSphere atmosphere gate.
+    public float atmosphereThickness = 0f;
+
     [System.NonSerialized] public StarData hostStar;          // the star this body belongs to
     [System.NonSerialized] public StarSystemData system;      // the system this body belongs to
     [System.NonSerialized] public List<Unit> units = new List<Unit>();  // units currently here

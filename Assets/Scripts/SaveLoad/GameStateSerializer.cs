@@ -111,7 +111,7 @@ public static class GameStateSerializer
             shipyardLevel = b.shipyardLevel, researchCenterLevel = b.researchCenterLevel,
             population = b.population, cities = b.cities,
             terraforming = b.terraforming, terraformability = b.terraformability,
-            biosphereActive = b.biosphereActive,
+            biosphereActive = b.biosphereActive, atmosphereThickness = b.atmosphereThickness,
             terraformProjects = b.terraformProjects != null ? new List<int>(b.terraformProjects) : new List<int>(),
             placedBuildings = b.placedBuildings != null ? new List<PlacedBuilding>(b.placedBuildings) : new List<PlacedBuilding>(),
             deepSurveyed = b.deepSurveyed, cityGrowthTimer = b.cityGrowthTimer,
@@ -273,10 +273,15 @@ public static class GameStateSerializer
             shipyardLevel = dto.shipyardLevel, researchCenterLevel = dto.researchCenterLevel,
             population = dto.population, cities = dto.cities,
             terraforming = dto.terraforming, terraformability = dto.terraformability,
-            biosphereActive = dto.biosphereActive,
+            biosphereActive = dto.biosphereActive, atmosphereThickness = dto.atmosphereThickness,
             birthrightClaim = dto.birthrightClaim, settled = dto.settled,
             visited = dto.visited, explorationProgress = dto.explorationProgress
         };
+        // A save written before atmosphereThickness existed has it defaulted to 0 by JsonUtility, same
+        // as a genuine asteroid/small-moon would read — so backfilling from Type+Size whenever it comes
+        // back non-positive is safe either way: a real zero recomputes to the same zero, an old save
+        // recomputes to what generation would have given it.
+        if (b.atmosphereThickness <= 0f) b.atmosphereThickness = AtmosphereRules.ForBody(b.type, b.surfaceSize);
         // Saves written before `settled` existed have it false everywhere, which would silently
         // un-colonise every world in an old save. A world with a City on it was settled by definition —
         // that inference is exactly what Claim.cs replaces, and this is the one place it's still correct
