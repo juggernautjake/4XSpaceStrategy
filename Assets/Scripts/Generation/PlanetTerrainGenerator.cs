@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 // Generates a planet's surface from a resolution-independent, deterministic noise field.
@@ -101,7 +102,115 @@ public static class PlanetTerrainGenerator
                 Sample s = SampleNormalized(body, u, v, p, octaves);
                 surface.tiles[x, y] = new TerrainTile(s.terrain, s.shade);
             }
+
+        // Neighbour-aware clean-up the per-cell noise can't do on its own: connect water bodies (a small
+        // pool touching the open sea IS the sea) and ring the oceans with beaches. Runs on the GRID — the
+        // surface the Planet View map and gameplay read — so those agree; the distant 3D globe (a separate
+        // per-pixel render) keeps the smooth noise view, which reads the same from orbit.
+        ApplyWaterAndShores(surface);
         return surface;
+    }
+
+    // Post-classification clean-up that needs to see a tile's NEIGHBOURS (the per-cell sampler can't).
+    //   1. Water bodies are flood-filled: a large connected body is OCEAN, a small isolated one is a LAKE —
+    //      so a lake that touches the ocean is part of the ocean (same body, classed by total size), and a
+    //      pond cut off from the sea reads as its own lake. Frozen water stays frozen; open-ocean reefs are
+    //      kept when their body is a sea.
+    //   2. Shorelines: soft lowland immediately touching the open ocean becomes BEACH, so coasts read as
+    //      beaches rather than jungle/desert running straight into the surf. Cold/rocky shores are left as
+    //      the classifier set them (a snowy or cliff coast, not a sandy one).
+    // Longitude wraps in x (a 2:1 map); latitude does not (the poles are edges). Deterministic — the same
+    // grid in gives the same grid out — so save/load and terraform re-runs reproduce it exactly.
+    static void ApplyWaterAndShores(PlanetSurface surf)
+    {
+        int w = surf.width, h = surf.height;
+        if (w <= 0 || h <= 0) return;
+        var tiles = surf.tiles;
+
+        // ---- 1) Water bodies -> Ocean (large) or Lake (small enclosed) ----
+        var visited = new bool[w, h];
+        int seaMin = Mathf.Max(10, (w * h) / 18);   // a body at least this big is open sea, not a lake
+        var stack = new Stack<int>();
+        var bodyCells = new List<int>();
+
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++)
+            {
+                if (visited[x, y] || !IsWater(tiles[x, y].type)) continue;
+
+                bodyCells.Clear();
+                stack.Clear();
+                stack.Push(x * h + y);
+                visited[x, y] = true;
+                while (stack.Count > 0)
+                {
+                    int packed = stack.Pop();
+                    int cx = packed / h, cy = packed % h;
+                    bodyCells.Add(packed);
+                    PushWater(tiles, visited, stack, (cx + 1) % w, cy, h);
+                    PushWater(tiles, visited, stack, (cx - 1 + w) % w, cy, h);
+                    if (cy + 1 < h) PushWater(tiles, visited, stack, cx, cy + 1, h);
+                    if (cy - 1 >= 0) PushWater(tiles, visited, stack, cx, cy - 1, h);
+                }
+
+                bool sea = bodyCells.Count >= seaMin;
+                foreach (int packed in bodyCells)
+                {
+                    int cx = packed / h, cy = packed % h;
+                    var tt = tiles[cx, cy].type;
+                    if (tt == TerrainType.FrozenSea) continue;             // ice stays ice, sea or lake
+                    if (tt == TerrainType.Reef && sea) continue;          // reefs belong to open ocean
+                    tiles[cx, cy].type = sea ? TerrainType.Ocean : TerrainType.Lake;
+                }
+            }
+
+        // ---- 2) Beaches ring the open ocean ----
+        // Snapshot the ocean mask first so a newly-made beach doesn't seed another beach one tile inland.
+        var isOcean = new bool[w, h];
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++)
+                isOcean[x, y] = tiles[x, y].type == TerrainType.Ocean;
+
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++)
+            {
+                if (!BeachEligible(tiles[x, y].type)) continue;
+                bool coastal = isOcean[(x + 1) % w, y] || isOcean[(x - 1 + w) % w, y]
+                            || (y + 1 < h && isOcean[x, y + 1]) || (y - 1 >= 0 && isOcean[x, y - 1]);
+                if (coastal) tiles[x, y].type = TerrainType.Beach;
+            }
+    }
+
+    static void PushWater(TerrainTile[,] tiles, bool[,] visited, Stack<int> stack, int nx, int ny, int h)
+    {
+        if (visited[nx, ny]) return;
+        if (!IsWater(tiles[nx, ny].type)) return;
+        visited[nx, ny] = true;
+        stack.Push(nx * h + ny);
+    }
+
+    // The soft lowland biomes that read as a sandy/gentle coast when they meet the sea. Mountains, hills,
+    // highlands, volcanoes, ice, rock and cold biomes are excluded — those make cliffs, snowy or rocky
+    // shores, not beaches.
+    static bool BeachEligible(TerrainType t)
+    {
+        switch (t)
+        {
+            case TerrainType.Plains:
+            case TerrainType.Grassland:
+            case TerrainType.Savanna:
+            case TerrainType.Steppe:
+            case TerrainType.Forest:
+            case TerrainType.Jungle:
+            case TerrainType.Swamp:
+            case TerrainType.Desert:
+            case TerrainType.Dunes:
+            case TerrainType.Wasteland:
+            case TerrainType.Badlands:
+                return true;
+            default:
+                return false;
+        }
     }
 
     // ---- The shared, resolution-independent sampler ----
@@ -120,7 +229,13 @@ public static class PlanetTerrainGenerator
 
         float lat = Mathf.Abs(v - 0.5f) * 2f;                 // 0 equator, 1 pole
         float heatNoise = FBm(fx * 0.9f + seed + 11f, fy * 0.9f + seed + 7f, 2);
-        float temperature = Mathf.Clamp01(((1f - lat) * 0.75f + heatNoise * 0.45f) * p.heat);
+        // Altitude cools the surface (atmospheric lapse rate): ground high above sea level runs colder than
+        // lowland at the same latitude, so mountains and highlands cap with snow and ice even in a warm
+        // band, and the coldest peaks freeze outright. Only ground ABOVE the mid-elevation is cooled, so
+        // seas and lowlands are untouched. `altCool` is reused for the °C reading below so the map and the
+        // temperature readout agree on how cold the heights are.
+        float altCool = Mathf.Max(0f, elevation - 0.6f);
+        float temperature = Mathf.Clamp01(((1f - lat) * 0.75f + heatNoise * 0.45f) * p.heat - altCool * 0.55f);
 
         float fine = Mathf.PerlinNoise(fx * 6f + seed, fy * 6f + seed);
 
@@ -155,13 +270,26 @@ public static class PlanetTerrainGenerator
         // the sea stay sea — every classifier tests elevation for water BEFORE ridge, so a low, drowned
         // fault reads as ocean (Earth's mid-ocean ridges), and only a fault crossing high ground becomes a
         // mountain belt. Derived per-sample, so it costs no save state and a remodel/reseed re-derives it.
+        bool volcanicHotspot = false;
         if (TectonicsMap.Active(body))
         {
             var tec = TectonicsMap.Sample(body, u, v);
             ridge = Mathf.Clamp(ridge + tec.boundary * tec.convergence * TectonicRidgeGain, 0f, 2f);
+            // Volcanoes cluster where plates DRIVE TOGETHER hardest (subduction). The strongest convergent
+            // boundaries on a tectonically active world get a scattering of volcanoes among their peaks —
+            // so some rocky worlds come out "somewhat volcanic" without being full Volcanic-type worlds.
+            volcanicHotspot = tec.boundary * tec.convergence > 0.72f;
         }
 
         TerrainType t = Classify(classifyType, elevation, moisture, temperature, ridge, lat);
+
+        // A raised, actively-converging tile can be a volcano rather than a plain peak. Deterministic
+        // (heatNoise is a stable field), so it's a sparse scatter along the belt, and only on Rocky worlds
+        // — the dedicated Volcanic classifier already handles furnace worlds, and freezing/ocean/gas worlds
+        // shouldn't sprout stray cones.
+        if (volcanicHotspot && classifyType == CelestialBodyType.RockyPlanet &&
+            (t == TerrainType.Mountains || t == TerrainType.Highlands) && heatNoise > 0.55f)
+            t = TerrainType.Volcano;
 
         // CLIMATE COHERENCE. The classifier's `temperature` is latitude-dominated (equator warm, poles cold)
         // and only lightly scaled by the world's heat, so on its own a globally FRIGID world could still show
@@ -171,7 +299,7 @@ public static class PlanetTerrainGenerator
         // grows no rainforest. Computed from the SAME heat/atmosphere/type the readout uses, plus the standard
         // ±15°C equator→pole swing and a small local-weather wobble from the heat noise.
         float baseC = PlanetTemperature.BaseCelsius(p.heat, body.atmosphereThickness, classifyType);
-        float tileC = baseC + Mathf.Lerp(15f, -15f, lat) + (heatNoise - 0.5f) * 12f;
+        float tileC = baseC + Mathf.Lerp(15f, -15f, lat) + (heatNoise - 0.5f) * 12f - altCool * AltitudeLapseC;
         t = ClimateCoherence(t, tileC);
 
         return new Sample
@@ -206,6 +334,7 @@ public static class PlanetTerrainGenerator
     const float LushMaxC = 55f;      // above this, rainforest & wetland thin to hardier tropical cover
     const float ScorchC = 75f;       // above this, no vegetation survives — bare, sun-baked ground
     const float BakedC = 100f;       // above this, that bare ground reads as wasteland, not just desert
+    const float AltitudeLapseC = 55f;// °C lost per unit of elevation above the mid-line (mountain lapse rate)
 
     // Re-judge one classified tile against its real temperature. Only water and vegetation are touched;
     // rock, mountains, sand, lava and already-frozen tiles are left exactly as the per-type classifier
