@@ -99,17 +99,21 @@ public partial class InspectorWindow
     void BuildStarOverview(Transform p)
     {
         var s = target.star;
+        // A bound cluster is described as a SYSTEM (its combined light + a per-sun breakdown below), not as
+        // a single star of the brightest sun's type — which used to make a binary read as one G/O star and
+        // even contradict itself (single-star "no life here" prose next to a valid combined habitable band).
+        bool multi = target.system != null && target.system.stars != null && target.system.stars.Count > 1;
 
-        Header(p, "THE STAR");
+        Header(p, multi ? "THE SYSTEM" : "THE STAR");
         var card = Card(p);
-        UIFactory.WrapText(card, StarProse(s), UITheme.SmallSize, UITheme.Text);
+        UIFactory.WrapText(card, multi ? ClusterProse(s, target.system.stars.Count) : StarProse(s), UITheme.SmallSize, UITheme.Text);
 
         var stats = Card(p);
-        Stat(stats, "Class", () => s.isBlackHole ? "Black hole" : $"{s.type}-type");
+        Stat(stats, "Class", () => s.isBlackHole ? "Black hole" : multi ? StarDatabase.SystemClass(s) : $"{s.type}-type");
         Stat(stats, "Stars in system", () => s.starCount == 1 ? "1 (single)" : s.starCount == 2 ? "2 (binary)" : $"{s.starCount} (ternary)");
-        Stat(stats, "Surface temperature", () => $"{s.temperatureK:F0} K");
-        Stat(stats, "Luminosity", () => $"{s.luminosity:F2}× our sun");
-        Stat(stats, "Mass", () => $"{s.mass:F2} solar masses");
+        if (!multi) Stat(stats, "Surface temperature", () => $"{s.temperatureK:F0} K");   // per-sun for a cluster (listed below)
+        Stat(stats, multi ? "Combined luminosity" : "Luminosity", () => $"{s.luminosity:F2}× our sun");
+        Stat(stats, multi ? "Combined mass" : "Mass", () => $"{s.mass:F2} solar masses");
         Stat(stats, "Habitable zone", () => s.hasHabitableZone ? $"{s.hzInner:F1} – {s.hzOuter:F1}" : "<color=#FF7A6E>none</color>");
 
         // For a bound cluster, break the combined star back into its individual suns and list EACH one's
@@ -123,8 +127,10 @@ public partial class InspectorWindow
             Note(p, $"A {StarDatabase.SystemClass(s).ToLower()} — {suns.Count} suns bound together; their worlds feel the " +
                     "combined light. Lettered A–C from most to least massive.");
 
+            // Order by NAME so the A/B/C cards line up with the map labels (names were assigned
+            // most-massive-first at generation, so this is also mass order for an unedited system).
             var ordered = new List<StarData>(suns);
-            ordered.Sort((a, b) => (b != null ? b.mass : 0f).CompareTo(a != null ? a.mass : 0f));
+            ordered.Sort((a, b) => string.CompareOrdinal(a != null ? a.name : "", b != null ? b.name : ""));
 
             float total = 0f;
             foreach (var sun in ordered)
@@ -230,11 +236,18 @@ public partial class InspectorWindow
 
     // ===== Dev star editor (per-sun, tabbed for bound clusters) =====
 
-    // The suns the editor can act on: a bound cluster's individual members, or the lone star.
+    // The suns the editor can act on: a bound cluster's individual members (ordered to match their A/B/C
+    // NAMES — i.e. by name, which was assigned most-massive-first at generation), or the lone star. Ordering
+    // by name rather than live mass keeps "Sun A" pointing at the star actually named "…A" even after a dev
+    // edits masses around, so the tabs never disagree with the map labels.
     List<StarData> EditableSuns()
     {
         if (target.system != null && target.system.stars != null && target.system.stars.Count > 0)
-            return target.system.stars;
+        {
+            var list = new List<StarData>(target.system.stars);
+            list.Sort((a, b) => string.CompareOrdinal(a != null ? a.name : "", b != null ? b.name : ""));
+            return list;
+        }
         var one = new List<StarData>();
         if (target.star != null) one.Add(target.star);
         return one;
@@ -283,10 +296,13 @@ public partial class InspectorWindow
 
         Note(p, "Size, mass and density are linked: move size or mass and density follows; move density and " +
                 "mass follows. Changing mass re-times this system's planets.");
+        // Ranges span the real generated extremes: an O star runs ~30-46 solar masses and ~6-7 density, so
+        // the old 20/6 caps clamped it — opening the editor showed a wrong (pinned) value that would have
+        // shrunk the star the moment you touched it. These cover every class with headroom to push further.
         var card = Card(p);
-        starSizeS    = UIFactory.LabeledSlider(card, "Size (render scale)", 1f, 20f, Mathf.Clamp(s.visualScale, 1f, 20f), ApplyStarSize, "F1");
-        starMassS    = UIFactory.LabeledSlider(card, "Mass (solar)", 0.1f, 20f, Mathf.Clamp(s.mass, 0.1f, 20f), ApplyStarMass, "F2");
-        starDensityS = UIFactory.LabeledSlider(card, "Density", 0.1f, 6f, Mathf.Clamp(s.density, 0.1f, 6f), ApplyStarDensity, "F2");
+        starSizeS    = UIFactory.LabeledSlider(card, "Size (render scale)", 1f, 30f, Mathf.Clamp(s.visualScale, 1f, 30f), ApplyStarSize, "F1");
+        starMassS    = UIFactory.LabeledSlider(card, "Mass (solar)", 0.1f, 50f, Mathf.Clamp(s.mass, 0.1f, 50f), ApplyStarMass, "F2");
+        starDensityS = UIFactory.LabeledSlider(card, "Density", 0.05f, 10f, Mathf.Clamp(s.density, 0.05f, 10f), ApplyStarDensity, "F2");
 
         Header(p, "STAR LIGHT (Dev)");
         var lcard = Card(p);
@@ -463,6 +479,23 @@ public partial class InspectorWindow
         starSuppress = true;
         s.value = Mathf.Clamp(value, s.minValue, s.maxValue);
         starSuppress = false;
+    }
+
+    // Plain-language description of a bound cluster — deliberately does NOT make the single-star claims
+    // StarProse does (which are about ONE star of a given type), since a cluster's worlds live by the
+    // combined light of several different suns.
+    static string ClusterProse(StarData combined, int count)
+    {
+        string kind = count >= 3 ? "ternary" : "binary";
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"A {kind} system — {count} suns bound by gravity, circling their shared centre of mass. ");
+        sb.Append("Its worlds orbit the whole cluster and are lit and warmed by the <b>combined</b> light of every sun");
+        if (combined != null && combined.hasHabitableZone)
+            sb.Append($", which sets a habitable band from {combined.hzInner:F1} to {combined.hzOuter:F1}. ");
+        else
+            sb.Append(" — too fierce and unsteady to hold a stable habitable band. ");
+        sb.Append("Each sun is its own star with its own type, colour and mass — listed individually below.");
+        return sb.ToString();
     }
 
     // Why this star matters, in plain language rather than a table.

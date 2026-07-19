@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 using TMPro;
@@ -53,17 +54,19 @@ public class SystemSummaryWindow : MonoBehaviour
         string starDesc = sys.isBlackHole ? "Black hole" : StarDatabase.SystemClass(star);
         sb.AppendLine($"<b>{starDesc}</b>");
 
-        // Mass: each sun's own mass and the total for a bound cluster, or the single star's mass.
+        // Mass: each sun listed by its own NAME (A/B/C, ordered to match), with the combined total — or the
+        // single star's mass.
         var suns = sys.stars;
         if (!sys.isBlackHole && suns != null && suns.Count > 1)
         {
+            var ordered = new List<StarData>(suns);
+            ordered.Sort((a, b) => string.CompareOrdinal(a != null ? a.name : "", b != null ? b.name : ""));
             float total = 0f;
-            for (int i = 0; i < suns.Count; i++)
+            foreach (var sun in ordered)
             {
-                if (suns[i] == null) continue;
-                total += suns[i].mass;
-                string tag = i < 3 ? ((char)('A' + i)).ToString() : (i + 1).ToString();
-                sb.AppendLine($"<color=#9FB4C8>Sun {tag}:</color> {suns[i].type}-type · {suns[i].mass:F2} solar masses");
+                if (sun == null) continue;
+                total += sun.mass;
+                sb.AppendLine($"<color=#9FB4C8>{sun.name}:</color> {sun.type}-type · {sun.mass:F2} solar masses");
             }
             sb.AppendLine($"<color=#9FB4C8>Total mass:</color> <b>{total:F2}</b> solar masses");
         }

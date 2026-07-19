@@ -207,13 +207,14 @@ public class GalaxyStarProxy : MonoBehaviour
         var suns = system.stars;
         if (!system.isBlackHole && suns != null && suns.Count > 1)
         {
+            var ordered = new List<StarData>(suns);
+            ordered.Sort((a, b) => string.CompareOrdinal(a != null ? a.name : "", b != null ? b.name : ""));
             float total = 0f;
-            for (int i = 0; i < suns.Count; i++)
+            foreach (var sun in ordered)
             {
-                if (suns[i] == null) continue;
-                total += suns[i].mass;
-                string tag = i < 3 ? ((char)('A' + i)).ToString() : (i + 1).ToString();
-                sb.Append($"\n<color=#9FB4C8>Sun {tag}:</color> {suns[i].mass:F2} solar");
+                if (sun == null) continue;
+                total += sun.mass;
+                sb.Append($"\n<color=#9FB4C8>{sun.name}:</color> {sun.mass:F2} solar");
             }
             sb.Append($"\n<color=#9FB4C8>Total mass:</color> <b>{total:F2}</b> solar");
         }
