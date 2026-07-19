@@ -7,6 +7,15 @@ public class CelestialBody
     public string name;
     public CelestialBodyType type;
     public ResourceDeposit resources;
+
+    // MASS VALUE — the player-facing measure of how big this world is (Earth-like ~2, gas giants 7-13,
+    // moons/asteroids below 1 in first-decimal steps). Set at generation from MassRules; surfaceSize below
+    // is DERIVED from it (MassRules.SurfaceSize). This is what the info windows show as the world's size.
+    public float mass = 2f;
+
+    // Grid/visual size — still the number the whole engine sizes maps, orbits and atmosphere from, but now
+    // a function of `mass` (MassRules.SurfaceSize) rather than an independent roll. Kept as its own field so
+    // none of the mechanical readers (MapMetrics, OrbitSafety, AtmosphereRules …) had to change.
     public int surfaceSize;
     public PlanetSurface surface;  // low-res grid (the "general" viewer + gameplay)
     public List<CelestialBody> moons = new List<CelestialBody>();

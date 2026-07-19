@@ -28,8 +28,8 @@ public static class TectonicsRules
 
             default:
                 // "~1/3 of the time... more likely for the larger planets" (request's own words, and its
-                // own note that this ratio is a starting guess to adjust later). Size range for
-                // terrestrial planets runs roughly 5..23 (see RollSurfaceSize); the chance spans a band
+                // own note that this ratio is a starting guess to adjust later). surfaceSize now derives
+                // from Mass (MassRules.SurfaceSize); the chance spans a band
                 // centred close to 1/3 rather than a flat 33% for every size, so bigger worlds really are
                 // more likely, and small ones are less likely without ever being impossible.
                 float sizeFactor = Mathf.InverseLerp(5f, 23f, surfaceSize);

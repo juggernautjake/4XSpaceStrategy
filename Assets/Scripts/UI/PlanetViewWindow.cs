@@ -988,7 +988,7 @@ public class PlanetViewWindow : MonoBehaviour
         // The conditionals MUST be parenthesised: inside an interpolation hole a bare ':' is parsed as
         // the start of a format specifier, not as part of a ternary.
         Stat(card, "Surface", () => $"{(body.surface != null ? body.surface.width : 0)} × {(body.surface != null ? body.surface.height : 0)} tiles");
-        Stat(card, "Size class", () => SizeWord(body.surfaceSize));
+        Stat(card, "Mass", () => MassWord(body.mass));
         Stat(card, "Owner", () =>
         {
             string hex = "#" + ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(body.owner));
@@ -1409,6 +1409,14 @@ public class PlanetViewWindow : MonoBehaviour
         if (size <= 11) return $"Medium ({size})";
         if (size <= 15) return $"Large ({size})";
         return $"Huge ({size})";
+    }
+
+    // The world's MASS VALUE as the player sees it — a descriptor plus the number (Earth-like ~2, gas
+    // giants 7-13, moons/asteroids below 1). This replaces the old surfaceSize "size class" readout.
+    static string MassWord(float mass)
+    {
+        string w = mass < 0.5f ? "Tiny" : mass < 1.5f ? "Small" : mass < 4f ? "Medium" : mass < 7f ? "Large" : "Giant";
+        return $"{w} ({MassRules.Format(mass)})";
     }
 
     static string WeatherProse(CelestialBody b)
@@ -4094,7 +4102,7 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
         sb.Append($"\n<color=#9FB4C8>Terraformability</color> {m.terraformability:F0}%");
 
         // Surface extent and what it's made of.
-        sb.Append($"\n<color=#9FB4C8>Size</color> {SizeWord(m.surfaceSize)}");
+        sb.Append($"\n<color=#9FB4C8>Mass</color> {MassWord(m.mass)}");
         string res = ResourceSummary(m.resources);
         if (res != null) sb.Append($"\n<color=#9FB4C8>Resources</color> {res}");
 
@@ -4114,6 +4122,14 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
         if (cells < 40) return "medium";
         if (cells < 56) return "large";
         return "vast";
+    }
+
+    // MoonTabHover is its own class, so it needs its own copy of the Mass descriptor (mirrors
+    // PlanetViewWindow.MassWord). Kept identical so a moon reads the same in the hover card as in the panel.
+    static string MassWord(float mass)
+    {
+        string w = mass < 0.5f ? "Tiny" : mass < 1.5f ? "Small" : mass < 4f ? "Medium" : mass < 7f ? "Large" : "Giant";
+        return $"{w} ({MassRules.Format(mass)})";
     }
 
     static string ResourceSummary(ResourceDeposit d)

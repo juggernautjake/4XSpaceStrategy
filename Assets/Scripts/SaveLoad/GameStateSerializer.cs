@@ -96,6 +96,7 @@ public static class GameStateSerializer
             ownerId = b.owner != null ? b.owner.id : -1,
             habitabilityLocked = b.habitabilityLocked,
             surfaceSize = b.surfaceSize,
+            mass = b.mass,
             terrainSeed = b.terrainSeed,
             naturalSeed = b.naturalSeed,
             continentFrequency = b.continentFrequency,
@@ -355,6 +356,9 @@ public static class GameStateSerializer
         // here; the only honest answer is the current seed — that's the world it recorded, and there's
         // no earlier one to recover.
         b.naturalSeed = dto.naturalSeed > 0f ? dto.naturalSeed : b.terrainSeed;
+        // Mass Value. A save from before it existed reads 0 — recover it from the saved surfaceSize (the
+        // world's size is known; MassRules.FromSurfaceSize is the inverse of how size is now derived).
+        b.mass = dto.mass > 0f ? dto.mass : MassRules.FromSurfaceSize(dto.surfaceSize);
         // The orbit "Reset" restores this. A save from before it existed reads 0; the only honest answer is
         // the orbit the world is at now — there's no earlier one recorded.
         b.naturalOrbitRadius = dto.naturalOrbitRadius > 0f ? dto.naturalOrbitRadius : b.orbitRadius;

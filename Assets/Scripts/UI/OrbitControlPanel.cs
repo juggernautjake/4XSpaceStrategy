@@ -40,7 +40,7 @@ public class OrbitControlPanel : MonoBehaviour
         var scroll = UIFactory.ScrollView(content, out RectTransform col);
 
         UIFactory.Label(col, "BODY", UITheme.SmallSize, UITheme.Accent, 18);
-        sizeS   = UIFactory.LabeledSlider(col, "Size", 4, 24, 10, v => ApplySize(v), "F0");
+        sizeS   = UIFactory.LabeledSlider(col, "Mass", 0.1f, 13f, 2f, v => ApplyMass(v), "F1");
 
         UIFactory.Label(col, "ORBIT", UITheme.SmallSize, UITheme.Accent, 18);
         radiusS = UIFactory.LabeledSlider(col, "Radius (distance)", 2f, 80f, 10f, v => ApplyRadius(v), "F1");
@@ -82,14 +82,21 @@ public class OrbitControlPanel : MonoBehaviour
         action();
     }
 
-    void ApplySize(float v)
+    // Mass is now the size control: it sets the body's Mass Value, derives its grid/visual surfaceSize
+    // (MassRules), and rescales the 3D mesh live. The surface grid itself rebuilds from the new size the
+    // next time the Planet View opens on this body. Quantized to the Mass scheme (whole at 1+, first
+    // decimal below).
+    void ApplyMass(float v)
     {
         if (suppress || current == null) return;
-        current.surfaceSize = Mathf.RoundToInt(v);
+        float mass = v >= 1f ? Mathf.Round(v) : Mathf.Round(v * 10f) / 10f;
+        current.mass = mass;
+        current.surfaceSize = MassRules.SurfaceSize(mass);
         if (current.visualObject != null)
         {
             bool moon = current.parentBody != null;
-            current.visualObject.transform.localScale = Vector3.one * Mathf.Max(0.35f, v * (moon ? 0.05f : 0.08f));
+            current.visualObject.transform.localScale =
+                Vector3.one * Mathf.Max(0.35f, current.surfaceSize * (moon ? 0.05f : 0.08f));
         }
     }
 
@@ -145,7 +152,7 @@ public class OrbitControlPanel : MonoBehaviour
         titleText.text = $"Orbit — {body.name}";
 
         suppress = true;
-        sizeS.value = body.surfaceSize;
+        sizeS.value = body.mass;
         // Per-body radius range: a planet's comes from its STAR (OrbitSafety.OrbitLimits — a bigger, brighter
         // sun holds planets much further out); a moon's is a small band around its planet. The max is widened
         // to the body's current orbit so an already-far world isn't clamped inward, giving the slider the full

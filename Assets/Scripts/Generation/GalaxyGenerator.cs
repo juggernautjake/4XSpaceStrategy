@@ -108,7 +108,10 @@ public static class GalaxyGenerator
         }
 
         planet.type = BestTypeFor(species);
-        planet.surfaceSize = Random.Range(11, 17);
+        // The home world is a comfortable Earth-to-super-Earth (Mass 2-4, Earth being 2); its grid size
+        // derives from that (MassRules.SurfaceSize → ~6-12 cells-per-side unit).
+        planet.mass = Random.Range(2, 5);
+        planet.surfaceSize = MassRules.SurfaceSize(planet.mass);
         planet.atmosphereThickness = AtmosphereRules.ForBody(planet.type, planet.surfaceSize);
         planet.hasTectonics = TectonicsRules.Roll(planet.type, planet.surfaceSize);
         planet.orbitPhase = Random.Range(0f, 360f);
@@ -145,7 +148,8 @@ public static class GalaxyGenerator
         for (int m = 0; m < moonCount; m++)
         {
             var moon = new CelestialBody(CelestialBodyType.Moon) { name = $"Homeworld-{(char)('a' + m)}" };
-            moon.surfaceSize = Random.Range(4, 12);
+            moon.mass = MassRules.ForMoon(planet.mass);
+            moon.surfaceSize = MassRules.SurfaceSize(moon.mass);
             moon.atmosphereThickness = AtmosphereRules.ForBody(moon.type, moon.surfaceSize);
             moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.surfaceSize);
             SeedTerrain(moon);

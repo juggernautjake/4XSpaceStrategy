@@ -34,21 +34,19 @@ public class SolarSystemGenerator : MonoBehaviour
 
         for (int i = 0; i < bodyCount; i++)
         {
-            // A body's MASS (0..1) is rolled first, independently, and then drives two things at once so a
-            // world's size and type agree: in the size-sensitive outer bands it decides Gas Giant vs Ice vs
-            // Barren vs Asteroid (the request's "gas giants ... the largest of planet sizes", asteroids the
-            // smallest), and it sets the body's actual surfaceSize within its type's range. The type
-            // FREQUENCIES are unchanged from the old bare-random roll — the mass cutoffs below reproduce the
-            // exact same proportions — so this links size to type without rebalancing which types appear
-            // (the one part of Advanced Generation the planning doc flagged as needing playtest calibration
-            // is deliberately left untouched: this is the safe, proportion-preserving half of it).
-            float mass = Random.value;
+            // A 0..1 SIZE RANK, rolled first: in the size-sensitive outer bands it orders which type spawns
+            // (the biggest become gas giants, the smallest asteroids — the request's "gas giants ... the
+            // largest of planet sizes"). The type FREQUENCIES it produces are unchanged from the old bare
+            // roll (the cutoffs in RollBodyByTemperature reproduce the same proportions). The actual world
+            // SIZE is no longer taken from this — it comes from the body's Mass Value (MassRules) once the
+            // type is known — but because each type has its own mass band, size and type stay consistent.
+            float sizeRank = Random.value;
 
-            // Type is chosen by ACTUAL temperature at this radius for this star, with mass breaking the
+            // Type is chosen by ACTUAL temperature at this radius for this star, with sizeRank breaking the
             // size-sensitive ties in the outer (cool/cold) bands.
-            CelestialBodyType type = RollBodyByTemperature(currentRadius, currentStar, mass, out float rolledWaterLevel);
+            CelestialBodyType type = RollBodyByTemperature(currentRadius, currentStar, sizeRank, out float rolledWaterLevel);
 
-            CelestialBody body = MakeBody(type, mass);
+            CelestialBody body = MakeBody(type);
             body.name = NameGenerator.PlanetName(systemName, i);
 
             // The SAME roll that decided Ocean/Rocky/Barren in the temperate band also sets the body's
@@ -100,7 +98,11 @@ public class SolarSystemGenerator : MonoBehaviour
             {
                 CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
                 moon.name = NameGenerator.MoonName(body.name, m);
-                moon.surfaceSize = Random.Range(3, 13);
+                // A moon's MASS comes from its host planet: at most half the host, rarely that high (see
+                // MassRules.ForMoon) — so a big gas giant can have a sizeable moon, a small planet only tiny
+                // ones. Grid/visual size derives from it, same as a planet.
+                moon.mass = MassRules.ForMoon(body.mass);
+                moon.surfaceSize = MassRules.SurfaceSize(moon.mass);
                 moon.distanceFromStar = body.distanceFromStar;   // shares the planet's solar distance
 
                 // A moon is no longer stuck with the single airless "Moon" palette. It rolls a real
@@ -257,6 +259,11 @@ public class SolarSystemGenerator : MonoBehaviour
 
         bool cool = currentStarType == StarType.M || currentStarType == StarType.K;
         best.type = cool ? CelestialBodyType.OceanPlanet : CelestialBodyType.RockyPlanet;
+        // Re-roll Mass (and the size derived from it) for the NEW type: "best" may have been a gas giant
+        // that happened to orbit near the zone centre, and its 7-13 mass would read absurdly on a small
+        // rocky/ocean world. Done before atmosphere/tectonics below, which read surfaceSize.
+        best.mass = MassRules.ForType(best.type);
+        best.surfaceSize = MassRules.SurfaceSize(best.mass);
         // Recomputed under the NEW type (atmosphere thickness depends on type, not just size) before the
         // biosphere check below reads it. Tectonics is re-rolled too — "best" may originally have been
         // whatever type happened to orbit near the zone centre (even a GasGiant/Asteroid, which never
@@ -285,17 +292,15 @@ public class SolarSystemGenerator : MonoBehaviour
     // PlanetSurface/TerrainTile grid. Populating ore against THIS surface would place it on tiles that
     // get thrown away a moment later, so ore population deliberately happens in GenerateSystem instead,
     // against the final surface, once — not here.
-    CelestialBody MakeBody(CelestialBodyType type, float mass)
+    CelestialBody MakeBody(CelestialBodyType type)
     {
         CelestialBody body = new(type) { id = _idCounter++ };
-        // Size from the same mass roll that chose the type, so the two agree: a body picked as a gas giant
-        // because it was the most massive really is the largest, one picked as an asteroid the smallest,
-        // mapped into the type's own range. Note the deliberate trade-off in the outer (cool/cold) bands,
-        // where mass ALSO chose the type: a type there only spans the mass sub-interval it was selected
-        // from, so e.g. those gas giants cluster near the top of the 18-32 range rather than filling it —
-        // the price of making size and type monotonic ("gas giants are the largest"). The hot/temperate
-        // bands pick type from an independent draw, so they keep the full per-type size spread.
-        body.surfaceSize = SizeFromMass(type, mass);
+        // The body's MASS VALUE (MassRules.ForType) and its grid/visual size DERIVED from it
+        // (MassRules.SurfaceSize): a gas giant is born heavy (7-13) and so large, an asteroid tiny. Type was
+        // already chosen by RollBodyByTemperature; the per-type mass ranges keep size and type consistent
+        // (heavy -> gas giant -> big) without a separate size roll.
+        body.mass = MassRules.ForType(type);
+        body.surfaceSize = MassRules.SurfaceSize(body.mass);
         body.atmosphereThickness = AtmosphereRules.ForBody(body.type, body.surfaceSize);
         body.hasTectonics = TectonicsRules.Roll(body.type, body.surfaceSize);
         SeedTerrain(body);
@@ -363,7 +368,7 @@ public class SolarSystemGenerator : MonoBehaviour
     // comes from Size/temperature-band weighting exactly as before — reworking those into a fully
     // attribute-driven pick would change how often each type appears across the whole galaxy, which
     // needs real playtesting to calibrate and isn't attempted here (see the dev-request planning doc).
-    CelestialBodyType RollBodyByTemperature(float distance, StarData star, float mass, out float waterLevel)
+    CelestialBodyType RollBodyByTemperature(float distance, StarData star, float sizeRank, out float waterLevel)
     {
         float rel = distance / Mathf.Max(0.5f, TempReference(star));   // <1 hot, ~1 temperate, >1 cold
         float r = Random.value;
@@ -387,22 +392,22 @@ public class SolarSystemGenerator : MonoBehaviour
             return CelestialBodyType.BarrenPlanet;
         }
 
-        if (rel < 3f)                          // cool — MASS sorts these by size (small -> large)
+        if (rel < 3f)                          // cool — sizeRank sorts these by size (small -> large)
         {
             // Same proportions as the old r-based roll (Barren 10% / Rocky 25% / Ice 45% / GasGiant 20%),
-            // just ordered by mass so the most massive fifth become the gas giants and the lightest tenth
-            // the barren dwarfs — and SizeFromMass then makes their actual sizes agree.
-            if (mass < 0.10f) return CelestialBodyType.BarrenPlanet;
-            if (mass < 0.35f) return CelestialBodyType.RockyPlanet;
-            if (mass < 0.80f) return CelestialBodyType.IcePlanet;
+            // just ordered by sizeRank so the most massive fifth become the gas giants and the lightest
+            // tenth the barren dwarfs — and each type's own Mass band (MassRules) then makes sizes agree.
+            if (sizeRank < 0.10f) return CelestialBodyType.BarrenPlanet;
+            if (sizeRank < 0.35f) return CelestialBodyType.RockyPlanet;
+            if (sizeRank < 0.80f) return CelestialBodyType.IcePlanet;
             return CelestialBodyType.GasGiant;
         }
 
-        // Cold outer system — again mass-sorted: the biggest are gas giants, the smallest asteroids. Same
+        // Cold outer system — again size-sorted: the biggest are gas giants, the smallest asteroids. Same
         // proportions as before (GasGiant 50% / Ice 30% / Barren 12% / Asteroid 8%).
-        if (mass < 0.08f) return CelestialBodyType.Asteroid;
-        if (mass < 0.20f) return CelestialBodyType.BarrenPlanet;
-        if (mass < 0.50f) return CelestialBodyType.IcePlanet;
+        if (sizeRank < 0.08f) return CelestialBodyType.Asteroid;
+        if (sizeRank < 0.20f) return CelestialBodyType.BarrenPlanet;
+        if (sizeRank < 0.50f) return CelestialBodyType.IcePlanet;
         return CelestialBodyType.GasGiant;
     }
 
@@ -496,32 +501,4 @@ public class SolarSystemGenerator : MonoBehaviour
         return StarType.O;
     }
 
-    // Each type's surface-size band (the same numbers RollSurfaceSize used). Kept as a range so a body's
-    // size can be indexed by its MASS roll rather than an independent draw — see SizeFromMass.
-    static void SizeRange(CelestialBodyType type, out int lo, out int hi)
-    {
-        switch (type)
-        {
-            // Wider spread so bodies (and their maps) vary noticeably in size.
-            case CelestialBodyType.GasGiant:       lo = 18; hi = 32; break;
-            case CelestialBodyType.IcePlanet:      lo = 7;  hi = 21; break;
-            case CelestialBodyType.OceanPlanet:    lo = 9;  hi = 23; break;
-            case CelestialBodyType.RockyPlanet:    lo = 6;  hi = 20; break;
-            case CelestialBodyType.VolcanicPlanet: lo = 6;  hi = 18; break;
-            case CelestialBodyType.BarrenPlanet:   lo = 5;  hi = 17; break;
-            case CelestialBodyType.Moon:           lo = 3;  hi = 13; break;
-            case CelestialBodyType.Asteroid:       lo = 3;  hi = 8;  break;
-            default:                               lo = 10; hi = 10; break;
-        }
-    }
-
-    // A body's surfaceSize from its 0..1 mass, mapped into its type's range: mass 0 = the smallest of that
-    // type, mass 1 = the largest. Because mass ALSO chose the type in the size-sensitive bands, size and
-    // type stay consistent across the whole system (massive -> gas giant -> large; light -> asteroid ->
-    // tiny), which is the causal link the request asks for between Size and what a body becomes.
-    static int SizeFromMass(CelestialBodyType type, float mass)
-    {
-        SizeRange(type, out int lo, out int hi);
-        return Mathf.Clamp(Mathf.RoundToInt(Mathf.Lerp(lo, hi, Mathf.Clamp01(mass))), lo, hi);
-    }
 }

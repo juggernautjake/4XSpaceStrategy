@@ -109,6 +109,7 @@ public class BodyDTO
     // live seed has been rerolled in the Dev sandbox. Zero means a save written before this existed —
     // the loader falls back to terrainSeed there.
     public float naturalSeed;
+    public float mass;                 // Mass Value (the player-facing size); surfaceSize derives from it
 
     // The world's UNTOUCHED climate. Must persist: terraforming lerps terrainParams away from this, so
     // re-deriving it on load would capture the already-terraformed values as "natural" and freeze all

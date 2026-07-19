@@ -11,8 +11,8 @@ public static class AtmosphereRules
 {
     // A moon at or above this surfaceSize counts as "large" and can hold a real, if thin, atmosphere.
     // Below it, a moon has none — matching "most moons will not have atmosphere ... unless they are
-    // large moons" from the request. Moon surfaceSize rolls 3..13 (SolarSystemGenerator.RollSurfaceSize),
-    // so this sits in the upper third.
+    // large moons" from the request. surfaceSize now derives from Mass (MassRules.SurfaceSize = mass*3), so
+    // this threshold means Mass >= 3, which a moon only reaches around a big planet or gas giant.
     public const float LargeMoonSurfaceSize = 9f;
 
     public static float ForBody(CelestialBodyType type, int surfaceSize)
