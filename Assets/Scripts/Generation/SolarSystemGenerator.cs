@@ -34,10 +34,21 @@ public class SolarSystemGenerator : MonoBehaviour
 
         for (int i = 0; i < bodyCount; i++)
         {
-            // Type is chosen by ACTUAL temperature at this radius for this star.
-            CelestialBodyType type = RollBodyByTemperature(currentRadius, currentStar, out float rolledWaterLevel);
+            // A body's MASS (0..1) is rolled first, independently, and then drives two things at once so a
+            // world's size and type agree: in the size-sensitive outer bands it decides Gas Giant vs Ice vs
+            // Barren vs Asteroid (the request's "gas giants ... the largest of planet sizes", asteroids the
+            // smallest), and it sets the body's actual surfaceSize within its type's range. The type
+            // FREQUENCIES are unchanged from the old bare-random roll — the mass cutoffs below reproduce the
+            // exact same proportions — so this links size to type without rebalancing which types appear
+            // (the one part of Advanced Generation the planning doc flagged as needing playtest calibration
+            // is deliberately left untouched: this is the safe, proportion-preserving half of it).
+            float mass = Random.value;
 
-            CelestialBody body = MakeBody(type);
+            // Type is chosen by ACTUAL temperature at this radius for this star, with mass breaking the
+            // size-sensitive ties in the outer (cool/cold) bands.
+            CelestialBodyType type = RollBodyByTemperature(currentRadius, currentStar, mass, out float rolledWaterLevel);
+
+            CelestialBody body = MakeBody(type, mass);
             body.name = NameGenerator.PlanetName(systemName, i);
 
             // The SAME roll that decided Ocean/Rocky/Barren in the temperate band also sets the body's
@@ -274,10 +285,13 @@ public class SolarSystemGenerator : MonoBehaviour
     // PlanetSurface/TerrainTile grid. Populating ore against THIS surface would place it on tiles that
     // get thrown away a moment later, so ore population deliberately happens in GenerateSystem instead,
     // against the final surface, once — not here.
-    CelestialBody MakeBody(CelestialBodyType type)
+    CelestialBody MakeBody(CelestialBodyType type, float mass)
     {
         CelestialBody body = new(type) { id = _idCounter++ };
-        body.surfaceSize = RollSurfaceSize(type, currentStarType);
+        // Size from the same mass roll that chose the type, so the two agree: a body picked as a gas giant
+        // because it was the most massive really is the largest, one picked as an asteroid the smallest.
+        // Mapped into the type's own range, so the per-type spread matches what RollSurfaceSize gave.
+        body.surfaceSize = SizeFromMass(type, mass);
         body.atmosphereThickness = AtmosphereRules.ForBody(body.type, body.surfaceSize);
         body.hasTectonics = TectonicsRules.Roll(body.type, body.surfaceSize);
         SeedTerrain(body);
@@ -345,7 +359,7 @@ public class SolarSystemGenerator : MonoBehaviour
     // comes from Size/temperature-band weighting exactly as before — reworking those into a fully
     // attribute-driven pick would change how often each type appears across the whole galaxy, which
     // needs real playtesting to calibrate and isn't attempted here (see the dev-request planning doc).
-    CelestialBodyType RollBodyByTemperature(float distance, StarData star, out float waterLevel)
+    CelestialBodyType RollBodyByTemperature(float distance, StarData star, float mass, out float waterLevel)
     {
         float rel = distance / Mathf.Max(0.5f, TempReference(star));   // <1 hot, ~1 temperate, >1 cold
         float r = Random.value;
@@ -369,19 +383,23 @@ public class SolarSystemGenerator : MonoBehaviour
             return CelestialBodyType.BarrenPlanet;
         }
 
-        if (rel < 3f)                          // cool
+        if (rel < 3f)                          // cool — MASS sorts these by size (small -> large)
         {
-            if (r < 0.45f) return CelestialBodyType.IcePlanet;
-            if (r < 0.70f) return CelestialBodyType.RockyPlanet;
-            if (r < 0.90f) return CelestialBodyType.GasGiant;
-            return CelestialBodyType.BarrenPlanet;
+            // Same proportions as the old r-based roll (Barren 10% / Rocky 25% / Ice 45% / GasGiant 20%),
+            // just ordered by mass so the most massive fifth become the gas giants and the lightest tenth
+            // the barren dwarfs — and SizeFromMass then makes their actual sizes agree.
+            if (mass < 0.10f) return CelestialBodyType.BarrenPlanet;
+            if (mass < 0.35f) return CelestialBodyType.RockyPlanet;
+            if (mass < 0.80f) return CelestialBodyType.IcePlanet;
+            return CelestialBodyType.GasGiant;
         }
 
-        // Cold outer system
-        if (r < 0.50f) return CelestialBodyType.GasGiant;
-        if (r < 0.80f) return CelestialBodyType.IcePlanet;
-        if (r < 0.92f) return CelestialBodyType.BarrenPlanet;
-        return CelestialBodyType.Asteroid;
+        // Cold outer system — again mass-sorted: the biggest are gas giants, the smallest asteroids. Same
+        // proportions as before (GasGiant 50% / Ice 30% / Barren 12% / Asteroid 8%).
+        if (mass < 0.08f) return CelestialBodyType.Asteroid;
+        if (mass < 0.20f) return CelestialBodyType.BarrenPlanet;
+        if (mass < 0.50f) return CelestialBodyType.IcePlanet;
+        return CelestialBodyType.GasGiant;
     }
 
     // A moon's world-type, rolled from the same attributes a planet uses (temperature + a Water Level
@@ -474,20 +492,32 @@ public class SolarSystemGenerator : MonoBehaviour
         return StarType.O;
     }
 
-    int RollSurfaceSize(CelestialBodyType type, StarType starType)
+    // Each type's surface-size band (the same numbers RollSurfaceSize used). Kept as a range so a body's
+    // size can be indexed by its MASS roll rather than an independent draw — see SizeFromMass.
+    static void SizeRange(CelestialBodyType type, out int lo, out int hi)
     {
         switch (type)
         {
             // Wider spread so bodies (and their maps) vary noticeably in size.
-            case CelestialBodyType.GasGiant:       return Random.Range(18, 32);
-            case CelestialBodyType.IcePlanet:      return Random.Range(7, 21);
-            case CelestialBodyType.OceanPlanet:    return Random.Range(9, 23);
-            case CelestialBodyType.RockyPlanet:    return Random.Range(6, 20);
-            case CelestialBodyType.VolcanicPlanet: return Random.Range(6, 18);
-            case CelestialBodyType.BarrenPlanet:   return Random.Range(5, 17);
-            case CelestialBodyType.Moon:           return Random.Range(3, 13);
-            case CelestialBodyType.Asteroid:       return Random.Range(3, 8);
-            default:                               return 10;
+            case CelestialBodyType.GasGiant:       lo = 18; hi = 32; break;
+            case CelestialBodyType.IcePlanet:      lo = 7;  hi = 21; break;
+            case CelestialBodyType.OceanPlanet:    lo = 9;  hi = 23; break;
+            case CelestialBodyType.RockyPlanet:    lo = 6;  hi = 20; break;
+            case CelestialBodyType.VolcanicPlanet: lo = 6;  hi = 18; break;
+            case CelestialBodyType.BarrenPlanet:   lo = 5;  hi = 17; break;
+            case CelestialBodyType.Moon:           lo = 3;  hi = 13; break;
+            case CelestialBodyType.Asteroid:       lo = 3;  hi = 8;  break;
+            default:                               lo = 10; hi = 10; break;
         }
+    }
+
+    // A body's surfaceSize from its 0..1 mass, mapped into its type's range: mass 0 = the smallest of that
+    // type, mass 1 = the largest. Because mass ALSO chose the type in the size-sensitive bands, size and
+    // type stay consistent across the whole system (massive -> gas giant -> large; light -> asteroid ->
+    // tiny), which is the causal link the request asks for between Size and what a body becomes.
+    static int SizeFromMass(CelestialBodyType type, float mass)
+    {
+        SizeRange(type, out int lo, out int hi);
+        return Mathf.Clamp(Mathf.RoundToInt(Mathf.Lerp(lo, hi, Mathf.Clamp01(mass))), lo, hi);
     }
 }
