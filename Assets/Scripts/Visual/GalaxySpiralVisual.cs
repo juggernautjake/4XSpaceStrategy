@@ -116,7 +116,10 @@ public class GalaxySpiralVisual : MonoBehaviour
         var qr = quad.GetComponent<Renderer>();
         if (qr != null)
         {
-            var mat = SpaceMaterials.Additive(new Color(1f, 1f, 1f, Mathf.Clamp01(shape.density)));
+            // density rolls 0.7-1.25 (see FromSeed) — remap onto the alpha range rather than clamping,
+            // since clamping collapsed every roll above 1.0 (almost half the range) to the same opaque quad.
+            float alpha = Mathf.Lerp(0.5f, 1f, Mathf.InverseLerp(0.7f, 1.25f, shape.density));
+            var mat = SpaceMaterials.Additive(new Color(1f, 1f, 1f, alpha));
             v.spiralTex = Generate(galaxy != null ? galaxy.visualSeed : 1, shape);
             mat.mainTexture = v.spiralTex;
             qr.material = mat;

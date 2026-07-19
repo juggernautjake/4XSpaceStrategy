@@ -1,6 +1,11 @@
 # Galaxy scale, render tiers, and the deep view — 2026-07-19 (Jacob Maddux)
 
-**Status: Built — needs a compile pass and a play test.**
+**Source files:** none — this run found the code for items 1-15 already committed (`0c79ae7`,
+`592aa6e`, `75760e4`, `1c5e9e6` and predecessors) and this planning doc already sitting in
+`in-progress/` with every slice ticked, but the §5 final holistic review and filing step had never
+been done. This run's job was that final pass.
+
+**Status:** Complete
 
 ## What was asked
 
@@ -62,6 +67,11 @@ Checked first, because commits `0c79ae7` / `592aa6e` / `75760e4` had covered sev
 - [x] **8 — Follow-up (13/14/15).** Proxy stars start smaller and grow on a longer runway so they hold a
       constant on-screen size; ships de-render at galaxy zoom via `MapTierVisibility` while their orders
       keep running; the core black hole is built at 3.2× a system star with the full ring set.
+- [x] **9 — Final holistic review (this run).** The code for slices 1-8 was already committed and this
+      doc already had every box ticked, but the §5 whole-diff review and filing step had never run. Did
+      that now: four review agents in parallel, one per area (LOD/tier/materials; black hole + deep-view
+      spiral; star naming/Overview UI/backdrop; naming-persistence + the ship-rotation gap flagged
+      below). Fixed what they found — see the notes below. Everything else came back clean.
 
 ## The zoom ladder, concretely
 
@@ -81,18 +91,37 @@ deliberately, since the deep view shows none of your systems.
 
 ## Things worth knowing
 
-- **Nothing here is compiled.** There is no Unity in this environment. Every file was reviewed hard —
-  three full review passes, which found and fixed 20+ real defects including several I introduced while
-  fixing earlier ones — but **you are the compiler.** Treat this as needing a build and a play test.
+- **Nothing here is compiled.** There is no Unity in this environment. Every file has now been through
+  four full review passes across two runs (three earlier, plus this run's four-agent pass over the whole
+  feature) — but **you are the compiler.** Treat this as needing a build and a play test.
 - The changes are broad: `GalaxyLOD` was rewritten, `SystemVisualizer.CreateBlackHole` was replaced with
   a call into the shared builder (its private `MakeRing`/`UnlitMaterial` are gone), and `SpaceBackground`
   changed in several places. If it doesn't build, the error is most likely in one of those.
-- **Ship rotation not built.** The offsets you asked for are already in `UnitModelRenderer.cs` verbatim
-  (Science `Euler(0,90,0)`, Colony `Euler(-90,0,0)`), so re-applying them is a no-op. Worth knowing:
-  `modelRotation` is only applied in the traveling branch and the parked-at-a-world branch of `TickShip`.
-  A ship idling in deep space, or one that just spawned, falls through with no `else` and keeps whatever
-  rotation it had. If the hulls still look wrong, that gap is a likelier cause than the angle — a
-  screenshot would settle it.
-- Several fixes traded one behaviour for another and are worth a look in play: the galaxy-view pick
-  spheres now grow with zoom but cap at 2.5×, and the empire ring was reduced from 2.1× to 1.3× the proxy
-  size because at wide zoom the old radius swept past neighbouring systems.
+- **Ship rotation gap, fixed this run.** The offsets you asked for (Science `Euler(0,90,0)`, Colony
+  `Euler(-90,0,0)`) were already in `UnitModelRenderer.cs`, but `modelRotation` was only ever applied in
+  the traveling branch and the parked-at-a-world branch of `TickShip` — a ship idling in deep space, or
+  one that had just spawned, fell through with no `else` and kept the raw import rotation. Fixed by
+  applying `modelRotation` as the model's initial rotation at build time, so a freeflying ship starts
+  correctly oriented even before it has a course to combine the correction with.
+- **Deep-view spiral `density` axis, fixed this run.** `GalaxyShape.density` rolls 0.7-1.25 and is meant
+  to vary the arm material's opacity, but the code clamped it to `Clamp01`, so every roll from 1.0 to 1.25
+  (almost half the range) collapsed to the same fully-opaque result. Now remapped onto the alpha range
+  instead of clamped, so the axis actually varies galaxy to galaxy as the comment always claimed it did.
+- **Dead code removed.** `PlanetUI.cs` still called `StarInfoPanel.Instance?.Hide()` — a harmless no-op
+  since `StarInfoPanel` is never instantiated anymore (`StarOverview` replaced it), but a stale reference
+  to a retired panel. Deleted.
+- Several fixes from the earlier runs traded one behaviour for another and are worth a look in play: the
+  galaxy-view pick spheres now grow with zoom but cap at 2.5×, and the empire ring was reduced from 2.1×
+  to 1.3× the proxy size because at wide zoom the old radius swept past neighbouring systems.
+
+## Closing note
+
+All 15 requested items are built (items 2/3/5 were already in place before this run; the rest across
+commits `1c5e9e6` and its predecessors). This run's job was the part that had never happened: the §5
+whole-diff review and filing step. Four review agents covered the whole feature area by area and came
+back mostly clean; the three real issues they found (ship-rotation gap, spiral density collapsing across
+part of its range, one dead code reference) are fixed above. Nothing was found that looked like a
+compile error, but that's a review opinion, not a guarantee — please build before playing, per the always
+rule. Play-test worth prioritizing: the zoom ladder crossfade through all four tiers, the deep-view
+spiral's variety across a few regenerated galaxies, and ship hull orientation right after founding a new
+colony ship or research ship (the case the rotation fix targets).

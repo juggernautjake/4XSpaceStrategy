@@ -126,7 +126,6 @@ public class PlanetUI : MonoBehaviour
             {
                 CameraController.Instance.ClearFocus();
                 ObjectLabelManager.Instance?.Hide();
-                StarInfoPanel.Instance?.Hide();
             }
         }
     }

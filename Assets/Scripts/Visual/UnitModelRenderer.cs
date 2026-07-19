@@ -172,6 +172,13 @@ public class UnitModelRenderer : MonoBehaviour
         var go = Instantiate(prefab, transform);
         go.name = "Model_" + u.name;
 
+        // Apply the hull's orientation correction up front, facing forward by default. Without this a
+        // ship that hasn't yet travelled or parked (just spawned, or idling with no course and no dock)
+        // keeps the raw import rotation instead — TickShip only re-applies modelRotation once it has a
+        // real heading to combine it with.
+        if (entry.motion == UnitModelLibrary.Motion.Freeflying)
+            go.transform.rotation = entry.modelRotation;
+
         // Normalise whatever scale the artist authored at, so a model never has to be built to a
         // particular size to look right here.
         FitTo(go, entry.size);
