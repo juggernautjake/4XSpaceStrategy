@@ -54,6 +54,47 @@ public static class DevReset
         }
     }
 
+    /// Re-fit a whole system to the star's CURRENT size and mass — the Dev star editor's "Fit orbits to
+    /// star" button, run after size/mass edits. Distinct from ResetSystem: it does NOT restore the generated
+    /// radii. It keeps every planet where the dev left it if that still clears the (possibly now-bigger)
+    /// star and its neighbours, and only pushes inward planets outward far enough to clear them
+    /// (OrbitSafety.EnforceSystem). It then re-times every planet from the star's current MASS — orbital
+    /// speed follows sqrt(mass)/radius — since a heavier or lighter star should visibly change how fast its
+    /// worlds go round, and re-spaces + re-times each planet's moons. Finally it pushes all of that onto the
+    /// live visuals (planet + ring positions and speeds).
+    public static void FitOrbitsToStar(List<CelestialBody> bodies, StarData star)
+    {
+        if (bodies == null) return;
+
+        // Clear the star's current radius (visualScale) and keep every lane collision-free.
+        OrbitSafety.EnforceSystem(bodies, star);
+
+        foreach (var b in bodies)
+        {
+            if (b == null) continue;
+            // EnforceSystem only re-timed the planets it actually moved; re-time ALL of them from the star's
+            // current mass so an edit that didn't need to move anything still re-speeds the system.
+            if (b.parentBody == null && star != null)
+                b.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(star, b.orbitRadius);
+            SyncController(b);
+            Rescore(b, star);
+            if (b.moons != null)
+                foreach (var m in b.moons)
+                {
+                    if (m == null) continue;
+                    SyncController(m);   // SpaceMoons (inside EnforceSystem) already re-spaced + re-timed moons
+                    Rescore(m, star);
+                }
+        }
+    }
+
+    // Push a body's data-authoritative orbit onto its live OrbitController (radius, speed, ring geometry).
+    static void SyncController(CelestialBody b)
+    {
+        var oc = b != null && b.visualObject != null ? b.visualObject.GetComponent<OrbitController>() : null;
+        if (oc != null) { oc.SetRadius(b.orbitRadius); oc.SetSpeed(b.orbitSpeed); oc.ForceRingRedraw(); }
+    }
+
     static void Rescore(CelestialBody b, StarData star)
     {
         var s = SpeciesManager.Current;

@@ -144,8 +144,15 @@ public partial class InspectorWindow
         // Dev-Mode only: put every planet and moon in this system back on the orbit it generated with,
         // undoing whatever the orbit editor moved. Matches "Dev mode bypasses the parameters, dev-off does not".
         if (GameMode.DevMode && target.system != null)
+        {
             UIFactory.Button(p, "Reset system orbits (Dev)",
                 () => DevReset.ResetSystem(target.system.bodies, target.star), 26);
+            // Keeps dev-set radii, only pushing in the ones that would now clip the (edited) star, and
+            // re-times every planet from the star's current mass. The counterpart to editing star size/mass:
+            // Reset restores the GENERATED orbits, this ADAPTS the current ones to the new star.
+            UIFactory.Button(p, "Fit orbits to star size/mass (Dev)",
+                () => DevReset.FitOrbitsToStar(target.system.bodies, target.star), 26);
+        }
 
         // Dev-Mode star editor: size / mass / density (interconnected) and the star's light.
         if (GameMode.DevMode && s != null && !s.isBlackHole)
