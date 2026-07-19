@@ -283,7 +283,16 @@ public static class GameStateSerializer
         // as a genuine asteroid/small-moon would read — so backfilling from Type+Size whenever it comes
         // back non-positive is safe either way: a real zero recomputes to the same zero, an old save
         // recomputes to what generation would have given it.
-        if (b.atmosphereThickness <= 0f) b.atmosphereThickness = AtmosphereRules.ForBody(b.type, b.surfaceSize);
+        // A MOON is backfilled through the moon-mass gate (ForMoon), not ForBody: a moon now carries a
+        // real planet-type (Ocean/Ice/Volcanic via RollMoonType) but its air is still capped by its small
+        // mass, and ForMoon legitimately returns 0 for a small one — whereas ForBody would read that type
+        // and hand it a full planet-sized atmosphere it never had, so a small icy/volcanic moon would
+        // sprout an atmosphere shell on every reload. dto.parentId (>=0 for a moon) is the signal, because
+        // b.parentBody isn't linked yet at this point in the load (Apply re-links moons afterward).
+        if (b.atmosphereThickness <= 0f)
+            b.atmosphereThickness = dto.parentId >= 0
+                ? AtmosphereRules.ForMoon(b.type, b.surfaceSize)
+                : AtmosphereRules.ForBody(b.type, b.surfaceSize);
         // Saves written before `settled` existed have it false everywhere, which would silently
         // un-colonise every world in an old save. A world with a City on it was settled by definition —
         // that inference is exactly what Claim.cs replaces, and this is the one place it's still correct

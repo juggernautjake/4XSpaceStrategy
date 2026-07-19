@@ -289,8 +289,12 @@ public class SolarSystemGenerator : MonoBehaviour
     {
         CelestialBody body = new(type) { id = _idCounter++ };
         // Size from the same mass roll that chose the type, so the two agree: a body picked as a gas giant
-        // because it was the most massive really is the largest, one picked as an asteroid the smallest.
-        // Mapped into the type's own range, so the per-type spread matches what RollSurfaceSize gave.
+        // because it was the most massive really is the largest, one picked as an asteroid the smallest,
+        // mapped into the type's own range. Note the deliberate trade-off in the outer (cool/cold) bands,
+        // where mass ALSO chose the type: a type there only spans the mass sub-interval it was selected
+        // from, so e.g. those gas giants cluster near the top of the 18-32 range rather than filling it —
+        // the price of making size and type monotonic ("gas giants are the largest"). The hot/temperate
+        // bands pick type from an independent draw, so they keep the full per-type size spread.
         body.surfaceSize = SizeFromMass(type, mass);
         body.atmosphereThickness = AtmosphereRules.ForBody(body.type, body.surfaceSize);
         body.hasTectonics = TectonicsRules.Roll(body.type, body.surfaceSize);
