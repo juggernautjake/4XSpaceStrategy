@@ -17,15 +17,23 @@ public class GalaxyLOD : MonoBehaviour
 
     // The height at which detailed systems give way to the enlarged-star overview, derived from how big
     // the galaxy actually is rather than fixed, so the overview appears as the systems get too small to
-    // read, at any galaxy size. Hysteresis (enter > exit) avoids flicker at the threshold.
-    const float EnterFrac = 0.55f;
-    const float ExitFrac = 0.42f;
-    const float MinEnter = 260f;
+    // read, at any galaxy size. Hysteresis (enter > exit) avoids flicker at the threshold. Lowered so the
+    // star overview takes over SOONER as you zoom out (detailed systems hand off earlier).
+    const float EnterFrac = 0.40f;
+    const float ExitFrac = 0.30f;
+    const float MinEnter = 200f;
 
-    // Enlarged-star proxy size as a fraction of the galaxy's radius, so a proxy reads as a clear dot at
-    // the overview zoom on a galaxy of any size. Tunable if the stars feel too big or small.
-    const float ProxySizeFrac = 0.03f;
+    // Enlarged-star proxy size as a fraction of the galaxy's radius — its size at the moment the overview
+    // kicks in. From there it GROWS with zoom (see UpdateProxyScales) to hold a roughly constant on-screen
+    // size, so a system's star never shrinks to nothing however far you pull back. Tunable.
+    const float ProxySizeFrac = 0.045f;
     const float ProxySizeMin = 3f;
+
+    // How far a proxy may grow, as a fraction of the galaxy radius, before the cap kicks in. Generous, so
+    // the stars stay a constant on-screen size out to very far zoom; past the cap they slowly shrink again
+    // rather than growing without bound. (Near max zoom the proxies overlap — which just reads as the
+    // galaxy's own glow, an acceptable "galaxy from far away" look.)
+    const float ProxyMaxFracOfGalaxy = 0.9f;
 
     float EnterGalaxy
     {
@@ -52,6 +60,7 @@ public class GalaxyLOD : MonoBehaviour
     readonly List<GalaxyStarProxy> proxies = new List<GalaxyStarProxy>();
     Galaxy builtFor;
     bool galaxyView;
+    float proxyBaseSize = 1f;   // the world size each proxy was built at (grown from here with zoom)
 
     public static void Create(Transform canvas)
     {
@@ -81,8 +90,25 @@ public class GalaxyLOD : MonoBehaviour
         if (g == null) return;
 
         float size = Mathf.Max(ProxySizeMin, CameraController.GalaxyRadius() * ProxySizeFrac);
+        proxyBaseSize = size;
         foreach (var sys in g.systems)
             proxies.Add(GalaxyStarProxy.Build(proxyRoot, sys, size));
+    }
+
+    // Grow every proxy linearly with camera height so its ON-SCREEN size stays roughly constant as you
+    // zoom out (screen size ~ worldSize / height; worldSize ~ height keeps it fixed) — a system's star
+    // never shrinks to a sub-pixel dot and "clips out of existence". Capped so a proxy never grows past a
+    // fraction of the galaxy, which would turn extreme zoom into one overlapping blob. Cheap: a handful of
+    // localScale writes per frame, and only while the overview is up.
+    void UpdateProxyScales()
+    {
+        if (cam == null || proxies.Count == 0 || proxyBaseSize <= 0.0001f) return;
+        float h = Mathf.Max(1f, cam.transform.position.y);
+        float refH = Mathf.Max(1f, EnterGalaxy);
+        float maxScale = Mathf.Max(4f, CameraController.GalaxyRadius() * ProxyMaxFracOfGalaxy / proxyBaseSize);
+        float f = Mathf.Clamp(h / refH, 1f, maxScale);
+        var s = Vector3.one * f;
+        foreach (var m in proxies) if (m != null) m.transform.localScale = s;
     }
 
     void Update()
@@ -95,6 +121,8 @@ public class GalaxyLOD : MonoBehaviour
         float h = cam.transform.position.y;
         bool want = galaxyView ? (h > ExitGalaxy) : (h > EnterGalaxy);
         if (want != galaxyView) SetGalaxyView(want);
+
+        if (galaxyView) UpdateProxyScales();   // keep the stars a constant on-screen size as you zoom
     }
 
     void SetGalaxyView(bool on)
