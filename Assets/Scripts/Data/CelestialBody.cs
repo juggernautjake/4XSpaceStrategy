@@ -142,6 +142,13 @@ public class CelestialBody
     public bool terraforming = false;        // an active terraforming project raising habitability
     public float researchProgress = 0f;      // 0..1 deep-research completion (research ship / centre)
 
+    // True while an Orbital Migration project (OrbitShiftIn/Out) is walking this world's orbit radius from
+    // its old value to the new one. The camera reads it so a FOCUS on a migrating world frames the whole
+    // orbit and stops hard-following the planet — otherwise the planet stays pinned to screen-centre with
+    // the star (and the resizing ring) off-screen, and the radius change nobody can see. Transient render
+    // state, so it isn't serialized; a save mid-migration resumes the job and re-sets it.
+    [System.NonSerialized] public bool migratingOrbit = false;
+
     // Does this world have living plant life at all? Set once at generation time (see
     // BiosphereRules.GeneratesWithBiosphere) for worlds that started out warm and wet enough to sustain
     // one; everything else generates sterile. Meeting the water/temperature conditions LATER through

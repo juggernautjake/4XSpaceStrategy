@@ -134,6 +134,11 @@ public class TerraformManager : MonoBehaviour
         };
         InitOrbitMigration(job);
         jobs.Add(job);
+        // Flag an orbit migration so the camera frames the whole orbit (and stops hard-following) when you
+        // fly to this world — otherwise the planet stays pinned to screen-centre and the slow radial change
+        // is invisible. Cleared on Complete/Cancel below.
+        if (t == TerraformProjectType.OrbitShiftOut || t == TerraformProjectType.OrbitShiftIn)
+            b.migratingOrbit = true;
 
         NotificationManager.Instance?.Push($"{p.name} begun on {b.name}", p.description, Fly(b), NotifKind.Info);
         OnChanged?.Invoke();
@@ -162,6 +167,11 @@ public class TerraformManager : MonoBehaviour
             j.body.remodelToType = -1; j.body.remodelT = 0f;
             TerraformVisuals.Advance(j.body, SpeciesManager.Current, force: true);
         }
+
+        // Abandoning an orbit migration leaves the world at whatever radius it had crept to and stops the
+        // camera's migration framing (the orbit simply stays where it is — same as MigrateTo on complete).
+        if ((j.type == TerraformProjectType.OrbitShiftOut || j.type == TerraformProjectType.OrbitShiftIn) && j.body != null)
+            j.body.migratingOrbit = false;
 
         OnChanged?.Invoke();
     }
@@ -276,6 +286,7 @@ public class TerraformManager : MonoBehaviour
         {
             float factor = j.type == TerraformProjectType.OrbitShiftOut ? 1.45f : 0.68f;
             MigrateTo(b, j.IsOrbitShift ? j.orbitTarget : b.orbitRadius * factor);
+            b.migratingOrbit = false;   // the migration is done; the camera can frame/follow normally again
         }
 
         // Planetary Remodelling: the surface has been dithering toward the target type as the project ran
@@ -565,6 +576,10 @@ public class TerraformManager : MonoBehaviour
                     metalPaid = d.metalPaid, energyPaid = d.energyPaid, waterPaid = d.waterPaid,
                     orbitStart = d.orbitStart, orbitTarget = d.orbitTarget
                 });
+                // Re-arm the camera's migration framing for a save resumed mid-migration (migratingOrbit
+                // is transient, so it loaded false; the job itself resumes and keeps animating regardless).
+                if (d.type == (int)TerraformProjectType.OrbitShiftOut || d.type == (int)TerraformProjectType.OrbitShiftIn)
+                    b.migratingOrbit = true;
             }
         OnChanged?.Invoke();
     }
