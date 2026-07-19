@@ -46,6 +46,12 @@ public static class PlanetTerrainGenerator
         public float latitude;     // 0 equator .. 1 pole
     }
 
+    // How much a convergent plate boundary lifts the ridge (mountain-building) field at the fault. A
+    // strong head-on collision (boundary≈1, convergence≈1) adds this much, enough to push mid-ridge ground
+    // over the Mountains threshold; a divergent boundary subtracts it (a thinning rift). Tuned by eye —
+    // there is no Editor here to calibrate against.
+    const float TectonicRidgeGain = 0.6f;
+
     // Octaves of noise the SURFACE GRID is built from.
     //
     // Six, matching what SurfaceTextureRenderer has always used to draw the detail map. It was four,
@@ -140,6 +146,21 @@ public static class PlanetTerrainGenerator
         if (classifyType == CelestialBodyType.RockyPlanet && !body.biosphereActive)
             moisture = Mathf.Min(moisture, 0.1f);
 
+        // Plate tectonics fold mountains up ALONG the fault lines, exactly where the Survey overlay draws
+        // them (both read this one TectonicsMap, so the map and the overlay can never disagree). A
+        // convergent boundary (two plates driving together) adds ridge in proportion to how close the tile
+        // is to the fault AND how hard they collide; a divergent rift subtracts a little. This concentrates
+        // ranges and volcanoes at the boundaries instead of scattering them by noise, on top of the
+        // whole-world ruggedness TectonicsRules.BoostRidge already gave the world. Faults that run under
+        // the sea stay sea — every classifier tests elevation for water BEFORE ridge, so a low, drowned
+        // fault reads as ocean (Earth's mid-ocean ridges), and only a fault crossing high ground becomes a
+        // mountain belt. Derived per-sample, so it costs no save state and a remodel/reseed re-derives it.
+        if (TectonicsMap.Active(body))
+        {
+            var tec = TectonicsMap.Sample(body, u, v);
+            ridge = Mathf.Clamp(ridge + tec.boundary * tec.convergence * TectonicRidgeGain, 0f, 2f);
+        }
+
         TerrainType t = Classify(classifyType, elevation, moisture, temperature, ridge, lat);
 
         return new Sample
@@ -223,9 +244,13 @@ public static class PlanetTerrainGenerator
         // what turns a maxed-out Water Level slider from an ice-covered world into an ocean world as the
         // Temperature slider (or terraforming) pushes it above freezing.
         bool frozen = temp < 0.22f;
+        // Low ground is (frozen) sea BEFORE ridge is considered, matching Terran — otherwise a
+        // mountain-building fault line (or a stray ridge-noise peak) crossing the low band would raise
+        // Mountains straight out of the frozen sea. A drowned fault stays sea, as Earth's mid-ocean
+        // ridges do; only faults over high ground fold up into ranges.
+        if (elev < 0.3f)   return frozen ? TerrainType.FrozenSea : TerrainType.Ocean;
         if (ridge > 0.8f)  return TerrainType.Mountains;
         if (elev > 0.72f)  return frozen ? TerrainType.Glacier : TerrainType.Highlands;
-        if (elev < 0.3f)   return frozen ? TerrainType.FrozenSea : TerrainType.Ocean;
         if (moist > 0.72f) return frozen ? TerrainType.CrystalField : TerrainType.Lake;
         if (lat < 0.25f && elev > 0.5f) return frozen ? TerrainType.Snow : TerrainType.Beach;
         // The bulk mid-elevation band is genuine ice SHEET, not a frozen sea — only the low-elevation
