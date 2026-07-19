@@ -21,6 +21,7 @@ public static class GameBootstrap
         ColonyManager.Create();             // colony economy, growth, terraforming, construction
         TerraformManager.Create();          // planetary-engineering projects that raise world ceilings
         CityGrowth.Create();                // colonies grow their own settlements (GameConfig toggle)
+        FactionAI.Create();                 // rival civilisations: race + personality, slow natural growth & expansion
         EarthquakeManager.Create();         // fault-line quakes damage infrastructure on tectonic worlds
         ControlGroupInput.Create();         // Ctrl+1..9 to bind fleets, 1..9 to recall them
         FleetMovementController.Create();

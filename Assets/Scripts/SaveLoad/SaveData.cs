@@ -30,6 +30,7 @@ public class SaveGame
     public bool organicCityGrowth = true;                   // the player's taste toggle, saved with the game
     public List<TerraformJobDTO> terraformJobs = new List<TerraformJobDTO>();
     public List<ControlGroupDTO> controlGroups = new List<ControlGroupDTO>();
+    public List<FactionAIDTO> factionAI = new List<FactionAIDTO>();   // each rival civilisation's race + personality
 
     // Space background settings (kept constant per map).
     public int bgSeed = 12345;
@@ -91,6 +92,18 @@ public class SystemDTO
     public int ownerId = -1;                 // -1 == unclaimed
     public bool isHome;
     public List<BodyDTO> bodies = new List<BodyDTO>();
+}
+
+[System.Serializable]
+public class FactionAIDTO
+{
+    public int factionId;
+    public int speciesIndex;
+    public float expansionism;
+    public float growthDrive;
+    public float hardiness;
+    public float expandCooldown;
+    public string temperament;
 }
 
 [System.Serializable]

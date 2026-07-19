@@ -48,6 +48,7 @@ public static class GameStateSerializer
         game.organicCityGrowth = GameConfig.OrganicCityGrowth;
         game.terraformJobs = TerraformManager.Instance != null ? TerraformManager.Instance.Export() : new List<TerraformJobDTO>();
         game.controlGroups = ControlGroups.Export();
+        game.factionAI = FactionAI.ToDTOs();   // rival civilisations' races + personalities (their worlds save via body ownerId)
 
         int bodyCount = 0;
         if (galaxy != null)
@@ -215,6 +216,10 @@ public static class GameStateSerializer
 
         GameManager.Instance.LoadGalaxy(galaxy);
         SpeciesManager.Select(game.speciesIndex);
+        // Rival civilisations' races + personalities. Their owned worlds already came back via each body's
+        // ownerId (and the renderer draws their owner rings from body.owner), so this just restores who they
+        // are and where their expansion clock stands.
+        FactionAI.LoadDTOs(game.factionAI);
 
         // Restore the player economy, ancient schematics, and fleet now the galaxy bodies exist.
         var byId = new Dictionary<int, CelestialBody>();

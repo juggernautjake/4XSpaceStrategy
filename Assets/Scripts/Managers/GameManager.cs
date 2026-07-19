@@ -62,6 +62,10 @@ public class GameManager : MonoBehaviour
         var homePlanet = FindHomePlanet();
         PlayerEconomy.NewGame(homePlanet, SpeciesManager.Current);
         UnitManager.Instance?.NewGame(homePlanet);
+
+        // Seed the rival civilisations: give each non-player faction a race + personality and a homeworld,
+        // from which it grows and expands on its own. After Visualize() so the seeded worlds' visuals exist.
+        FactionAI.NewGame(Galaxy);
     }
 
     CelestialBody FindHomePlanet()

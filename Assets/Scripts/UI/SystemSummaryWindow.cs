@@ -77,6 +77,8 @@ public class SystemSummaryWindow : MonoBehaviour
                         : sys.owner != null ? $"<color=#FF9A5C>{FactionManager.OwnerName(sys.owner)}</color>"
                         : "Unclaimed";
         sb.AppendLine($"<color=#9FB4C8>Owner:</color> {sysOwner}");
+        string civ = FactionAI.Describe(sys.owner);
+        if (civ != null) sb.AppendLine($"<size=11><color=#9FB4C8>{civ}</color></size>");
         sb.AppendLine($"Planets: {sys.bodies.Count}\n");
 
         for (int i = 0; i < sys.bodies.Count; i++)

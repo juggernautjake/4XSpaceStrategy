@@ -253,6 +253,8 @@ public class GalaxyStarProxy : MonoBehaviour
                    : system.owner != null ? FactionManager.OwnerName(system.owner)
                    : "Unclaimed";
         sb.Append($"\n<color=#9FB4C8>Owner:</color> {own}");
+        string civ = FactionAI.Describe(system.owner);
+        if (civ != null) sb.Append($"\n<size=10><color=#9FB4C8>{civ}</color></size>");
         return sb.ToString();
     }
 
