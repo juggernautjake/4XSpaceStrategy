@@ -39,11 +39,16 @@ public static class PlanetTemperature
     const float GreenhouseMaxC = 45f;
 
     static float BaseCelsius(CelestialBody b)
+        => BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, b.type);
+
+    // The same law from raw inputs, so terrain GENERATION can judge a tile's climate against the exact
+    // figure this class shows the player — greenhouse warming and the type nudge included — and the map
+    // (frozen seas, no jungle in a furnace) can never disagree with the °C readout.
+    public static float BaseCelsius(float heat, float atmosphereThickness, CelestialBodyType type)
     {
-        float heat = b.terrainParams.heat;
         float kelvin = ReferenceKelvin * Mathf.Sqrt(Mathf.Max(0.01f, heat));
-        float greenhouseC = Mathf.Clamp01(b.atmosphereThickness) * GreenhouseMaxC;
-        return kelvin - 273.15f + TypeModifierC(b.type) + greenhouseC;
+        float greenhouseC = Mathf.Clamp01(atmosphereThickness) * GreenhouseMaxC;
+        return kelvin - 273.15f + TypeModifierC(type) + greenhouseC;
     }
 
     // Hot planet TYPES run hot everywhere (a furnace world's own internal heat), cold types run cold

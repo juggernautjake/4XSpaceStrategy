@@ -163,6 +163,17 @@ public static class PlanetTerrainGenerator
 
         TerrainType t = Classify(classifyType, elevation, moisture, temperature, ridge, lat);
 
+        // CLIMATE COHERENCE. The classifier's `temperature` is latitude-dominated (equator warm, poles cold)
+        // and only lightly scaled by the world's heat, so on its own a globally FRIGID world could still show
+        // a liquid equatorial sea, and a globally SCORCHING one could still grow jungle. Re-judge the water
+        // and vegetation tiles against the tile's ACTUAL temperature in °C — the very figure PlanetTemperature
+        // shows the player — so the two always agree: a −70°C world's seas read as ice, and a 100°C world
+        // grows no rainforest. Computed from the SAME heat/atmosphere/type the readout uses, plus the standard
+        // ±15°C equator→pole swing and a small local-weather wobble from the heat noise.
+        float baseC = PlanetTemperature.BaseCelsius(p.heat, body.atmosphereThickness, classifyType);
+        float tileC = baseC + Mathf.Lerp(15f, -15f, lat) + (heatNoise - 0.5f) * 12f;
+        t = ClimateCoherence(t, tileC);
+
         return new Sample
         {
             terrain = t, shade = fine, elevation = elevation, water = IsWater(t),
@@ -184,6 +195,76 @@ public static class PlanetTerrainGenerator
             default:
                 return false;
         }
+    }
+
+    // ---- Climate coherence thresholds (°C, matching PlanetTemperature so the map agrees with the readout) ----
+    // The game's °C runs a little warm (greenhouse + calibration), so an Earth-like world's tropics read
+    // ~40-50°C and still deserve jungle — the vegetation ceilings sit above that, and only bite on genuinely
+    // hostile worlds. Easy knobs if the balance wants nudging.
+    const float FreezeC = 0f;        // liquid water / warm vegetation can't persist below this
+    const float DeepFreezeC = -25f;  // below this even hardy groundcover is buried — snow, not tundra
+    const float LushMaxC = 55f;      // above this, rainforest & wetland thin to hardier tropical cover
+    const float ScorchC = 75f;       // above this, no vegetation survives — bare, sun-baked ground
+    const float BakedC = 100f;       // above this, that bare ground reads as wasteland, not just desert
+
+    // Re-judge one classified tile against its real temperature. Only water and vegetation are touched;
+    // rock, mountains, sand, lava and already-frozen tiles are left exactly as the per-type classifier
+    // decided. Deterministic and resolution-independent (pure function of the tile type and its °C), so the
+    // grid and the detailed globe stay identical.
+    static TerrainType ClimateCoherence(TerrainType t, float tileC)
+    {
+        // --- Below freezing: liquid water turns to ice; warm vegetation dies back to frozen ground ---
+        if (tileC < FreezeC)
+        {
+            switch (t)
+            {
+                case TerrainType.Ocean:
+                case TerrainType.Lake:
+                case TerrainType.River:
+                case TerrainType.Reef:
+                    return TerrainType.FrozenSea;
+                case TerrainType.Beach:
+                    return TerrainType.Snow;
+                case TerrainType.Jungle:
+                case TerrainType.Forest:
+                case TerrainType.Swamp:
+                case TerrainType.Grassland:
+                case TerrainType.Savanna:
+                case TerrainType.Plains:
+                case TerrainType.Steppe:
+                    return tileC < DeepFreezeC ? TerrainType.Snow : TerrainType.Tundra;
+            }
+            return t;
+        }
+
+        // --- Too hot for lush growth: rainforest & wetland step down to hardy cover ---
+        if (tileC > ScorchC)
+        {
+            switch (t)
+            {
+                case TerrainType.Jungle:
+                case TerrainType.Forest:
+                case TerrainType.Swamp:
+                case TerrainType.Grassland:
+                case TerrainType.Savanna:
+                case TerrainType.Taiga:
+                case TerrainType.Steppe:
+                case TerrainType.Plains:
+                    return tileC > BakedC ? TerrainType.Wasteland : TerrainType.Desert;
+            }
+            return t;
+        }
+
+        if (tileC > LushMaxC)
+        {
+            switch (t)
+            {
+                case TerrainType.Jungle: return TerrainType.Savanna;    // rainforest -> tropical grassland
+                case TerrainType.Swamp:  return TerrainType.Grassland;  // wetland dries out
+                case TerrainType.Forest: return TerrainType.Grassland;
+            }
+        }
+        return t;
     }
 
     static float FBm(float x, float y, int octaves)
