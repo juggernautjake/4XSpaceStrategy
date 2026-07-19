@@ -483,7 +483,13 @@ public class SpaceBackground : MonoBehaviour
                 float phase = ang * hand - Mathf.Log(Mathf.Max(0.03f, r)) * tight;
                 float arm = Mathf.Pow(Mathf.Cos(phase * arms) * 0.5f + 0.5f, sharp);
 
-                float fade = 1f - Mathf.SmoothStep(0.55f, 1f, r);
+                // Mathf.SmoothStep(0.55f, 1f, r) does NOT ramp from 0.55 to 1 — Unity's SmoothStep is a
+                // smoothed lerp BETWEEN those two values. The old form returned 0.55..1, so the fade
+                // peaked at 0.45 instead of 1 and began falling from r=0 rather than from 0.55: every
+                // distant galaxy came out uniformly dim with no bright disc, rather than bright out to
+                // 0.55 and then fading. The two-edge form is SmoothStep(0,1,...) fed an InverseLerp.
+                // Same trap as GalaxySpiralVisual.Ramp, which documents it in full.
+                float fade = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.55f, 1f, r));
                 float core = Mathf.Exp(-(r * r) / (bulge * bulge));
                 float a = Mathf.Clamp01(arm * fade * 0.7f + core);
 

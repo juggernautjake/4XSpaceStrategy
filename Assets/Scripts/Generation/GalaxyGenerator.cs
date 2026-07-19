@@ -67,12 +67,28 @@ public static class GalaxyGenerator
     }
 
     // Golden-angle spiral so systems spread out and don't overlap.
+    //
+    // Distances are DELIBERATELY large — the inner ring starts 900 units out and each system adds 260.
+    // The old layout put the home system 170 units from the galactic core and stepped 95 per system,
+    // which packed twelve systems into a disc barely a thousand units across. Two things went wrong with
+    // that. Interstellar space did not read as empty: at galaxy view the systems sat almost shoulder to
+    // shoulder, so pulling back gained you nothing and the map felt like one crowded cluster rather than
+    // a galaxy. And the central black hole, which has to be drawn large enough to read as the thing the
+    // whole galaxy turns around, had no room to be drawn at all without swallowing the nearest systems.
+    //
+    // Everything downstream is derived from GalaxyRadius() rather than hardcoded — the camera's framing
+    // height, the render-tier boundaries, the proxy sizes and the zoom ceiling — so widening the layout
+    // rescales the entire zoom ladder with it and no constant elsewhere needs touching.
+    const float InnerRadius = 900f;
+    const float RadiusStep = 260f;
+
     static Vector3 SpiralPosition(int i, int count)
     {
-        if (i == 0) return new Vector3(0, 0, 170f);      // home a bit off-centre
+        // Home sits on the inner ring like everything else, rather than at a hardcoded offset near the
+        // core — that offset is what used to put it inside the black hole's own halo.
         float angle = i * 2.399963f;                     // golden angle (radians)
-        float radius = 200f + i * 95f;
-        return new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius + 170f);
+        float radius = InnerRadius + i * RadiusStep;
+        return new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
     }
 
     static void LinkBodies(StarSystemData sys)

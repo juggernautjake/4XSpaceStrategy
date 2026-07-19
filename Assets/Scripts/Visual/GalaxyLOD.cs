@@ -22,25 +22,31 @@ public enum ViewTier
 // zoom was just the same proxies drifting apart, with the galactic core rendering as a near-black sphere
 // on a black background, i.e. invisible.
 //
-// THE RULE NOW: every representation has a continuous alpha derived from camera height, and a thing stays
-// rendered until its alpha reaches zero. Two representations overlap through each boundary, one dissolving
-// in as the other dissolves out, so there is never a frame where the screen jumps.
+// THE RULE NOW: there are TWO MODES, and they are mutually exclusive.
 //
-//   height ->      [ Body ]   [ System ]        [ Galaxy ]           [ Deep ]
-//   detailed systems  ############################
-//   star proxies                        ####################################
-//   deep spiral                                            ##################
+//   height ->      [ Body ]   [ System ]  |     [ Galaxy ]           [ Deep ]
+//   detailed systems  ##########################|
+//   star proxies                                |###############################
+//   deep spiral                                 |            #############+#####
 //
-// A continuous crossfade needs no hysteresis. The old code needed an enter/exit gap because a binary test
-// on a jittering height flickers; a fade has no discrete decision to flicker on. Activation still happens
-// at a threshold, but only where alpha is ~0, so a flicker there is invisible by construction.
+// SYSTEM MODE draws the real systems: suns, planets, moons, orbits, ships. GALAXY MODE draws one enlarged
+// star per system, the galactic core, and — further out — the spiral those systems sit in. Crossing the
+// boundary switches modes outright. The small and large representations of a system NEVER exist at the
+// same time; a system is either drawn as itself or drawn as a marker, never as both.
 //
-// THE ONE EXCEPTION is the detailed systems. Everything else here is built from runtime materials this
-// file controls, so alpha is safe to drive. The detailed systems are textured, lit planet materials, and
-// forcing several hundred of them into transparent blending to fade them out would be both expensive and
-// a real risk of wrecking how they render. So detail is still a hard toggle — but it is held on until the
-// proxies have finished fading IN over the top of it, which reads as a crossfade without touching a single
-// planet material. See DetailShouldRender.
+// That exclusivity is a deliberate reversal. The previous version held the detailed systems on until the
+// proxies had finished fading in OVER them, which crossfaded smoothly but meant a band of ~190 units of
+// height where each system was drawn twice — once at true scale and once as a huge sphere on top of it.
+// It read as clutter, not as a transition.
+//
+// Smoothness now comes from the proxies fading UP from the boundary rather than across it: at the instant
+// detail switches off, proxy alpha is 0 and rising, so nothing pops in fully-formed and nothing overlaps.
+// The switch itself has hysteresis — a binary test on a jittering height flickers, and there is no longer
+// a fade spanning the threshold to hide it.
+//
+// The deep spiral is ADDITIVE to galaxy mode, not a third replacement for it: the system stars stay lit
+// and at full alpha inside it, which is the point of the widest view — you should be able to see where
+// your empire is while looking at the whole galaxy.
 public class GalaxyLOD : MonoBehaviour
 {
     public static GalaxyLOD Instance;
@@ -54,6 +60,12 @@ public class GalaxyLOD : MonoBehaviour
     /// keying off it makes the backdrop lurch a beat after the thing it is reacting to.
     public static float ProxyAlpha { get; private set; }
     public static float DeepAlpha { get; private set; }
+
+    /// True while the real systems are being drawn. This is THE authority on which mode is up — anything
+    /// that has to appear and disappear together with the planets (ships, most obviously) must key off
+    /// this and not off an alpha, or it will hand over on a slightly different frame and be left floating
+    /// alone in an otherwise collapsed map.
+    public static bool SystemMode { get; private set; } = true;
 
     // ---- Boundaries ------------------------------------------------------------------------------
     // Derived from how big the galaxy actually is, so they hold at any galaxy size rather than being
@@ -87,17 +99,22 @@ public class GalaxyLOD : MonoBehaviour
     // its SCREEN size (roughly worldSize / height) stays put. Pull back twice as far, the star is twice as
     // big in world units and exactly as big on screen.
     //
-    // The base size is small (2.4% of the galaxy radius, was 4.5%) precisely SO there is headroom to grow.
-    // At 4.5% a proxy already started at ~63 units against ~95-unit system spacing, so it could barely
-    // grow at all before neighbouring systems merged — the growth had to be capped almost immediately,
-    // and capped growth is what let the stars shrink away at wide zoom. Starting smaller buys a much
-    // longer runway before overlap becomes a problem.
-    const float ProxySizeFrac = 0.024f;
+    // The base size is small (1% of the galaxy radius) precisely SO there is headroom to grow. At the
+    // original 4.5% a proxy started at ~63 units against ~95-unit system spacing, so it could barely grow
+    // before neighbours merged — the growth had to be capped almost immediately, and capped growth is
+    // what let the stars shrink away at wide zoom. Starting small buys a long runway.
+    const float ProxySizeFrac = 0.010f;
     const float ProxySizeMin = 2f;
 
-    // How far a proxy may grow. Generous, because the alternative to a big star is an invisible one.
-    // In practice the crossfade to the deep view retires the proxies before this binds.
-    const float ProxyMaxScale = 14f;
+    // The ceiling on that growth is COMPUTED, not guessed — from the real closest approach between any
+    // two systems in this galaxy (see RecomputeProxyLimits). A hardcoded number cannot be right for both
+    // a 1-system and a 12-system map, and getting it wrong in either direction is visible: too low and
+    // the stars shrink away as you pull back, too high and the inner map merges into one blob.
+    float proxyMaxScale = 6f;
+
+    // Fraction of the closest system-to-system distance a proxy's DIAMETER may occupy. At 0.8 neighbours
+    // are clearly distinct but the field still reads as populated.
+    const float ProxySpacingUse = 0.8f;
 
     Camera cam;
     Transform proxyRoot;
@@ -115,6 +132,11 @@ public class GalaxyLOD : MonoBehaviour
 
     Galaxy builtFor;
     bool detailOn = true;
+
+    // How long the enlarged stars take to dissolve in after the mode switch. Long enough to read as a
+    // transition rather than a pop, short enough that it is over before you have finished scrolling.
+    const float ProxyFadeSeconds = 0.3f;
+    float proxyFade;
     float proxyBaseSize = 1f;
     float coreProxyBaseSize = 1f;
     float coreMaxScale = 1f;   // capped so the horizon never reaches the nearest system
@@ -182,14 +204,13 @@ public class GalaxyLOD : MonoBehaviour
 
         float b1 = Mathf.Max(MinGalaxyEnter, cFrame * GalaxyEnterFrac);
         // The floor must never push the boundary so high that framing the whole galaxy (h == frame) lands
-        // mid-crossfade. In a one-system galaxy `frame` is only ~190 while MinGalaxyEnter is 200, so Home
-        // would leave a 38%-opaque proxy sphere sitting on top of the still-rendered star — with its own
-        // collider in front of it, stealing clicks from the star underneath.
-        // The 0.999 is not decoration. `cB1 * (1 + BlendFrac)` is the upper edge of the crossfade band,
-        // and ApplyDetail compares against it with a strict <. Setting cB1 to exactly cFrame/(1+BlendFrac)
-        // makes that round-trip land a float ULP or two ABOVE cFrame for some radii (170 and 180 both do),
-        // so at h == cFrame the comparison flips and the detailed system renders underneath an opaque
-        // proxy. Shaving a thousandth off puts the edge unambiguously below cFrame at every size.
+        // mid-transition. A small galaxy can frame below MinGalaxyEnter, which would leave Home sitting
+        // inside the switch band with a half-faded proxy on top of the still-rendered star — and its
+        // collider in front of it, stealing clicks from the star underneath. (With the current layout the
+        // inner ring alone is 900 units out, so the clamp no longer binds in practice; it stays because
+        // nothing else guarantees the relationship if the layout is retuned.)
+        // The 0.999 keeps the clamp strictly below cFrame rather than landing a float ULP either side of
+        // it, so "frame the whole galaxy" is unambiguously in galaxy mode at every galaxy size.
         cB1 = Mathf.Min(b1, Mathf.Max(1f, cFrame / (1f + BlendFrac) * 0.999f));
 
         // Kept clear of the galaxy boundary so the two crossfades never overlap — if they did, all three
@@ -200,6 +221,16 @@ public class GalaxyLOD : MonoBehaviour
         // DeepEnterFrac were ever tuned below 1/(1-BlendFrac) = 1.43; at 1.6 it never binds.
         cB2 = Mathf.Max(Mathf.Max(cB1 * 3f, cFrame * DeepEnterFrac),
                         cFrame / (1f - BlendFrac) * 1.08f);
+
+        // ...but never so high that the deep view cannot finish arriving before the wheel stops.
+        //
+        // The fade completes at cB2 * (1 + BlendFrac), and the wheel is clamped at
+        // CameraController.ZoomCeiling (DeepZoomFactor * cFrame). On a small galaxy the `cB1 * 3` term
+        // wins and pushes the completion point above that ceiling — so the spiral would be stuck
+        // permanently part-faded, at a height the player cannot zoom past. Capping here means the widest
+        // view is always the fully-formed one.
+        float deepCeiling = cFrame * CameraController.DeepZoomFactor / (1f + BlendFrac);
+        if (deepCeiling > 1f) cB2 = Mathf.Min(cB2, deepCeiling);
     }
 
     /// 0 below the boundary, 1 above it, smoothly across the blend band.
@@ -220,10 +251,34 @@ public class GalaxyLOD : MonoBehaviour
         float b1 = cB1;
         float b2 = cB2;
 
-        float toGalaxy = Blend(h, b1);      // 0 = detailed systems, 1 = proxies
-        float toDeep = Blend(h, b2);        // 0 = proxies, 1 = deep spiral
+        // Mode first — the proxy fade is driven by which mode we are in, not by height.
+        ApplyDetail(h, b1);
 
-        ProxyAlpha = toGalaxy * (1f - toDeep);
+        // The proxy fade is over TIME, not over height, and that is the whole reason this works.
+        //
+        // Height-based was the obvious thing and it was wrong. Exclusive modes mean detail vanishes at a
+        // threshold and proxies must start from zero there, so a height-based ramp leaves a band where
+        // detail is already off and proxies are still near-invisible. With the switch carrying hysteresis
+        // that band is ~220 units wide, and a single scroll notch (height x0.55) can PARK you inside it —
+        // an empty starfield with no planets, no stars, no spiral, and no way to tell it is a bug rather
+        // than empty space. Descending only, so it would have read as intermittent.
+        //
+        // On a timer there is no such band: whatever height you stop at, the fade finishes in 0.3s.
+        // Branch on the MODE, not on a comparison between the fade and its target. Writing this as
+        // `target > proxyFade ? MoveTowards(...) : 0f` looks equivalent and is not: MoveTowards returns
+        // the target EXACTLY once it arrives, so the very next frame `1 > 1` is false and the fade was
+        // slammed back to zero — a permanent 0.3-second sawtooth that blinked every star in the galaxy
+        // out for one frame, restarted the dissolve, and pulsed the backdrop along with it.
+        proxyFade = detailOn
+            ? 0f   // returning to system mode: cut instantly, detail is already back on top
+            : Mathf.MoveTowards(proxyFade, 1f, Time.unscaledDeltaTime / ProxyFadeSeconds);
+
+        float toDeep = Blend(h, b2);
+
+        // NOT multiplied by (1 - toDeep). The system stars stay fully lit inside the deep view: the
+        // widest zoom is meant to show you the galaxy AND where you are in it, and fading the stars out
+        // left it a pretty but uninformative picture.
+        ProxyAlpha = proxyFade;
         DeepAlpha = toDeep;
 
         Tier = h < BodyMaxHeight ? ViewTier.Body
@@ -231,20 +286,22 @@ public class GalaxyLOD : MonoBehaviour
              : h < b2 ? ViewTier.Galaxy
              : ViewTier.Deep;
 
-        ApplyDetail(h, b1);
         ApplyProxies(ProxyAlpha, h, b1);
-        ApplyDeep(DeepAlpha, h, b2, g);
+        ApplyDeep(DeepAlpha);
     }
 
-    // The detailed systems: a hard toggle, held on until the proxies have fully faded in over them.
+    // The mode switch. Detail off above the boundary, on below it — with a hysteresis gap, because a bare
+    // `h < b1` on a height that eases toward its target will flip back and forth for several frames as it
+    // settles, and each flip is a full activate/deactivate of every planet, moon and orbit in the galaxy.
     //
-    // The upper edge of the blend band is exactly where proxyAlpha reaches 1, so detail switches off on the
-    // frame the proxies stop being translucent — the swap happens underneath something already opaque.
+    // The gap is asymmetric on purpose: you must climb past b1 to leave system mode, but drop to 0.88*b1
+    // to come back. Zooming out is the deliberate gesture, so it gets the tighter edge.
     void ApplyDetail(float h, float b1)
     {
-        bool want = h < b1 + Mathf.Max(1f, b1 * BlendFrac);
+        bool want = detailOn ? h < b1 : h < b1 * 0.88f;
         if (want == detailOn) return;
         detailOn = want;
+        SystemMode = want;
         if (SystemContext.SystemParent != null)
             SystemContext.SystemParent.gameObject.SetActive(want);
         if (!want && MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
@@ -265,7 +322,9 @@ public class GalaxyLOD : MonoBehaviour
         if (coreProxyFade != null) coreProxyFade.SetAlpha(alpha);
     }
 
-    void ApplyDeep(float alpha, float h, float b2, Galaxy g)
+    // Takes only the alpha now: the deep view is fixed-scale, so it no longer depends on camera height,
+    // the boundary, or the galaxy.
+    void ApplyDeep(float alpha)
     {
         bool on = alpha > 0.004f;
         if (deepRoot.gameObject.activeSelf != on) deepRoot.gameObject.SetActive(on);
@@ -286,11 +345,14 @@ public class GalaxyLOD : MonoBehaviour
 
         if (!on || deepVisual == null) return;
 
-        // Grow with height so the spiral holds a roughly constant on-screen size however far you pull
-        // back — the same trick the proxies use. Without it the galaxy would shrink to a dot and the
-        // widest zoom would show nothing at all.
-        float f = Mathf.Clamp(h / Mathf.Max(1f, b2), 1f, 40f);
-        deepVisual.SetScale(f);
+        // FIXED at true galaxy scale — deliberately not grown with height like the proxies are.
+        //
+        // The spiral is the galaxy the systems actually sit in, so its arms have to stay registered with
+        // where those systems are. Scaling it with camera height slid it out from under them: the spiral
+        // swelled while the star positions stayed put, until the whole empire was a knot in the middle of
+        // a vastly oversized disc. Leaving it fixed means pulling back genuinely makes it recede, which is
+        // what sells the distance — and the zoom ceiling (CameraController.ZoomCeiling) stops before it
+        // ever becomes too small to read.
         if (deepFade != null) deepFade.SetAlpha(alpha);
     }
 
@@ -315,6 +377,13 @@ public class GalaxyLOD : MonoBehaviour
         // detailOn:false, conclude nothing had changed, and leave the new detailed systems rendering
         // underneath the proxies. Resetting to true forces the next ApplyDetail to actually re-evaluate.
         detailOn = true;
+        // Must move together with detailOn. ApplyDetail early-returns when `want == detailOn`, so if the
+        // galaxy changed while in galaxy mode and the camera lands below the boundary, that early return
+        // fires and SystemMode is never written — leaving it false while the planets render. Every ship
+        // then stays hidden indefinitely (and newly built ones get hidden too, since MapTierVisibility
+        // re-applies while hidden), until the player manually zooms out past the boundary and back.
+        SystemMode = true;
+        proxyFade = 0f;
 
         if (g == null)
         {
@@ -331,6 +400,7 @@ public class GalaxyLOD : MonoBehaviour
 
         float size = Mathf.Max(ProxySizeMin, CameraController.GalaxyRadius() * ProxySizeFrac);
         proxyBaseSize = size;
+        RecomputeProxyLimits(g, size);
         foreach (var sys in g.systems)
             proxies.Add(GalaxyStarProxy.Build(proxyRoot, sys, size));
 
@@ -343,6 +413,26 @@ public class GalaxyLOD : MonoBehaviour
         BuildDeep(g);
 
         if (galaxyTitle != null) galaxyTitle.text = g.name;
+    }
+
+    // How large a proxy may grow before it starts merging with its neighbour.
+    //
+    // Measured, not assumed: the golden-angle layout means the closest pair is not necessarily adjacent
+    // in index order, so this walks every pair. Twelve systems is 66 comparisons, once per galaxy.
+    void RecomputeProxyLimits(Galaxy g, float size)
+    {
+        proxyMaxScale = 6f;
+        if (g.systems == null || g.systems.Count < 2 || size <= 0.0001f) return;
+
+        float minSep = float.MaxValue;
+        for (int i = 0; i < g.systems.Count; i++)
+            for (int j = i + 1; j < g.systems.Count; j++)
+                minSep = Mathf.Min(minSep,
+                    (g.systems[i].galaxyPosition - g.systems[j].galaxyPosition).magnitude);
+
+        if (minSep <= 0.0001f || minSep == float.MaxValue) return;
+        // size is the proxy's DIAMETER at scale 1, so the budget compares directly against separation.
+        proxyMaxScale = Mathf.Clamp(minSep * ProxySpacingUse / size, 1f, 40f);
     }
 
     // The galactic core, in the galaxy overview.
@@ -376,23 +466,22 @@ public class GalaxyLOD : MonoBehaviour
         // ...but its growth is capped so the event horizon never reaches the nearest system.
         //
         // The core scales with the same zoom ramp as the system stars, while the systems sit at FIXED
-        // galaxy positions — the home system is hardcoded 170 units out (GalaxyGenerator.SpiralPosition).
-        // So the horizon grows toward a stationary target. On an 11- or 12-system map it overtook it: at
-        // the exact height the Home key jumps to, the horizon radius passed 190 and the home system was
-        // inside the black hole, fully occluded because at that height the proxies are opaque and the
-        // horizon has its depth write back on. The player pressed Home and their home system was gone.
+        // galaxy positions. So the horizon grows toward a stationary target, and on a tightly-packed map
+        // it used to overtake it: the innermost system ended up inside the black hole and fully occluded,
+        // because at that height the proxies are opaque and the horizon has its depth write back on.
         //
-        // The cap is applied to the Art transform, so it holds the WHOLE black hole — horizon, discs,
-        // halo, jets — not just the horizon. That is a little more conservative than strictly needed
-        // (only the opaque horizon can actually occlude anything), but capping the parent keeps the
-        // object internally consistent, and a core that stops growing early still reads correctly.
+        // The budget is measured against the HORIZON specifically, because the horizon is the only part
+        // that can occlude anything — it is opaque and depth-writing. The halo and the outer disc extend
+        // roughly 4.8x further and will overlap the inner systems at high zoom, which is fine and in fact
+        // wanted: they are additive and low-alpha, so they read as the core's glow washing over the inner
+        // map rather than as anything hiding behind it.
         float nearest = float.MaxValue;
         foreach (var sys in g.systems)
             nearest = Mathf.Min(nearest, (sys.galaxyPosition - g.centerPosition).magnitude);
         float horizonRadius = Mathf.Max(0.01f, coreProxyBaseSize * 0.5f);
         coreMaxScale = (nearest < float.MaxValue)
-            ? Mathf.Clamp(nearest * 0.5f / horizonRadius, 1f, ProxyMaxScale)
-            : ProxyMaxScale;
+            ? Mathf.Clamp(nearest * 0.5f / horizonRadius, 1f, proxyMaxScale)
+            : proxyMaxScale;
 
         var hover = root.AddComponent<CoreProxyHover>();
         hover.galaxy = g;
@@ -410,7 +499,9 @@ public class GalaxyLOD : MonoBehaviour
 
     void BuildDeep(Galaxy g)
     {
-        float radius = Mathf.Max(200f, CameraController.GalaxyRadius() * 1.35f);
+        // 1.3x the outermost system, so the arms extend a little past the systems rather than being
+        // clipped by them. Fixed for the life of the galaxy — see the note in ApplyDeep.
+        float radius = Mathf.Max(200f, CameraController.GalaxyRadius() * 1.3f);
         deepVisual = GalaxySpiralVisual.Build(deepRoot, g, radius);
         deepRoot.position = g.centerPosition;
         deepFade = deepVisual.GetComponent<FadeGroup>();
@@ -426,12 +517,11 @@ public class GalaxyLOD : MonoBehaviour
         // leaving it frozen at scale 1 in a galaxy that has a centre but no systems.
         if (proxyBaseSize <= 0.0001f) return;
 
-        // Grow from the moment the overview becomes reachable, not from the boundary. Anchoring the ramp
-        // at b1 meant f stayed pinned at 1 for the whole lower half of the crossfade — so through the
-        // entire fade-in the stars were at their smallest AND their most transparent, which is exactly
-        // when players reported them disappearing.
-        float refH = Mathf.Max(1f, b1 * (1f - BlendFrac));
-        float f = Mathf.Clamp(Mathf.Max(1f, h) / refH, 1f, ProxyMaxScale);
+        // Anchored at the mode boundary, which is exactly where the proxies come into existence. World
+        // size then tracks camera height, so SCREEN size is constant: a system's star is the same size to
+        // the eye the moment galaxy mode opens and at the zoom ceiling, and never shrinks away.
+        float refH = Mathf.Max(1f, b1);
+        float f = Mathf.Clamp(Mathf.Max(1f, h) / refH, 1f, proxyMaxScale);
         foreach (var m in proxies) if (m != null) m.SetScale(f);
         if (coreProxy != null) coreProxy.localScale = Vector3.one * Mathf.Min(f, coreMaxScale);
     }
@@ -447,6 +537,7 @@ public class GalaxyLOD : MonoBehaviour
         Tier = ViewTier.System;
         ProxyAlpha = 0f;
         DeepAlpha = 0f;
+        SystemMode = true;   // or the next scene's ships start hidden
     }
 }
 
@@ -582,7 +673,7 @@ public class GalaxyStarProxy : MonoBehaviour
         // also froze it — the drawn star grew to 7.4x while its clickable radius stayed put, so at wide
         // zoom the outer third of a visibly large star was dead to the cursor, which is the "stars are
         // hard to hit when zoomed out" problem the growth existed to solve. Capped at 2.5x, which keeps
-        // the home system's pick sphere clear of the core's (162 < 170 units apart) while restoring most
+        // every system's pick sphere well clear of its neighbours' and of the core's, while restoring most
         // of the screen-space pick size.
         if (pick != null) pick.radius = baseColliderRadius * Mathf.Min(f, ColliderMaxScale);
     }

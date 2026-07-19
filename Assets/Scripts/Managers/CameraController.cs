@@ -108,6 +108,28 @@ public class CameraController : MonoBehaviour
         return Mathf.Clamp(needed, 50f, maxHeight);
     }
 
+    /// How far out the wheel may actually go, derived from the galaxy rather than the absolute ceiling.
+    ///
+    /// `maxHeight` is a 120,000-unit backstop, which is orders of magnitude past anything worth looking
+    /// at — a galaxy frames at a few thousand. Left as the wheel's limit, most of the scroll range was
+    /// empty black with the whole galaxy a dot in the middle, and the representative stars shrank to
+    /// nothing long before you reached it. This puts the ceiling just past the point where the deep view
+    /// has fully faded in, so "fully zoomed out" is a composed shot — the spiral, its core, and the system
+    /// stars still readable inside it — rather than an unbounded void.
+    ///
+    /// 2.4x the framing height: the deep view finishes fading in at ~2.08x (see GalaxyLOD), so this
+    /// clears it with a little room and nothing more.
+    /// Public because GalaxyLOD has to keep the deep view's fade INSIDE this ceiling — a fade that
+    /// completes above the height the wheel stops at can never be seen finished.
+    public const float DeepZoomFactor = 2.4f;
+
+    public float ZoomCeiling()
+    {
+        float r = GalaxyRadius();
+        if (r <= 0f) return Mathf.Min(maxHeight, 4000f);
+        return Mathf.Clamp(HeightToFrame(r) * DeepZoomFactor, 200f, maxHeight);
+    }
+
     /// Pull all the way back so the entire generated galaxy is on screen at once.
     public void ViewWholeGalaxy()
     {
@@ -458,7 +480,8 @@ public class CameraController : MonoBehaviour
         float factor = Mathf.Exp(-scroll * 6f);      // scroll up -> factor < 1 -> closer
         float floor = ZoomFloor();
         float want = targetHeight * factor;
-        float got = Mathf.Clamp(want, floor, maxHeight);
+        float ceiling = ZoomCeiling();
+        float got = Mathf.Clamp(want, floor, ceiling);
 
         if (ZoomLog)
         {
@@ -466,7 +489,7 @@ public class CameraController : MonoBehaviour
             // difference. A dump of every value is a haystack; naming the binding constraint is the
             // answer. This one line, printed once, is what would have found the eight months the scene
             // was overriding maxHeight to 80 while this file said 120000.
-            string why = got < want - 0.001f ? $"CLAMPED BY CEILING (maxHeight={maxHeight:F0})"
+            string why = got < want - 0.001f ? $"CLAMPED BY CEILING (ZoomCeiling={ceiling:F0}, maxHeight={maxHeight:F0})"
                        : got > want + 0.001f ? $"CLAMPED BY FLOOR (ZoomFloor={floor:F2})"
                        : "free";
             Debug.Log($"[Zoom] scroll={scroll:F3} x{factor:F2}  {targetHeight:F1} -> want {want:F1} -> got {got:F1}  [{why}]");
@@ -532,16 +555,22 @@ public class CameraController : MonoBehaviour
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"===== ZOOM REPORT ({reason}) =====");
         sb.AppendLine($"  height        {h:F2}        target {targetHeight:F2}");
-        sb.AppendLine($"  LIMITS        floor {floor:F2}  ..  ceiling {maxHeight:F0}     range x{(floor > 0.001f ? maxHeight / floor : 0f):F0}");
+        // The EFFECTIVE ceiling, not maxHeight. The wheel is clamped by ZoomCeiling (a few thousand);
+        // maxHeight is a 120,000 backstop that never binds. Reporting the backstop here would recreate
+        // this file's original sin in diagnostic form — printing a number that is not the one in force,
+        // and computing a "12x further out available" that the wheel will refuse to deliver.
+        float ceiling = ZoomCeiling();
+        sb.AppendLine($"  LIMITS        floor {floor:F2}  ..  ceiling {ceiling:F0}     range x{(floor > 0.001f ? ceiling / floor : 0f):F0}");
         sb.AppendLine($"    minHeight         {minHeight}       (const - the scene cannot override it)");
         sb.AppendLine($"    freeLookMinHeight {freeLookMinHeight}");
-        sb.AppendLine($"    maxHeight         {maxHeight}");
+        sb.AppendLine($"    ZoomCeiling       {ceiling:F0}   (galaxy-derived; what the wheel actually obeys)");
+        sb.AppendLine($"    maxHeight         {maxHeight}   (absolute backstop, does not bind)");
 
         // Which end are we sitting on? "At the ceiling" is the single most useful fact here, and it's
         // what an isolated height reading never tells you.
-        if (h >= maxHeight * 0.999f) sb.AppendLine("  >> AT THE CEILING. Cannot zoom out further.");
+        if (h >= ceiling * 0.999f) sb.AppendLine("  >> AT THE CEILING. Cannot zoom out further.");
         else if (h <= floor * 1.001f) sb.AppendLine("  >> AT THE FLOOR. Cannot zoom in further.");
-        else sb.AppendLine($"  >> free: {maxHeight / Mathf.Max(0.001f, h):F1}x further out available, " +
+        else sb.AppendLine($"  >> free: {ceiling / Mathf.Max(0.001f, h):F1}x further out available, " +
                            $"{h / Mathf.Max(0.001f, floor):F1}x further in");
 
         sb.AppendLine($"  FOCUS         following={following} target={(followTarget != null ? followTarget.name : "<none>")}");

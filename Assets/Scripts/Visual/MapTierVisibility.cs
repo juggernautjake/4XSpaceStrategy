@@ -26,21 +26,10 @@ public class MapTierVisibility : MonoBehaviour
 {
     bool lastVisible = true;
 
-    // Keyed off the CONTINUOUS proxy alpha, not the discrete tier — and that is the difference between
-    // ships that vanish with their systems and ships that vanish before them.
-    //
-    // Tier flips to Galaxy at the boundary, but the detailed systems are deliberately held on until the
-    // proxies have finished fading in OVER them (see GalaxyLOD.ApplyDetail). Keying off Tier put a band
-    // of ~190 units of camera height where planets, moons and orbit rings were still fully drawn while
-    // every ship had already popped out — and popping back in 190 units late on the way down.
-    // ProxyAlpha reaching 1 is exactly the moment the detailed systems switch off.
-    //
-    // The DeepAlpha term is not redundant. ProxyAlpha is `toGalaxy * (1 - toDeep)`, so it falls back
-    // toward zero as the deep view fades in — meaning a bare `ProxyAlpha < 0.999f` becomes true AGAIN at
-    // the top of the range and every ship reappears in the deep view, which is the exact thing this class
-    // exists to prevent, reinstated at the far end. The test has to be "the systems are drawn", not
-    // "the proxies are not fully opaque".
-    static bool ShouldShow => GalaxyLOD.ProxyAlpha < 0.999f && GalaxyLOD.DeepAlpha < 0.001f;
+    // Keyed off the MODE, not off any alpha. Ships belong to the detailed systems and must vanish on the
+    // exact frame those do — an alpha-based test hands over a few frames early or late and leaves the
+    // fleet hanging in an otherwise collapsed map. SystemMode is the single switch both follow.
+    static bool ShouldShow => GalaxyLOD.SystemMode;
 
     void LateUpdate()
     {

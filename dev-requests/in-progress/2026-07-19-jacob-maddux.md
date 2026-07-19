@@ -62,22 +62,35 @@ Checked first, because commits `0c79ae7` / `592aa6e` / `75760e4` had covered sev
 - [x] **8 — Follow-up (13/14/15).** Proxy stars start smaller and grow on a longer runway so they hold a
       constant on-screen size; ships de-render at galaxy zoom via `MapTierVisibility` while their orders
       keep running; the core black hole is built at 3.2× a system star with the full ring set.
+- [x] **9 — Two exclusive view modes (follow-up).** System mode and Galaxy mode never render at the same
+      time — a system is drawn either as itself or as a marker, never both. The switch has hysteresis, and
+      the enlarged stars dissolve in over 0.3s on a TIMER rather than over a height band (a height-based
+      ramp leaves a band where detail is off and proxies are still invisible, and one scroll notch can
+      park you in it). The enlarged stars now stay lit at full alpha inside the deep view, so the widest
+      zoom shows the galaxy and where you are in it at once.
+- [x] **10 — Layout and zoom range (follow-up).** Systems moved out and spread: inner ring 900 units
+      (was 170), step 260 (was 95). The wheel's ceiling is now derived from the galaxy (2.4× its framing
+      height) instead of the 120,000 backstop, so "fully zoomed out" is a composed shot rather than a
+      dot in a void.
 
 ## The zoom ladder, concretely
 
 Heights derive from `HeightToFrame(GalaxyRadius())` so they hold at any galaxy size. For a 12-system
-galaxy (radius ≈ 1408, frame ≈ 1574):
+galaxy under the new layout (radius ≈ 3760, frame ≈ 4204):
 
-| | detailed systems | star proxies | deep spiral |
+| height | system mode | galaxy mode | deep spiral |
 |---|---|---|---|
-| h < 630 | drawn | — | — |
-| 630–819 | drawn | fading in over the top | — |
-| 819–1763 | off | opaque | — |
-| 1763–3274 | off | fading out | fading in |
-| h > 3274 | off | — | opaque |
+| < 1682 | drawn | — | — |
+| 1682 – 4709 | off | stars dissolve in over 0.3s, then opaque | — |
+| 4709 – 8746 | off | opaque | fading in |
+| 8746 – 10091 (ceiling) | off | opaque | opaque |
 
-The Home key / "Galaxy" button jump to h = frame = 1574, which lands squarely in the opaque-proxy band —
-deliberately, since the deep view shows none of your systems.
+The two modes never overlap. Home / the "Galaxy" button jump to h = 4204, which sits in clean galaxy mode
+below the deep band — deliberately, since you press it to look at your systems.
+
+The enlarged stars hold a constant on-screen size (~1.75% of screen height) from the mode switch all the
+way to the ceiling, and never overlap: the closest two systems are 1339 units apart and a star is 226
+units across at its largest.
 
 ## Things worth knowing
 

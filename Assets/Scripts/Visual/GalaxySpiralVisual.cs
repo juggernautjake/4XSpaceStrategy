@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 // Every procedural choice that makes one galaxy look unlike another.
@@ -14,7 +13,7 @@ public struct GalaxyShape
     public int armCount;            // 2-5 major arms
     public float handedness;        // +1 clockwise, -1 counter-clockwise
     public float tightness;         // how fast the arms wrap — low is open and sweeping, high is coiled
-    public float armLength;         // 0.5-1.0 of the disc radius before the arms fade out
+    public float armLength;         // normalised radius at which the arms begin fading toward the rim
     public float armSharpness;      // high = thin defined lanes, low = broad diffuse arms
     public float wispiness;         // turbulence broken into the arms
     public float distortion;        // large-scale warping of the whole spiral, so it isn't perfectly regular
@@ -40,7 +39,9 @@ public struct GalaxyShape
         s.armCount = 2 + rng.Next(0, 4);                       // 2..5
         s.handedness = rng.NextDouble() < 0.5 ? 1f : -1f;
         s.tightness = F(1.6f, 5.2f);
-        s.armLength = F(0.55f, 1.0f);
+        // Where the arms START fading toward the rim (see the envelope in Generate). A compact galaxy
+        // draws in at 0.6, a sprawling one carries structure almost to the edge at 0.95.
+        s.armLength = F(0.6f, 0.95f);
         s.armSharpness = F(1.1f, 3.4f);
         s.wispiness = F(0.15f, 0.85f);
         s.distortion = F(0f, 0.55f);
@@ -73,8 +74,9 @@ public struct GalaxyShape
 // generates its nebulae exactly this way (SpaceBackground). One texture, one draw call, and the arm
 // structure can be far richer than a particle budget would allow.
 //
-// The real system stars are the exception — they are actual sparkle quads pinned to their true galaxy
-// positions, so the widest view still shows you where your empire is.
+// This is a BACKDROP, not the whole view. Galaxy mode's enlarged system stars stay lit at full alpha in
+// front of it, at their true positions — so the widest zoom shows you the galaxy and where you are in it
+// at the same time. The faint stars baked into the texture are the galaxy's own uncounted billions.
 public class GalaxySpiralVisual : MonoBehaviour
 {
     // 320, not 512.
@@ -86,7 +88,6 @@ public class GalaxySpiralVisual : MonoBehaviour
     // genuinely costs nothing to give up.
     const int TexSize = 320;
 
-    Transform disc;          // the spinning part: spiral texture + system sparkles
     Texture2D spiralTex;     // owned by this instance; destroyed with it
     float baseRadius = 1f;
 
@@ -103,7 +104,6 @@ public class GalaxySpiralVisual : MonoBehaviour
         // The spinning disc. Everything that should turn with the galaxy hangs off this.
         var discGo = new GameObject("Disc");
         discGo.transform.SetParent(root.transform, false);
-        v.disc = discGo.transform;
         var spin = discGo.AddComponent<SelfSpin>();
         spin.speed = shape.spinSpeed;
         spin.unscaled = true;   // the map keeps turning while the simulation is paused
@@ -122,8 +122,18 @@ public class GalaxySpiralVisual : MonoBehaviour
             qr.material = mat;
         }
 
-        // Real system stars as bright twinkles at their true positions, scaled into the disc.
-        v.BuildSystemSparkles(galaxy, shape);
+        // NO separate sparkle field for the systems.
+        //
+        // There used to be one — a twinkling quad per system, mapped into the disc at 0.7x its real
+        // position. It existed because the star proxies used to fade OUT as this view faded in, so
+        // something had to stand in for them. They no longer do: galaxy mode keeps its enlarged stars lit
+        // at full alpha all the way to the zoom ceiling, at their TRUE positions. Drawing sparkles as
+        // well would double every system, at two slightly different places, one of them turning with the
+        // disc and one not. The real stars are the better marker: they are correctly placed, correctly
+        // coloured, and they can still be hovered and clicked.
+        //
+        // The faint stars baked into the spiral texture stay — those are the galaxy's own uncounted
+        // billions, not the dozen systems you can visit.
 
         // The core. Sized against the spiral rather than the system-view black hole, because here it is
         // standing in for an entire galactic centre rather than sitting in one system.
@@ -134,69 +144,15 @@ public class GalaxySpiralVisual : MonoBehaviour
         return v;
     }
 
-    // A sparkle per system, at its real galaxy position mapped into the spiral's local space.
-    //
-    // Parented to the spinning disc rather than the static root: at this zoom the positions are landmarks
-    // rather than targets (nothing is clickable out here), and a spiral turning underneath a fixed grid of
-    // dots reads as two unrelated objects.
-    void BuildSystemSparkles(Galaxy galaxy, GalaxyShape shape)
-    {
-        if (galaxy == null || galaxy.systems == null) return;
-
-        // Map real galaxy coordinates into the spiral disc. Systems occupy the inner ~70% so they sit in
-        // the arms rather than out past the visible edge.
-        float worldR = 0f;
-        foreach (var sys in galaxy.systems)
-            worldR = Mathf.Max(worldR, new Vector2(sys.galaxyPosition.x, sys.galaxyPosition.z).magnitude);
-        if (worldR <= 0.01f) worldR = 1f;
-        float k = baseRadius * 0.7f / worldR;
-
-        var dot = SparkleTexture();
-        foreach (var sys in galaxy.systems)
-        {
-            var q = SpaceMaterials.Primitive(PrimitiveType.Quad, disc, "Sparkle_" + sys.name);
-            q.transform.localPosition = new Vector3(sys.galaxyPosition.x * k, 0f, sys.galaxyPosition.z * k);
-            q.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-
-            // Home and owned systems burn brighter — at this range that is the only empire information
-            // the view carries.
-            bool mine = sys.isHome || sys.owner == FactionManager.Player;
-            float size = baseRadius * (mine ? 0.075f : 0.05f);
-            q.transform.localScale = Vector3.one * size;
-
-            Color c = sys.isBlackHole ? new Color(0.85f, 0.6f, 1f)
-                    : (sys.combinedStar != null ? sys.combinedStar.color : Color.white);
-            c = Color.Lerp(c, Color.white, 0.45f);           // hot cores read white-ish at distance
-            if (mine) c = Color.Lerp(c, new Color(0.6f, 1f, 0.7f), 0.35f);
-
-            var r = q.GetComponent<Renderer>();
-            if (r != null)
-            {
-                var m = SpaceMaterials.Additive(c);
-                m.mainTexture = dot;
-                r.material = m;
-            }
-
-            var tw = q.AddComponent<SparkleTwinkle>();
-            tw.baseScale = size;
-            // Detuned periods so the field shimmers instead of pulsing in unison — the same trick the
-            // background star field uses.
-            tw.speed = 0.5f + Mathf.Repeat(sys.name.GetHashCode() * 0.0001f, 1.4f);
-            tw.amount = mine ? 0.45f : 0.3f;
-        }
-    }
-
-    // Keep the whole thing facing up and sized to the caller's scale.
-    public void SetScale(float s)
-    {
-        transform.localScale = Vector3.one * Mathf.Max(0.0001f, s);
-    }
+    // No SetScale. The deep view is deliberately FIXED at true galaxy scale so its arms stay registered
+    // with the system positions in front of it — see the note in GalaxyLOD.ApplyDeep. A scale setter here
+    // would advertise a knob that must not be turned.
 
     // The spiral texture belongs to this instance. There WAS a static seed-keyed cache here; it was
     // removed because nothing ever evicted from it — every new game and every load added another
     // ~0.4 MB RGBA32 (320x320x4) pinned by a static reference that Resources.UnloadUnusedAssets cannot
     // reclaim. There is exactly one deep view alive at a time, so a cache was buying nothing to begin
-    // with. (`sparkleTex` below is still static, but it is one shared 64x64 dot — bounded, not growing.)
+    // with.
     void OnDestroy()
     {
         if (spiralTex != null) Destroy(spiralTex);
@@ -262,17 +218,27 @@ public class GalaxySpiralVisual : MonoBehaviour
                     arms *= Mathf.Lerp(1f, 0.35f + n * 1.3f, shape.wispiness);
                 }
 
-                // Radial envelope: arms fade out past armLength, and everything fades at the rim so the
-                // disc has no hard circular edge.
-                float lengthFade = 1f - Mathf.SmoothStep(shape.armLength * 0.75f, shape.armLength, r);
-                float rimFade = 1f - Mathf.SmoothStep(0.82f, 1f, r);
+                // Radial envelope: arms are at full strength out to armLength, then ramp to nothing at
+                // the rim, with a second ramp over the last 18% so the disc has no hard circular edge.
+                //
+                // armLength is the START of the fade, not its end. The disc is sized at 1.3x the
+                // outermost system, so that system sits at r = 1/1.3 = 0.77; with armLength in
+                // [0.6, 0.95] the arms are still at roughly 60% there in the worst case and full
+                // strength in the best. They are never absent, which is the point — the outer third of
+                // the map used to sit on bare black, outside the galaxy it belongs to.
+                //
+                // Both ramps go through Ramp(), NOT Mathf.SmoothStep. See the note on Ramp: passing edges
+                // to Mathf.SmoothStep silently gives a smoothed lerp between those two VALUES instead,
+                // which attenuated the whole disc and inverted armLength's meaning.
+                float lengthFade = 1f - Ramp(shape.armLength, 1f, r);
+                float rimFade = 1f - Ramp(0.82f, 1f, r);
                 arms *= lengthFade * rimFade;
 
                 // Central bulge: bright, smooth, and it should swamp the arms rather than sit under them.
                 float core = Mathf.Exp(-(r * r) / Mathf.Max(0.0004f, shape.coreSize * shape.coreSize));
 
                 // Dust lanes — darker material between the arms, strongest mid-disc.
-                float lanes = Mathf.Clamp01(1f - arms) * Mathf.SmoothStep(0f, 0.35f, r) * rimFade;
+                float lanes = Mathf.Clamp01(1f - arms) * Ramp(0f, 0.35f, r) * rimFade;
 
                 Color c = Color.Lerp(shape.innerArm, shape.outerArm, Mathf.Clamp01(r / Mathf.Max(0.01f, shape.armLength)));
                 Color outCol = c * arms;
@@ -309,6 +275,23 @@ public class GalaxySpiralVisual : MonoBehaviour
         return Mathf.Pow(raw, sharpness);
     }
 
+    /// A 0..1 S-curve ramp between two edges — GLSL's `smoothstep(lo, hi, x)`.
+    ///
+    /// THIS IS NOT WHAT Mathf.SmoothStep DOES, and the difference is easy to miss because the signatures
+    /// match. Unity's `Mathf.SmoothStep(a, b, t)` is a smoothed LERP: it returns a value between `a` and
+    /// `b`, using `t` as the blend. It does not treat `a` and `b` as edges.
+    ///
+    /// So `Mathf.SmoothStep(0.82f, 1f, r)` — which reads exactly like a rim fade — actually returns
+    /// 0.82..1 for r in 0..1, i.e. it never approaches zero and it starts ramping at r = 0 rather than at
+    /// 0.82. Used as an envelope it attenuates the ENTIRE disc to <=18% and inverts the parameter's
+    /// meaning, so a "longer" arm setting produced fainter arms. That is what was hollowing out the
+    /// spiral and leaving the outer systems on bare black.
+    ///
+    /// `Mathf.SmoothStep(0f, 1f, t)` is the one form that behaves as expected, because lerping 0..1 by a
+    /// smoothed t IS the S-curve. Feeding it an InverseLerp gives the two-edge version.
+    static float Ramp(float lo, float hi, float x)
+        => Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(lo, hi, x));
+
     static float FBm(float x, float y, int octaves)
     {
         float sum = 0f, amp = 0.5f, freq = 1f, norm = 0f;
@@ -322,51 +305,4 @@ public class GalaxySpiralVisual : MonoBehaviour
         return norm > 0f ? sum / norm : 0f;
     }
 
-    static Texture2D sparkleTex;
-
-    // A soft round dot with a faint four-point diffraction cross — the shape a bright point source takes
-    // through a real lens, and the cheapest way to make a dot read as a STAR rather than a circle.
-    static Texture2D SparkleTexture()
-    {
-        if (sparkleTex != null) return sparkleTex;
-        const int N = 64;
-        var t = new Texture2D(N, N, TextureFormat.RGBA32, false);
-        t.wrapMode = TextureWrapMode.Clamp;
-        var px = new Color32[N * N];
-        for (int y = 0; y < N; y++)
-            for (int x = 0; x < N; x++)
-            {
-                float u = (x / (float)(N - 1)) * 2f - 1f;
-                float v = (y / (float)(N - 1)) * 2f - 1f;
-                float r = Mathf.Sqrt(u * u + v * v);
-                float core = Mathf.Clamp01(1f - r);
-                core = core * core * core;
-                float spike = Mathf.Clamp01(1f - Mathf.Abs(u) * 9f) * Mathf.Clamp01(1f - Mathf.Abs(v) * 1.4f)
-                            + Mathf.Clamp01(1f - Mathf.Abs(v) * 9f) * Mathf.Clamp01(1f - Mathf.Abs(u) * 1.4f);
-                float a = Mathf.Clamp01(core + spike * 0.35f);
-                px[y * N + x] = new Color(1f, 1f, 1f, a);
-            }
-        t.SetPixels32(px);
-        t.Apply();
-        sparkleTex = t;
-        return t;
-    }
-}
-
-// Breathes a sparkle's size so the star field shimmers. Scale rather than alpha, because these are
-// additive quads over a bright disc, where a size change reads far more clearly than an opacity change.
-public class SparkleTwinkle : MonoBehaviour
-{
-    public float baseScale = 1f;
-    public float speed = 1f;
-    public float amount = 0.35f;
-    float phase;
-
-    void Start() { phase = Random.Range(0f, Mathf.PI * 2f); }
-
-    void Update()
-    {
-        float s = baseScale * (1f + Mathf.Sin(Time.unscaledTime * speed + phase) * amount);
-        transform.localScale = Vector3.one * Mathf.Max(0.0001f, s);
-    }
 }
