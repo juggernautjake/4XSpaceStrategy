@@ -223,32 +223,38 @@ public static class TerraformDiagnosis
         }
 
         // ---- Water ----
-        // The stored Water resource number can drift out of step with what the world actually IS — so a
-        // visibly-blue OCEAN planet must never read as "no water". An ocean world is liquid water by
-        // definition; treat it as saturated regardless of the stored amount. (An ICE world has water too,
-        // but frozen and useless until melted, so it deliberately still reads as needing water — that's
-        // what keeps "Melt the Ice Caps" on offer for it.)
-        float water = b.resources != null ? b.resources.Get(ResourceType.Water) : 0f;
-        bool oceanWorld = b.type == CelestialBodyType.OceanPlanet;
-        float effWater = oceanWorld ? Mathf.Max(water, 400f) : water;
-        if (NeedsWater(s) && effWater < 140f && b.type != CelestialBodyType.GasGiant)
+        // Read the water ACTUALLY ON THE SURFACE, not the stored Water resource number. The two used to
+        // disagree badly: surface water is a function of the world's Water Level (terrainParams.elevation)
+        // and is exactly what the map is drawn from, while resources.Water was an unrelated per-type random
+        // roll — so a rocky world visibly covered in ocean could still report "no water" because its
+        // resource number happened to be low. Water Level is the single source of truth here.
+        //
+        // "Needs water" means needs LIQUID water: a world with a high Water Level that's frozen (an ice
+        // world) still reads as needing it — which keeps "Melt the Ice Caps" on offer — while a rocky/ocean
+        // world with liquid seas correctly reads as watered.
+        float waterLevel = PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation);
+        bool hasWaterLevel = waterLevel >= BiosphereRules.MinWaterLevel;      // there ARE water/ice tiles
+        bool hasLiquidWater = hasWaterLevel && BiosphereRules.HasLiquidWaterClimate(b);
+        if (NeedsWater(s) && !hasLiquidWater && b.type != CelestialBodyType.GasGiant)
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.NoWater,
-                severity = Mathf.Clamp01(1f - effWater / 140f),
-                detail = $"Almost no accessible water ({effWater:F0} units). {s.name} cannot live without it."
+                // A world that HAS the water but frozen just needs warming; a genuinely dry one needs it hauled in.
+                severity = hasWaterLevel ? 0.5f : Mathf.Clamp01(1f - waterLevel / BiosphereRules.MinWaterLevel),
+                detail = hasWaterLevel
+                    ? $"Its water is frozen solid — {s.name} needs it liquid, not ice."
+                    : $"Almost no accessible water. {s.name} cannot live without it."
             });
 
-        // The mirror image: to a silicate, heat-loving race an ocean world is not a paradise, it is a
-        // drowning hazard. The same planet the Aquarii would score in the eighties is worthless to the
-        // Pyrothians until the water is gone.
-        if (s.PrefersDry && b.type != CelestialBodyType.GasGiant &&
-            (oceanWorld || water > 260f))
+        // The mirror image: to a silicate, heat-loving race a world of liquid seas is not a paradise, it is
+        // a drowning hazard. Keyed on the same surface Water Level (only LIQUID water drowns them — a frozen
+        // world is arid enough for them), so it agrees with the map exactly as the NoWater case above does.
+        if (s.PrefersDry && b.type != CelestialBodyType.GasGiant && waterLevel > 0.45f && BiosphereRules.HasLiquidWaterClimate(b))
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.TooMuchWater,
-                severity = Mathf.Clamp01(effWater / 420f + (oceanWorld ? 0.45f : 0f)),
-                detail = $"Drowned in water ({effWater:F0} units). {s.name} needs it arid — the hydrosphere has to go."
+                severity = Mathf.Clamp01((waterLevel - 0.45f) / 0.55f + 0.3f),
+                detail = $"Drowned in water — {s.name} needs it arid; the hydrosphere has to go."
             });
 
         // ---- Atmosphere ----
@@ -446,8 +452,11 @@ public static class TerraformProjectDatabase
         P(new TerraformProjectInfo(TerraformProjectType.MeltIceCaps, "Melt the Ice Caps", TerraformProblem.NoWater, "X3",
             160, 420, 0, 40f, 12f,
             "Orbital heat lances melt the polar caps and buried glaciers, flooding the basins and thickening the air in one stroke. Only works where the water is already here, frozen."),
+            // Only offer it where there's actually frozen water to melt: an ice world, or any world whose
+            // surface has a real Water Level that's currently frozen (not liquid). Reads the surface, not
+            // the disconnected Water resource number — consistent with the NoWater diagnosis above.
             (b, s) => b.type == CelestialBodyType.IcePlanet ||
-                      (b.resources != null && b.resources.Get(ResourceType.Water) >= 60f));
+                      (BiosphereRules.HasEnoughWaterLevel(b) && !BiosphereRules.HasLiquidWaterClimate(b)));
 
         P(new TerraformProjectInfo(TerraformProjectType.TapAquifers, "Tap the Deep Aquifers", TerraformProblem.NoWater, "X8",
             300, 220, 0, 45f, 10f,

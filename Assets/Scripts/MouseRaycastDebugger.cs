@@ -1,13 +1,16 @@
 using UnityEngine;
 
-// Logs what the mouse ray hits. Kept as a tracing aid, but gated behind Dev Mode: it fired on EVERY
-// left click, so in normal play it buried the console in "Raycast hit NOTHING" and made real warnings
-// impossible to spot. Turn Dev Mode on (HUD) when you actually want it.
+// Logs what the mouse ray hits — a tracing aid, silent by default. It used to fire on every click in Dev
+// Mode, which now doubles as the sandbox mode, so it buried the console in "Raycast hit: X" while you were
+// dragging the terrain/orbit sliders. Flip `Verbose` on in the debugger (or from code) when you actually
+// want to trace what the ray hits; otherwise it stays quiet.
 public class MouseRaycastDebugger : MonoBehaviour
 {
+    public static bool Verbose = false;
+
     void Update()
     {
-        if (!GameMode.DevMode) return;
+        if (!Verbose || !GameMode.DevMode) return;
         if (!Input.GetMouseButtonDown(0)) return;
         var cam = Camera.main;
         if (cam == null) return;

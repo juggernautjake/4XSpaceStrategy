@@ -1419,9 +1419,11 @@ public class PlanetViewWindow : MonoBehaviour
                 : spin > 45f ? "Spins violently; the storms never stop. "
                 : "A steady day/night cycle. ");
         sb.Append(Mathf.Abs(b.inclination) > 28f ? "Its severe axial tilt gives it savage seasons. " : "Mild seasons. ");
-        float water = b.resources != null ? b.resources.Get(ResourceType.Water) : 0f;
-        sb.Append(water < 60f ? "Bone dry — no weather to speak of. "
-                : water > 300f ? "Wet, with heavy cloud and frequent storms. "
+        // Read the water actually on the surface (its Water Level), not the disconnected Water resource
+        // number — so a world covered in ocean tiles never reads "bone dry".
+        float waterLevel = PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation);
+        sb.Append(waterLevel < 0.15f ? "Bone dry — no weather to speak of. "
+                : waterLevel > 0.6f ? "Wet, with heavy cloud and frequent storms. "
                 : "Moderate moisture and weather. ");
         if (b.surfaceSize >= 14) sb.Append("Massive enough to hold a deep, heavy atmosphere.");
         else if (b.surfaceSize <= 4) sb.Append("Too small to hold much of an atmosphere at all.");
@@ -2085,10 +2087,16 @@ public class PlanetViewWindow : MonoBehaviour
             PlanetTerrainGenerator.WaterLevelFromElevation(p.elevation),
             v => SetTerrain(1, PlanetTerrainGenerator.ElevationFromWaterLevel(v)));
 
-        bool canGrow = BiosphereRules.CanSustainBiosphere(body);
+        // Dev Mode lets you paint plant life on ANY world (the whole Terrain tab is a Dev sandbox), so the
+        // slider is freed there — otherwise it stays gated on a genuinely habitable, biosphere-active world.
+        // Without this the range collapses to 0.3..0.3 on a barren world and the handle can't move at all.
+        bool canGrow = GameMode.DevMode || BiosphereRules.CanSustainBiosphere(body);
         float bioCeiling = canGrow ? 2f : 0.3f;
+        // Open at the world's real state: its moisture if it has a living biosphere, otherwise the barren
+        // floor — so the handle position matches what the map is actually showing.
+        float bioValue = body.biosphereActive ? Mathf.Min(p.moisture, bioCeiling) : 0.3f;
         SliderRow("BioSphere", canGrow ? "sparse <-> lush plant life" : "capped — see note below",
-            0.3f, bioCeiling, Mathf.Min(p.moisture, bioCeiling), v => SetTerrain(2, v));
+            0.3f, bioCeiling, bioValue, v => SetTerrain(2, v));
         if (!canGrow)
         {
             string why = BiosphereRules.WhyCapped(body) ?? "conditions aren't met";
@@ -2134,9 +2142,16 @@ public class PlanetViewWindow : MonoBehaviour
         {
             case 0: p.scale = v; break;
             case 1: p.elevation = v; break;
-            // Re-checked here (not just at the slider's max bound) so a BioSphere value set before
-            // conditions changed can't linger above the ceiling once something else moves it.
-            case 2: p.moisture = Mathf.Min(v, BiosphereRules.CanSustainBiosphere(body) ? 2f : 0.3f); break;
+            // In the Dev sandbox the BioSphere slider paints plant life directly: dragging it above the
+            // floor switches the world's biosphere ON (which lifts the generator's no-biosphere moisture
+            // floor in SampleNormalized so plants actually appear), and dragging back to the floor switches
+            // it OFF (barren). Outside Dev Mode the biosphere gates stand and moisture stays capped at the
+            // floor. Re-checked here (not just at the slider's max bound) so a value set before conditions
+            // changed can't linger above the ceiling once something else moves it.
+            case 2:
+                if (GameMode.DevMode) body.biosphereActive = v > 0.31f;
+                p.moisture = Mathf.Min(v, (GameMode.DevMode || BiosphereRules.CanSustainBiosphere(body)) ? 2f : 0.3f);
+                break;
             case 3: p.heat = v; break;
             case 4: p.ridge = v; break;
         }
@@ -2270,7 +2285,9 @@ public class PlanetViewWindow : MonoBehaviour
     {
         var card = Card();
         var group = card.gameObject.AddComponent<CanvasGroup>();
-        Note(card, "<color=#DCE2EA>■</color> plates   <color=#F22B2B>■</color> fault lines   <color=#F22B2B>➤</color> push direction & strength — where quakes, mountains and volcanoes cluster.");
+        // No ➤ (U+27A4) here: the runtime font (LiberationSans SDF) has no glyph for it, so it rendered as
+        // a tofu box and spammed a TMP warning every time this card drew. Describe the arrows in words.
+        Note(card, "<color=#DCE2EA>■</color> plates   <color=#F22B2B>■</color> fault lines   <color=#F22B2B>red arrows</color> = push direction & strength — where quakes, mountains and volcanoes cluster.");
         var btn = UIFactory.Button(card, "", () =>
         {
             showTectonicsOverlay = !showTectonicsOverlay;
@@ -2370,10 +2387,13 @@ public class PlanetViewWindow : MonoBehaviour
             else parts.Add($"It sits squarely in the band {s.name} can live in.");
         }
 
-        float water = b.resources != null ? b.resources.Get(ResourceType.Water) : 0f;
-        if (water < 60f) parts.Add("There is essentially no accessible water.");
-        else if (water > 300f) parts.Add("Water is abundant — arguably too abundant.");
-        else parts.Add("There is some accessible water.");
+        // Describe the water actually on the surface (its Water Level), not the disconnected Water resource
+        // number, and call out frozen water as frozen rather than absent.
+        float surfaceWater = PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation);
+        if (surfaceWater < 0.15f) parts.Add("There is essentially no water on the surface.");
+        else if (!BiosphereRules.HasLiquidWaterClimate(b)) parts.Add("Its water is all here — but frozen solid.");
+        else if (surfaceWater > 0.6f) parts.Add("Water is abundant — arguably too abundant.");
+        else parts.Add("There is some liquid water.");
 
         if (b.surfaceSize <= 4) parts.Add("It is small enough that gravity is a suggestion and any atmosphere drifts away.");
         else if (b.surfaceSize >= 14) parts.Add("It is massive, and holds a deep, heavy atmosphere.");

@@ -249,10 +249,13 @@ public partial class InspectorWindow
             else parts.Add($"It sits squarely in the band {s.name} can live in.");
         }
 
-        float water = b.resources != null ? b.resources.Get(ResourceType.Water) : 0f;
-        if (water < 60f) parts.Add("There is essentially no accessible water.");
-        else if (water > 300f) parts.Add("Water is abundant — arguably too abundant.");
-        else parts.Add("There is some accessible water.");
+        // Describe the water actually on the surface (its Water Level), not the disconnected Water resource
+        // number, and call out frozen water as frozen rather than absent.
+        float surfaceWater = PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation);
+        if (surfaceWater < 0.15f) parts.Add("There is essentially no water on the surface.");
+        else if (!BiosphereRules.HasLiquidWaterClimate(b)) parts.Add("Its water is all here — but frozen solid.");
+        else if (surfaceWater > 0.6f) parts.Add("Water is abundant — arguably too abundant.");
+        else parts.Add("There is some liquid water.");
 
         if (b.surfaceSize <= 4) parts.Add("It is small enough that gravity is a suggestion and any atmosphere drifts away.");
         else if (b.surfaceSize >= 14) parts.Add("It is massive, and holds a deep, heavy atmosphere.");

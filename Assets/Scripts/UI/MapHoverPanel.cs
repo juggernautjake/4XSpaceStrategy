@@ -13,12 +13,25 @@ using TMPro;
 public class MapHoverPanel : MonoBehaviour
 {
     static MapHoverPanel _instance;
+    static bool _quitting;
+
     // Lazily self-creating — but NEVER during teardown. On scene close / stop-play this panel is destroyed,
-    // yet other objects' OnDestroy (e.g. PlanetViewWindow) still call Instance.Hide(); without this guard
-    // that call spawns a FRESH MapHoverPanel from inside OnDestroy, which Unity reports as "some objects
-    // were not cleaned up (did you spawn from OnDestroy?)". When not playing, hand back whatever already
-    // exists (null if it's gone) instead of creating a new one.
-    public static MapHoverPanel Instance => _instance != null ? _instance : (Application.isPlaying ? Create() : null);
+    // yet other objects' OnDestroy (e.g. PlanetViewWindow) still call Instance.Hide(); without a guard that
+    // call spawns a FRESH MapHoverPanel (and, via its canvas, an EventSystem) from inside OnDestroy, which
+    // Unity reports as "some objects were not cleaned up (did you spawn from OnDestroy?)". Application.isPlaying
+    // alone flips too late to catch this — the teardown OnDestroy calls run while it's still true — so we also
+    // watch Application.quitting, which fires FIRST, at the very start of shutdown.
+    public static MapHoverPanel Instance =>
+        _instance != null ? _instance : (Application.isPlaying && !_quitting ? Create() : null);
+
+    [RuntimeInitializeOnLoadMethod]
+    static void HookShutdown()
+    {
+        _quitting = false;                       // fresh play session (also covers domain-reload-off in the Editor)
+        Application.quitting -= MarkQuitting;     // de-dupe so the handler doesn't stack across sessions
+        Application.quitting += MarkQuitting;
+    }
+    static void MarkQuitting() => _quitting = true;
 
     RectTransform panel;
     TMP_Text label;
