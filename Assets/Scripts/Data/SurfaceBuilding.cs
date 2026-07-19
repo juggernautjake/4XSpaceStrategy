@@ -137,9 +137,10 @@ public class PlacedBuilding
     // ladder the shipyard and research centre already use.
     public int level = 1;
 
-    // Condition, 0..1 of this building's maximum. Damage is not yet dealt to surface structures, so in
-    // practice this reads 100% — but it's stored per building so the readout is real rather than a
-    // hardcoded label, and so raids/decay have somewhere to land.
+    // Condition, 0..1 of this building's maximum. Earthquakes on tectonically-active worlds now damage
+    // structures near fault lines (see EarthquakeManager), lowering this; a structure driven to 0 is
+    // demolished. It scales OutputMult below, so a damaged building really does produce less until it's
+    // rebuilt. Round-trips through save/load, so damage persists.
     public float health = 1f;
 
     // Energy banked in this structure, if it's a capacitor. Held per BUILDING rather than per grid
@@ -160,8 +161,9 @@ public class PlacedBuilding
     public int CurrentHealth => Mathf.RoundToInt(Mathf.Clamp01(health) * MaxHealth);
     public bool CanUpgrade => level < MaxLevel;
 
-    /// Everything that scales a building's production: where you sited it, and how good it is.
-    public float OutputMult => Mathf.Clamp01(efficiency) * LevelMult;
+    /// Everything that scales a building's production: where you sited it, how good it is, and its
+    /// condition — earthquake-damaged structures produce proportionally less until repaired/rebuilt.
+    public float OutputMult => Mathf.Clamp01(efficiency) * LevelMult * Mathf.Clamp01(health);
 
     /// Repair the record after a load. JsonUtility fills MISSING fields with 0, so a save written
     /// before levels/health existed comes back as level 0 / health 0 — a dead, non-existent tier.

@@ -417,8 +417,10 @@ public static class SurfaceBuildManager
         return best;
     }
 
-    /// Demolish a structure and refund most of its cost — the materials are still standing there.
-    public static void Demolish(CelestialBody b, PlacedBuilding p)
+    /// Demolish a structure. A voluntary teardown refunds most of its cost (the materials are still
+    /// standing there); a structure LOST — flattened by an earthquake — refunds nothing, so callers that
+    /// destroy rather than dismantle pass refund:false.
+    public static void Demolish(CelestialBody b, PlacedBuilding p, bool refund = true)
     {
         if (b == null || p == null || b.placedBuildings == null) return;
         if (!b.placedBuildings.Remove(p)) return;
@@ -437,7 +439,7 @@ public static class SurfaceBuildManager
             UnitManager.Instance?.NotifyBuildChanged();
         }
 
-        if (!GameMode.DevMode)
+        if (refund && !GameMode.DevMode)
         {
             var info = p.Info;
             PlayerEconomy.Add(ResourceType.Metal, ColonyManager.DiscCost(info.costMetal) * 0.6f);

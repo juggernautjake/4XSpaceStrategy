@@ -1726,6 +1726,7 @@ public class PlanetViewWindow : MonoBehaviour
             }
             return $"({cap.x},{cap.y}) · {site}{adj}{power}\n" +
                    $"<color=#9FB4C8>Output ×{cap.OutputMult * pf:0.00}</color> (siting × tech level" +
+                   $"{(cap.health < 0.999f ? " × condition" : "")}" +
                    $"{(info.powerDraw > 0f ? " × power" : "")})";
         });
 
