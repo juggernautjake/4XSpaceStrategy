@@ -10,11 +10,81 @@ using TMPro;
 //   Worlds   — every body orbiting it, drillable
 public partial class InspectorWindow
 {
+    // Surface-grid thumbnails minted for the Worlds/Zone planet lists. Tracked so we can Destroy them
+    // on the next rebuild (a rebuild throws away the RawImages that referenced them) — otherwise every
+    // tab switch would leak a handful of little textures.
+    readonly List<Texture2D> starThumbs = new List<Texture2D>();
+
     void CollectStarTabs()
     {
         tabs.Add(new InspectorTab("Overview", BuildStarOverview));
         tabs.Add(new InspectorTab("Zone", BuildStarZone, () => target.star != null && !target.star.isBlackHole));
         tabs.Add(new InspectorTab("Worlds", BuildStarWorlds));
+    }
+
+    // A small square surface-grid image for a planet's list row — the same idea as the moon tabs in the
+    // Planet View: point-filtered terrain colours, an "unexplored" placeholder until the world's been
+    // visited. Square regardless of the world's grid aspect, so the list stays tidy.
+    void AddStarThumb(Transform parent, CelestialBody b, float size = 42f)
+    {
+        var go = UIFactory.NewUI(parent, "Thumb");
+        var le = go.AddComponent<LayoutElement>();
+        le.preferredWidth = size; le.preferredHeight = size;
+        le.minWidth = size; le.minHeight = size;
+        le.flexibleWidth = 0; le.flexibleHeight = 0;
+        var raw = go.AddComponent<RawImage>();
+        raw.raycastTarget = false;
+        var tex = b != null && b.Visited ? StarSurfaceThumb(b) : null;
+        if (tex != null) { raw.texture = tex; starThumbs.Add(tex); }
+        else raw.color = new Color(0.12f, 0.16f, 0.22f, 1f);   // unexplored placeholder
+    }
+
+    // Render a body's surface grid to a tiny point-filtered texture using the shared terrain colours —
+    // matches AssociatedObjectsWindow.SurfaceThumb so the star list and the Planet View agree.
+    static Texture2D StarSurfaceThumb(CelestialBody b)
+    {
+        var s = b.surface;
+        if (s == null || s.tiles == null || s.width <= 0 || s.height <= 0) return null;
+        var tex = new Texture2D(s.width, s.height, TextureFormat.RGBA32, false)
+        { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+        var px = new Color32[s.width * s.height];
+        for (int y = 0; y < s.height; y++)
+            for (int x = 0; x < s.width; x++)
+            {
+                var t = s.tiles[x, y];
+                Color c = t != null ? TerrainColorMap.Get(t.type) : new Color(0.10f, 0.10f, 0.12f);
+                px[y * s.width + x] = c;
+            }
+        tex.SetPixels32(px);
+        tex.Apply(false, false);
+        return tex;
+    }
+
+    // A planet list row: [surface thumbnail] [live text] with an Inspect button. Shared by the Zone and
+    // Worlds tabs so both show the little square image the request asks for.
+    void StarWorldRow(Transform p, CelestialBody cap, System.Func<string> text)
+    {
+        var card = Card(p);
+
+        var rowGo = UIFactory.NewUI(card, "Row");
+        var h = rowGo.AddComponent<HorizontalLayoutGroup>();
+        h.spacing = 8; h.childControlWidth = true; h.childControlHeight = true;
+        h.childForceExpandWidth = true; h.childForceExpandHeight = false;
+        h.childAlignment = TextAnchor.MiddleLeft;
+        UIFactory.AddLayout(rowGo, 46f);
+
+        AddStarThumb(rowGo.transform, cap);
+        var t = UIFactory.WrapText(rowGo.transform, "", UITheme.SmallSize, UITheme.Text);
+        t.raycastTarget = false;
+        live.Text(t, text);
+
+        UIFactory.Button(card, "Inspect »", () => PlanetUI.Instance?.Show(cap), 22);
+    }
+
+    void ClearStarThumbs()
+    {
+        foreach (var t in starThumbs) if (t != null) Destroy(t);
+        starThumbs.Clear();
     }
 
     void BuildStarOverview(Transform p)
@@ -93,6 +163,7 @@ public partial class InspectorWindow
     // The habitable band, read through the CURRENT SPECIES — the whole point being that it moves.
     void BuildStarZone(Transform p)
     {
+        ClearStarThumbs();
         var s = target.star;
         var sp = SpeciesManager.Current;
 
@@ -122,16 +193,13 @@ public partial class InspectorWindow
         {
             if (b.parentBody != null) continue;   // moons follow their planet
             var cap = b;
-            var row = Card(p);
-            var t = UIFactory.WrapText(row, "", UITheme.SmallSize, UITheme.Text);
-            live.Text(t, () =>
+            StarWorldRow(p, cap, () =>
             {
                 bool inZone = Habitability.InZone(s, SpeciesManager.Current, cap.distanceFromStar);
                 string mark = inZone ? "<color=#4DFF6E>• in band</color>" : "<color=#9FB4C8>· outside</color>";
                 return $"{mark}  <b>{cap.name}</b>  <size=10><color=#9FB4C8>{TerraformDiagnosis.Pretty(cap.type)} · " +
                        $"distance {cap.distanceFromStar:F1} · hab <color={Habitability.ScoreColorHex(cap.habitability)}>{cap.habitability:F0}%</color></color></size>";
             });
-            UIFactory.Button(row, "Inspect »", () => PlanetUI.Instance?.Show(cap), 22);
         }
     }
 
@@ -140,6 +208,7 @@ public partial class InspectorWindow
 
     void BuildStarWorlds(Transform p)
     {
+        ClearStarThumbs();
         Header(p, "WORLDS OF THIS SYSTEM");
         var bodies = SystemBodies();
         if (bodies.Count == 0) { Note(p, "No known bodies orbit this star."); return; }
@@ -148,10 +217,7 @@ public partial class InspectorWindow
         {
             if (b.parentBody != null) continue;
             var cap = b;
-
-            var card = Card(p);
-            var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
-            live.Text(t, () =>
+            StarWorldRow(p, cap, () =>
             {
                 string owner = cap.owner != null
                     ? $"<color=#{ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(cap.owner))}>{FactionManager.OwnerLabel(cap.owner)}</color>"
@@ -164,7 +230,6 @@ public partial class InspectorWindow
                        $"hab <color={Habitability.ScoreColorHex(cap.habitability)}>{cap.habitability:F0}%</color> · " +
                        $"{moons} moon(s) · {ships} ship(s)</color></size>";
             });
-            UIFactory.Button(card, "Inspect »", () => PlanetUI.Instance?.Show(cap), 22);
         }
     }
 

@@ -34,7 +34,9 @@ public class BodyUnitsPanel : MonoBehaviour
         grid = UIFactory.NewUI(content, "Grid").GetComponent<RectTransform>();
         UIFactory.Stretch(grid);
         var g = grid.gameObject.AddComponent<GridLayoutGroup>();
-        g.cellSize = new Vector2(52, 60);
+        // Cell is tall enough that the bottom name band clears 20px (0.31 * 66 ≈ 20.5px) so the label
+        // isn't clipped — UISanity flagged the old 0.28 * 60 ≈ 17px band as cutting off descenders.
+        g.cellSize = new Vector2(52, 66);
         g.spacing = new Vector2(6, 6);
         g.padding = new RectOffset(4, 4, 4, 4);
 
@@ -80,13 +82,13 @@ public class BodyUnitsPanel : MonoBehaviour
         var raw = iconGo.AddComponent<RawImage>();
         raw.texture = UnitIconRenderer.Get(u.type);
         var irt = raw.rectTransform;
-        irt.anchorMin = new Vector2(0.15f, 0.3f); irt.anchorMax = new Vector2(0.85f, 0.95f);
+        irt.anchorMin = new Vector2(0.15f, 0.34f); irt.anchorMax = new Vector2(0.85f, 0.96f);
         irt.offsetMin = Vector2.zero; irt.offsetMax = Vector2.zero;
         raw.raycastTarget = false;
 
         var label = UIFactory.Text(item.transform, u.name, 9, UITheme.Text, TextAlignmentOptions.Center);
         var lrt = label.rectTransform;
-        lrt.anchorMin = new Vector2(0, 0); lrt.anchorMax = new Vector2(1, 0.28f);
+        lrt.anchorMin = new Vector2(0, 0); lrt.anchorMax = new Vector2(1, 0.31f);
         lrt.offsetMin = Vector2.zero; lrt.offsetMax = Vector2.zero;
 
         AddGroupBadge(item.transform, u);

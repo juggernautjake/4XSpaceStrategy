@@ -150,6 +150,7 @@ public partial class InspectorWindow : MonoBehaviour
         PlanetUI.OnBodySelected -= OnBodySelected;
         PlanetUI.OnClosed -= OnSelectionCleared;
         UnitSelection.OnChanged -= OnUnitSelectionChanged;
+        ClearStarThumbs();
     }
 
     // ---- Selection routing ----
