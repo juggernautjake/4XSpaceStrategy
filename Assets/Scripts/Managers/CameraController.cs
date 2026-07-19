@@ -300,33 +300,16 @@ public class CameraController : MonoBehaviour
         following = follow;
 
         float radius = WorldRadius(target, objectSizeHint);
+        // For a PLANET, frame its whole neighbourhood — the planet AND its moons / orbiting stations —
+        // rather than filling the screen with just the globe (which read as "too zoomed in"). Use the
+        // system's orbital reach (its outermost moon); for a moonless world still pull back a couple of
+        // radii so there's room to see whatever is in orbit around it. The zoom FLOOR is unchanged (it's
+        // still the planet's own surface), so you can hand-zoom right down onto it afterwards — even during
+        // an orbit migration: focus follows the planet and zoom is bounded only by the planet's surface and
+        // the galaxy ceiling, never by keeping the star in view, so you can zoom right in as it moves.
         var pc = target != null ? target.GetComponent<PlanetClick>() : null;
         if (pc != null && pc.data != null)
-        {
-            if (pc.data.migratingOrbit)
-            {
-                // An Orbital Migration is under way. Frame the whole ORBIT — its ring reaches orbitRadius
-                // out to the star — and DON'T hard-follow the planet, so you actually watch the orbit
-                // shrink or grow (the planet visibly closing on, or pulling away from, its star) instead of
-                // it staying pinned to screen-centre with the star and the resizing ring off-screen. Reverts
-                // to normal framing/following once the project completes (migratingOrbit clears).
-                // 1.4× (not a bare 1.1×): FillHeight intentionally overflows the framed radius and the 55°
-                // pitch reaches less below the centre than above, so a tighter frame would crop the star
-                // off the bottom whenever the planet's phase puts it there. 1.4× keeps the star (and the
-                // resizing ring) on screen in every orbital orientation.
-                radius = Mathf.Max(radius * 2.2f, pc.data.orbitRadius * 1.4f);
-                following = false;
-            }
-            else
-            {
-                // For a PLANET, frame its whole neighbourhood — the planet AND its moons / orbiting
-                // stations — rather than filling the screen with just the globe (which read as "too zoomed
-                // in"). Use the system's orbital reach (its outermost moon); for a moonless world still pull
-                // back a couple of radii so there's room to see whatever is in orbit around it. The zoom
-                // FLOOR is unchanged (still the planet's own surface), so you can hand-zoom onto it after.
-                radius = Mathf.Max(OrbitSafety.SystemReach(pc.data), radius * 2.2f);
-            }
-        }
+            radius = Mathf.Max(OrbitSafety.SystemReach(pc.data), radius * 2.2f);
 
         targetHeight = Mathf.Clamp(FillHeight(radius), minHeight, maxHeight);
         if (target == null) return;

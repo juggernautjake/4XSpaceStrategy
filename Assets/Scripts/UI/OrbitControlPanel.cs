@@ -64,9 +64,20 @@ public class OrbitControlPanel : MonoBehaviour
         root.SetActive(false);
     }
 
+    // Re-fetch the OrbitController from the LIVE selection before every edit. Caching it once in ShowFor
+    // left it pointing at a destroyed controller after any system re-visualization (Unity "fake-null"),
+    // which silently no-op'd every slider while the panel stayed open — the "sliders do nothing" bug.
+    // Fetching fresh here means the sliders always drive the body you're actually looking at.
+    bool Ready()
+    {
+        if (suppress || current == null) return false;
+        oc = current.visualObject != null ? current.visualObject.GetComponent<OrbitController>() : null;
+        return oc != null;
+    }
+
     void Apply(System.Action action)
     {
-        if (suppress || current == null || oc == null) return;
+        if (!Ready()) return;
         action();
     }
 
@@ -83,7 +94,7 @@ public class OrbitControlPanel : MonoBehaviour
 
     void ApplyRadius(float v)
     {
-        if (suppress || current == null || oc == null) return;
+        if (!Ready()) return;
         oc.SetRadius(v);
         current.orbitRadius = v;
 
@@ -137,7 +148,11 @@ public class OrbitControlPanel : MonoBehaviour
 
     public void Toggle()
     {
-        if (root.activeSelf) root.SetActive(false);
+        if (root.activeSelf) { root.SetActive(false); return; }
+        // Open from the LIVE selection, not a stale cache: ShowFor re-fetches current + oc, so the panel
+        // works even when the body was selected BEFORE Dev Mode was on (ShowFor's Dev gate had returned
+        // early then, leaving current null and Toggle a no-op), and it never opens onto a dead controller.
+        if (PlanetUI.Selected != null) ShowFor(PlanetUI.Selected);
         else if (current != null) root.SetActive(true);
     }
 
