@@ -159,14 +159,21 @@ public class OrbitControlPanel : MonoBehaviour
         // dynamic sweep from just clear of the star out to the edge of the system and back.
         if (body.parentBody == null)
         {
-            OrbitSafety.OrbitLimits(body.hostStar, out float rlo, out float rhi);
+            OrbitSafety.OrbitLimits(body.hostStar, out float rlo, out float _);
             radiusS.minValue = rlo;
-            radiusS.maxValue = Mathf.Max(rhi, body.orbitRadius * 1.8f);
+            // Max reaches only a LITTLE past the outermost planet in this system, not a big luminosity-
+            // scaled distance — the request's "the max orbit should not go nearly so far out". Find the
+            // system's outermost planet orbit and add a modest margin.
+            float outer = body.orbitRadius;
+            if (body.system != null && body.system.bodies != null)
+                foreach (var b in body.system.bodies)
+                    if (b != null && b.parentBody == null) outer = Mathf.Max(outer, b.orbitRadius);
+            radiusS.maxValue = outer * 1.25f + 4f;
         }
         else
         {
             radiusS.minValue = OrbitSafety.DiscRadius(body.parentBody) + 0.5f;
-            radiusS.maxValue = Mathf.Max(radiusS.minValue + 8f, body.orbitRadius * 1.8f);
+            radiusS.maxValue = Mathf.Max(radiusS.minValue + 8f, body.orbitRadius * 1.6f);
         }
         radiusS.value = body.orbitRadius;
         speedS.value = body.orbitSpeed;

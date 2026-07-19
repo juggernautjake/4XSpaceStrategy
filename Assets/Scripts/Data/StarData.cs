@@ -10,6 +10,11 @@ public class StarData
     public float temperatureK;     // surface temperature (heat)
     public float luminosity;       // relative to a G-type star (= 1.0)
     public float mass = 1f;        // solar masses (drives orbital speeds)
+    // How tightly the mass is packed: density = mass / (radius/RefScale)^3, ~1 for a typical star. Not an
+    // independent roll — it's the RELATIONSHIP between mass and radius, so a heavy-but-small star reads as
+    // dense and a light-but-big one as sparse. Stored so the Dev star editor can show and drive it. Kept in
+    // sync via StarDatabase.DensityOf whenever mass or visualScale changes.
+    public float density = 1f;
     public float lightIntensity;   // suggested Unity Light intensity
     public Color color;            // visible colour of the star
     public float visualScale;      // relative render size
@@ -32,6 +37,18 @@ public static class StarDatabase
     // Sun-like habitable zone landing among the inner-to-mid planets.
     public const float AU = 14f;
 
+    // The render radius (visualScale) a "typical" star sits at, after the 2x-larger change below. Density
+    // is measured relative to it: a star of this size and one solar mass has density 1. It's the anchor for
+    // the mass<->radius<->density triangle the Dev editor exposes.
+    public const float RefScale = 6f;
+
+    // The three ways of reading the mass/radius/density triangle. density = mass / (radius/RefScale)^3, so
+    // any two give the third. The Dev star sliders use these to keep themselves consistent: change the size
+    // with mass held and density follows; change the density with radius held and mass follows; and so on.
+    public static float DensityOf(float mass, float scale) => mass / Mathf.Pow(Mathf.Max(0.05f, scale) / RefScale, 3f);
+    public static float MassFrom(float density, float scale) => density * Mathf.Pow(Mathf.Max(0.05f, scale) / RefScale, 3f);
+    public static float ScaleFrom(float mass, float density) => RefScale * Mathf.Pow(Mathf.Max(0.001f, mass) / Mathf.Max(0.001f, density), 1f / 3f);
+
     public static StarData Get(StarType type)
     {
         var s = new StarData { type = type };
@@ -50,22 +67,31 @@ public static class StarDatabase
             default:         baseTemp = 3200f;  baseLum = 0.05f;  baseScale = 2.4f; break;
         }
 
-        // Per-star variance so no two suns are alike (wide spread in heat, brightness, size, mass).
+        // Per-star variance so no two suns are alike (wide spread in heat, brightness, size, mass). Mass and
+        // size are rolled INDEPENDENTLY and both wide, so density (mass over size^3) genuinely varies: some
+        // stars come out heavy-but-small (dense), others light-but-big (sparse), which is what the request
+        // asks for.
         s.temperatureK = baseTemp * Random.Range(0.78f, 1.22f);
         s.luminosity   = baseLum  * Random.Range(0.45f, 1.9f);
-        s.mass         = OrbitalMechanics.StarMass(type) * Random.Range(0.78f, 1.28f);
+        s.mass         = OrbitalMechanics.StarMass(type) * Random.Range(0.65f, 1.55f);
 
-        // Colour is DERIVED from the (varied) temperature so appearance tracks how hot the star is,
-        // with a little jitter so even same-temperature stars differ slightly.
+        // Colour is DERIVED from the (varied) temperature so appearance tracks how hot the star is, with a
+        // more noticeable jitter (was ±0.05) so stars — and the individual suns in a binary/trinary, which
+        // each cast their own coloured light — read as distinctly tinted rather than all near-white.
         Color tc = ColorFromTemperature(s.temperatureK);
         s.color = new Color(
-            Mathf.Clamp01(tc.r + Random.Range(-0.05f, 0.05f)),
-            Mathf.Clamp01(tc.g + Random.Range(-0.05f, 0.05f)),
-            Mathf.Clamp01(tc.b + Random.Range(-0.05f, 0.05f)));
+            Mathf.Clamp01(tc.r + Random.Range(-0.11f, 0.11f)),
+            Mathf.Clamp01(tc.g + Random.Range(-0.11f, 0.11f)),
+            Mathf.Clamp01(tc.b + Random.Range(-0.11f, 0.11f)));
 
-        // Render size tracks the class, nudged up for the more luminous members, plus variance.
+        // Render size tracks the class, nudged up for the more luminous members, then DOUBLED so the sun
+        // dominates the centre of its system as the request wants, plus a wide independent variance.
         float lumFactor = Mathf.Pow(Mathf.Max(0.001f, s.luminosity / Mathf.Max(0.0001f, baseLum)), 0.12f);
-        s.visualScale = baseScale * lumFactor * Random.Range(0.85f, 1.2f);
+        s.visualScale = baseScale * 2f * lumFactor * Random.Range(0.72f, 1.38f);
+
+        // Density is the relationship between the two independent rolls above (~1 typical, varying either
+        // side). Kept in sync with mass/visualScale here and by the Dev editor.
+        s.density = DensityOf(s.mass, s.visualScale);
 
         // Scene-light brightness scales with luminosity (compressed so hot giants don't blow out).
         s.lightIntensity = Mathf.Clamp(0.5f + Mathf.Sqrt(s.luminosity) * 0.25f, 0.45f, 3.2f);
@@ -113,8 +139,8 @@ public static class StarDatabase
         return new StarData
         {
             type = StarType.O, isBlackHole = true, starCount = 1,
-            temperatureK = 0f, luminosity = 0f, mass = 14f,
-            color = new Color(0.05f, 0.02f, 0.08f), visualScale = 2.0f,
+            temperatureK = 0f, luminosity = 0f, mass = 14f, density = DensityOf(14f, 4.0f),
+            color = new Color(0.05f, 0.02f, 0.08f), visualScale = 4.0f,
             lightIntensity = 0.5f, hasHabitableZone = false, hzInner = 0f, hzOuter = 0f
         };
     }
@@ -150,6 +176,7 @@ public static class StarDatabase
             lightIntensity = Mathf.Clamp(0.6f + Mathf.Sqrt(lum) * 0.25f, 0.6f, 3.5f),
             hasHabitableZone = true
         };
+        c.density = DensityOf(c.mass, c.visualScale);
         float sqrtL = Mathf.Sqrt(lum);
         c.hzInner = 0.95f * sqrtL * AU;
         c.hzOuter = 1.37f * sqrtL * AU;

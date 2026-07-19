@@ -474,7 +474,7 @@ public class SolarSystemGenerator : MonoBehaviour
 
         isBlackHole = false;
         float c = Random.value;
-        int count = c < 0.01f ? 3 : (c < 0.05f ? 2 : 1);   // ~1% ternary, ~4% binary, ~95% single
+        int count = c < 0.05f ? 3 : (c < 0.20f ? 2 : 1);   // ~5% ternary, ~15% binary, ~80% single (common enough to meet)
         for (int i = 0; i < count; i++) stars.Add(StarDatabase.Get(RollStarType()));
 
         currentStar = StarDatabase.Combine(stars);
