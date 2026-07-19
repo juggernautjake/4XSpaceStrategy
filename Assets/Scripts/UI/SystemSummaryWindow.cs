@@ -50,9 +50,30 @@ public class SystemSummaryWindow : MonoBehaviour
 
         var sb = new StringBuilder();
         var star = sys.combinedStar;
-        string starDesc = sys.isBlackHole ? "Black hole"
-            : (star != null ? (star.starCount > 1 ? $"{star.starCount} stars" : $"{star.type}-type star") : "star");
+        string starDesc = sys.isBlackHole ? "Black hole" : StarDatabase.SystemClass(star);
         sb.AppendLine($"<b>{starDesc}</b>");
+
+        // Mass: each sun's own mass and the total for a bound cluster, or the single star's mass.
+        var suns = sys.stars;
+        if (!sys.isBlackHole && suns != null && suns.Count > 1)
+        {
+            float total = 0f;
+            for (int i = 0; i < suns.Count; i++)
+            {
+                if (suns[i] == null) continue;
+                total += suns[i].mass;
+                string tag = i < 3 ? ((char)('A' + i)).ToString() : (i + 1).ToString();
+                sb.AppendLine($"<color=#9FB4C8>Sun {tag}:</color> {suns[i].type}-type · {suns[i].mass:F2} solar masses");
+            }
+            sb.AppendLine($"<color=#9FB4C8>Total mass:</color> <b>{total:F2}</b> solar masses");
+        }
+        else if (star != null)
+            sb.AppendLine($"<color=#9FB4C8>Mass:</color> {star.mass:F2} solar masses");
+
+        string sysOwner = sys.owner == FactionManager.Player ? "<color=#4DFF6E>Your empire</color>"
+                        : sys.owner != null ? $"<color=#FF9A5C>{FactionManager.OwnerName(sys.owner)}</color>"
+                        : "Unclaimed";
+        sb.AppendLine($"<color=#9FB4C8>Owner:</color> {sysOwner}");
         sb.AppendLine($"Planets: {sys.bodies.Count}\n");
 
         for (int i = 0; i < sys.bodies.Count; i++)
