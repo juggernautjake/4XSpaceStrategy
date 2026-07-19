@@ -54,7 +54,8 @@ public class GameManager : MonoBehaviour
         Galaxy = GalaxyGenerator.Generate(solarSystemGenerator, systemCount, avgPlanets, SpeciesManager.Current);
         FocusedSystem = Galaxy.Home;
 
-        Debug.Log($"Generated galaxy: {Galaxy.systems.Count} systems; home = {(Galaxy.Home != null ? Galaxy.Home.name : "?")}.");
+        // (Silenced to keep the console clean — this was a one-time generation confirmation.)
+        // Debug.Log($"Generated galaxy: {Galaxy.systems.Count} systems; home = {(Galaxy.Home != null ? Galaxy.Home.name : "?")}.");
         Visualize();
 
         // Player economy + starting fleet (home planet is rendered by Visualize above).

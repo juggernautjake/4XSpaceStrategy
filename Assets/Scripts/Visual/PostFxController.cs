@@ -49,7 +49,8 @@ public class PostFxController : MonoBehaviour
             color.postExposure.Override(0.1f);
             color.saturation.Override(6f);
 
-            Debug.Log("[PostFX] URP post-processing enabled (Bloom, Vignette, ACES).");
+            // (Silenced to keep the console clean — this was a one-time startup confirmation.)
+            // Debug.Log("[PostFX] URP post-processing enabled (Bloom, Vignette, ACES).");
         }
         catch (System.Exception e)
         {
