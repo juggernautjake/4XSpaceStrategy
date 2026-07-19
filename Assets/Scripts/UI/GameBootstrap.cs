@@ -74,6 +74,7 @@ public static class GameBootstrap
         GalaxyLOD.Create(canvas.transform);
         BoxSelectController.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);
+        TileCatalogWindow.Create(canvas.transform);   // reference viewer for every terrain tile type
         GenerationMenu.Create(canvas.transform);
         EscapeMenu.Create(canvas.transform);
         StartMenu.Create(canvas.transform);
