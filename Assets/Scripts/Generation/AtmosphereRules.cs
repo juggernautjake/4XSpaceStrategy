@@ -42,4 +42,19 @@ public static class AtmosphereRules
                 return Mathf.Clamp01(0.15f + surfaceSize * 0.03f);
         }
     }
+
+    // Atmosphere for a MOON, which is capped by its (small) mass no matter what SURFACE type it rolled.
+    // A moon can now generate as an ocean/rocky/volcanic/ice world (see SolarSystemGenerator.RollMoonType),
+    // but that's its terrain, not its gravity — Europa is ice with essentially no air, Io is volcanic with
+    // only a tenuous envelope. So the large-moon mass gate applies to ALL moon surface types, not just the
+    // bare "Moon" one ForBody's Moon arm handled: below the line a moon holds none; above it a thin
+    // envelope, which volcanic outgassing thickens slightly. This is the difference from ForBody, which
+    // would hand a small ice/volcanic moon a full PLANET-sized atmosphere off its type alone.
+    public static float ForMoon(CelestialBodyType surfaceType, int surfaceSize)
+    {
+        if (surfaceSize < LargeMoonSurfaceSize) return 0f;
+        float thin = Mathf.Clamp01(0.15f + (surfaceSize - LargeMoonSurfaceSize) * 0.03f);
+        if (surfaceType == CelestialBodyType.VolcanicPlanet) thin = Mathf.Clamp01(thin + 0.10f);
+        return thin;
+    }
 }

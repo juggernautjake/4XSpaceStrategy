@@ -105,11 +105,14 @@ public class SandboxEditorPanel : MonoBehaviour
         if (currentBody == null) return;
         suppress = true; // don't let programmatic value changes fire live edits
 
-        // Size
+        // Size. A moon is detected by parentBody, not by type: a moon can now roll an Ocean/Rocky/etc.
+        // surface type (see RollMoonType) yet is still a small, planet-orbiting body — using type here
+        // would hand a retyped moon full planet-size slider bounds. Matches LiveSize's own parentBody test.
+        bool small = currentBody.parentBody != null || currentBody.type == CelestialBodyType.Asteroid;
         if (sizeSlider != null)
         {
-            sizeSlider.minValue = (currentBody.type == CelestialBodyType.Moon || currentBody.type == CelestialBodyType.Asteroid) ? 4f : 6f;
-            sizeSlider.maxValue = (currentBody.type == CelestialBodyType.Moon || currentBody.type == CelestialBodyType.Asteroid) ? 8f : 24f;
+            sizeSlider.minValue = small ? 4f : 6f;
+            sizeSlider.maxValue = small ? 8f : 24f;
             sizeSlider.value = currentBody.surfaceSize;
         }
 
@@ -119,7 +122,7 @@ public class SandboxEditorPanel : MonoBehaviour
             if (radiusSlider != null)
             {
                 radiusSlider.minValue = 2.5f;
-                radiusSlider.maxValue = (currentBody.type == CelestialBodyType.Moon) ? 12f : 60f;
+                radiusSlider.maxValue = (currentBody.parentBody != null) ? 12f : 60f;
                 radiusSlider.value = currentOrbit.orbitRadius;
             }
             if (speedSlider != null)

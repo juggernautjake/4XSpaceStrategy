@@ -90,16 +90,45 @@ public class SolarSystemGenerator : MonoBehaviour
                 CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
                 moon.name = NameGenerator.MoonName(body.name, m);
                 moon.surfaceSize = Random.Range(3, 13);
-                moon.atmosphereThickness = AtmosphereRules.ForBody(moon.type, moon.surfaceSize);
-                moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.surfaceSize);
                 moon.distanceFromStar = body.distanceFromStar;   // shares the planet's solar distance
+
+                // A moon is no longer stuck with the single airless "Moon" palette. It rolls a real
+                // world-type from the SAME attributes a planet does — its temperature (taken from its
+                // parent's solar distance) and, for a big enough moon, a Water Level draw — gated by its
+                // small mass: only a moon large enough to hold air and surface water can come out temperate
+                // or ocean, while a hot orbit can make any moon volcanic (Io) and a cold one icy (Europa),
+                // and the rest stay airless rock. This is the request's "moons use the same generation
+                // system as planets" — see RollMoonType. (Its body class stays a moon for orbit/spacing:
+                // OrbitSafety keys moon-scale off parentBody, which is set below and restored on load.)
+                float moonRel = moon.distanceFromStar / Mathf.Max(0.5f, TempReference(currentStar));
+                moon.type = RollMoonType(moonRel, moon.surfaceSize, out float moonWaterLevel);
+
+                // Atmosphere uses the MOON mass gate (ForMoon, not ForBody) so its air is capped by its
+                // small mass whatever surface it rolled — a large ocean moon holds thin real air (enough to
+                // pass the biosphere gate below), a small ice/volcanic one holds essentially none, matching
+                // the request's "most moons ... no or thin atmosphere unless they are large moons". Tectonics
+                // keys on the chosen type + size exactly like a planet's, so only a sizeable moon folds plates.
+                moon.atmosphereThickness = AtmosphereRules.ForMoon(moon.type, moon.surfaceSize);
+                moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.surfaceSize);
+
                 SeedTerrain(moon);
+                // Feed the Water Level draw into the moon's real terrain AFTER SeedTerrain — TerrainVariance
+                // (called inside it) resets terrainParams, so setting elevation earlier would be discarded;
+                // this is exactly the ordering the planet path uses above. A -1 (no temperate roll) keeps
+                // the variance-rolled elevation untouched.
+                if (moonWaterLevel >= 0f)
+                {
+                    var wp = moon.terrainParams;
+                    wp.elevation = PlanetTerrainGenerator.ElevationFromWaterLevel(moonWaterLevel);
+                    moon.terrainParams = wp;
+                }
                 BiasHeat(moon, moon.distanceFromStar, currentStar);           // same climate band as its planet
                 TerraformVisuals.CaptureNatural(moon);   // re-capture the post-bias climate as this moon's natural state
+                // A large, warm, wet moon with an atmosphere starts out living, just like a qualifying
+                // planet; GeneratesWithBiosphere still returns false for barren/airless/ice/volcanic moons,
+                // so most moons stay sterile. Set before the bake so the first render agrees with the flag.
+                moon.biosphereActive = BiosphereRules.GeneratesWithBiosphere(moon);
                 moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
-                // Every moon is CelestialBodyType.Moon today (no Ocean/Rocky moon subtype exists — see
-                // the Advanced Planet Generation slice), so GeneratesWithBiosphere would always be false
-                // here; biosphereActive's own default already covers that, so there's nothing to set.
                 OreGenerator.Populate(moon);
                 ResourceGenerator.GenerateResources(moon);
 
@@ -353,6 +382,42 @@ public class SolarSystemGenerator : MonoBehaviour
         if (r < 0.80f) return CelestialBodyType.IcePlanet;
         if (r < 0.92f) return CelestialBodyType.BarrenPlanet;
         return CelestialBodyType.Asteroid;
+    }
+
+    // A moon's world-type, rolled from the same attributes a planet uses (temperature + a Water Level
+    // draw) but gated by its small mass. `rel` is the moon's temperature ratio — its parent's solar
+    // distance over the star's temperate reference, exactly as RollBodyByTemperature reads it (<1 hot,
+    // ~1 temperate, >1 cold).
+    //
+    // Only a LARGE moon (enough gravity to hold an atmosphere and keep surface water) can become a
+    // temperate or ocean world — the request's own "a moon ... that has an atmosphere, has liquid water,
+    // and is within the Habitable zone ... could very likely spawn as a temperate rocky type". A hot
+    // orbit can turn any moon volcanic (Io's tidal volcanism needs no atmosphere), a cold one icy
+    // (Europa's frozen shell likewise), and everything else stays the airless Moon rock that used to be
+    // every moon's only look. Gas Giant and Asteroid are deliberately never rolled here — a moon is
+    // neither. `waterLevel` is -1 except in the temperate band, where it's the same 0..1 draw the caller
+    // feeds into the moon's real water coverage, so a bare-minimum ocean moon reads as islands and a
+    // maxed one is fully drowned, identically to a planet.
+    static CelestialBodyType RollMoonType(float rel, int surfaceSize, out float waterLevel)
+    {
+        waterLevel = -1f;
+        bool large = surfaceSize >= AtmosphereRules.LargeMoonSurfaceSize;   // can hold air + surface water
+        float r = Random.value;
+
+        if (rel < 0.85f)                       // hot orbit: volcanic (Io) or bare sun-baked rock
+            return r < 0.5f ? CelestialBodyType.VolcanicPlanet : CelestialBodyType.Moon;
+
+        if (rel <= 1.5f)                       // temperate band — the only place a moon can be a living world
+        {
+            if (!large) return CelestialBodyType.Moon;   // too little mass to hold the air/water it needs
+            waterLevel = r;                    // the SAME draw decides the type AND the moon's water coverage
+            if (waterLevel > 0.6f)  return CelestialBodyType.OceanPlanet;
+            if (waterLevel > 0.25f) return CelestialBodyType.RockyPlanet;
+            return CelestialBodyType.BarrenPlanet;
+        }
+
+        // Cold outer orbit: an icy shell (frozen water needs no atmosphere) or airless rock.
+        return r < 0.55f ? CelestialBodyType.IcePlanet : CelestialBodyType.Moon;
     }
 
     // Bias a world's terrain temperature by how close it is to the star: closer = hotter climate,

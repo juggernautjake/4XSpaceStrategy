@@ -77,6 +77,12 @@ public static class PlanetAppearance
 
         if (!HasAtmosphere(body.type, out Color color, out float thickness)) return;
 
+        // Honor the body's actual atmosphereThickness attribute, not just its type. A small moon can now
+        // roll an ice/volcanic/rocky SURFACE (see RollMoonType) while its mass holds essentially no air
+        // (AtmosphereRules.ForMoon) — such a moon should look airless, so skip the shell when the attribute
+        // says there's nothing there. Planets always sit well above this floor, so they're unaffected.
+        if (body.atmosphereThickness < 0.06f) return;
+
         var shell = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         shell.name = "Atmosphere";
         var col = shell.GetComponent<Collider>();
