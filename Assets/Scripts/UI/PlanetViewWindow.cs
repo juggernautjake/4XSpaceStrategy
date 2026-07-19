@@ -157,6 +157,10 @@ public class PlanetViewWindow : MonoBehaviour
     // The Power grid is now a Survey overlay rather than its own tab: this flag is the "showing the power
     // grid" option, mutually exclusive with the index ramps (picking one clears the other).
     bool showPowerOverlay;
+    // The plate-tectonics overlay — another bespoke Survey overlay (not an index ramp): it washes the map
+    // white, paints the fault lines red, and draws a push-direction arrow per plate. Mutually exclusive
+    // with the index ramps AND the power overlay, and only offered on a world that has active tectonics.
+    bool showTectonicsOverlay;
 
     readonly LiveSet live = new LiveSet();
     string lastSig = null;
@@ -167,6 +171,10 @@ public class PlanetViewWindow : MonoBehaviour
     // Selection marker (see DrawSelectionMarker / AnimateMarker).
     RectTransform markerLayer;
     Image markerRing, markerArrow;
+
+    // Per-plate push arrows for the tectonics overlay (see DrawPlateArrows). Its own layer so they clear
+    // and redraw independently of the selection marker.
+    RectTransform plateArrowLayer;
     float markerRingBase, markerArrowBaseY;
     PlacedBuilding lastMarkedSelection;
 
@@ -273,6 +281,12 @@ public class PlanetViewWindow : MonoBehaviour
         var glImg = ghostLayer.gameObject.AddComponent<Image>();
         glImg.color = new Color(0, 0, 0, 0); glImg.raycastTarget = false;
 
+        // Topmost overlay layer: the tectonics push arrows, so they sit above the fault-line wash.
+        plateArrowLayer = UIFactory.NewUI(mapRT, "PlateArrows").GetComponent<RectTransform>();
+        UIFactory.Stretch(plateArrowLayer);
+        var palImg = plateArrowLayer.gameObject.AddComponent<Image>();
+        palImg.color = new Color(0, 0, 0, 0); palImg.raycastTarget = false;
+
         // The map itself is the click/hover target for placement.
         var probe = mapGO.AddComponent<SurfaceGridProbe>();
         probe.Init(this, mapRT);
@@ -374,6 +388,7 @@ public class PlanetViewWindow : MonoBehaviour
         body = b;
         selected = null; rotation = 0;
         showPowerOverlay = false;   // a fresh world opens on the plain map, not the last world's power view
+        showTectonicsOverlay = false;   // ...nor the last world's tectonics view (also a survey-gated overlay)
         CancelPlace();          // a confirm from the last world means nothing on this one
         lastSig = null;
 
@@ -675,7 +690,7 @@ public class PlanetViewWindow : MonoBehaviour
         var sb = new System.Text.StringBuilder();
         sb.Append(body.id).Append('|').Append((int)tab).Append('|');
         sb.Append(selected.HasValue ? (int)selected.Value : -1).Append('|');
-        sb.Append((int)activeIndex).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
+        sb.Append((int)activeIndex).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(showTectonicsOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
 
         // The Overview and Orbit tabs fold in the colony/shipyard structure, so their SHAPE changes when
         // a shipyard or research centre is built or upgraded, when a city appears, when ownership flips,
@@ -2164,6 +2179,7 @@ public class PlanetViewWindow : MonoBehaviour
         // reachable from this toggle (mutually exclusive with the index ramps); the diagnostic panel is
         // shown below for a world of yours that's settled, since a grid only exists once something's built.
         AddPowerToggle();
+        AddTectonicsToggle();
         if (body.owner == FactionManager.Player && body.settled)
             BuildPowerPanel();
 
@@ -2212,10 +2228,10 @@ public class PlanetViewWindow : MonoBehaviour
             Note(card, SurfaceIndex.Describe(k));
         }
 
-        var btn = UIFactory.Button(card, "", () => { activeIndex = k; showPowerOverlay = false; lastSig = null; }, 24);
+        var btn = UIFactory.Button(card, "", () => { activeIndex = k; showPowerOverlay = false; showTectonicsOverlay = false; lastSig = null; }, 24);
         live.Button(btn, () =>
         {
-            bool on = activeIndex == k && !showPowerOverlay;
+            bool on = activeIndex == k && !showPowerOverlay && !showTectonicsOverlay;
             string nm = labelOverride ?? SurfaceIndex.Name(k);
             if (k == SurfaceIndexKind.None) return (true, on ? $"• {nm}" : nm);
             if (!SurfaceIndex.Unlocked(body, k)) return (false, $"{nm} — {SurfaceIndex.LockReason(body, k)}");
@@ -2234,7 +2250,7 @@ public class PlanetViewWindow : MonoBehaviour
         var btn = UIFactory.Button(card, "", () =>
         {
             showPowerOverlay = !showPowerOverlay;
-            if (showPowerOverlay) activeIndex = SurfaceIndexKind.None;
+            if (showPowerOverlay) { activeIndex = SurfaceIndexKind.None; showTectonicsOverlay = false; }
             lastSig = null;
         }, 24);
         live.Button(btn, () =>
@@ -2242,6 +2258,29 @@ public class PlanetViewWindow : MonoBehaviour
             if (body.owner != FactionManager.Player || !body.settled)
                 return (false, "Power grid — settle this world first");
             return (true, showPowerOverlay ? "• Power grid (showing)" : "Show power grid");
+        }, group);
+    }
+
+    // The plate-tectonics overlay toggle — a Survey overlay like the power grid, not an index ramp. Only
+    // meaningful on a world that actually HAS active plates (hasTectonics is known from a survey), so it
+    // disables itself with the reason on the button everywhere else. Picking it clears any index ramp and
+    // the power overlay; picking either of those clears it.
+    void AddTectonicsToggle()
+    {
+        var card = Card();
+        var group = card.gameObject.AddComponent<CanvasGroup>();
+        Note(card, "<color=#DCE2EA>■</color> plates   <color=#F22B2B>■</color> fault lines   <color=#F22B2B>➤</color> push direction & strength — where quakes, mountains and volcanoes cluster.");
+        var btn = UIFactory.Button(card, "", () =>
+        {
+            showTectonicsOverlay = !showTectonicsOverlay;
+            if (showTectonicsOverlay) { activeIndex = SurfaceIndexKind.None; showPowerOverlay = false; }
+            lastSig = null;
+        }, 24);
+        live.Button(btn, () =>
+        {
+            if (!TectonicsMap.Active(body)) return (false, "Tectonics — this world has no active plate tectonics");
+            if (!body.Surveyed) return (false, "Tectonics — survey this world first");
+            return (true, showTectonicsOverlay ? "• Tectonics (showing)" : "Show tectonics");
         }, group);
     }
 
@@ -2455,12 +2494,25 @@ public class PlanetViewWindow : MonoBehaviour
 
     void RefreshOverlay()
     {
+        // The plate arrows belong to the tectonics overlay only — clear them up front so every other path
+        // (index ramp, power, build, nothing) leaves none behind; the tectonics branch redraws them.
+        ClearPlateArrows();
+
         // Two different overlays share one texture:
         //  BUILD  — holding a structure highlights the best 10% of sites for it on this world.
         //  SURVEY — the raw index ramp.
-        // The power grid is its own overlay entirely: it isn't a ramp over an index, it's a map of what
-        // the electricity reaches, so it gets its own pass rather than being forced through Ramp(). It's
-        // now a Survey overlay, chosen by the power toggle rather than a dedicated tab.
+        // The power grid and the tectonics map are each their own overlay entirely: not a ramp over an
+        // index but a purpose-drawn map (what the electricity reaches; where the plates and faults are), so
+        // each gets its own pass rather than being forced through Ramp(). Both are Survey overlays chosen
+        // by their toggle rather than a dedicated tab.
+        if (tab == Tab.Survey && showTectonicsOverlay && body.surface != null && body.Surveyed && TectonicsMap.Active(body))
+        {
+            overlayImage.gameObject.SetActive(true);
+            RefreshTectonicsOverlay();
+            DrawPlateArrows();
+            return;
+        }
+
         if (tab == Tab.Survey && showPowerOverlay && body.surface != null)
         {
             overlayImage.gameObject.SetActive(true);
@@ -2620,6 +2672,73 @@ public class PlanetViewWindow : MonoBehaviour
         if (overlayTex != null) Destroy(overlayTex);
         overlayTex = new Texture2D(w, h, TextureFormat.RGBA32, false)
         { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+    }
+
+    // ---- Tectonics overlay ----
+    // Like the power overlay, this doesn't ramp an index — it draws the plate geometry directly: a
+    // translucent WHITE wash over the whole map (so it reads at a glance as the tectonic view), with the
+    // FAULT LINES between plates painted red. Built from the same TectonicsMap the terrain generator folds
+    // its mountains from, so the red lines land exactly where the ranges and volcanoes cluster. Static
+    // (plates don't move frame to frame), so it's painted once per rebuild rather than on a timer.
+    void RefreshTectonicsOverlay()
+    {
+        int w = body.surface.width, h = body.surface.height;
+        EnsureOverlayTex(w, h);
+
+        var wash  = new Color(0.86f, 0.89f, 0.93f, 0.30f);   // translucent white plate wash
+        var fault = new Color(0.95f, 0.16f, 0.16f, 0.92f);   // red fault line
+
+        var px = new Color[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                float u = (x + 0.5f) / w, v = (y + 0.5f) / h;
+                float boundary = TectonicsMap.Sample(body, u, v).boundary;
+                // A fault cell where the tile sits close to a plate boundary; the band comes out ~1-3 cells
+                // wide, widening where three plates meet at a corner, exactly as the request describes.
+                px[y * w + x] = boundary > 0.55f ? fault : wash;
+            }
+        overlayTex.SetPixels(px);
+        overlayTex.Apply();
+        overlayImage.texture = overlayTex;
+    }
+
+    // A red arrow per plate, at the plate's centre, pointing the way the plate pushes and sized by how
+    // hard — the request's "each continent should have a red arrow ... the size should indicate how
+    // strongly it is pushing". Same TectonicsMap geometry as the fault wash and the terrain.
+    void DrawPlateArrows()
+    {
+        ClearPlateArrows();
+        if (plateArrowLayer == null || body?.surface == null || !TectonicsMap.Active(body)) return;
+        var layout = TectonicsMap.Get(body);
+        if (layout?.plates == null) return;
+
+        foreach (var plate in layout.plates)
+        {
+            TectonicsMap.ArrowOnMap(plate, out float u, out float v, out Vector2 dir, out float strength);
+            if (dir.sqrMagnitude < 1e-6f) continue;
+
+            var go = UIFactory.NewUI(plateArrowLayer, "PlateArrow");
+            var img = go.AddComponent<Image>();
+            img.sprite = SurfaceMarkerArt.Arrow();
+            img.raycastTarget = false;
+            img.color = new Color(0.96f, 0.18f, 0.18f, 0.95f);   // same red as the fault lines
+            var rt = img.rectTransform;
+            rt.anchorMin = rt.anchorMax = new Vector2(u, v);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            float sz = Mathf.Lerp(16f, 34f, Mathf.Clamp01(strength));
+            rt.sizeDelta = new Vector2(sz * 0.7f, sz);
+            rt.anchoredPosition = Vector2.zero;
+            // SurfaceMarkerArt.Arrow points straight DOWN (-Y) by default. Rotating a down-vector by z=θ
+            // (CCW) sends it to (sinθ, -cosθ); solving that == dir gives θ = atan2(dir.x, -dir.y).
+            rt.localEulerAngles = new Vector3(0f, 0f, Mathf.Atan2(dir.x, -dir.y) * Mathf.Rad2Deg);
+        }
+    }
+
+    void ClearPlateArrows()
+    {
+        if (plateArrowLayer == null) return;
+        for (int i = plateArrowLayer.childCount - 1; i >= 0; i--) Destroy(plateArrowLayer.GetChild(i).gameObject);
     }
 
     // ---- Structures on the map ----
