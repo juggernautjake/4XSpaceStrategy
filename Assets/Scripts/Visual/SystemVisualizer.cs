@@ -94,15 +94,37 @@ public class SystemVisualizer : MonoBehaviour
         }
         else
         {
-            float radius = 2.6f + sys.stars.Count * 0.4f;
-            for (int i = 0; i < sys.stars.Count; i++)
+            // A bound cluster on a real barycenter model (StarCluster), not a plain shared ring:
+            //   Binary  — two suns orbit their mass-split barycenter; the heavier sun rides the closer circle.
+            //   Trinary — suns [0]/[1] are a close inner pair orbiting their own barycenter, and that pair
+            //             (as one combined mass) plus the third sun orbit the SYSTEM barycenter.
+            var layout = StarCluster.Layout(sys.stars);
+
+            // The inner pair (if any) orbits this moving point rather than the fixed system centre.
+            Transform pairCenter = pivot.transform;
+            if (layout.hasPair)
+            {
+                var pb = new GameObject("PairBarycenter");
+                pb.transform.SetParent(pivot.transform, false);
+                var pbc = pb.AddComponent<OrbitController>();
+                pbc.ringVisible = false;
+                pbc.Setup(pivot.transform, layout.pairRadius, layout.pairSpeed);
+                pbc.SetPhase(layout.pairPhase);
+                pbc.SetRingVisible(false);
+                pairCenter = pb.transform;
+            }
+
+            int count = Mathf.Min(sys.stars.Count, layout.orbits.Length);
+            for (int i = 0; i < count; i++)
             {
                 var go = CreateStarVisual(sys.stars[i], pivot.transform, sys.combinedStar);
                 SetStarSystem(go, sys);
+                var o = layout.orbits[i];
+                Transform center = o.aboutPair ? pairCenter : pivot.transform;
                 var oc = go.GetComponent<OrbitController>() ?? go.AddComponent<OrbitController>();
                 oc.ringVisible = false;
-                oc.Setup(pivot.transform, radius, 14f);
-                oc.SetPhase(i * 360f / sys.stars.Count);
+                oc.Setup(center, o.radius, o.speed);
+                oc.SetPhase(o.phase);
                 oc.SetRingVisible(false);
             }
         }
@@ -175,9 +197,9 @@ public class SystemVisualizer : MonoBehaviour
         var rend = star.GetComponent<Renderer>();
         if (rend != null)
         {
-            // Glow strength tracks the star's actual brightness so a dim red dwarf and a blazing
-            // blue giant read very differently.
-            float emK = Mathf.Clamp(1.0f + Mathf.Sqrt(Mathf.Max(0f, s.luminosity)) * 0.15f, 1.0f, 3.2f);
+            // Glow strength tracks the star's LIGHT INTENSITY (shared formula) so a dim red dwarf and a
+            // blazing blue giant read differently AND the Dev intensity slider visibly changes the sun.
+            float emK = StarDatabase.EmissionStrength(s);
             rend.material.color = s.color;
             rend.material.EnableKeyword("_EMISSION");
             rend.material.SetColor("_EmissionColor", s.color * emK);
@@ -192,7 +214,8 @@ public class SystemVisualizer : MonoBehaviour
         if (stray != null) Destroy(stray);
 
         var si = star.GetComponent<StarInteraction>() ?? star.AddComponent<StarInteraction>();
-        si.star = combined;
+        si.star = combined;   // combined cluster data (shared light/heat/HZ)
+        si.member = s;         // this sun's OWN data, so the editor can target it individually
 
         var lightGo = new GameObject("StarLight");
         lightGo.transform.SetParent(star.transform, false);

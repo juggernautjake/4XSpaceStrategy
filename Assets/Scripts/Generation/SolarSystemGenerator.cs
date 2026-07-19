@@ -35,7 +35,7 @@ public class SolarSystemGenerator : MonoBehaviour
         // tucked in close; a large bright star holds them further out, both by construction here and as the
         // EnforceSystem pass (below) guarantees. The small random spread keeps systems from all starting at
         // the identical radius.
-        float starRadius = currentStar != null ? currentStar.visualScale * 0.5f : 1f;
+        float starRadius = OrbitSafety.StarRadius(currentStar);   // whole cluster reach for a binary/ternary
         float currentRadius = starRadius + OrbitSafety.StarClearance + Random.Range(1f, 4f);
         float prevOuterReach = 0f;                     // outermost point the previous planet's system reaches
 

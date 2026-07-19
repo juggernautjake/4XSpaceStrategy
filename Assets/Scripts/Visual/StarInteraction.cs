@@ -5,7 +5,8 @@ using UnityEngine;
 [RequireComponent(typeof(Collider))]
 public class StarInteraction : MonoBehaviour
 {
-    public StarData star;
+    public StarData star;          // the COMBINED cluster data (light/heat/HZ) — same on every sun of a system
+    public StarData member;        // this specific sun's OWN data (== star for a single-star system)
     public StarSystemData system;
 
     /// The rendered transform for a StarData, or null if it isn't on screen.
@@ -25,15 +26,25 @@ public class StarInteraction : MonoBehaviour
         return null;
     }
 
-    /// EVERY rendered transform mapped to this StarData — one for a single star, several for a
-    /// binary/ternary cluster (each sun carries the same combined `star`). Used by the Dev star editor
-    /// to rescale and re-light all of a system's suns at once.
+    /// EVERY rendered transform mapped to this COMBINED StarData — one for a single star, several for a
+    /// binary/ternary cluster (each sun carries the same combined `star`).
     public static System.Collections.Generic.List<Transform> AllOf(StarData s)
     {
         var list = new System.Collections.Generic.List<Transform>();
         if (s == null) return list;
         foreach (var si in FindObjectsByType<StarInteraction>(FindObjectsSortMode.None))
             if (si.star == s) list.Add(si.transform);
+        return list;
+    }
+
+    /// The rendered transform(s) for one INDIVIDUAL sun (its own `member` data) — so the Dev star editor
+    /// can rescale/re-light and re-orbit a single sun of a cluster without touching its sisters.
+    public static System.Collections.Generic.List<Transform> MembersOf(StarData member)
+    {
+        var list = new System.Collections.Generic.List<Transform>();
+        if (member == null) return list;
+        foreach (var si in FindObjectsByType<StarInteraction>(FindObjectsSortMode.None))
+            if (si.member == member) list.Add(si.transform);
         return list;
     }
 

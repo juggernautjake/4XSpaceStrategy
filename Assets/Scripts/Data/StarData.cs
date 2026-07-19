@@ -20,6 +20,12 @@ public class StarData
     public float visualScale;      // relative render size
     public bool isBlackHole;       // rare central black hole
 
+    // For a bound cluster (binary/ternary) this is how far the OUTERMOST sun's surface reaches from the
+    // system barycenter — so orbit spacing keeps planets clear of the WHOLE cluster, not just one sun. It
+    // is 0 for a single star, where callers use visualScale * 0.5 (one sun's radius) instead. Set by
+    // StarDatabase.Combine from the StarCluster layout, so it always matches how the suns are rendered.
+    public float clusterRadius;
+
     public int starCount = 1;      // 1 = single, 2 = binary, 3 = trinary (combined view)
 
     public bool hasHabitableZone;  // O/B giants burn too hot/short for a stable zone
@@ -49,6 +55,28 @@ public static class StarDatabase
     public static float MassFrom(float density, float scale) => density * Mathf.Pow(Mathf.Max(0.05f, scale) / RefScale, 3f);
     public static float ScaleFrom(float mass, float density) => RefScale * Mathf.Pow(Mathf.Max(0.001f, mass) / Mathf.Max(0.001f, density), 1f / 3f);
 
+    // Pull a raw blackbody colour halfway to white so stars read as subtly tinted, not garish — and so
+    // the light they cast on worlds is gentle. Used at generation; the Dev editor's colour sliders can
+    // still push a star anywhere the player wants.
+    public static Color SubtleTint(Color raw) => Color.Lerp(raw, Color.white, 0.5f);
+
+    // How strongly a star's surface glows (emission multiplier), tied to its LIGHT INTENSITY so the Dev
+    // editor's intensity slider visibly brightens or dims the sun itself, not only the light it casts.
+    // One formula, shared by the renderer and the editor, so an edited star matches a generated one.
+    public static float EmissionStrength(StarData s)
+        => s == null ? 1f : Mathf.Clamp(0.45f + s.lightIntensity * 0.7f, 0.45f, 3.5f);
+
+    // A short human classification of a system from its combined star: "Single G-type", "Binary system",
+    // "Ternary system", or "Black hole".
+    public static string SystemClass(StarData combined)
+    {
+        if (combined == null) return "Star";
+        if (combined.isBlackHole) return "Black hole";
+        return combined.starCount >= 3 ? "Ternary system"
+             : combined.starCount == 2 ? "Binary system"
+             : $"Single {combined.type}-type";
+    }
+
     public static StarData Get(StarType type)
     {
         var s = new StarData { type = type };
@@ -75,14 +103,15 @@ public static class StarDatabase
         s.luminosity   = baseLum  * Random.Range(0.45f, 1.9f);
         s.mass         = OrbitalMechanics.StarMass(type) * Random.Range(0.65f, 1.55f);
 
-        // Colour is DERIVED from the (varied) temperature so appearance tracks how hot the star is, with a
-        // more noticeable jitter (was ±0.05) so stars — and the individual suns in a binary/trinary, which
-        // each cast their own coloured light — read as distinctly tinted rather than all near-white.
-        Color tc = ColorFromTemperature(s.temperatureK);
+        // Colour is DERIVED from the (varied) temperature so appearance tracks how hot the star is, but
+        // pulled halfway to white (SubtleTint) so a sun reads as GENTLY tinted rather than a vivid crayon,
+        // and — crucially — the coloured light it throws on its worlds stays believable rather than washing
+        // everything orange or blue. A small jitter keeps no two suns identical.
+        Color tc = SubtleTint(ColorFromTemperature(s.temperatureK));
         s.color = new Color(
-            Mathf.Clamp01(tc.r + Random.Range(-0.11f, 0.11f)),
-            Mathf.Clamp01(tc.g + Random.Range(-0.11f, 0.11f)),
-            Mathf.Clamp01(tc.b + Random.Range(-0.11f, 0.11f)));
+            Mathf.Clamp01(tc.r + Random.Range(-0.05f, 0.05f)),
+            Mathf.Clamp01(tc.g + Random.Range(-0.05f, 0.05f)),
+            Mathf.Clamp01(tc.b + Random.Range(-0.05f, 0.05f)));
 
         // Render size tracks the class, nudged up for the more luminous members, then DOUBLED so the sun
         // dominates the centre of its system as the request wants, plus a wide independent variance.
@@ -177,6 +206,9 @@ public static class StarDatabase
             hasHabitableZone = true
         };
         c.density = DensityOf(c.mass, c.visualScale);
+        // How far the bound suns physically spread from the barycenter, so orbit spacing clears the whole
+        // cluster. Same layout the renderer uses (StarCluster), so clearance and visuals never disagree.
+        c.clusterRadius = StarCluster.Layout(stars).reach;
         float sqrtL = Mathf.Sqrt(lum);
         c.hzInner = 0.95f * sqrtL * AU;
         c.hzOuter = 1.37f * sqrtL * AU;

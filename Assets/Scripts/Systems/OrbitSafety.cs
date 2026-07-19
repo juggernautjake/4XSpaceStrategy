@@ -43,6 +43,16 @@ public static class OrbitSafety
     /// reserve twice the room you need, or half).
     public static float DiscRadius(CelestialBody b) => Scale(b) * 0.5f;
 
+    /// How far the STAR (or bound star cluster) reaches from the system barycenter — the amount the
+    /// innermost planet has to clear. For a single sun it's just its render radius; for a binary/ternary
+    /// it's the whole cluster's reach (StarData.clusterRadius, set from the same layout the renderer uses),
+    /// so planets can't be placed inside a pair of suns.
+    public static float StarRadius(StarData star)
+    {
+        if (star == null) return 1f;
+        return star.clusterRadius > 0.001f ? star.clusterRadius : star.visualScale * 0.5f;
+    }
+
     /// How far a planet's whole system reaches from its orbit line: its own disc, or its outermost
     /// moon's orbit plus that moon's disc — whichever is further.
     public static float SystemReach(CelestialBody b)
@@ -101,7 +111,7 @@ public static class OrbitSafety
         var sorted = new List<CelestialBody>(bodies);
         sorted.Sort((x, y) => x.orbitRadius.CompareTo(y.orbitRadius));
 
-        float starRadius = star != null ? star.visualScale * 0.5f : 1f;
+        float starRadius = StarRadius(star);
         float prevOuter = starRadius + StarClearance;
 
         foreach (var b in sorted)
@@ -133,7 +143,7 @@ public static class OrbitSafety
         if (system == null || body == null) return false;
 
         float reach = SystemReach(body);
-        float starRadius = star != null ? star.visualScale * 0.5f : 1f;
+        float starRadius = StarRadius(star);
         lo = starRadius + StarClearance + reach;
         hi = float.MaxValue;
 
@@ -170,7 +180,7 @@ public static class OrbitSafety
     /// world isn't clamped inward.
     public static void OrbitLimits(StarData star, out float min, out float max)
     {
-        float starRadius = star != null ? star.visualScale * 0.5f : 1f;
+        float starRadius = StarRadius(star);
         min = starRadius + StarClearance;
         float lum = star != null ? Mathf.Max(0.05f, star.luminosity) : 1f;
         max = min + Mathf.Sqrt(lum) * StarDatabase.AU * 12f;

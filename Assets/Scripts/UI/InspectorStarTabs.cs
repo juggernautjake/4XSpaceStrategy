@@ -20,6 +20,9 @@ public partial class InspectorWindow
     // recursing back into its own callback.
     Slider starSizeS, starMassS, starDensityS, starIntS, starRS, starGS, starBS;
     bool starSuppress;
+    // Which sun of a bound cluster the editor's sliders currently act on (a tab per sun). 0 for a single
+    // star. Clamped to the sun count each build, so it survives switching between systems.
+    int editSunIndex;
 
     void CollectStarTabs()
     {
@@ -109,6 +112,32 @@ public partial class InspectorWindow
         Stat(stats, "Mass", () => $"{s.mass:F2} solar masses");
         Stat(stats, "Habitable zone", () => s.hasHabitableZone ? $"{s.hzInner:F1} – {s.hzOuter:F1}" : "<color=#FF7A6E>none</color>");
 
+        // For a bound cluster, break the combined star back into its individual suns — each one's name,
+        // spectral class, mass and a colour swatch — with the system's combined mass. This is the "naming
+        // and classifications" the single combined readout above otherwise hides.
+        var suns = target.system != null ? target.system.stars : null;
+        if (suns != null && suns.Count > 1)
+        {
+            Header(p, "SUNS OF THIS SYSTEM");
+            var sunCard = Card(p);
+            Note(sunCard, $"A {StarDatabase.SystemClass(s).ToLower()} — {suns.Count} suns bound together; their worlds feel the combined light.");
+            float total = 0f;
+            for (int i = 0; i < suns.Count; i++)
+            {
+                var sun = suns[i];
+                if (sun == null) continue;
+                total += sun.mass;
+                string tag = i < 3 ? ((char)('A' + i)).ToString() : (i + 1).ToString();
+                string hex = ColorUtility.ToHtmlStringRGB(sun.color);
+                string nm = string.IsNullOrEmpty(sun.name) ? $"Star {tag}" : sun.name;
+                UIFactory.WrapText(sunCard,
+                    $"<color=#{hex}>•</color> <b>{nm}</b> <size=10><color=#9FB4C8>· {sun.type}-type · {sun.mass:F2} solar masses</color></size>",
+                    UITheme.SmallSize, UITheme.Text);
+            }
+            UIFactory.WrapText(sunCard, $"<color=#9FB4C8>Combined mass:</color> <b>{total:F2}</b> solar masses",
+                UITheme.SmallSize, UITheme.Text);
+        }
+
         if (target.system != null)
         {
             Header(p, "SYSTEM");
@@ -190,11 +219,59 @@ public partial class InspectorWindow
         }
     }
 
-    // ===== Dev star editor =====
+    // ===== Dev star editor (per-sun, tabbed for bound clusters) =====
 
-    void BuildStarEditor(Transform p, StarData s)
+    // The suns the editor can act on: a bound cluster's individual members, or the lone star.
+    List<StarData> EditableSuns()
     {
+        if (target.system != null && target.system.stars != null && target.system.stars.Count > 0)
+            return target.system.stars;
+        var one = new List<StarData>();
+        if (target.star != null) one.Add(target.star);
+        return one;
+    }
+
+    // The sun the sliders currently drive.
+    StarData EditSun()
+    {
+        var suns = EditableSuns();
+        if (suns.Count == 0) return target.star;
+        editSunIndex = Mathf.Clamp(editSunIndex, 0, suns.Count - 1);
+        return suns[editSunIndex];
+    }
+
+    void BuildStarEditor(Transform p, StarData combined)
+    {
+        var suns = EditableSuns();
+        editSunIndex = Mathf.Clamp(editSunIndex, 0, Mathf.Max(0, suns.Count - 1));
+
         Header(p, "STAR EDITOR (Dev)");
+
+        // A tab per sun for a bound cluster — edit each one individually, live. A single star has no tabs.
+        if (suns.Count > 1)
+        {
+            Note(p, "Bound cluster — edit each sun on its own tab. Growing one won't clip its partner; the " +
+                    "cluster re-spaces live.");
+            var tabsGo = UIFactory.NewUI(p, "SunTabs");
+            UIFactory.AddLayout(tabsGo, 26);
+            var htabs = tabsGo.AddComponent<HorizontalLayoutGroup>();
+            htabs.spacing = 4; htabs.childControlWidth = true; htabs.childControlHeight = true;
+            htabs.childForceExpandWidth = true; htabs.childForceExpandHeight = true;
+            for (int i = 0; i < suns.Count; i++)
+            {
+                int idx = i;
+                string tag = i < 3 ? ((char)('A' + i)).ToString() : (i + 1).ToString();
+                var tb = UIFactory.Button(tabsGo.transform, $"Sun {tag}", () => { editSunIndex = idx; lastSig = null; }, 22);
+                var colors = tb.colors;
+                colors.normalColor = idx == editSunIndex ? UITheme.ButtonActive : UITheme.ButtonBg;
+                colors.highlightedColor = colors.normalColor;
+                colors.selectedColor = colors.normalColor;
+                tb.colors = colors;
+            }
+        }
+
+        var s = suns.Count > 0 ? suns[editSunIndex] : combined;
+
         Note(p, "Size, mass and density are linked: move size or mass and density follows; move density and " +
                 "mass follows. Changing mass re-times this system's planets.");
         var card = Card(p);
@@ -213,37 +290,41 @@ public partial class InspectorWindow
     void ApplyStarSize(float v)
     {
         if (starSuppress) return;
-        var s = target.star; if (s == null) return;
+        var s = EditSun(); if (s == null) return;
         s.visualScale = v;
         s.density = StarDatabase.DensityOf(s.mass, v);
-        foreach (var t in StarInteraction.AllOf(s)) if (t != null) t.localScale = Vector3.one * v;
+        foreach (var t in StarInteraction.MembersOf(s)) if (t != null) t.localScale = Vector3.one * v;
         SetSliderQuiet(starDensityS, s.density);
+        RelayoutCluster();       // a grown sun re-spaces so it can't clip its partner
+        RecombineAndRetime();    // combined size/HZ/cluster reach may have shifted
     }
 
     void ApplyStarMass(float v)
     {
         if (starSuppress) return;
-        var s = target.star; if (s == null) return;
+        var s = EditSun(); if (s == null) return;
         s.mass = v;
         s.density = StarDatabase.DensityOf(v, s.visualScale);
         SetSliderQuiet(starDensityS, s.density);
-        RecomputePlanetSpeeds();
+        RelayoutCluster();       // barycenter shifts with mass — the heavier sun rides the closer circle
+        RecombineAndRetime();
     }
 
     void ApplyStarDensity(float v)
     {
         if (starSuppress) return;
-        var s = target.star; if (s == null) return;
+        var s = EditSun(); if (s == null) return;
         s.density = v;
         s.mass = StarDatabase.MassFrom(v, s.visualScale);
         SetSliderQuiet(starMassS, s.mass);
-        RecomputePlanetSpeeds();
+        RelayoutCluster();
+        RecombineAndRetime();
     }
 
     void ApplyStarIntensity(float v)
     {
         if (starSuppress) return;
-        var s = target.star; if (s == null) return;
+        var s = EditSun(); if (s == null) return;
         s.lightIntensity = v;
         ApplyStarLight(s);
     }
@@ -251,18 +332,22 @@ public partial class InspectorWindow
     void ApplyStarColor()
     {
         if (starSuppress) return;
-        var s = target.star; if (s == null) return;
+        var s = EditSun(); if (s == null) return;
         if (starRS == null || starGS == null || starBS == null) return;
         s.color = new Color(starRS.value, starGS.value, starBS.value);
         ApplyStarLight(s);
     }
 
-    // Push the star's colour and intensity onto every sun's material (glow) and point light. Mirrors
-    // SystemVisualizer.CreateStarVisual so an edited star looks the same as a freshly generated one.
-    static void ApplyStarLight(StarData s)
+    // Push ONE sun's colour and intensity onto its own material (glow) and point light — its sisters are
+    // left alone. Divides the light by the system's sun count so a cluster isn't over-lit, matching
+    // SystemVisualizer.CreateStarVisual.
+    void ApplyStarLight(StarData s)
     {
-        float emK = Mathf.Clamp(1f + Mathf.Sqrt(Mathf.Max(0f, s.luminosity)) * 0.15f, 1f, 3.2f);
-        foreach (var t in StarInteraction.AllOf(s))
+        if (s == null) return;
+        int n = (target.system != null && target.system.stars != null && target.system.stars.Count > 0)
+            ? target.system.stars.Count : 1;
+        float emK = StarDatabase.EmissionStrength(s);   // glow tracks intensity, so the slider is visible
+        foreach (var t in StarInteraction.MembersOf(s))
         {
             if (t == null) continue;
             var rend = t.GetComponent<Renderer>();
@@ -273,7 +358,72 @@ public partial class InspectorWindow
                 rend.material.SetColor("_EmissionColor", s.color * emK);
             }
             var light = t.GetComponentInChildren<Light>();
-            if (light != null) { light.color = s.color; light.intensity = s.lightIntensity / Mathf.Max(1, s.starCount); }
+            if (light != null) { light.color = s.color; light.intensity = s.lightIntensity / Mathf.Max(1, n); }
+        }
+    }
+
+    // Recompute the COMBINED cluster data in place from the current per-sun stats (mass/light/HZ/cluster
+    // reach), then re-time the planets, which orbit that combined mass. In place so target.star and every
+    // body.hostStar reference stays valid. No-op for a single star (combined already IS the star).
+    void RecombineAndRetime()
+    {
+        RecombineInPlace(target.star, EditableSuns());
+        RecomputePlanetSpeeds();
+    }
+
+    static void RecombineInPlace(StarData combined, List<StarData> stars)
+    {
+        if (combined == null || stars == null || stars.Count <= 1) return;
+        float lum = 0f, mass = 0f, scale = 0f;
+        Color col = Color.black;
+        StarData bright = stars[0];
+        foreach (var s in stars)
+        {
+            if (s == null) continue;
+            lum += s.luminosity; mass += s.mass;
+            col += s.color * Mathf.Max(0.1f, s.luminosity);
+            scale = Mathf.Max(scale, s.visualScale);
+            if (s.luminosity > bright.luminosity) bright = s;
+        }
+        combined.luminosity = lum;
+        combined.mass = mass;
+        combined.temperatureK = bright.temperatureK;
+        combined.type = bright.type;
+        combined.visualScale = scale;
+        combined.color = col / Mathf.Max(0.1f, lum);
+        combined.lightIntensity = Mathf.Clamp(0.6f + Mathf.Sqrt(lum) * 0.25f, 0.6f, 3.5f);
+        combined.density = StarDatabase.DensityOf(combined.mass, combined.visualScale);
+        combined.clusterRadius = StarCluster.Layout(stars).reach;
+        float sqrtL = Mathf.Sqrt(lum);
+        combined.hzInner = 0.95f * sqrtL * StarDatabase.AU;
+        combined.hzOuter = 1.37f * sqrtL * StarDatabase.AU;
+        combined.hasHabitableZone = true;
+    }
+
+    // Re-space the suns of a bound cluster after a size/mass edit so nothing clips and the heavier sun rides
+    // the closer circle — the same StarCluster layout the renderer used, pushed onto the live orbits.
+    void RelayoutCluster()
+    {
+        var sys = target.system;
+        if (sys == null || sys.stars == null || sys.stars.Count <= 1) return;
+        var layout = StarCluster.Layout(sys.stars);
+
+        if (layout.hasPair && sys.pivot != null)
+        {
+            var pb = sys.pivot.Find("PairBarycenter");
+            var pbc = pb != null ? pb.GetComponent<OrbitController>() : null;
+            if (pbc != null) { pbc.SetRadius(layout.pairRadius); pbc.SetSpeed(layout.pairSpeed); }
+        }
+
+        int count = Mathf.Min(sys.stars.Count, layout.orbits.Length);
+        for (int i = 0; i < count; i++)
+        {
+            var o = layout.orbits[i];
+            foreach (var t in StarInteraction.MembersOf(sys.stars[i]))
+            {
+                var oc = t != null ? t.GetComponent<OrbitController>() : null;
+                if (oc != null) { oc.SetRadius(o.radius); oc.SetSpeed(o.speed); }
+            }
         }
     }
 
