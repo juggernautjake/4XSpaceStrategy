@@ -43,6 +43,13 @@ public class SystemSummaryWindow : MonoBehaviour
         root.SetActive(false);
     }
 
+    /// Close the window. Needed because a double-click on a system proxy opens the full Overview instead,
+    /// and leaving this one stacked behind it would show the same system twice.
+    public void Hide()
+    {
+        if (root != null) root.SetActive(false);
+    }
+
     public void Show(StarSystemData sys)
     {
         if (sys == null) return;

@@ -228,95 +228,23 @@ public class SystemVisualizer : MonoBehaviour
         return star;
     }
 
+    // The visuals themselves now live in BlackHoleVisual, shared with the galaxy overview and the deep
+    // view — this only adds what is specific to a black hole standing in a rendered system: something to
+    // click on, and the StarInteraction that opens its Overview.
     void CreateBlackHole(Transform parent, StarData combined, StarSystemData sys)
     {
         float scale = Mathf.Max(1f, combined.visualScale);
+        var root = BlackHoleVisual.Build(parent, scale, withLight: true,
+                                         lightIntensity: combined.lightIntensity,
+                                         clickable: true);
 
-        var root = new GameObject("BlackHole");
-        root.transform.SetParent(parent, false);
-        root.transform.localPosition = Vector3.zero;
+        var horizon = root.transform.Find("EventHorizon");
+        if (horizon == null) return;
 
-        // Event horizon: a truly black, UNLIT sphere so it never reads as a grey "ball".
-        var horizon = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        horizon.name = "EventHorizon";
-        horizon.transform.SetParent(root.transform, false);
-        horizon.transform.localScale = Vector3.one * scale;
-        var hr = horizon.GetComponent<Renderer>();
-        if (hr != null)
-        {
-            hr.material = UnlitMaterial(new Color(0.01f, 0.01f, 0.02f, 1f));
-            hr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        }
-        EnsureClickCollider(horizon, Mathf.Max(1.8f, scale * 0.6f));
-
-        var si = horizon.AddComponent<StarInteraction>();
+        EnsureClickCollider(horizon.gameObject, Mathf.Max(1.8f, scale * 0.6f));
+        var si = horizon.gameObject.AddComponent<StarInteraction>();
         si.star = combined;
         si.system = sys;
-
-        // Bright photon ring hugging the horizon (the glowing rim of a black hole).
-        MakeRing(root.transform, "PhotonRing", scale * 0.62f, new Color(0.75f, 0.86f, 1f, 0.95f), scale * 0.06f, 128);
-
-        // Accretion disc: concentric rings, hot blue-white inside fading to orange-red outside, on a
-        // tilted holder that slowly rotates so the disc feels alive.
-        var disc = new GameObject("AccretionDisc");
-        disc.transform.SetParent(root.transform, false);
-        disc.transform.localRotation = Quaternion.Euler(74f, 0f, 0f);   // tilt so it reads as a disc, not a flat ring
-        const int rings = 7;
-        for (int i = 0; i < rings; i++)
-        {
-            float t = i / (float)(rings - 1);
-            float r = Mathf.Lerp(scale * 0.72f, scale * 1.85f, t);
-            Color c = Color.Lerp(new Color(1f, 0.97f, 0.9f), new Color(1f, 0.32f, 0.08f), t);
-            c.a = Mathf.Lerp(0.95f, 0.35f, t);
-            float w = Mathf.Lerp(scale * 0.10f, scale * 0.26f, t);
-            MakeRing(disc.transform, "Acc" + i, r, c, w, 96);
-        }
-        disc.AddComponent<SelfSpin>().speed = 35f;
-
-        // A faint reddish halo glow behind everything for depth.
-        MakeRing(root.transform, "Halo", scale * 2.15f, new Color(1f, 0.45f, 0.2f, 0.18f), scale * 0.5f, 96);
-
-        var lightGo = new GameObject("BHLight");
-        lightGo.transform.SetParent(root.transform, false);
-        var light = lightGo.AddComponent<Light>();
-        light.type = LightType.Point;
-        light.color = new Color(1f, 0.6f, 0.3f);
-        light.intensity = combined.lightIntensity;
-        light.range = 160f;
-    }
-
-    // A flat, loopable ring drawn in the local XZ plane. Used for the accretion disc / photon ring.
-    static LineRenderer MakeRing(Transform parent, string name, float radius, Color color, float width, int seg)
-    {
-        var go = new GameObject(name);
-        go.transform.SetParent(parent, false);
-        var lr = go.AddComponent<LineRenderer>();
-        lr.useWorldSpace = false; lr.loop = true; lr.positionCount = seg;
-        lr.material = new Material(Shader.Find("Sprites/Default"));
-        lr.startColor = lr.endColor = color;
-        lr.startWidth = lr.endWidth = Mathf.Max(0.03f, width);
-        lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        lr.receiveShadows = false;
-        for (int i = 0; i < seg; i++)
-        {
-            float a = i * Mathf.PI * 2f / seg;
-            lr.SetPosition(i, new Vector3(Mathf.Cos(a) * radius, 0f, Mathf.Sin(a) * radius));
-        }
-        return lr;
-    }
-
-    // An unlit material that renders a solid colour regardless of scene lighting (URP-aware, with
-    // fallbacks) — so the event horizon stays black.
-    static Material UnlitMaterial(Color c)
-    {
-        var sh = Shader.Find("Universal Render Pipeline/Unlit");
-        if (sh == null) sh = Shader.Find("Unlit/Color");
-        if (sh == null) sh = Shader.Find("Sprites/Default");
-        var m = new Material(sh);
-        if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
-        if (m.HasProperty("_Color")) m.SetColor("_Color", c);
-        m.color = c;
-        return m;
     }
 
     // Ensures a body has exactly one sphere collider sized for an easy click. The collider's WORLD
@@ -338,8 +266,19 @@ public class SystemVisualizer : MonoBehaviour
 }
 
 // Rotates its transform about local Y — used to slowly spin a black hole's accretion disc.
+//
+// `unscaled` opts out of Time.timeScale. Default OFF, because the things that spin in the SIMULATION —
+// a planet's cloud shell, a derelict's slow tumble — are part of the world and should stop when the
+// player pauses. The deep view is not: it is a map, drawn at a zoom where no simulation is visible, and
+// a galaxy that freezes mid-turn while the rest of the UI keeps animating just looks broken.
 public class SelfSpin : MonoBehaviour
 {
     public float speed = 30f;
-    void Update() { transform.Rotate(0f, speed * Time.deltaTime, 0f, Space.Self); }
+    public bool unscaled;
+
+    void Update()
+    {
+        float dt = unscaled ? Time.unscaledDeltaTime : Time.deltaTime;
+        transform.Rotate(0f, speed * dt, 0f, Space.Self);
+    }
 }

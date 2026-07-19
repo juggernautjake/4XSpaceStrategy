@@ -130,7 +130,11 @@ public class UnitModelRenderer : MonoBehaviour
     public static void Create()
     {
         if (Instance != null) return;
-        new GameObject("UnitModelRenderer").AddComponent<UnitModelRenderer>();
+        var go = new GameObject("UnitModelRenderer");
+        go.AddComponent<UnitModelRenderer>();
+        // De-render the hulls once the camera pulls back to the galaxy overview. Visuals only — the ships
+        // carry on with whatever they were doing. See MapTierVisibility.
+        go.AddComponent<MapTierVisibility>();
     }
 
     void Awake() { Instance = this; }

@@ -26,7 +26,9 @@ public class SpaceBackground : MonoBehaviour
 
     float shootingTimer;
     Vector3 lastCamPos;
-    Texture2D _dot, _galaxyRound, _galaxySpiral, _cloud;
+    // No shared spiral texture any more — each distant spiral generates its own (GenerateDistantSpiral),
+    // so the deep field doesn't repeat the same galaxy nine times at nine rotations.
+    Texture2D _dot, _galaxyRound, _cloud;
 
     public static void Create()
     {
@@ -46,11 +48,14 @@ public class SpaceBackground : MonoBehaviour
         Rebuild();
     }
 
-    static Material MakeMat(Texture2D tex, Color tint)
+    // Not static any more: each material is recorded so a rebuild can free the previous set, exactly like
+    // the textures. One material per quad, ~110 quads, leaked on every "Regenerate Space" otherwise.
+    Material MakeMat(Texture2D tex, Color tint)
     {
         var m = new Material(Shader.Find("Sprites/Default"));
         m.mainTexture = tex;
         m.color = tint;
+        materials.Add(m);
         return m;
     }
 
@@ -111,6 +116,11 @@ public class SpaceBackground : MonoBehaviour
 
         foreach (Transform c in transform) Destroy(c.gameObject);
         twinkles.Clear();
+        // The dim targets point at renderers about to be destroyed, and hold their authored alphas.
+        // Re-collected at the end of this method once the new quads exist.
+        dimTargets.Clear();
+        appliedDim = 1f;
+        ReleaseGenerated();  // the previous set is about to be orphaned by the quads we just destroyed
 
         transform.SetParent(cam.transform, false);
         transform.localPosition = Vector3.zero;
@@ -118,13 +128,12 @@ public class SpaceBackground : MonoBehaviour
 
         var rng = new System.Random(Seed);
 
-        var nebula = GenerateNebula(Seed, rng);
-        var starsFar = GenerateStars(Seed + 7, rng, 0.5f);
-        var starsMid = GenerateStars(Seed + 31, rng, 0.75f);
-        _galaxyRound = GenerateGalaxyRound(Seed + 91);
-        _galaxySpiral = GenerateGalaxySpiral(Seed + 133);
-        _cloud = GenerateCloud(Seed + 200);
-        _dot = GenerateDot();
+        var nebula = Track(GenerateNebula(Seed, rng));
+        var starsFar = Track(GenerateStars(Seed + 7, rng, 0.5f));
+        var starsMid = Track(GenerateStars(Seed + 31, rng, 0.75f));
+        _galaxyRound = Track(GenerateGalaxyRound(Seed + 91));
+        _cloud = Track(GenerateCloud(Seed + 200));
+        _dot = Track(GenerateDot());
 
         rootFar = new GameObject("Far").transform; rootFar.SetParent(transform, false);
         rootMid = new GameObject("Mid").transform; rootMid.SetParent(transform, false);
@@ -146,15 +155,36 @@ public class SpaceBackground : MonoBehaviour
         }
 
         // Distant galaxies — a mix of round and spiral, faint and small.
-        int galaxies = 8;
+        //
+        // Each spiral gets its OWN generated texture rather than every one of them sharing a single
+        // two-arm image. Copies of one spiral at different rotations read as wallpaper the moment you
+        // notice it; varying arm count, wind direction and tightness is what makes them look like a real
+        // deep field. Roughly 62% of the nine roll as spirals, so this generates ~6 textures per rebuild.
+        //
+        // They are also foreshortened: a real galaxy is a disc seen at a random angle, so most of them
+        // present as ellipses rather than face-on circles. That single non-uniform scale does more for the
+        // illusion of distance than any amount of extra texture detail.
+        int galaxies = 9;
         for (int i = 0; i < galaxies; i++)
         {
-            bool spiral = rng.NextDouble() < 0.5;
-            float gs = FovSize(dFar) * (0.05f + (float)rng.NextDouble() * 0.06f);
-            var g = MakeQuad(rootFar, spiral ? "Spiral" : "Galaxy", dFar - 8f, gs,
-                             spiral ? _galaxySpiral : _galaxyRound, new Color(1, 1, 1, 0.42f));
-            Scatter(g, rng, FovSize(dFar) * 0.38f);
+            bool spiral = rng.NextDouble() < 0.62;
+            float gs = FovSize(dFar) * (0.045f + (float)rng.NextDouble() * 0.075f);
+            var tex = spiral ? Track(GenerateDistantSpiral(rng)) : _galaxyRound;
+
+            // Faint, and tinted — distant galaxies redden with distance and the variation stops the
+            // field reading as one flat grey wash.
+            var tint = Color.Lerp(new Color(0.82f, 0.86f, 1f), new Color(1f, 0.82f, 0.7f),
+                                  (float)rng.NextDouble());
+            tint.a = 0.26f + (float)rng.NextDouble() * 0.26f;
+
+            var g = MakeQuad(rootFar, spiral ? "Spiral" : "Galaxy", dFar - 8f, gs, tex, tint);
+            Scatter(g, rng, FovSize(dFar) * 0.40f);
             g.transform.localRotation = Quaternion.Euler(0, 0, (float)(rng.NextDouble() * 360));
+
+            // Inclination: squash one axis. Kept above 0.22 so none of them collapses to a bare line.
+            float squash = 0.22f + (float)rng.NextDouble() * 0.78f;
+            var sc = g.transform.localScale;
+            g.transform.localScale = new Vector3(sc.x, sc.y * squash, 1f);
         }
 
         // Many small, sparkling stars on the near layer.
@@ -170,6 +200,9 @@ public class SpaceBackground : MonoBehaviour
         }
 
         solidQuad = MakeQuad(transform, "SolidColor", dFar + 20f, FovSize(dFar + 20f), Texture2D.whiteTexture, SolidColor);
+
+        // After every quad exists, so each one's authored alpha is captured before any dimming happens.
+        CollectDimTargets();
 
         ApplyVisibility();
 
@@ -190,17 +223,133 @@ public class SpaceBackground : MonoBehaviour
 
         Vector3 delta = cam.transform.position - lastCamPos;
         lastCamPos = cam.transform.position;
-        float dr = Vector3.Dot(delta, cam.transform.right);
-        float du = Vector3.Dot(delta, cam.transform.up);
+
+        // Parallax normalised by camera HEIGHT, which is what makes it work at every zoom.
+        //
+        // The drift used to be driven by raw world movement against a fixed clamp. Near a planet, panning a
+        // few units moved the layers a satisfying amount. In the galaxy view, where a single pan crosses
+        // hundreds of units, the layers slammed into their clamp on the first frame of movement and then
+        // sat there — so the backdrop was dead in exactly the view with the most empty space to sell.
+        //
+        // Dividing by height converts world movement into SCREEN-RELATIVE movement: panning by one
+        // screen-width produces the same parallax whether that screen-width is 4 units or 4,000. The gain
+        // is set so behaviour near a system matches roughly what the old constants gave.
+        float h = Mathf.Max(1f, cam.transform.position.y);
+        float norm = ParallaxGain / h;
+        float dr = Vector3.Dot(delta, cam.transform.right) * norm;
+        float du = Vector3.Dot(delta, cam.transform.up) * norm;
         Drift(rootFar, dr, du, 0.015f, 60f);
         Drift(rootMid, dr, du, 0.035f, 90f);
         Drift(rootNear, dr, du, 0.06f, 120f);
+
+        UpdateZoomDepth(h);
 
         shootingTimer -= Time.unscaledDeltaTime;
         if (shootingTimer <= 0f && rootNear != null)
         {
             shootingTimer = Random.Range(5f, 13f);
             SpawnShootingStar();
+        }
+    }
+
+    // Tuned so parallax near a system feels like the old fixed-gain version did — at the ~200-unit height
+    // where you sit looking at one system, ParallaxGain/h is about 1, i.e. unchanged.
+    const float ParallaxGain = 200f;
+
+    // Parallax along the ZOOM axis, and the handover to the deep view.
+    //
+    // Two things happen as you pull back. The near star layer spreads slightly relative to the far nebula,
+    // which is what depth looks like when you move away from a field of objects at different distances —
+    // panning parallax alone leaves the sky feeling like a painted backdrop. And the whole backdrop dims
+    // as the deep view fades in, because the procedural spiral out there is the subject at that zoom and a
+    // full-brightness star field in front of it just muddies it.
+    void UpdateZoomDepth(float h)
+    {
+        if (rootNear == null || rootFar == null || rootMid == null) return;
+
+        // Reference height: roughly where a single system fills the view.
+        float t = Mathf.Clamp01(Mathf.Log10(Mathf.Max(1f, h / 60f)) / 2.2f);
+
+        float nearSpread = Mathf.Lerp(1f, 1.16f, t);
+        rootNear.localScale = Vector3.one * nearSpread;
+        rootMid.localScale = Vector3.one * Mathf.Lerp(1f, 1.07f, t);
+
+        // Dim once the wide views start carrying the picture.
+        //
+        // Driven by the CONTINUOUS fade alphas, not by the discrete tier. Keying off GalaxyLOD.Tier meant
+        // the backdrop held full brightness until the boundary flipped and then lurched over half a second
+        // — visibly a beat behind the crossfade it was supposed to be reacting to. Reading the alphas
+        // makes the sky recede in lockstep with the spiral coming in.
+        float dim = Mathf.Lerp(1f, 0.72f, GalaxyLOD.ProxyAlpha);
+        dim = Mathf.Lerp(dim, 0.32f, GalaxyLOD.DeepAlpha);
+        if (Mathf.Abs(dim - appliedDim) > 0.005f)
+        {
+            appliedDim = dim;
+            ApplyDim(appliedDim);
+        }
+    }
+
+    float appliedDim = 1f;
+
+    // One dimmable backdrop quad, with its AUTHORED alpha captured once so repeated dimming can never
+    // compound into permanent invisibility.
+    //
+    // Collected once at Rebuild rather than walked per frame. The dim now tracks a continuous fade, so it
+    // changes on most frames of a scroll gesture — and GetComponentsInChildren over three roots allocates
+    // three arrays each time, during exactly the moment the player is moving the camera.
+    struct DimTarget
+    {
+        public MeshRenderer rend;
+        public Material mat;
+        public TwinkleStar twinkle;   // non-null: dim via its multiplier, it owns its own alpha
+        public float baseAlpha;
+    }
+
+    readonly List<DimTarget> dimTargets = new List<DimTarget>();
+
+    void CollectDimTargets()
+    {
+        dimTargets.Clear();
+        CollectDimTargetsIn(rootFar);
+        CollectDimTargetsIn(rootMid);
+        CollectDimTargetsIn(rootNear);
+    }
+
+    void CollectDimTargetsIn(Transform root)
+    {
+        if (root == null) return;
+        foreach (var mr in root.GetComponentsInChildren<MeshRenderer>(true))
+        {
+            // A shooting star fades on its own timer and destroys itself, so it is never a dim target —
+            // dimming would fight its fade, and it is spawned after this runs anyway.
+            if (mr.GetComponent<ShootingStar>() != null) continue;
+            var tw = mr.GetComponent<TwinkleStar>();
+            // sharedMaterial, NOT material. Every quad here was already given its own material by
+            // MakeMat, which tracked it for release — but the `.material` getter instantiates ANOTHER
+            // per-renderer copy that nothing tracks, so reading it here would leak one instance per quad
+            // per rebuild while ReleaseGenerated dutifully freed the originals.
+            var m = mr.sharedMaterial;
+            dimTargets.Add(new DimTarget
+            {
+                rend = mr,
+                mat = m,
+                twinkle = tw,
+                baseAlpha = m != null ? m.color.a : 1f
+            });
+        }
+    }
+
+    void ApplyDim(float k)
+    {
+        for (int i = 0; i < dimTargets.Count; i++)
+        {
+            var d = dimTargets[i];
+            if (d.rend == null) continue;
+            if (d.twinkle != null) { d.twinkle.dim = k; continue; }
+            if (d.mat == null) continue;
+            var c = d.mat.color;
+            c.a = Mathf.Clamp01(d.baseAlpha * k);
+            d.mat.color = c;
         }
     }
 
@@ -247,7 +396,22 @@ public class SpaceBackground : MonoBehaviour
                 float cloud = Mathf.Clamp01((FBm(u * 3f + so, v * 3f + so, 5) - 0.45f) * 2.2f);
                 float cloud2 = Mathf.Clamp01((FBm(u * 6f + so + 40f, v * 6f + so + 40f, 4) - 0.55f) * 2.4f);
                 float cloud3 = Mathf.Clamp01((FBm(u * 1.6f + so + 90f, v * 1.6f + so + 90f, 3) - 0.5f) * 1.8f);
+
+                // FILAMENTS. Plain FBm gives soft blobs, and blobs are what made the old sky read as fog
+                // rather than as a nebula. Ridged noise — 1 minus the distance from the midpoint, raised
+                // to a power — inverts the field so its ZERO CROSSINGS become bright thin lines, which is
+                // what the shock fronts and gas lanes in a real nebula look like.
+                float ridge = FBm(u * 4.5f + so + 210f, v * 4.5f + so + 210f, 4);
+                ridge = 1f - Mathf.Abs(ridge * 2f - 1f);
+                ridge = Mathf.Pow(Mathf.Clamp01(ridge), 5f);
+                // Confined to where there is already gas, so filaments run THROUGH the clouds instead of
+                // hanging in empty space.
+                ridge *= Mathf.Clamp01(cloud + cloud3 * 0.7f);
+
                 Color c = baseCol + hueA * cloud * 0.16f + hueB * cloud2 * 0.12f + hueC * cloud3 * 0.10f;
+                // Filaments emit hotter than the gas around them — pushed toward white rather than tinted,
+                // so they read as brightness instead of another colour in the mix.
+                c += Color.Lerp(hueA, Color.white, 0.55f) * ridge * 0.30f;
                 px[y * w + x] = new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
             }
         // Faint baked background stars (small/dim; the sparkle comes from the near-layer sprites).
@@ -291,22 +455,43 @@ public class SpaceBackground : MonoBehaviour
         tex.SetPixels(px); tex.Apply(); return tex;
     }
 
-    Texture2D GenerateGalaxySpiral(int seed)
+    // One distant spiral galaxy, varied per call — arm count, wind direction, tightness and bulge size.
+    // Same logarithmic-spiral maths as the deep-view galaxy (GalaxySpiralVisual), at a fraction of the
+    // resolution, because these are a few dozen pixels across on screen.
+    // All variation comes from `rng`, which is the map's single seeded stream — so the deep field is
+    // reproducible for a given map seed without needing a per-galaxy seed of its own.
+    Texture2D GenerateDistantSpiral(System.Random rng)
     {
         int s = 128; var tex = NewTex(s);
-        var px = new Color[s * s]; Vector2 c = new Vector2(s / 2f, s / 2f);
-        for (int y = 0; y < s; y++) for (int x = 0; x < s; x++)
-        {
-            Vector2 d = new Vector2(x - c.x, y - c.y);
-            float r = d.magnitude / (s * 0.5f);
-            float ang = Mathf.Atan2(d.y, d.x);
-            // Two-arm logarithmic spiral.
-            float arm = Mathf.Cos(2f * (ang - r * 5f));
-            float core = Mathf.Clamp01(1f - r) * 0.9f;
-            float arms = Mathf.Clamp01(arm) * Mathf.Clamp01(1f - r) * 0.7f;
-            float a = Mathf.Clamp01(core * 0.5f + arms);
-            px[y * s + x] = new Color(0.85f, 0.85f, 1f, a * 0.8f);
-        }
+        var px = new Color[s * s];
+        Vector2 c = new Vector2(s / 2f, s / 2f);
+
+        int arms = 2 + rng.Next(0, 3);                              // 2..4
+        float hand = rng.NextDouble() < 0.5 ? 1f : -1f;
+        float tight = 3.0f + (float)rng.NextDouble() * 3.5f;
+        float bulge = 0.14f + (float)rng.NextDouble() * 0.16f;
+        float sharp = 1.0f + (float)rng.NextDouble() * 1.6f;
+
+        for (int y = 0; y < s; y++)
+            for (int x = 0; x < s; x++)
+            {
+                Vector2 d = new Vector2(x - c.x, y - c.y);
+                float r = d.magnitude / (s * 0.5f);
+                if (r > 1f) { px[y * s + x] = new Color(0, 0, 0, 0); continue; }
+
+                float ang = Mathf.Atan2(d.y, d.x);
+                float phase = ang * hand - Mathf.Log(Mathf.Max(0.03f, r)) * tight;
+                float arm = Mathf.Pow(Mathf.Cos(phase * arms) * 0.5f + 0.5f, sharp);
+
+                float fade = 1f - Mathf.SmoothStep(0.55f, 1f, r);
+                float core = Mathf.Exp(-(r * r) / (bulge * bulge));
+                float a = Mathf.Clamp01(arm * fade * 0.7f + core);
+
+                // Cool arms, warm core — the same temperature contrast the deep view uses.
+                Color col = Color.Lerp(new Color(0.72f, 0.82f, 1f), new Color(1f, 0.92f, 0.78f), core);
+                px[y * s + x] = new Color(col.r, col.g, col.b, a * 0.85f);
+            }
+
         tex.SetPixels(px); tex.Apply(); return tex;
     }
 
@@ -338,6 +523,38 @@ public class SpaceBackground : MonoBehaviour
         tex.SetPixels(px); tex.Apply(); return tex;
     }
 
+    // Every texture this class generates, so a rebuild can free the previous set.
+    //
+    // Runtime-created textures are not collected when the GameObjects using them are destroyed — Unity
+    // only reclaims assets it loaded itself. Rebuild() already destroyed the quads but left their textures
+    // resident, so each "Regenerate Space" leaked a 512x512 nebula, two 512x512 star fields and a handful
+    // of smaller ones. Now that each distant spiral generates its OWN texture there are ~6 more per
+    // rebuild, which turns a slow leak into a noticeable one.
+    readonly List<Texture2D> generated = new List<Texture2D>();
+    readonly List<Material> materials = new List<Material>();
+
+    Texture2D Track(Texture2D t)
+    {
+        if (t != null) generated.Add(t);
+        return t;
+    }
+
+    // Both sets are freed together, and only ever AFTER the quads referencing them have been destroyed —
+    // Rebuild destroys its children first, and both destructions resolve at the same end-of-frame point,
+    // so nothing is ever drawn against a freed asset.
+    void ReleaseGenerated()
+    {
+        for (int i = 0; i < generated.Count; i++)
+            if (generated[i] != null) Destroy(generated[i]);
+        generated.Clear();
+
+        for (int i = 0; i < materials.Count; i++)
+            if (materials[i] != null) Destroy(materials[i]);
+        materials.Clear();
+    }
+
+    void OnDestroy() { ReleaseGenerated(); }
+
     static Texture2D NewTex(int s) => new Texture2D(s, s, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
 
     static Color RandomNebulaHue(System.Random rng)
@@ -365,6 +582,11 @@ public class TwinkleStar : MonoBehaviour
     Vector3 baseScale;
     MeshRenderer mr;
 
+    // Backdrop dim multiplier, written by SpaceBackground as the wide views fade in. It has to live here
+    // rather than being applied to the material directly, because this component rewrites its own alpha
+    // every frame and would overwrite anything set from outside.
+    [HideInInspector] public float dim = 1f;
+
     public void Init(float phase, float speed, Vector3 baseScale)
     {
         this.phase = phase; this.speed = speed; this.baseScale = baseScale;
@@ -375,7 +597,7 @@ public class TwinkleStar : MonoBehaviour
     {
         float t = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * speed + phase);
         transform.localScale = baseScale * (0.8f + 0.35f * t);   // small variation
-        if (mr != null) { var c = mr.material.color; c.a = 0.55f + 0.45f * t; mr.material.color = c; }
+        if (mr != null) { var c = mr.material.color; c.a = (0.55f + 0.45f * t) * dim; mr.material.color = c; }
     }
 }
 
@@ -399,5 +621,13 @@ public class ShootingStar : MonoBehaviour
         transform.localPosition += velocity * (Time.unscaledDeltaTime / life);
         if (mr != null) { var c = mr.material.color; c.a = Mathf.Clamp01(1f - age / life); mr.material.color = c; }
         if (age >= life) Destroy(gameObject);
+    }
+
+    // A shooting star spawns every 5-13 seconds and destroys itself, but its runtime material would
+    // outlive it — Unity does not free materials with their GameObject. Over a long session that is
+    // hundreds of orphans, and unlike the backdrop's own quads there is no rebuild to sweep them up.
+    void OnDestroy()
+    {
+        if (mr != null && mr.material != null) Destroy(mr.material);
     }
 }

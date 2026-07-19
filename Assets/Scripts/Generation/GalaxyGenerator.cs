@@ -17,9 +17,13 @@ public static class GalaxyGenerator
         NameGenerator.Reset();   // fresh unique-name registry for this galaxy
 
         var galaxy = new Galaxy();
+        galaxy.name = NameGenerator.GalaxyName();
+        galaxy.visualSeed = Random.Range(1, 1000000);
         galaxy.center = StarDatabase.BlackHole();
         galaxy.center.visualScale = 6f;
-        galaxy.center.name = "Galactic Core";
+        // The core is named FOR its galaxy — "The Aureth Veil Core" — so the widest zoom reads as one
+        // named place rather than a generic black hole floating in a generic galaxy.
+        galaxy.center.name = $"{galaxy.name} Core";
         galaxy.centerPosition = Vector3.zero;
 
         for (int i = 0; i < systemCount; i++)

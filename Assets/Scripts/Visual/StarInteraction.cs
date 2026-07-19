@@ -56,17 +56,17 @@ public class StarInteraction : MonoBehaviour
 
         SimpleAudio.Instance?.PlaySelect();
 
-        if (system != null)
-        {
-            GameManager.Instance?.SetFocus(system);
-            if (SystemContext.Zone != null)
-                SystemContext.Zone.Retarget(system.combinedStar, system.pivot, system.bodies);
-        }
-
         // The tabbed Inspector is the ONE readout for anything you click, stars included. The old simpler
         // StarInfoPanel was a duplicate that popped up alongside it; it's retired, so only the fleshed-out
         // tabbed window shows now.
-        InspectorWindow.Instance?.Inspect(InspectorTarget.Of(star, system), resetTrail: true);
+        //
+        // No double-click handling here, deliberately. In the detailed system view a SINGLE click already
+        // opens the cluster Overview — Inspect() resets to tab 0, and Overview is the first tab the Star
+        // target registers — so a double click opens exactly the same window, and special-casing it would
+        // only add a branch that does nothing. The galaxy overview is the place that genuinely needed the
+        // gesture: out there a single click opens the light summary window, so double-click is what
+        // reaches the full per-sun breakdown (see GalaxyStarProxy.OnMouseDown).
+        StarOverview.OpenFromStar(star, system);
 
         // Clicking a star no longer moves the camera either (it just shows the info + the Inspector, which
         // has its own "Focus" button). Auto-focusing on click was disorienting and was also what let a star

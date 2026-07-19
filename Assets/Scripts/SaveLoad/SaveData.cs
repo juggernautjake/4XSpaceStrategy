@@ -15,6 +15,11 @@ public class SaveGame
     public string factionName = "Your Empire";
     public int homeIndex = 0;
     public float timeScale = 1f;
+    // The galaxy's name and the seed its deep-view spiral was generated from. Stored, not derived: the
+    // spiral has to come back identical on reload. An older save has neither, so both are re-rolled on
+    // load rather than left blank (see GameStateSerializer.Apply).
+    public string galaxyName = "";
+    public int galaxySeed = 0;
     public List<SystemDTO> galaxySystems = new List<SystemDTO>();
     public ResearchDTO research = new ResearchDTO();
 

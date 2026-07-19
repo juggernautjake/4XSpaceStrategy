@@ -18,6 +18,8 @@ public static class GameStateSerializer
             difficulty = (int)GameConfig.CurrentDifficulty,
             factionName = FactionManager.Player != null ? FactionManager.Player.name : "Your Empire",
             homeIndex = galaxy != null ? galaxy.homeIndex : 0,
+            galaxyName = galaxy != null ? galaxy.name : "",
+            galaxySeed = galaxy != null ? galaxy.visualSeed : 0,
             timeScale = Time.timeScale
         };
 
@@ -171,8 +173,14 @@ public static class GameStateSerializer
             FactionManager.Player.name = game.factionName;
 
         var galaxy = new Galaxy { homeIndex = game.homeIndex };
+        // Saves written before the galaxy was named carry neither field. Re-roll rather than leave the
+        // widest zoom showing "Unnamed Galaxy" over a seed-0 spiral — an old save gets a name it didn't
+        // have, which is a better outcome than a blank one, and every save after this keeps its own.
+        galaxy.name = !string.IsNullOrEmpty(game.galaxyName) ? game.galaxyName : NameGenerator.GalaxyName();
+        galaxy.visualSeed = game.galaxySeed != 0 ? game.galaxySeed : Random.Range(1, 1000000);
         galaxy.center = StarDatabase.BlackHole();
         galaxy.center.visualScale = 6f;
+        galaxy.center.name = $"{galaxy.name} Core";
 
         foreach (var sd in game.galaxySystems)
         {

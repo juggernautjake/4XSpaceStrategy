@@ -17,7 +17,10 @@ public class UnitTokenRenderer : MonoBehaviour
     public static void Create()
     {
         if (Instance != null) return;
-        new GameObject("UnitTokenRenderer").AddComponent<UnitTokenRenderer>();
+        var go = new GameObject("UnitTokenRenderer");
+        go.AddComponent<UnitTokenRenderer>();
+        // De-render the tokens at galaxy zoom, same as the 3D hulls. Visuals only — see MapTierVisibility.
+        go.AddComponent<MapTierVisibility>();
     }
 
     /// Where this unit is drawn, or null if it isn't drawn here (it has a mesh instead).

@@ -33,6 +33,16 @@ public class StarSystemData
 // The whole galaxy.
 public class Galaxy
 {
+    // The galaxy's own name — the one label the player reads at the widest zoom, where the spiral is the
+    // only thing on screen. Systems and stars are named by the generators; this is the level above them.
+    public string name = "Unnamed Galaxy";
+
+    // Drives every procedural choice in the deep-view spiral: handedness, arm count, tightness, arm
+    // length, wispiness, density, distortion and palette (see GalaxyShape.FromSeed). STORED rather than
+    // derived from the name, so a saved galaxy reloads with the exact spiral it was generated with — a
+    // hash of the name would work until someone renamed it, and then the sky would silently change.
+    public int visualSeed;
+
     public List<StarSystemData> systems = new List<StarSystemData>();
     public int homeIndex;
     public StarData center;                 // central supermassive object (visual)

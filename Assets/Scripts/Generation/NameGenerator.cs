@@ -75,6 +75,33 @@ public static class NameGenerator
     public static string StarName(string systemName, int index, int count)
         => count <= 1 ? systemName : $"{systemName} {(char)('A' + index)}";
 
+    // --- Galaxy names -------------------------------------------------------------------------
+
+    // Evocative rather than catalogue-like: the galaxy is the one name the player reads at the widest
+    // zoom, sitting under a slowly turning spiral, so it wants to sound like a place and not a serial
+    // number. Systems already carry the "Kepler-231" register; this is the counterweight to it.
+    static readonly string[] GalaxyWord =
+    { "Aureth", "Vantara", "Ceruleth", "Ossian", "Halcyon", "Ithrane", "Sable", "Verrin", "Cassaris",
+      "Umbral", "Solenne", "Tenebris", "Aurelian", "Mirovar", "Kaleth", "Zephyrine", "Obsidia", "Lucent",
+      "Nyxara", "Thessaly", "Amaranth", "Corvine", "Elysia", "Fathom", "Gossamer", "Hollow", "Ivory" };
+
+    // The shape-word. Deliberately mixed between structures ("Spiral", "Wheel") and moods ("Veil",
+    // "Hollow") so two galaxies rarely read as the same kind of object.
+    static readonly string[] GalaxyForm =
+    { "Spiral", "Veil", "Wheel", "Coil", "Expanse", "Reach", "Cascade", "Maelstrom", "Drift", "Whorl",
+      "Cradle", "Shroud", "Bloom", "Tide", "Crown", "Abyss", "Halo", "Lattice" };
+
+    public static string GalaxyName()
+    {
+        switch (Random.Range(0, 4))
+        {
+            case 0:  return $"The {Pick(GalaxyWord)} {Pick(GalaxyForm)}";   // "The Aureth Veil"
+            case 1:  return $"{Pick(GalaxyWord)} {Pick(GalaxyForm)}";       // "Ceruleth Spiral"
+            case 2:  return $"{Pick(GalaxyWord)}'s {Pick(GalaxyForm)}";     // "Ossian's Maelstrom"
+            default: return $"{Pick(GalaxyWord)}-{Random.Range(1, 99)}";    // "Vantara-47"
+        }
+    }
+
     static string Pick(string[] a) => a[Random.Range(0, a.Length)];
 
     static string Roman(int i) => (i >= 0 && i < RomanNumerals.Length) ? RomanNumerals[i] : (i + 1).ToString();
