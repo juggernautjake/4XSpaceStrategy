@@ -99,7 +99,7 @@ public class SystemVisualizer : MonoBehaviour
             {
                 var go = CreateStarVisual(sys.stars[i], pivot.transform, sys.combinedStar);
                 SetStarSystem(go, sys);
-                var oc = go.AddComponent<OrbitController>();
+                var oc = go.GetComponent<OrbitController>() ?? go.AddComponent<OrbitController>();
                 oc.ringVisible = false;
                 oc.Setup(pivot.transform, radius, 14f);
                 oc.SetPhase(i * 360f / sys.stars.Count);
@@ -121,7 +121,14 @@ public class SystemVisualizer : MonoBehaviour
             var click = visual.GetComponent<PlanetClick>();
             if (click != null) click.data = body;
 
-            var oc = visual.AddComponent<OrbitController>();
+            // Reuse the OrbitController the prefab already carries rather than ADDING a second one. The
+            // planet prefab embeds an (unconfigured, parentBody-null) OrbitController; adding another left
+            // TWO on the body, and GetComponent<OrbitController>() — used by the orbit-radius slider
+            // (OrbitControlPanel) and by terraforming's orbit migration (TerraformManager.RescoreOrbit) —
+            // returns the FIRST, i.e. the inert prefab copy. Their SetRadius calls then moved nothing (its
+            // UpdatePosition early-returns on the null parent, its RedrawRing no-ops on a null ring) while
+            // this appended controller silently drove the planet. One controller, configured AND fetched.
+            var oc = visual.GetComponent<OrbitController>() ?? visual.AddComponent<OrbitController>();
             oc.SetupFromData(pivot.transform, body);
             if (body.Surveyed) PlanetAppearance.Apply(body, visual);
             else visual.AddComponent<BodyFog>().Init(body);   // fog-of-war silhouette
@@ -140,7 +147,9 @@ public class SystemVisualizer : MonoBehaviour
                 var moonClick = moonVisual.GetComponent<PlanetClick>();
                 if (moonClick != null) moonClick.data = moon;
 
-                var moc = moonVisual.AddComponent<OrbitController>();
+                // Same as the planet above: reuse the prefab's controller so the one that's configured is
+                // the one GetComponent later returns.
+                var moc = moonVisual.GetComponent<OrbitController>() ?? moonVisual.AddComponent<OrbitController>();
                 moc.SetupFromData(body.visualObject.transform, moon);
                 if (moon.Surveyed) PlanetAppearance.Apply(moon, moonVisual);
                 else moonVisual.AddComponent<BodyFog>().Init(moon);

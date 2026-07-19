@@ -160,6 +160,22 @@ public static class OrbitSafety
         return true;
     }
 
+    /// The min and max orbit RADIUS a planet may sensibly occupy around its star, derived from the star's
+    /// SIZE and how far its light and gravity reach (its luminosity — the same distance scale the habitable
+    /// zone uses). The Dev-Mode orbit editor uses this as the radius slider's range, so you can fly a planet
+    /// from just clear of the star's surface out toward the edge of the system and back. The minimum keeps a
+    /// planet from clipping into the star (star radius + the same StarClearance generation reserves); the
+    /// maximum keeps it within the star's reach — a big, bright sun holds planets far further out than a dim
+    /// red dwarf. Callers should still widen `max` to at least the body's current radius so an already-outer
+    /// world isn't clamped inward.
+    public static void OrbitLimits(StarData star, out float min, out float max)
+    {
+        float starRadius = star != null ? star.visualScale * 0.5f : 1f;
+        min = starRadius + StarClearance;
+        float lum = star != null ? Mathf.Max(0.05f, star.luminosity) : 1f;
+        max = min + Mathf.Sqrt(lum) * StarDatabase.AU * 12f;
+    }
+
     // ---- Diagnostics ----
     /// Any overlapping bands in this system? Used by the generators to assert their own output.
     public static bool Validate(List<CelestialBody> bodies, out string problem)
