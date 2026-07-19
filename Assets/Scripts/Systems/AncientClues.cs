@@ -86,12 +86,18 @@ public static class AncientClues
     }
 
     // Called when a clue-bearing world has been both surveyed AND deeply studied (UnitManager.DoDeepResearch).
-    // Reveals the fragment: a specially-styled notification + the Codex viewer, and the all-ten reward.
     public static void Reveal(CelestialBody b)
     {
-        if (b == null || b.clueIndex < 0 || b.clueIndex >= Total) return;
-        int idx = b.clueIndex;
-        if (_found.Contains(idx)) return;          // already recovered (a re-study)
+        if (b == null) return;
+        RevealIndex(b.clueIndex, b.name);
+    }
+
+    // Reveal a specific fragment from any source (a world, a derelict station, …). Fires the specially-styled
+    // notification + the Codex viewer, and — when the last of the ten is in hand — the all-ten reward.
+    public static void RevealIndex(int idx, string sourceName)
+    {
+        if (idx < 0 || idx >= Total) return;
+        if (_found.Contains(idx)) return;          // already recovered
 
         _found.Add(idx);
         var clue = Get(idx);
@@ -99,7 +105,7 @@ public static class AncientClues
         // (Push plays the NotifKind.Ancient chime itself.)
         NotificationManager.Instance?.Push(
             $"A Voice of {CivName} — {clue.title}",
-            $"A fragment of {CivName} stirs on {b.name}.  ({FoundCount}/{Total} recovered)",
+            $"A fragment of {CivName} surfaces at {sourceName}.  ({FoundCount}/{Total} recovered)",
             () => AncientClueWindow.Instance?.Show(idx),
             NotifKind.Ancient,
             clue.body);
@@ -125,12 +131,16 @@ public static class AncientClues
             "+60% research · +50% ore yield · +60% ship range · +60% terraforming speed · faster, cheaper construction.");
     }
 
-    // ---- Generation: guarantee exactly ten clue-bearing worlds across the galaxy ----
+    // ---- Generation: guarantee ten clue sources across the galaxy, spread over WORLDS and DERELICTS ----
+    // A "source" is anything that can hold a fragment — a solid unclaimed planet or moon, or an ancient
+    // derelict station. Each gets a setter that stamps its clue index; we shuffle them all together and hand
+    // out the ten fragments, so a run's clues might sit on moons, planets and drifting stations alike.
     public static void SeedGalaxy(Galaxy galaxy)
     {
         if (galaxy == null) return;
 
-        var candidates = new List<CelestialBody>();
+        var setters = new List<System.Action<int>>();
+
         foreach (var sys in galaxy.systems)
         {
             if (sys == null) continue;
@@ -139,22 +149,30 @@ public static class AncientClues
                 if (b == null) continue;
                 b.clueIndex = -1;   // clear any prior seeding
                 // Solid, unclaimed worlds/moons only — a clue must be FOUND (surveyed + studied), so it can't
-                // sit on the player's already-known home world, and a gas giant has no surface to leave it on.
+                // sit on the player's already-known home world, and a gas giant has no surface for it.
                 if (b.type == CelestialBodyType.GasGiant || b.type == CelestialBodyType.Asteroid) continue;
                 if (b.owner != null) continue;
-                candidates.Add(b);
+                var cap = b;
+                setters.Add(i => cap.clueIndex = i);
             }
         }
 
-        // Shuffle, then hand out the ten distinct fragments. (A galaxy with fewer than ten solid worlds gets
-        // as many as it can hold — normal galaxies have far more than ten.)
-        for (int i = candidates.Count - 1; i > 0; i--)
+        if (galaxy.derelicts != null)
+            foreach (var d in galaxy.derelicts)
+            {
+                if (d == null) continue;
+                d.clueIndex = -1;
+                var cap = d;
+                setters.Add(i => cap.clueIndex = i);
+            }
+
+        for (int i = setters.Count - 1; i > 0; i--)
         {
             int j = Random.Range(0, i + 1);
-            (candidates[i], candidates[j]) = (candidates[j], candidates[i]);
+            (setters[i], setters[j]) = (setters[j], setters[i]);
         }
-        int n = Mathf.Min(Total, candidates.Count);
-        for (int i = 0; i < n; i++) candidates[i].clueIndex = i;
+        int n = Mathf.Min(Total, setters.Count);
+        for (int i = 0; i < n; i++) setters[i](i);
     }
 
     // ---- Save / load ----

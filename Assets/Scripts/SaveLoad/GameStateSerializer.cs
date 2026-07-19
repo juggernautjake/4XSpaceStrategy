@@ -59,6 +59,18 @@ public static class GameStateSerializer
                 foreach (var _ in sys.AllBodies()) bodyCount++;
             }
 
+        if (galaxy != null && galaxy.derelicts != null)
+            foreach (var d in galaxy.derelicts)
+                game.derelicts.Add(new DerelictDTO
+                {
+                    id = d.id, systemIndex = d.systemIndex, orbit = (int)d.orbit,
+                    dsX = d.deadSpacePos.x, dsY = d.deadSpacePos.y, dsZ = d.deadSpacePos.z,
+                    orbitRadius = d.orbitRadius, orbitPhase = d.orbitPhase, orbitSpeed = d.orbitSpeed,
+                    clueIndex = d.clueIndex,
+                    rewardMetal = d.rewardMetal, rewardEnergy = d.rewardEnergy, rewardResearch = d.rewardResearch,
+                    studied = d.studied
+                });
+
         int sysCount = galaxy != null ? galaxy.systems.Count : 0;
         game.summary = $"{sysCount} systems · {bodyCount} bodies · {GameConfig.CurrentDifficulty}";
         return game;
@@ -209,6 +221,20 @@ public static class GameStateSerializer
 
             galaxy.systems.Add(sys);
         }
+
+        // Ancient derelict stations — restored to the galaxy before it's handed to the renderer, so their
+        // hulls (and any Vael fragment or salvage they still hold) come back exactly where they drifted.
+        if (game.derelicts != null)
+            foreach (var dd in game.derelicts)
+                galaxy.derelicts.Add(new Derelict
+                {
+                    id = dd.id, systemIndex = dd.systemIndex, orbit = (Derelict.Orbit)dd.orbit,
+                    deadSpacePos = new Vector3(dd.dsX, dd.dsY, dd.dsZ),
+                    orbitRadius = dd.orbitRadius, orbitPhase = dd.orbitPhase, orbitSpeed = dd.orbitSpeed,
+                    clueIndex = dd.clueIndex,
+                    rewardMetal = dd.rewardMetal, rewardEnergy = dd.rewardEnergy, rewardResearch = dd.rewardResearch,
+                    studied = dd.studied
+                });
 
         ResearchManager.Import(game.research?.discovered, game.research?.researched,
                                game.research != null ? game.research.points : 0);

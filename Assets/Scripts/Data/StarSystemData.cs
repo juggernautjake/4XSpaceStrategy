@@ -38,6 +38,10 @@ public class Galaxy
     public StarData center;                 // central supermassive object (visual)
     public Vector3 centerPosition = Vector3.zero;
 
+    // Ancient derelict stations hidden about the galaxy at odd orbits (see Derelict / DerelictGen). Some
+    // hold a Vael fragment; others hold salvageable materials or lost technology.
+    public List<Derelict> derelicts = new List<Derelict>();
+
     public StarSystemData Home =>
         (homeIndex >= 0 && homeIndex < systems.Count) ? systems[homeIndex] : (systems.Count > 0 ? systems[0] : null);
 }

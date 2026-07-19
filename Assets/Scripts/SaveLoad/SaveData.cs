@@ -31,6 +31,7 @@ public class SaveGame
     public List<TerraformJobDTO> terraformJobs = new List<TerraformJobDTO>();
     public List<ControlGroupDTO> controlGroups = new List<ControlGroupDTO>();
     public List<FactionAIDTO> factionAI = new List<FactionAIDTO>();   // each rival civilisation's race + personality
+    public List<DerelictDTO> derelicts = new List<DerelictDTO>();     // ancient derelict stations and their contents
 
     // Space background settings (kept constant per map).
     public int bgSeed = 12345;
@@ -92,6 +93,19 @@ public class SystemDTO
     public int ownerId = -1;                 // -1 == unclaimed
     public bool isHome;
     public List<BodyDTO> bodies = new List<BodyDTO>();
+}
+
+[System.Serializable]
+public class DerelictDTO
+{
+    public int id;
+    public int systemIndex;
+    public int orbit;
+    public float dsX, dsY, dsZ;
+    public float orbitRadius, orbitPhase, orbitSpeed;
+    public int clueIndex;
+    public int rewardMetal, rewardEnergy, rewardResearch;
+    public bool studied;
 }
 
 [System.Serializable]

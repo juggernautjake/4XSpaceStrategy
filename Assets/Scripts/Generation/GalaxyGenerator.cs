@@ -54,7 +54,9 @@ public static class GalaxyGenerator
             foreach (var b in sys.AllBodies())
                 b.naturalOrbitRadius = b.orbitRadius;
 
-        // Scatter the ten Vael fragments across the galaxy — always exactly ten clue-bearing worlds to find.
+        // Hide ancient derelict stations at odd orbits, THEN scatter the ten Vael fragments across worlds
+        // AND those derelicts (so some fragments drift out at a black hole or in dead space, not just on a moon).
+        DerelictGen.Populate(galaxy);
         AncientClues.SeedGalaxy(galaxy);
 
         return galaxy;

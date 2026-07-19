@@ -22,6 +22,8 @@ public static class GameBootstrap
         TerraformManager.Create();          // planetary-engineering projects that raise world ceilings
         CityGrowth.Create();                // colonies grow their own settlements (GameConfig toggle)
         FactionAI.Create();                 // rival civilisations: race + personality, slow natural growth & expansion
+        DerelictRenderer.Create();          // ancient derelict stations at odd orbits (some hold Vael fragments)
+        CometManager.Create();              // comets that sweep through systems; study/catch them for salvage or lore
         EarthquakeManager.Create();         // fault-line quakes damage infrastructure on tectonic worlds
         ControlGroupInput.Create();         // Ctrl+1..9 to bind fleets, 1..9 to recall them
         FleetMovementController.Create();
@@ -77,6 +79,7 @@ public static class GameBootstrap
         SettingsWindow.Create(canvas.transform);
         TileCatalogWindow.Create(canvas.transform);   // reference viewer for every terrain tile type
         AncientClueWindow.Create(canvas.transform);   // the Vael Codex — ancient-civilisation message fragments
+        AnomalyWindow.Create(canvas.transform);       // study window for derelict stations and comets
         GenerationMenu.Create(canvas.transform);
         EscapeMenu.Create(canvas.transform);
         StartMenu.Create(canvas.transform);
