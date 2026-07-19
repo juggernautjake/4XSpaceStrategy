@@ -112,30 +112,39 @@ public partial class InspectorWindow
         Stat(stats, "Mass", () => $"{s.mass:F2} solar masses");
         Stat(stats, "Habitable zone", () => s.hasHabitableZone ? $"{s.hzInner:F1} – {s.hzOuter:F1}" : "<color=#FF7A6E>none</color>");
 
-        // For a bound cluster, break the combined star back into its individual suns — each one's name,
-        // spectral class, mass and a colour swatch — with the system's combined mass. This is the "naming
-        // and classifications" the single combined readout above otherwise hides.
+        // For a bound cluster, break the combined star back into its individual suns and list EACH one's
+        // full info in its own card — the map labels only carry the names, so this panel is where the
+        // per-sun spectral class, temperature, luminosity and mass live. Ordered most-massive-first to
+        // match the A/B/C naming (Star A is the heaviest).
         var suns = target.system != null ? target.system.stars : null;
         if (suns != null && suns.Count > 1)
         {
             Header(p, "SUNS OF THIS SYSTEM");
-            var sunCard = Card(p);
-            Note(sunCard, $"A {StarDatabase.SystemClass(s).ToLower()} — {suns.Count} suns bound together; their worlds feel the combined light.");
+            Note(p, $"A {StarDatabase.SystemClass(s).ToLower()} — {suns.Count} suns bound together; their worlds feel the " +
+                    "combined light. Lettered A–C from most to least massive.");
+
+            var ordered = new List<StarData>(suns);
+            ordered.Sort((a, b) => (b != null ? b.mass : 0f).CompareTo(a != null ? a.mass : 0f));
+
             float total = 0f;
-            for (int i = 0; i < suns.Count; i++)
+            foreach (var sun in ordered)
             {
-                var sun = suns[i];
                 if (sun == null) continue;
                 total += sun.mass;
-                string tag = i < 3 ? ((char)('A' + i)).ToString() : (i + 1).ToString();
+                var cap = sun;
                 string hex = ColorUtility.ToHtmlStringRGB(sun.color);
-                string nm = string.IsNullOrEmpty(sun.name) ? $"Star {tag}" : sun.name;
-                UIFactory.WrapText(sunCard,
-                    $"<color=#{hex}>•</color> <b>{nm}</b> <size=10><color=#9FB4C8>· {sun.type}-type · {sun.mass:F2} solar masses</color></size>",
-                    UITheme.SmallSize, UITheme.Text);
+                string nm = string.IsNullOrEmpty(sun.name) ? "Star" : sun.name;
+                var sunCard = Card(p);
+                UIFactory.WrapText(sunCard, $"<color=#{hex}>•</color> <b>{nm}</b>", UITheme.SmallSize, UITheme.Text);
+                Stat(sunCard, "Class", () => $"{cap.type}-type");
+                Stat(sunCard, "Surface temperature", () => $"{cap.temperatureK:F0} K");
+                Stat(sunCard, "Luminosity", () => $"{cap.luminosity:F2}× our sun");
+                Stat(sunCard, "Mass", () => $"{cap.mass:F2} solar masses");
             }
-            UIFactory.WrapText(sunCard, $"<color=#9FB4C8>Combined mass:</color> <b>{total:F2}</b> solar masses",
-                UITheme.SmallSize, UITheme.Text);
+
+            float totCap = total;
+            var combinedCard = Card(p);
+            Stat(combinedCard, "Combined mass", () => $"{totCap:F2} solar masses");
         }
 
         if (target.system != null)

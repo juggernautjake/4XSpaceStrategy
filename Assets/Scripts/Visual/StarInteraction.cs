@@ -74,21 +74,23 @@ public class StarInteraction : MonoBehaviour
         ObjectLabelManager.Instance?.ShowForStar(transform, transform.lossyScale.x * 0.5f, Name(), Category());
     }
 
+    // The map label shows this sun's NAME (its own, with the A/B/C suffix in a cluster) — never its
+    // spectral type, which belongs in the star info panel.
     string Name()
     {
-        if (star == null) return "Star";
-        if (star.isBlackHole) return "Black Hole";
-        return $"{star.type}-type Star";
+        if (member != null && !string.IsNullOrEmpty(member.name)) return member.name;
+        if (star != null && star.isBlackHole) return "Black Hole";
+        return system != null && !string.IsNullOrEmpty(system.name) ? system.name : "Star";
     }
 
+    // Classification + owner only — deliberately no spectral type here (it's in the panel).
     string Category()
     {
-        string sys = system != null ? $"{system.name} · {FactionManager.OwnerLabel(system.owner)}" : "";
-        string kind = star == null ? "Star"
-            : star.isBlackHole ? "Black Hole"
-            : star.starCount >= 3 ? "Ternary system"
-            : star.starCount == 2 ? "Binary system"
-            : $"{star.type}-type star";
-        return string.IsNullOrEmpty(sys) ? kind : $"{kind}  ({sys})";
+        if (star != null && star.isBlackHole) return "Black hole";
+        string cls = star != null && star.starCount >= 3 ? "Ternary system"
+                   : star != null && star.starCount == 2 ? "Binary system"
+                   : "Star system";
+        string owner = system != null ? FactionManager.OwnerLabel(system.owner) : "";
+        return string.IsNullOrEmpty(owner) ? cls : $"{cls} · {owner}";
     }
 }

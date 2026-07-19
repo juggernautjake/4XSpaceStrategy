@@ -503,11 +503,23 @@ public class SolarSystemGenerator : MonoBehaviour
         currentStarType = currentStar.type;
     }
 
-    // Give every sun in the cluster (and the combined star) a unique name derived from the system.
+    // Give every sun in the cluster (and the combined star) a unique name derived from the system. In a
+    // multi-star system the suffix goes by MASS — the most massive sun is "<System> A", then B, then C —
+    // independent of generation order. The `stars` list order itself is left alone (the renderer keys the
+    // inner pair off stars[0]/[1]); only the NAMES are ranked.
     void NameStars(string systemName)
     {
-        for (int i = 0; i < stars.Count; i++)
-            stars[i].name = NameGenerator.StarName(systemName, i, stars.Count);
+        if (stars.Count == 1)
+        {
+            stars[0].name = systemName;
+        }
+        else if (stars.Count > 1)
+        {
+            var byMass = new List<StarData>(stars);
+            byMass.Sort((a, b) => b.mass.CompareTo(a.mass));   // most massive first
+            for (int rank = 0; rank < byMass.Count; rank++)
+                byMass[rank].name = $"{systemName} {(char)('A' + rank)}";
+        }
         if (currentStar != null) currentStar.name = systemName;
     }
 

@@ -22,6 +22,9 @@ public static class UnitModelLibrary
         public float size;         // largest dimension, in world units, after normalisation
         public Motion motion;
         public float spin;         // degrees/sec of idle axial rotation
+        // A fixed orientation correction applied AFTER the ship is pointed along its course, in the model's
+        // own local frame — so an imported hull that faces the wrong way sits right relative to travel.
+        public Quaternion modelRotation = Quaternion.identity;
     }
 
     // Sizes are measured against the worlds these things sit next to. SystemVisualizer scales a planet
@@ -56,19 +59,23 @@ public static class UnitModelLibrary
             path = "SpaceAssets/Ships/LP Colony Ship",
             size = 0.34f,
             motion = Motion.Freeflying,
-            spin = 0f       // it points where it's going; a spinning colony ship would look broken
+            spin = 0f,      // it points where it's going; a spinning colony ship would look broken
+            // Pitch the hull up 90° about its lateral axis so it sits the right way up.
+            modelRotation = Quaternion.Euler(-90f, 0f, 0f)
         };
 
         // The whole research line shares the science hull. They're the same silhouette conceptually —
         // a mobile laboratory — and each tier is visibly bigger than the last, which is the cheapest
         // honest way to show that a Mk III is a more serious ship than a Mk I.
         const string sciencePath = "SpaceAssets/Ships/LP Science Ship";
-        map[UnitType.ResearchShip] = new Entry { path = sciencePath, size = 0.22f, motion = Motion.Freeflying };
-        map[UnitType.ResearchShipII] = new Entry { path = sciencePath, size = 0.26f, motion = Motion.Freeflying };
-        map[UnitType.ResearchShipIII] = new Entry { path = sciencePath, size = 0.30f, motion = Motion.Freeflying };
+        // Yaw the science hull 90° about its up axis so it faces the right way.
+        var sciRot = Quaternion.Euler(0f, 90f, 0f);
+        map[UnitType.ResearchShip] = new Entry { path = sciencePath, size = 0.22f, motion = Motion.Freeflying, modelRotation = sciRot };
+        map[UnitType.ResearchShipII] = new Entry { path = sciencePath, size = 0.26f, motion = Motion.Freeflying, modelRotation = sciRot };
+        map[UnitType.ResearchShipIII] = new Entry { path = sciencePath, size = 0.30f, motion = Motion.Freeflying, modelRotation = sciRot };
         // The Science Vessel is the top of that line — a dedicated deep-survey laboratory, and the
         // largest of them.
-        map[UnitType.ScienceVessel] = new Entry { path = sciencePath, size = 0.34f, motion = Motion.Freeflying };
+        map[UnitType.ScienceVessel] = new Entry { path = sciencePath, size = 0.34f, motion = Motion.Freeflying, modelRotation = sciRot };
     }
 
     public static Entry For(UnitType t)
@@ -278,11 +285,11 @@ public class UnitModelRenderer : MonoBehaviour
 
         if (u.status == UnitStatus.Traveling)
         {
-            // Face the way it's actually flying.
+            // Face the way it's actually flying (with the hull's own orientation correction on top).
             Vector3 dir = u.travelTo - u.travelFrom;
             if (dir.sqrMagnitude > 0.0001f)
                 m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
-                    Quaternion.LookRotation(dir.normalized, Vector3.up), 3f * dt);
+                    Quaternion.LookRotation(dir.normalized, Vector3.up) * m.entry.modelRotation, 3f * dt);
         }
         else if (u.location != null && u.location.visualObject != null)
         {
@@ -294,7 +301,7 @@ public class UnitModelRenderer : MonoBehaviour
             float ang = idx * Mathf.PI * 2f / count;
             pos = host.position + new Vector3(Mathf.Cos(ang) * standoff, 0.35f, Mathf.Sin(ang) * standoff);
             m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
-                Quaternion.LookRotation((host.position - pos).normalized, Vector3.up), 2f * dt);
+                Quaternion.LookRotation((host.position - pos).normalized, Vector3.up) * m.entry.modelRotation, 2f * dt);
         }
 
         if (!m.animated)
