@@ -1137,6 +1137,22 @@ public class PlanetViewWindow : MonoBehaviour
                                           "<color=#FFBF4D>No deep survey yet</color> — send a research ship to study this world and unlock the Heat, Fertile and Weather indexes.";
             return "<color=#4DFF6E>Fully surveyed.</color> Every index overlay is available.";
         });
+
+        // Restore the world's ORIGINAL look — the terrain seed and natural climate it generated with —
+        // undoing however terraforming (or the Dev terrain sandbox) has remodelled its surface. The world's
+        // structures, ownership, population and terraform PROJECT list are untouched; only the terrain
+        // appearance snaps back to the planet you first found.
+        Header("APPEARANCE");
+        var ap = Card();
+        Note(ap, "Make this world look the way it did when it was first generated. Its colony and terraforming " +
+                 "progress stay; only the surface's appearance resets.");
+        UIFactory.Button(ap, "Reset appearance to original", () =>
+        {
+            body.terrainSeed = body.naturalSeed;
+            body.terrainParams = body.naturalParams;
+            RegenerateTerrain();
+            lastSig = null;   // rebuild so any dependent readouts refresh
+        }, 26);
     }
 
     // The two-stage road to owning a world — CLAIM it, then SETTLE it once it's liveable — plus the
@@ -1288,6 +1304,21 @@ public class PlanetViewWindow : MonoBehaviour
     {
         var mgr = ColonyManager.Instance;
 
+        // Per-world orbit-ring visibility (the request's "click a planet, turn its orbit and its moons'
+        // orbits off"). For a planet the toggle also hides every one of its moons' rings; for a moon it's
+        // just that moon's own ring.
+        Header("ORBIT DISPLAY");
+        {
+            bool isMoon = body.parentBody != null;
+            var card = Card();
+            UIFactory.Toggle(card,
+                isMoon ? "Show this moon's orbit ring" : "Show this world's + its moons' orbit rings",
+                body.showRing, on => SetPlanetOrbitRings(body, on));
+            Note(card, isMoon
+                ? "Hide the blue ring this moon traces around its planet."
+                : "Hide the blue orbit ring for this world and all of its moons at once.");
+        }
+
         Header("SHIPYARD");
         if (body.shipyardLevel < 1)
         {
@@ -1369,6 +1400,27 @@ public class PlanetViewWindow : MonoBehaviour
                 live.Text(t, () => $"<b>{cap.name}</b> — arriving in {Mathf.Max(0f, cap.travelDuration - cap.travelElapsed):F0}s");
                 UIFactory.Button(card, "Select »", () => UnitSelection.SelectOnly(cap), 22);
             }
+        }
+    }
+
+    // Turn a world's orbit ring on/off, and — for a planet — all of its moons' rings with it. Writes the
+    // body data (so it saves and survives re-visualization) and drives the live OrbitController.
+    void SetPlanetOrbitRings(CelestialBody b, bool show)
+    {
+        if (b == null) return;
+        ApplyOrbitRing(b, show);
+        if (b.parentBody == null && b.moons != null)
+            foreach (var m in b.moons) ApplyOrbitRing(m, show);
+    }
+
+    static void ApplyOrbitRing(CelestialBody b, bool show)
+    {
+        if (b == null) return;
+        b.showRing = show;
+        if (b.visualObject != null)
+        {
+            var oc = b.visualObject.GetComponent<OrbitController>();
+            if (oc != null) oc.SetRingVisible(show);
         }
     }
 

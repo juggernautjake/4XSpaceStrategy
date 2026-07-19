@@ -29,7 +29,14 @@ public class SolarSystemGenerator : MonoBehaviour
         currentSystemName = systemName;
         NameStars(systemName);
 
-        float currentRadius = Random.Range(9f, 12f);   // clear the star + inner-moon reach
+        // Start the innermost planet just past the star's SURFACE plus the standard clearance, derived from
+        // the star's actual render size — not a fixed 9–12 that predated the 2x-larger stars and would let a
+        // big sun sit almost touching (or swallowing) its first planet. A dim red dwarf keeps its planets
+        // tucked in close; a large bright star holds them further out, both by construction here and as the
+        // EnforceSystem pass (below) guarantees. The small random spread keeps systems from all starting at
+        // the identical radius.
+        float starRadius = currentStar != null ? currentStar.visualScale * 0.5f : 1f;
+        float currentRadius = starRadius + OrbitSafety.StarClearance + Random.Range(1f, 4f);
         float prevOuterReach = 0f;                     // outermost point the previous planet's system reaches
 
         for (int i = 0; i < bodyCount; i++)

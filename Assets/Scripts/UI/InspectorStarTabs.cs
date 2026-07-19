@@ -15,6 +15,12 @@ public partial class InspectorWindow
     // tab switch would leak a handful of little textures.
     readonly List<Texture2D> starThumbs = new List<Texture2D>();
 
+    // Dev star-editor sliders. Size/mass/density are interconnected (density = mass / (size/RefScale)^3),
+    // so moving one programmatically moves the dependent one — starSuppress stops that write from
+    // recursing back into its own callback.
+    Slider starSizeS, starMassS, starDensityS, starIntS, starRS, starGS, starBS;
+    bool starSuppress;
+
     void CollectStarTabs()
     {
         tabs.Add(new InspectorTab("Overview", BuildStarOverview));
@@ -130,11 +136,167 @@ public partial class InspectorWindow
 
         UIFactory.Button(p, "Toggle Habitable Zone Rings", () => SystemContext.Zone?.Toggle(), 26);
 
+        // Hide/show every orbit line in this system at once — the request's "select a system's star and
+        // turn all its orbits off". Not Dev-gated: it's a view preference, like the habitable-zone rings.
+        var orbitBtn = UIFactory.Button(p, "Toggle all orbit rings", ToggleSystemOrbits, 26);
+        live.Button(orbitBtn, () => (true, AnySystemRingOn() ? "Hide all orbit rings" : "Show all orbit rings"));
+
         // Dev-Mode only: put every planet and moon in this system back on the orbit it generated with,
         // undoing whatever the orbit editor moved. Matches "Dev mode bypasses the parameters, dev-off does not".
         if (GameMode.DevMode && target.system != null)
             UIFactory.Button(p, "Reset system orbits (Dev)",
                 () => DevReset.ResetSystem(target.system.bodies, target.star), 26);
+
+        // Dev-Mode star editor: size / mass / density (interconnected) and the star's light.
+        if (GameMode.DevMode && s != null && !s.isBlackHole)
+            BuildStarEditor(p, s);
+    }
+
+    // ===== System-wide orbit ring visibility =====
+
+    bool AnySystemRingOn()
+    {
+        foreach (var b in SystemBodies())
+            if (b != null && b.parentBody == null && b.showRing) return true;
+        return false;
+    }
+
+    void ToggleSystemOrbits()
+    {
+        bool show = !AnySystemRingOn();
+        foreach (var b in SystemBodies())
+        {
+            if (b == null) continue;
+            SetBodyRing(b, show);
+            if (b.moons != null) foreach (var m in b.moons) SetBodyRing(m, show);
+        }
+    }
+
+    static void SetBodyRing(CelestialBody b, bool show)
+    {
+        if (b == null) return;
+        b.showRing = show;
+        if (b.visualObject != null)
+        {
+            var oc = b.visualObject.GetComponent<OrbitController>();
+            if (oc != null) oc.SetRingVisible(show);
+        }
+    }
+
+    // ===== Dev star editor =====
+
+    void BuildStarEditor(Transform p, StarData s)
+    {
+        Header(p, "STAR EDITOR (Dev)");
+        Note(p, "Size, mass and density are linked: move size or mass and density follows; move density and " +
+                "mass follows. Changing mass re-times this system's planets.");
+        var card = Card(p);
+        starSizeS    = UIFactory.LabeledSlider(card, "Size (render scale)", 1f, 20f, Mathf.Clamp(s.visualScale, 1f, 20f), ApplyStarSize, "F1");
+        starMassS    = UIFactory.LabeledSlider(card, "Mass (solar)", 0.1f, 20f, Mathf.Clamp(s.mass, 0.1f, 20f), ApplyStarMass, "F2");
+        starDensityS = UIFactory.LabeledSlider(card, "Density", 0.1f, 6f, Mathf.Clamp(s.density, 0.1f, 6f), ApplyStarDensity, "F2");
+
+        Header(p, "STAR LIGHT (Dev)");
+        var lcard = Card(p);
+        starIntS = UIFactory.LabeledSlider(lcard, "Light intensity", 0f, 4f, Mathf.Clamp(s.lightIntensity, 0f, 4f), ApplyStarIntensity, "F2");
+        starRS   = UIFactory.LabeledSlider(lcard, "Light Red",   0f, 1f, Mathf.Clamp01(s.color.r), _ => ApplyStarColor(), "F2");
+        starGS   = UIFactory.LabeledSlider(lcard, "Light Green", 0f, 1f, Mathf.Clamp01(s.color.g), _ => ApplyStarColor(), "F2");
+        starBS   = UIFactory.LabeledSlider(lcard, "Light Blue",  0f, 1f, Mathf.Clamp01(s.color.b), _ => ApplyStarColor(), "F2");
+    }
+
+    void ApplyStarSize(float v)
+    {
+        if (starSuppress) return;
+        var s = target.star; if (s == null) return;
+        s.visualScale = v;
+        s.density = StarDatabase.DensityOf(s.mass, v);
+        foreach (var t in StarInteraction.AllOf(s)) if (t != null) t.localScale = Vector3.one * v;
+        SetSliderQuiet(starDensityS, s.density);
+    }
+
+    void ApplyStarMass(float v)
+    {
+        if (starSuppress) return;
+        var s = target.star; if (s == null) return;
+        s.mass = v;
+        s.density = StarDatabase.DensityOf(v, s.visualScale);
+        SetSliderQuiet(starDensityS, s.density);
+        RecomputePlanetSpeeds();
+    }
+
+    void ApplyStarDensity(float v)
+    {
+        if (starSuppress) return;
+        var s = target.star; if (s == null) return;
+        s.density = v;
+        s.mass = StarDatabase.MassFrom(v, s.visualScale);
+        SetSliderQuiet(starMassS, s.mass);
+        RecomputePlanetSpeeds();
+    }
+
+    void ApplyStarIntensity(float v)
+    {
+        if (starSuppress) return;
+        var s = target.star; if (s == null) return;
+        s.lightIntensity = v;
+        ApplyStarLight(s);
+    }
+
+    void ApplyStarColor()
+    {
+        if (starSuppress) return;
+        var s = target.star; if (s == null) return;
+        if (starRS == null || starGS == null || starBS == null) return;
+        s.color = new Color(starRS.value, starGS.value, starBS.value);
+        ApplyStarLight(s);
+    }
+
+    // Push the star's colour and intensity onto every sun's material (glow) and point light. Mirrors
+    // SystemVisualizer.CreateStarVisual so an edited star looks the same as a freshly generated one.
+    static void ApplyStarLight(StarData s)
+    {
+        float emK = Mathf.Clamp(1f + Mathf.Sqrt(Mathf.Max(0f, s.luminosity)) * 0.15f, 1f, 3.2f);
+        foreach (var t in StarInteraction.AllOf(s))
+        {
+            if (t == null) continue;
+            var rend = t.GetComponent<Renderer>();
+            if (rend != null)
+            {
+                rend.material.color = s.color;
+                rend.material.EnableKeyword("_EMISSION");
+                rend.material.SetColor("_EmissionColor", s.color * emK);
+            }
+            var light = t.GetComponentInChildren<Light>();
+            if (light != null) { light.color = s.color; light.intensity = s.lightIntensity / Mathf.Max(1, s.starCount); }
+        }
+    }
+
+    // Re-time every planet after the star's mass changed — orbital speed follows sqrt(mass)/radius.
+    // Moons orbit their planet's mass, not the star's, so they're left alone.
+    void RecomputePlanetSpeeds()
+    {
+        var s = target.star;
+        if (s == null || target.system == null || target.system.bodies == null) return;
+        foreach (var b in target.system.bodies)
+        {
+            if (b == null || b.parentBody != null) continue;
+            float sp = OrbitalMechanics.PlanetAngularSpeed(s, b.orbitRadius);
+            b.orbitSpeed = sp;
+            if (b.visualObject != null)
+            {
+                var oc = b.visualObject.GetComponent<OrbitController>();
+                if (oc != null) oc.SetSpeed(sp);
+            }
+        }
+    }
+
+    // Move a linked slider to `value` without letting its onChanged callback fire back into another
+    // Apply — the value is already derived, so re-deriving from it would be circular.
+    void SetSliderQuiet(Slider s, float value)
+    {
+        if (s == null) return;
+        starSuppress = true;
+        s.value = Mathf.Clamp(value, s.minValue, s.maxValue);
+        starSuppress = false;
     }
 
     // Why this star matters, in plain language rather than a table.

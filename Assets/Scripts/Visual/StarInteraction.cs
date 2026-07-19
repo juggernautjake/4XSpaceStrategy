@@ -25,6 +25,18 @@ public class StarInteraction : MonoBehaviour
         return null;
     }
 
+    /// EVERY rendered transform mapped to this StarData — one for a single star, several for a
+    /// binary/ternary cluster (each sun carries the same combined `star`). Used by the Dev star editor
+    /// to rescale and re-light all of a system's suns at once.
+    public static System.Collections.Generic.List<Transform> AllOf(StarData s)
+    {
+        var list = new System.Collections.Generic.List<Transform>();
+        if (s == null) return list;
+        foreach (var si in FindObjectsByType<StarInteraction>(FindObjectsSortMode.None))
+            if (si.star == s) list.Add(si.transform);
+        return list;
+    }
+
     void OnMouseDown()
     {
         if (UnityEngine.EventSystems.EventSystem.current != null &&
