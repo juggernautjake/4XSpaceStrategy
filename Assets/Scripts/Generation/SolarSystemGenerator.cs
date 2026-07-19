@@ -482,7 +482,22 @@ public class SolarSystemGenerator : MonoBehaviour
         isBlackHole = false;
         float c = Random.value;
         int count = c < 0.05f ? 3 : (c < 0.20f ? 2 : 1);   // ~5% ternary, ~15% binary, ~80% single (common enough to meet)
-        for (int i = 0; i < count; i++) stars.Add(StarDatabase.Get(RollStarType()));
+
+        // A single star rolls the realistic (red-dwarf-heavy) distribution. A CLUSTER instead rolls a
+        // flatter spread AND keeps its suns to DISTINCT spectral classes — so a binary/ternary reads as
+        // genuinely different, differently-coloured suns (a red dwarf beside a white F, say) rather than
+        // two near-identical red dwarfs. With seven classes and at most three suns, distinctness is always
+        // reachable; the guard just stops an unlucky run of repeats.
+        var usedTypes = new HashSet<StarType>();
+        for (int i = 0; i < count; i++)
+        {
+            StarType t;
+            int guard = 0;
+            do { t = count > 1 ? RollClusterStarType() : RollStarType(); }
+            while (count > 1 && usedTypes.Contains(t) && guard++ < 16);
+            usedTypes.Add(t);
+            stars.Add(StarDatabase.Get(t));
+        }
 
         currentStar = StarDatabase.Combine(stars);
         currentStarType = currentStar.type;
@@ -505,6 +520,21 @@ public class SolarSystemGenerator : MonoBehaviour
         if (roll < 0.90f) return StarType.F;
         if (roll < 0.96f) return StarType.A;
         if (roll < 0.99f) return StarType.B;
+        return StarType.O;
+    }
+
+    // A flatter spread across the spectral classes for the suns of a bound cluster, so their colours span a
+    // visibly wider range than the red-dwarf-heavy single-star odds would give. Paired with the distinct-
+    // type guarantee in RollStarSystem, a binary/ternary shows off genuinely different suns.
+    StarType RollClusterStarType()
+    {
+        float roll = Random.value;
+        if (roll < 0.22f) return StarType.M;
+        if (roll < 0.42f) return StarType.K;
+        if (roll < 0.60f) return StarType.G;
+        if (roll < 0.76f) return StarType.F;
+        if (roll < 0.88f) return StarType.A;
+        if (roll < 0.96f) return StarType.B;
         return StarType.O;
     }
 
