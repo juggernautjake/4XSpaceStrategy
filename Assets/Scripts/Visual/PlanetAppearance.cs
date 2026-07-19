@@ -13,7 +13,12 @@ public static class PlanetAppearance
         if (go == null) return;
         var rend = go.GetComponent<Renderer>();
         if (rend == null) return;
-        Texture2D tex = SurfaceTextureRenderer.Build(body);
+        // Read the GRID tiles (BuildGrid) rather than re-sampling the noise (Build): the grid carries the
+        // neighbour-aware clean-up — connected oceans, inland lakes, coastal beaches — that per-pixel
+        // sampling can't reproduce, so the 3D globe now shows exactly the map the Planet View does. Falls
+        // back to the noise render only if the surface grid somehow isn't built yet.
+        Texture2D tex = SurfaceTextureRenderer.BuildGrid(body) ?? SurfaceTextureRenderer.Build(body);
+        if (tex == null) return;
         tex.wrapMode = TextureWrapMode.Repeat;
         var m = rend.material;
         // Build() allocates a fresh Texture2D every call, and terraforming refreshes the globe ~once a
@@ -31,7 +36,10 @@ public static class PlanetAppearance
         var rend = go.GetComponent<Renderer>();
         if (rend != null)
         {
-            Texture2D tex = SurfaceTextureRenderer.Build(body);
+            // Grid-based (BuildGrid) so the globe matches the Planet View map exactly — same connected
+            // oceans, lakes and beaches — instead of a noise render that skips the grid clean-up.
+            Texture2D tex = SurfaceTextureRenderer.BuildGrid(body) ?? SurfaceTextureRenderer.Build(body);
+            if (tex == null) return;
             tex.wrapMode = TextureWrapMode.Repeat; // wraps cleanly around longitude
             var m = rend.material;
             m.mainTexture = tex;
