@@ -31,17 +31,18 @@ public static class MassRules
         }
     }
 
-    // A moon's mass from its HOST planet's mass: at most half the host, weighted so reaching that half is
-    // rare (most moons are small). Quantized to the request's scheme — whole numbers at 1+, first-decimal
-    // below 1. E.g. a size-11 gas giant caps its moons at floor(11/2)=5; a mass-1 planet caps its moons at
-    // 0.5.
+    // A moon's mass from its HOST planet's mass: at most 40% of the host, weighted so reaching that cap is
+    // rare (most moons are small). The cap was 50%, which left a gas giant's big moons reading almost as
+    // large as the planet on the map; 40% pulls moons ~20% smaller on average so a moon clearly reads as a
+    // satellite of its world, not a twin. Quantized to the request's scheme — whole numbers at 1+, first-
+    // decimal below 1. E.g. a size-11 gas giant caps its moons at floor(11*0.4)=4; a mass-1 planet at 0.4.
     public static float ForMoon(float hostMass)
     {
-        float maxRaw = hostMass * 0.5f;
+        float maxRaw = hostMass * 0.4f;
         float max = maxRaw >= 1f ? Mathf.Floor(maxRaw) : Mathf.Round(maxRaw * 10f) / 10f;
         if (max < 0.1f) max = 0.1f;                       // even a tiny host gets a 0.1 moon
 
-        float r = Random.value; r *= r;                   // bias toward the small end; half-the-host is rare
+        float r = Random.value; r *= r;                   // bias toward the small end; the cap is rare
         float raw = Mathf.Lerp(0.1f, max, r);
         float m = raw >= 1f ? Mathf.Floor(raw) : Mathf.Round(raw * 10f) / 10f;
         return Mathf.Clamp(m, 0.1f, max);
