@@ -410,6 +410,12 @@ public class PlanetViewWindow : MonoBehaviour
         var rrt = root.GetComponent<RectTransform>();
         rrt.sizeDelta = WindowSize(root.transform);
         rrt.anchoredPosition = Vector2.zero;
+        // Guarantee it actually fits the canvas. WindowSize can fall back to the 1920x1080 reference before
+        // the canvas rect is measurable (or exceed a smaller canvas), and WindowFit only re-clamps on a
+        // canvas SIZE CHANGE — which setting sizeDelta here isn't — so it would otherwise leave the window
+        // hanging off the edge (the UISanity "off-canvas" warning). Fit() shrinks it to the canvas and
+        // nudges it fully on-screen right now.
+        root.GetComponent<WindowFit>()?.Fit();
         rrt.SetAsLastSibling();
         RefreshMapTexture();
 
@@ -2263,6 +2269,13 @@ public class PlanetViewWindow : MonoBehaviour
         Header("UNDER THE CURSOR");
         var card = Card();
         var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
+        // Reserve enough height for the FULLY-populated readout (tile position/type, ore, and one line per
+        // index) up front, so this section always occupies its space in the scroll list. Otherwise it's an
+        // empty one-liner until you hover a tile, at which point it suddenly grows and pushes the real
+        // content down BELOW the visible area — where you can't tell there's anything to scroll to. Reserving
+        // it makes the scroll range include it at all times, so it's reachable the moment it fills in.
+        int reservedLines = System.Enum.GetValues(typeof(SurfaceIndexKind)).Length + 2;  // indexes + pos/type + ore
+        t.gameObject.AddComponent<LayoutElement>().minHeight = reservedLines * 16f;
         live.Text(t, () =>
         {
             if (hoverCell.x < 0 || body.surface == null) return "<color=#9FB4C8>Hover the map.</color>";
