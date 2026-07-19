@@ -20,6 +20,7 @@ public static class PlanetAppearance
         Texture2D tex = SurfaceTextureRenderer.BuildGrid(body) ?? SurfaceTextureRenderer.Build(body);
         if (tex == null) return;
         tex.wrapMode = TextureWrapMode.Repeat;
+        tex.filterMode = FilterMode.Bilinear;   // smooth the globe so it isn't blocky up close (the flat map keeps its own crisp texture)
         var m = rend.material;
         // Build() allocates a fresh Texture2D every call, and terraforming refreshes the globe ~once a
         // second for minutes — so the previous surface texture has to be released or it leaks steadily
@@ -41,6 +42,7 @@ public static class PlanetAppearance
             Texture2D tex = SurfaceTextureRenderer.BuildGrid(body) ?? SurfaceTextureRenderer.Build(body);
             if (tex == null) return;
             tex.wrapMode = TextureWrapMode.Repeat; // wraps cleanly around longitude
+            tex.filterMode = FilterMode.Bilinear;  // smooth on the sphere (the 2D map keeps its own crisp point-filtered texture)
             var m = rend.material;
             m.mainTexture = tex;
             if (m.HasProperty("_BaseMap")) m.SetTexture("_BaseMap", tex);
@@ -62,6 +64,89 @@ public static class PlanetAppearance
         }
 
         AddAtmosphere(body, go);
+        AddClouds(body, go);
+    }
+
+    // A slowly-drifting cloud shell for worlds with real air, sat just above the surface and below the
+    // atmosphere haze. Deterministic (seeded from the world's terrain seed) so it's stable across
+    // re-renders and reloads, and it rotates a touch faster than the planet so the weather visibly moves.
+    static void AddClouds(CelestialBody body, GameObject go)
+    {
+        var existing = go.transform.Find("Clouds");
+        if (existing != null)
+        {
+            // Free the cloud texture + material too (destroying the GameObject alone would orphan them).
+            var oldMr = existing.GetComponent<MeshRenderer>();
+            if (oldMr != null && oldMr.sharedMaterial != null)
+            {
+                if (oldMr.sharedMaterial.mainTexture != null) Object.Destroy(oldMr.sharedMaterial.mainTexture);
+                Object.Destroy(oldMr.sharedMaterial);
+            }
+            Object.Destroy(existing.gameObject);
+        }
+
+        // Airless bodies get none; a gas giant's whole surface is already cloud; a world with almost no air
+        // stays clear.
+        if (body.type == CelestialBodyType.GasGiant) return;
+        if (body.atmosphereThickness < 0.14f) return;
+
+        var shell = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        shell.name = "Clouds";
+        var col = shell.GetComponent<Collider>();
+        if (col != null) Object.Destroy(col);
+        shell.transform.SetParent(go.transform, false);
+        shell.transform.localScale = Vector3.one * 1.03f;   // hugs the surface, under the atmosphere shell
+
+        var mr = shell.GetComponent<MeshRenderer>();
+        var mat = new Material(Shader.Find("Sprites/Default"));   // reliable unlit transparent
+        // Volcanic worlds get a dirty ash-grey haze; everything else, white water cloud.
+        mat.color = body.type == CelestialBodyType.VolcanicPlanet
+            ? new Color(0.55f, 0.5f, 0.48f, 1f)
+            : Color.white;
+        mat.mainTexture = CloudTexture(body);
+        mr.material = mat;
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        mr.receiveShadows = false;
+
+        shell.AddComponent<SelfSpin>().speed = 3.5f;   // gentle weather drift on top of the planet's own spin
+    }
+
+    // A wrapping cloud texture: soft FBm noise as white with a varying alpha, thresholded so there are real
+    // gaps of clear sky. Thicker air -> more coverage. Sized modestly (clouds are soft, so they don't need
+    // the surface's resolution) and bilinear so they read as soft weather rather than pixels.
+    static Texture2D CloudTexture(CelestialBody body)
+    {
+        const int w = 128, h = 64;
+        var tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
+        {
+            wrapMode = TextureWrapMode.Repeat,
+            filterMode = FilterMode.Bilinear
+        };
+        float seed = body.terrainSeed * 0.137f + 13f;
+        float coverage = Mathf.Clamp01(body.atmosphereThickness) * 0.55f + 0.12f;   // 0.12..0.67
+        var px = new Color32[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                float u = (float)x / w, vv = (float)y / h;
+                // Two octaves of Perlin, stretched 2:1 like the surface so bands read east-west.
+                float n = CloudFBm(u * 5f + seed, vv * 2.5f + seed);
+                // Fade cloud out toward the poles a little so caps aren't permanently overcast.
+                float polar = 1f - Mathf.Pow(Mathf.Abs(vv - 0.5f) * 2f, 3f) * 0.35f;
+                float a = Mathf.Clamp01((n - (1f - coverage)) * 3.2f) * polar;
+                px[y * w + x] = new Color32(255, 255, 255, (byte)(a * 205f));
+            }
+        tex.SetPixels32(px);
+        tex.Apply();
+        return tex;
+    }
+
+    static float CloudFBm(float x, float y)
+    {
+        float a = Mathf.PerlinNoise(x, y);
+        float b = Mathf.PerlinNoise(x * 2.3f + 40f, y * 2.3f + 40f) * 0.5f;
+        float c = Mathf.PerlinNoise(x * 4.7f + 90f, y * 4.7f + 90f) * 0.25f;
+        return (a + b + c) / 1.75f;
     }
 
     static bool HasAtmosphere(CelestialBodyType t, out Color color, out float thickness)
