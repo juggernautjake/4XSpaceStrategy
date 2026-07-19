@@ -46,6 +46,14 @@ public static class GalaxyGenerator
         ForceHomeWorld(home, homeSpecies);
         AssignOwnership(galaxy);
         Recompute(galaxy);
+
+        // Record every body's generated orbit so Dev Mode can reset a planet (or a whole system) back to
+        // where it started after the orbit editor moves it. Done last, once every orbit is final — the home
+        // world is re-homed by ForceHomeWorld, and EnforceSystem may nudge radii before this point.
+        foreach (var sys in galaxy.systems)
+            foreach (var b in sys.AllBodies())
+                b.naturalOrbitRadius = b.orbitRadius;
+
         return galaxy;
     }
 

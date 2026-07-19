@@ -58,6 +58,7 @@ public class OrbitControlPanel : MonoBehaviour
         ringT = UIFactory.Toggle(col, "Show orbit ring", true, on => Apply(() => { oc.SetRingVisible(on); current.showRing = on; }));
 
         UIFactory.Button(col, "Realistic Speed (recompute)", RecomputeRealistic);
+        UIFactory.Button(col, "Reset orbit (to original)", ResetToNaturalOrbit);
 
         PlanetUI.OnBodySelected += ShowFor;
         PlanetUI.OnClosed += Hide;
@@ -111,6 +112,15 @@ public class OrbitControlPanel : MonoBehaviour
         }
     }
 
+    // Dev-Mode "put this planet back where it started". Restores the orbit it generated with and snaps the
+    // sliders (radius/speed) to match.
+    void ResetToNaturalOrbit()
+    {
+        if (current == null) return;
+        DevReset.ResetOrbit(current, current.hostStar);
+        ShowFor(current);
+    }
+
     void RecomputeRealistic()
     {
         if (current == null) return;
@@ -125,6 +135,10 @@ public class OrbitControlPanel : MonoBehaviour
     {
         if (!GameMode.DevMode) { Hide(); return; }   // sandbox tool: Dev Mode only
         current = body;
+        // Capture the generated orbit the first time we open on a body generation didn't record one for (an
+        // old save, or a body made outside GalaxyGenerator), so "Reset orbit" always has something to
+        // restore. Only ever set when unset, so it can't be overwritten by a dev-moved radius.
+        if (body.naturalOrbitRadius <= 0f) body.naturalOrbitRadius = body.orbitRadius;
         oc = body.visualObject != null ? body.visualObject.GetComponent<OrbitController>() : null;
         if (oc == null) { Hide(); return; }
 

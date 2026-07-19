@@ -59,6 +59,12 @@ public partial class InspectorWindow
             : (false, "Focus — this star isn't rendered"));
 
         UIFactory.Button(p, "Toggle Habitable Zone Rings", () => SystemContext.Zone?.Toggle(), 26);
+
+        // Dev-Mode only: put every planet and moon in this system back on the orbit it generated with,
+        // undoing whatever the orbit editor moved. Matches "Dev mode bypasses the parameters, dev-off does not".
+        if (GameMode.DevMode && target.system != null)
+            UIFactory.Button(p, "Reset system orbits (Dev)",
+                () => DevReset.ResetSystem(target.system.bodies, target.star), 26);
     }
 
     // Why this star matters, in plain language rather than a table.

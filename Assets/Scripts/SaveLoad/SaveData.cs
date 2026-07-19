@@ -117,6 +117,7 @@ public class BodyDTO
     public float tScale = 1f, tElev = 1f, tMoist = 1f, tHeat = 1f, tRidge = 1f; // terrain params
 
     public float orbitRadius, orbitSpeed, orbitPhase;
+    public float naturalOrbitRadius;   // the generated orbit, for Dev-Mode "Reset orbit/system"
     public int orbitDirection;
     public float inclination, eccentricity, verticalOffset, spinSpeed;
     public bool showRing;

@@ -44,6 +44,13 @@ public class CelestialBody
 
     // --- Orbit parameters (authoritative data; the OrbitController reads these) ---
     public float orbitRadius = 10f;     // for planets: distance from star; for moons: distance from planet
+
+    // The orbit radius this body GENERATED with — captured once at generation and never moved by the Dev
+    // orbit slider or by terraforming, so Dev Mode's "Reset orbit" (one planet) and "Reset system" (a star)
+    // can put it back. 0 = never captured (an old save, or an unusual generation path); reset then leaves
+    // the orbit where it is. Persisted, with a load-time backfill from the current radius (see DevReset /
+    // GameStateSerializer).
+    public float naturalOrbitRadius = 0f;
     public float orbitSpeed = 20f;
     public float orbitPhase = 0f;       // starting angle in degrees
     public int orbitDirection = 1;      // +1 counter-clockwise, -1 clockwise

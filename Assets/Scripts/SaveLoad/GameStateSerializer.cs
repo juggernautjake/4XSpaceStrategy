@@ -104,6 +104,7 @@ public static class GameStateSerializer
             nScale = b.naturalParams.scale, nElev = b.naturalParams.elevation,
             nMoist = b.naturalParams.moisture, nHeat = b.naturalParams.heat, nRidge = b.naturalParams.ridge,
             orbitRadius = b.orbitRadius, orbitSpeed = b.orbitSpeed, orbitPhase = b.orbitPhase,
+            naturalOrbitRadius = b.naturalOrbitRadius,
             orbitDirection = b.orbitDirection, inclination = b.inclination, eccentricity = b.eccentricity,
             verticalOffset = b.verticalOffset, spinSpeed = b.spinSpeed, showRing = b.showRing,
             distanceFromStar = b.distanceFromStar, habitability = b.habitability, isHabitable = b.isHabitable,
@@ -354,6 +355,9 @@ public static class GameStateSerializer
         // here; the only honest answer is the current seed — that's the world it recorded, and there's
         // no earlier one to recover.
         b.naturalSeed = dto.naturalSeed > 0f ? dto.naturalSeed : b.terrainSeed;
+        // The orbit "Reset" restores this. A save from before it existed reads 0; the only honest answer is
+        // the orbit the world is at now — there's no earlier one recorded.
+        b.naturalOrbitRadius = dto.naturalOrbitRadius > 0f ? dto.naturalOrbitRadius : b.orbitRadius;
         b.lastTerraformRenderHab = b.habitability;   // don't regenerate on the first tick after loading
 
         b.surface = PlanetTerrainGenerator.GenerateSurface(b);
