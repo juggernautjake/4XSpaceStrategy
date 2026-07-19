@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 // Categories of alert, each with its own recognizable sound.
-public enum NotifKind { Info, Research, Discovery, Danger, Victory, Defeat }
+public enum NotifKind { Info, Research, Discovery, Danger, Victory, Defeat, Ancient }
 
 // Fully procedural audio (no sound assets needed):
 //  * a constant, slightly-wavering deep space hum,
@@ -251,6 +251,7 @@ public class SimpleAudio : MonoBehaviour
             case NotifKind.Danger: return cDanger;
             case NotifKind.Victory: return cVictory;
             case NotifKind.Defeat: return cDefeat;
+            case NotifKind.Ancient: return cDiscovery;   // the Vael fragments chime like a discovery
             default: return cInfo;
         }
     }

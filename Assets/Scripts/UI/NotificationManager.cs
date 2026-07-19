@@ -22,6 +22,7 @@ public class NotificationManager : MonoBehaviour
             case NotifKind.Danger: return UITheme.Bad;
             case NotifKind.Victory: return new Color(1f, 0.85f, 0.35f);
             case NotifKind.Defeat: return new Color(1f, 0.45f, 0.45f);
+            case NotifKind.Ancient: return new Color(0.85f, 0.72f, 0.35f);   // Vael gold
             default: return UITheme.Accent;
         }
     }

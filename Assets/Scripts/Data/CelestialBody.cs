@@ -144,6 +144,10 @@ public class CelestialBody
     // where the geothermal vents are takes someone on the ground.
     public bool deepSurveyed = false;
 
+    // Which fragment of the Vael's message this world hides (0..9), or -1 for none. Exactly ten worlds carry
+    // one (AncientClues.SeedGalaxy); it's revealed when the world is surveyed AND deeply studied.
+    public int clueIndex = -1;
+
     // Seconds accumulated toward this world's next organic settlement (see CityGrowth). Per-body so a
     // paradise and a marginal world grow on their own clocks.
     public float cityGrowthTimer = 0f;

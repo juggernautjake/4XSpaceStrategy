@@ -76,6 +76,7 @@ public static class GameBootstrap
         BoxSelectController.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);
         TileCatalogWindow.Create(canvas.transform);   // reference viewer for every terrain tile type
+        AncientClueWindow.Create(canvas.transform);   // the Vael Codex — ancient-civilisation message fragments
         GenerationMenu.Create(canvas.transform);
         EscapeMenu.Create(canvas.transform);
         StartMenu.Create(canvas.transform);

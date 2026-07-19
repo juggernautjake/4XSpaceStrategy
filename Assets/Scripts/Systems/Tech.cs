@@ -681,6 +681,12 @@ public static class TechManager
             tc += t.terraCeiling; ts += t.terraSpeed; rm += t.rangeMult; oy += t.oreYield;
             sp += t.shipyardPower; rc += t.researchCap;
         }
+        // THE VAEL LEGACY — recovering all ten Vael fragments grants their whole making as a broad, permanent
+        // surge, folded straight into the same effect tables every system already reads (AncientClues).
+        if (AncientClues.AllFound)
+        {
+            rr += 0.6f; oy += 0.5f; rm += 0.6f; ts += 0.6f; tc += 15f; bc += 0.2f; bt += 0.2f;
+        }
         TechEffects.ShipyardPowerBonus = sp;
         TechEffects.ResearchCapacityBonus = rc;
         TechEffects.ResearchRateMult = 1f + rr;

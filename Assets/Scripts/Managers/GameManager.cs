@@ -51,6 +51,7 @@ public class GameManager : MonoBehaviour
         EmpireTech.Reset();
         TechManager.Reset();
         AncientLore.Reset();
+        AncientClues.Reset();   // a fresh galaxy re-scatters the ten Vael fragments (SeedGalaxy, in Generate)
         Galaxy = GalaxyGenerator.Generate(solarSystemGenerator, systemCount, avgPlanets, SpeciesManager.Current);
         FocusedSystem = Galaxy.Home;
 

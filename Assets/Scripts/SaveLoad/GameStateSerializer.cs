@@ -35,7 +35,8 @@ public static class GameStateSerializer
             points = ResearchManager.ResearchPoints,
             empireLevel = EmpireTech.Level,
             tech = TechManager.Export(),
-            schematics = AncientLore.Export()
+            schematics = AncientLore.Export(),
+            cluesFound = AncientClues.Export()
         };
 
         game.ecoMetal = PlayerEconomy.Get(ResourceType.Metal);
@@ -118,7 +119,7 @@ public static class GameStateSerializer
             hasTectonics = b.hasTectonics,
             terraformProjects = b.terraformProjects != null ? new List<int>(b.terraformProjects) : new List<int>(),
             placedBuildings = b.placedBuildings != null ? new List<PlacedBuilding>(b.placedBuildings) : new List<PlacedBuilding>(),
-            deepSurveyed = b.deepSurveyed, cityGrowthTimer = b.cityGrowthTimer,
+            deepSurveyed = b.deepSurveyed, clueIndex = b.clueIndex, cityGrowthTimer = b.cityGrowthTimer,
             birthrightClaim = b.birthrightClaim, settled = b.settled,
             visited = b.visited, explorationProgress = b.explorationProgress
         };
@@ -241,6 +242,7 @@ public static class GameStateSerializer
             PlayerEconomy.Import(game.ecoMetal, game.ecoEnergy, game.ecoWater);
 
         AncientLore.Import(game.research != null ? game.research.schematics : 0);
+        AncientClues.Import(game.research != null ? game.research.cluesFound : null);
         UnitManager.Instance?.ImportUnitDTOs(game.units, byId, home);
 
         // Resume in-progress work. Both run after the galaxy and fleet exist, because their schedulers
@@ -309,6 +311,7 @@ public static class GameStateSerializer
         if (dto.buildings != null) b.buildings = new List<int>(dto.buildings);
         if (dto.terraformProjects != null) b.terraformProjects = new List<int>(dto.terraformProjects);
         b.deepSurveyed = dto.deepSurveyed;
+        b.clueIndex = dto.clueIndex;
         b.cityGrowthTimer = dto.cityGrowthTimer;
         if (dto.placedBuildings != null) b.placedBuildings = new List<PlacedBuilding>(dto.placedBuildings);
 

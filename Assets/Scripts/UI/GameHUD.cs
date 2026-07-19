@@ -30,6 +30,7 @@ public class GameHUD : MonoBehaviour
         BarButton(bar.transform, "Species", 72, () => SpeciesWindow.Instance?.Toggle());
         BarButton(bar.transform, "Ore Codex", 84, () => ResearchWindow.Instance?.Toggle());
         BarButton(bar.transform, "Tiles", 54, () => TileCatalogWindow.Instance?.Toggle());
+        BarButton(bar.transform, "Codex", 58, () => AncientClueWindow.Instance?.Toggle());
         BarButton(bar.transform, "Notices", 70, () => NotificationManager.Instance?.ToggleHistory());
         BarButton(bar.transform, "Zone", 56, () => SystemContext.Zone?.Toggle());
         orbitBtn = BarButton(bar.transform, "Orbit", 58, () => OrbitControlPanel.Instance?.Toggle());

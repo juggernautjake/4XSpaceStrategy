@@ -861,6 +861,8 @@ public class UnitManager : MonoBehaviour
         if (!b.deepSurveyed)
         {
             b.deepSurveyed = true;
+            // A world both surveyed and now studied on the ground is where a Vael fragment, if any, surfaces.
+            AncientClues.Reveal(b);
             NotificationManager.Instance?.Push($"Deep survey complete on {b.name}",
                 "Heat, Fertile and Weather index overlays are now available for this world — use them in the Planet View's Survey tab to site geothermal plants, farms and solar arrays where they'll actually pay.",
                 FlyTo(b), NotifKind.Research);

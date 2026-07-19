@@ -153,6 +153,7 @@ public class BodyDTO
     public List<int> terraformProjects = new List<int>();   // completed TerraformProjectType ids
     public List<PlacedBuilding> placedBuildings = new List<PlacedBuilding>();   // surface-grid structures
     public bool deepSurveyed;                               // unlocks the Heat/Fertile/Wind/Solar/Water indexes
+    public int clueIndex = -1;                              // which Vael fragment this world hides, -1 = none
     public float cityGrowthTimer;                           // progress toward this world's next settlement
     public bool birthrightClaim;
     public bool settled;            // people live here (Claim.cs). Distinct from owning it.
@@ -211,6 +212,7 @@ public class ResearchDTO
     public int empireLevel = 1;
     public List<string> tech = new List<string>();   // researched tech-tree node ids
     public int schematics;                            // ancient schematics recovered
+    public List<int> cluesFound = new List<int>();    // recovered Vael fragment indices (0..9)
 }
 
 // A ship or deployed station.

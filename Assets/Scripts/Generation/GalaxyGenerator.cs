@@ -54,6 +54,9 @@ public static class GalaxyGenerator
             foreach (var b in sys.AllBodies())
                 b.naturalOrbitRadius = b.orbitRadius;
 
+        // Scatter the ten Vael fragments across the galaxy — always exactly ten clue-bearing worlds to find.
+        AncientClues.SeedGalaxy(galaxy);
+
         return galaxy;
     }
 
