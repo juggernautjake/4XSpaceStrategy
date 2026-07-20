@@ -40,10 +40,26 @@ public static class GalaxyGenerator
         galaxy.center.name = $"{galaxy.name} Core";
         galaxy.centerPosition = Vector3.zero;
 
-        // The home sun, rolled here so the loading screen can show the real one while the galaxy builds.
-        // A pleasant G or K either way — the cradle needs a stable habitable zone.
-        galaxy.homeStar = StarDatabase.Get(Random.value < 0.5f ? StarType.G : StarType.K);
+        // The home cluster, rolled here so the loading screen can show the real sun(s) while the galaxy
+        // builds. Almost always one star; occasionally a bound binary or (rarer still) a trinary.
+        galaxy.homeStars = RollHomeCluster();
         return galaxy;
+    }
+
+    // Almost always a single sun; occasionally a binary, rarely a trinary — same low rate shape as an
+    // ordinary system's cluster roll (RollStarSystem/RollClusterStarType), but every home sun stays a
+    // pleasant G or K. That restriction is what keeps the difficulty's habitability guarantee (below,
+    // ForceHomeWorld) holding for 2 or 3 suns exactly as it does for 1: StarDatabase.Combine's summed
+    // luminosity for up to three G/K stars (max ~3x a single G) never approaches the O/B range where
+    // hasHabitableZone would be a lie, so the cradle never needs to be capped back down to binary.
+    static List<StarData> RollHomeCluster()
+    {
+        float c = Random.value;
+        int count = c < 0.04f ? 3 : (c < 0.14f ? 2 : 1);   // ~4% trinary, ~10% binary, ~86% single
+        var list = new List<StarData>(count);
+        for (int i = 0; i < count; i++)
+            list.Add(StarDatabase.Get(Random.value < 0.5f ? StarType.G : StarType.K));
+        return list;
     }
 
     /// Phase 2 — one star system, with all its worlds. This is the expensive part and the reason the
@@ -89,7 +105,7 @@ public static class GalaxyGenerator
         home.isHome = true;
         home.galaxyPosition = SpiralPosition(0, systemCount);
 
-        ForceHomeWorld(home, homeSpecies, galaxy.homeStar);
+        ForceHomeWorld(home, homeSpecies, galaxy.homeStars);
         AssignOwnership(galaxy);
         Recompute(galaxy);
 
@@ -150,15 +166,35 @@ public static class GalaxyGenerator
     }
 
     // Ensures a >=85%-habitable home world for the species, with 1-3 moons, all player-owned.
-    static void ForceHomeWorld(StarSystemData home, Species species, StarData homeStar)
+    static void ForceHomeWorld(StarSystemData home, Species species, List<StarData> homeStars)
     {
-        // A pleasant single sun so the home always has a stable habitable zone.
-        // Type comes from the plan rolled in Begin, NOT from a fresh roll here — that is what makes the
-        // star the loading screen showed and the star the player actually gets the same one.
-        home.stars = new List<StarData> { homeStar ?? StarDatabase.Get(StarType.G) };
-        home.stars[0].name = home.name;
+        // The cluster (1-3 suns) comes from the plan rolled in Begin, NOT from a fresh roll here — that is
+        // what makes the star(s) the loading screen showed and the star(s) the player actually gets the
+        // same objects. StarCluster.Layout (the renderer's own geometry) treats stars[0]/[1] as the inner
+        // pair for a trinary, so the list order from RollHomeCluster is kept as-is; only the NAMES below
+        // are ranked, exactly like every other multi-star system (SolarSystemGenerator.NameStars).
+        home.stars = homeStars != null && homeStars.Count > 0
+            ? new List<StarData>(homeStars)
+            : new List<StarData> { StarDatabase.Get(StarType.G) };
+
+        if (home.stars.Count == 1)
+        {
+            home.stars[0].name = home.name;
+        }
+        else
+        {
+            var byMass = new List<StarData>(home.stars);
+            byMass.Sort((a, b) => b.mass.CompareTo(a.mass));   // most massive first
+            for (int rank = 0; rank < byMass.Count; rank++)
+                byMass[rank].name = $"{home.name} {(char)('A' + rank)}";
+        }
+
         home.isBlackHole = false;
-        home.combinedStar = home.stars[0];
+        // Combine handles 1-3 suns identically (it's the same call an ordinary multi-star system makes),
+        // so the >=85% guarantee below never has to know whether the home cradle is single, binary or
+        // trinary: hasHabitableZone comes back true either way, and the zone/orbit-safety code downstream
+        // already reads the combined star rather than any one sun.
+        home.combinedStar = StarDatabase.Combine(home.stars);
         home.combinedStar.name = home.name;
         LinkBodies(home);
 

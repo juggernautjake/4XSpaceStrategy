@@ -43,20 +43,25 @@ public class Galaxy
     // hash of the name would work until someone renamed it, and then the sky would silently change.
     public int visualSeed;
 
-    // The home system's star, DECIDED UP FRONT.
+    // The home system's star CLUSTER (1-3 suns), DECIDED UP FRONT.
     //
     // ForceHomeWorld used to roll this itself, and ForceHomeWorld runs at the very end of generation —
-    // so for the whole time the loading screen is running, "which star does the player's home have"
+    // so for the whole time the loading screen is running, "which star(s) does the player's home have"
     // had no answer yet. Rolling it in Begin and having ForceHomeWorld consume it means what the loading
-    // screen shows and what the player lands in are the same star by construction rather than by two
+    // screen shows and what the player lands in are the same suns by construction rather than by two
     // rolls happening to agree.
-    // The INSTANCE, not just the class.
+    // The INSTANCEs, not just the classes.
     //
     // StarDatabase.Get is not a lookup — it re-rolls temperature, per-channel colour and visual scale on
-    // every call. So storing only the StarType and calling Get twice would give the loading screen and
-    // the actual home system two different-looking stars that merely share a spectral class, which is
-    // exactly the coincidence this field exists to eliminate. Roll once, hand the same object to both.
-    public StarData homeStar;
+    // every call. So storing only the StarType(s) and calling Get again would give the loading screen and
+    // the actual home system different-looking stars that merely share a spectral class, which is
+    // exactly the coincidence this field exists to eliminate. Roll once, hand the same objects to both.
+    public List<StarData> homeStars = new List<StarData>();
+
+    // Convenience: the primary (first) home sun, for callers that only care about "the" home star (the
+    // loading screen's single-sphere preview, before the pop-out cluster is shown). Never settable —
+    // homeStars is the one source of truth, so there's nowhere for the two to disagree.
+    public StarData homeStar => homeStars != null && homeStars.Count > 0 ? homeStars[0] : null;
 
     public List<StarSystemData> systems = new List<StarSystemData>();
     public int homeIndex;

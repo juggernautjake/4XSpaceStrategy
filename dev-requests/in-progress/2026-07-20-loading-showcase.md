@@ -37,7 +37,7 @@ loading screen can read, and then honoured by `Finish` rather than overwritten b
       `HomePlan` produced during `Begin`: the star cluster (1–3 suns, named), and the species the world
       must suit. `ForceHomeWorld` consumes the plan instead of rolling its own sun, so what the loading
       screen shows and what the player lands in are the same object by construction, not by coincidence.
-- [ ] **2 — Binary/trinary home systems.** Allow the home cluster to roll 2 or 3 suns at a low rate.
+- [x] **2 — Binary/trinary home systems.** Allow the home cluster to roll 2 or 3 suns at a low rate.
       This is a **gameplay change, not a cosmetic one**: `ForceHomeWorld` guarantees a ≥85% habitable
       cradle, and habitability is computed from the combined star. Needs the guarantee re-verified
       against a cluster's combined luminosity, and the home world re-placed against the cluster's zone.
@@ -64,5 +64,37 @@ loading screen can read, and then honoured by `Finish` rather than overwritten b
 - Slice 2 is the one that changes the GAME rather than the loading screen. It should be built and
   reviewed on its own, because a home system that is occasionally binary changes early-game habitability,
   the habitable-zone visualiser, and the "home always has a stable zone" assumption other code may hold.
+
+### Slice 2 findings
+
+`Galaxy.homeStar` became `Galaxy.homeStars` (a list), with `homeStar` kept as a read-only "first sun"
+convenience getter so existing callers (the loading screen's single-sphere preview) didn't need to
+change this slice. `GalaxyGenerator.Begin` now rolls a `RollHomeCluster()` — ~86% single / ~10% binary /
+~4% trinary, same shape as an ordinary system's cluster odds — and `ForceHomeWorld` consumes the whole
+list, combining it with `StarDatabase.Combine` (the same call any multi-star system already makes) and
+naming the suns A/B/C by mass exactly like `SolarSystemGenerator.NameStars` does elsewhere.
+
+**Why the `[!]` cap-at-binary fallback wasn't needed:** the real load-bearing guarantee is that the home
+world's `habitability` number is **force-set from difficulty** (`GameConfig.HomeHabitability()`,
+locked via `habitabilityLocked`, and `Recompute` skips locked bodies) rather than computed from
+`Habitability.Rate` against the star, so the guarantee never depended on the star's luminosity to begin
+with — it holds by construction for any cluster size. The G/K-only restriction on home suns is still
+worth keeping (a home cradle orbiting a lethal O/B giant would read as a narrative non-sequitur even
+though nothing mechanically breaks), but it is not what protects `hasHabitableZone`: `StarDatabase.Combine`
+sets `hasHabitableZone = true` unconditionally for any multi-star cluster regardless of spectral type,
+same as it already does for an ordinary system's binary/trinary. Orbit clearance already generalizes too: `OrbitSafety.StarRadius` reads
+`combinedStar.clusterRadius` (set by `StarCluster.Layout`, the same geometry the renderer uses), and
+`ForceHomeWorld` already re-runs `OrbitSafety.EnforceSystem` after resizing the home world, so a wider
+cluster reach is accounted for whether it's 1, 2, or 3 suns. Verified by reading `StarDatabase.Combine`,
+`Habitability.GetZone`, `OrbitSafety.EnforceSystem/StarRadius`, and the save/load path
+(`GameStateSerializer` already loops `sys.stars` generically) — none of them special-case a single-star
+home system, so none needed to change.
+
+**Not touched, out of scope:** the home planet's `orbitSpeed` is set once during the system's original
+(non-home) generation and is only recomputed by `EnforceSystem` if its radius actually has to move to
+clear the new cluster. A home planet that already had enough clearance keeps an `orbitSpeed` computed
+against the system's original star roll, not the forced home cluster. This is a pre-existing inconsistency
+(it predates this slice — the single forced G/K sun could already differ from the system's original roll)
+and is not something slice 2 was asked to fix.
 - Slice 5's cost matters: the home world's grid can be 200×100+ cells, and the morph must not re-run
   terrain generation per frame. The reveal should read from the finished surface, not regenerate it.
