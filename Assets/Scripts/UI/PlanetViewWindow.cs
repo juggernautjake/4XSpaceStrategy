@@ -96,6 +96,38 @@ public class PlanetViewWindow : MonoBehaviour
     RectTransform tabStrip, sidePanel, gridHolder;
     RawImage mapImage, overlayImage;
     RectTransform mapRT, pieceLayer, ghostLayer;
+
+    // ---- Horizontal wrap ----------------------------------------------------------------------
+    //
+    // A planet map is a CYLINDER: its left and right edges are the same meridian, and the terrain is
+    // generated to join there (PlanetTerrainGenerator.WrapU). So scrolling east past the right edge should
+    // arrive back at the left, endlessly, rather than stopping at a wall.
+    //
+    // Making the pan wrap is the easy half. The hard half is that at the seam you must see BOTH edges at
+    // once, which means the map has to be drawn more than once. Rather than duplicate the whole map node,
+    // each mirror carries only what is actually visible — terrain, overlay, structures — and is parented
+    // INSIDE mapRT, stretched to it and offset by exactly one map width. That way every mirror inherits
+    // the zoom and pan for free: there is one source of truth for where the map is, and the copies are
+    // rigidly attached to it rather than being kept in sync by hand.
+    //
+    // Two mirrors, not one. Which side the gap opens on depends on which way you scrolled, and a single
+    // mirror would have to be moved across at the moment the gap flips — one more thing to get wrong at
+    // exactly the moment the player is looking at it.
+    class WrapMirror
+    {
+        public RectTransform root;
+        public RawImage terrain;
+        public RawImage overlay;
+        public RectTransform pieces;
+    }
+
+    readonly List<WrapMirror> mirrors = new List<WrapMirror>();
+
+    // How far one arrow press scrolls, as a fraction of the viewport width.
+    const float ScrollStepFrac = 0.22f;
+    // Degrees... rather, pixels per second while an arrow is held down.
+    const float ScrollHoldSpeed = 900f;
+    float scrollHoldDir;
     TMP_Text statusText;
 
     // Host map + moon maps. The host map lives in hostViewport (which shrinks to the bottom when any moon
@@ -299,6 +331,13 @@ public class PlanetViewWindow : MonoBehaviour
         UIFactory.Stretch(pieceLayer);
         var plImg = pieceLayer.gameObject.AddComponent<Image>();
         plImg.color = new Color(0, 0, 0, 0); plImg.raycastTarget = false;
+
+        // The wrap mirrors. Built here, immediately after the things they mirror, so the two cannot
+        // drift apart structurally. They sit BELOW the markers/ghost in sibling order because those are
+        // deliberately not mirrored — a selection ring or the piece riding the cursor belongs to where
+        // you are actually pointing, not to a copy of it one world away.
+        BuildWrapMirror(-1);
+        BuildWrapMirror(+1);
 
         // Above the pieces so the ring/arrow are never hidden behind a structure's own tiles.
         markerLayer = UIFactory.NewUI(mapRT, "Markers").GetComponent<RectTransform>();
@@ -553,7 +592,7 @@ public class PlanetViewWindow : MonoBehaviour
         bar.anchorMin = bar.anchorMax = new Vector2(0, 0);
         bar.pivot = new Vector2(0, 0);
         bar.anchoredPosition = new Vector2(6, 6);
-        bar.sizeDelta = new Vector2(188, 26);
+        bar.sizeDelta = new Vector2(268, 26);
 
         var bg = bar.gameObject.AddComponent<Image>();
         bg.color = new Color(0.04f, 0.07f, 0.11f, 0.85f);
@@ -573,6 +612,51 @@ public class PlanetViewWindow : MonoBehaviour
         zoomLabel = UIFactory.Text(bar, "100%", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.Center);
         var zle = zoomLabel.gameObject.AddComponent<LayoutElement>();
         zle.flexibleWidth = 1f;
+
+        // Scroll arrows, on the same strip as the zoom controls and acting on the same map — whichever
+        // pane is active (see ActiveScrollTarget). They live here rather than floating over the map so
+        // there is one place the map's controls are, instead of two.
+        ScrollButton(bar, "<", -1f);
+        ScrollButton(bar, ">", +1f);
+    }
+
+    /// A press-and-hold scroll arrow. Click nudges; holding scrolls continuously, which is what you want
+    /// for crossing a whole world rather than clicking twenty times.
+    void ScrollButton(RectTransform bar, string label, float dir)
+    {
+        var btn = UIFactory.Button(bar.transform, label, () => NudgeScroll(dir), 20f);
+        var le = btn.gameObject.AddComponent<LayoutElement>();
+        le.preferredWidth = 30f; le.flexibleWidth = 0f;
+
+        var hold = btn.gameObject.AddComponent<ViewHoldButton>();
+        hold.onDown = () => scrollHoldDir = dir;
+        hold.onUp = () => { if (Mathf.Approximately(scrollHoldDir, dir)) scrollHoldDir = 0f; };
+    }
+
+    void NudgeScroll(float dir)
+    {
+        var vp = ActiveScrollViewport();
+        if (vp == null) return;
+        ScrollActive(dir * vp.rect.width * ScrollStepFrac);
+    }
+
+    /// The viewport the scroll arrows act on.
+    ///
+    /// The HOST planet map. Moon panes keep their pan in a separate dictionary (moonPan) with their own
+    /// tile scale and no wrap mirrors of their own, so scrolling one would move a map that cannot loop —
+    /// it would hit its edge and stop, which is worse than the arrows plainly belonging to the main map.
+    RectTransform ActiveScrollViewport() => hostViewport;
+
+    /// Note the NEGATION. `dx` is which way the player asked the VIEW to travel; mapPan moves the MAP,
+    /// and those are opposites — pressing ">" to look further east has to slide the map west.
+    void ScrollActive(float dx) => ScrollMap(-dx);
+
+    /// Continuous scroll while an arrow is held. Frame-rate independent, and unscaled so it works while
+    /// the game is paused — the Planet View is a place you use while paused.
+    void TickScrollHold()
+    {
+        if (Mathf.Approximately(scrollHoldDir, 0f)) return;
+        ScrollActive(scrollHoldDir * ScrollHoldSpeed * Time.unscaledDeltaTime);
     }
 
     void ZoomButton(RectTransform bar, string label, System.Action onClick)
@@ -704,17 +788,118 @@ public class PlanetViewWindow : MonoBehaviour
         ClampPan();
     }
 
+    // ---- Wrap mirrors --------------------------------------------------------------------------
+
+    /// One copy of the map's visible content, offset by `side` map-widths.
+    void BuildWrapMirror(int side)
+    {
+        var m = new WrapMirror();
+
+        m.root = UIFactory.NewUI(mapRT, side < 0 ? "WrapLeft" : "WrapRight").GetComponent<RectTransform>();
+        UIFactory.Stretch(m.root);
+        m.root.name = side < 0 ? "WrapLeft" : "WrapRight";
+
+        var t = UIFactory.NewUI(m.root, "Terrain");
+        m.terrain = t.AddComponent<RawImage>();
+        UIFactory.Stretch(m.terrain.rectTransform);
+        // A raycast target, deliberately. The mirrors are children of mapRT, so a click on one bubbles up
+        // to the probe on the real map — which then wraps the longitude back onto the cell this is a copy
+        // of (see ScreenToCellIn). Left non-interactive, the mirrored half of the screen would look like
+        // the world and behave like a hole.
+        m.terrain.raycastTarget = true;
+
+        var o = UIFactory.NewUI(m.root, "Overlay");
+        m.overlay = o.AddComponent<RawImage>();
+        UIFactory.Stretch(m.overlay.rectTransform);
+        m.overlay.raycastTarget = false;
+        o.SetActive(false);
+
+        m.pieces = UIFactory.NewUI(m.root, "Pieces").GetComponent<RectTransform>();
+        UIFactory.Stretch(m.pieces);
+
+        m.root.gameObject.SetActive(false);
+        mirrors.Add(m);
+    }
+
+    /// Put the mirrors one map-width to either side, and copy across what they display.
+    ///
+    /// Offsetting a STRETCHED rect is done by shifting offsetMin and offsetMax together — that translates
+    /// it while it keeps matching the parent's size, so the mirrors track every zoom change for free
+    /// rather than needing their own size kept in step.
+    void SyncWrapMirrors()
+    {
+        if (mirrors.Count == 0 || mapRT == null) return;
+
+        float w = mapRT.rect.width;
+        bool on = WrapEnabled;
+
+        for (int i = 0; i < mirrors.Count; i++)
+        {
+            var m = mirrors[i];
+            if (m.root == null) continue;
+
+            if (m.root.gameObject.activeSelf != on) m.root.gameObject.SetActive(on);
+            if (!on) continue;
+
+            float dx = (i == 0 ? -w : w);
+            m.root.offsetMin = new Vector2(dx, 0f);
+            m.root.offsetMax = new Vector2(dx, 0f);
+
+            if (m.terrain != null && mapImage != null)
+            {
+                m.terrain.texture = mapImage.texture;
+                m.terrain.color = mapImage.color;
+            }
+            if (m.overlay != null && overlayImage != null)
+            {
+                bool ov = overlayImage.gameObject.activeSelf && overlayImage.texture != null;
+                if (m.overlay.gameObject.activeSelf != ov) m.overlay.gameObject.SetActive(ov);
+                m.overlay.texture = overlayImage.texture;
+                m.overlay.color = overlayImage.color;
+            }
+        }
+    }
+
+    /// Wrapping only makes sense once the map is at least as wide as the viewport. Below that the whole
+    /// world already fits on screen, there is no edge to run off, and a mirror would just draw a second
+    /// copy of the planet beside the first.
+    bool WrapEnabled =>
+        body != null && body.surface != null && hostViewport != null && mapRT != null &&
+        mapRT.rect.width >= hostViewport.rect.width - 0.5f;
+
+    /// Scroll the map horizontally by `dx` pixels, wrapping around the seam.
+    public void ScrollMap(float dx)
+    {
+        if (body == null || body.surface == null) return;
+        mapPan.x += dx;
+        ClampPan();
+    }
+
     // Keep the viewport covered: you can never drag the map so far that you're looking at the letterbox
     // instead of the world. When the map is smaller than the viewport on an axis, it centres on it.
+    //
+    // X WRAPS rather than clamping, once the map is wide enough for there to be an edge to run off. The
+    // pan is folded back into one map-width, and because a mirror is sitting exactly one map-width to
+    // either side, the fold lands on identical content — so the position jumps and the picture does not.
+    // Y still clamps: latitude has real ends. The poles are edges, not a seam.
     void ClampPan()
     {
         var vp = hostViewport.rect;
         Vector2 size = mapRT.sizeDelta;
-        float slackX = Mathf.Max(0f, (size.x - vp.width) * 0.5f);
+
+        if (WrapEnabled && size.x > 0.5f)
+            mapPan.x = Mathf.Repeat(mapPan.x + size.x * 0.5f, size.x) - size.x * 0.5f;
+        else
+        {
+            float slackX = Mathf.Max(0f, (size.x - vp.width) * 0.5f);
+            mapPan.x = Mathf.Clamp(mapPan.x, -slackX, slackX);
+        }
+
         float slackY = Mathf.Max(0f, (size.y - vp.height) * 0.5f);
-        mapPan.x = Mathf.Clamp(mapPan.x, -slackX, slackX);
         mapPan.y = Mathf.Clamp(mapPan.y, -slackY, slackY);
         mapRT.anchoredPosition = mapPan;
+
+        SyncWrapMirrors();
     }
 
     // Signature covers only the SHAPE of the window: which world, which tab, what's selected, what's
@@ -772,6 +957,15 @@ public class PlanetViewWindow : MonoBehaviour
     {
         if (root == null || !root.activeSelf) return;
         if (body == null) { root.SetActive(false); return; }
+
+        TickScrollHold();
+
+        // Once per frame rather than at each of the half-dozen places the map's texture, overlay or size
+        // can change. Those are scattered (RefreshMapTexture, the overlay refreshes, ApplyMapSize, the
+        // piece rebuild), and a mirror that misses one shows a stale copy of the world beside the real
+        // one — a failure that only appears at the seam, which is where nobody is looking during a test.
+        // The call is a handful of property writes and early-outs entirely when wrapping is off.
+        SyncWrapMirrors();
 
         string sig = Signature();
         if (sig != lastSig) { lastSig = sig; Rebuild(); }
@@ -2869,6 +3063,10 @@ public class PlanetViewWindow : MonoBehaviour
     void DrawPieces()
     {
         for (int i = pieceLayer.childCount - 1; i >= 0; i--) Destroy(pieceLayer.GetChild(i).gameObject);
+        foreach (var m in mirrors)
+            if (m.pieces != null)
+                for (int i = m.pieces.childCount - 1; i >= 0; i--) Destroy(m.pieces.GetChild(i).gameObject);
+
         if (body?.surface == null) return;
 
         foreach (var p in SurfaceBuildManager.On(body))
@@ -2879,9 +3077,22 @@ public class PlanetViewWindow : MonoBehaviour
             // — so this only has to be a strong, readable colour, not the only strong colour on screen.
             var c = Vivid(info.color);
             var cells = SurfaceBuildingDatabase.Footprint(p);
+
+            // Drawn into the real layer AND both wrap mirrors. Structures have to survive the seam: a map
+            // that loops but whose cities vanish as they cross the join is worse than one that does not
+            // loop at all, because it looks like the buildings were destroyed.
             foreach (var cell in cells) AddCellQuad(pieceLayer, cell.x, cell.y, c);
             OutlineFootprint(pieceLayer, cells);
+
+            foreach (var m in mirrors)
+            {
+                if (m.pieces == null) continue;
+                foreach (var cell in cells) AddCellQuad(m.pieces, cell.x, cell.y, c);
+                OutlineFootprint(m.pieces, cells);
+            }
         }
+
+        SyncWrapMirrors();
     }
 
     // ---- Confirm before building ----
@@ -3241,7 +3452,18 @@ public class PlanetViewWindow : MonoBehaviour
         var r = mapRect.rect;
         float u = (lp.x - r.xMin) / r.width;
         float v = (lp.y - r.yMin) / r.height;
-        if (u < 0f || u > 1f || v < 0f || v > 1f) return false;
+
+        // Longitude WRAPS for the host map once the wrap mirrors are up.
+        //
+        // Without this, clicking on a mirror resolves to a u outside 0..1 and gets rejected — so exactly
+        // the half of the screen showing mirrored world would be dead to clicks, hover and building,
+        // while still scrolling and looking perfectly normal. At a half-width pan that is half the
+        // viewport. Wrapping u maps a point on a mirror back onto the cell it is a copy of, which is the
+        // whole reason the mirror looks like that cell.
+        if (mapRect == mapRT && WrapEnabled) u = Mathf.Repeat(u, 1f);
+        else if (u < 0f || u > 1f) return false;
+
+        if (v < 0f || v > 1f) return false;
 
         x = Mathf.Clamp(Mathf.FloorToInt(u * b.surface.width), 0, b.surface.width - 1);
         y = Mathf.Clamp(Mathf.FloorToInt(v * b.surface.height), 0, b.surface.height - 1);

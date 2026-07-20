@@ -37,47 +37,51 @@ public class ViewEditorWindow : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "View", new Vector2(300, 340), out root, out _);
+        var content = UIFactory.Window(parent, "View", new Vector2(300, 430), out root, out _);
         UIFactory.VerticalLayout(content, 6);
 
         // ---- Named zoom levels ----
         UIFactory.Label(content, "ZOOM LEVEL", UITheme.SmallSize, UITheme.SubText, 18);
 
-        UIFactory.Button(content, "Planet", () => CameraController.Instance?.ViewPlanet(), 30);
-        UIFactory.Button(content, "System", () => CameraController.Instance?.ViewSystem(), 30);
-        UIFactory.Button(content, "Galaxy", () => CameraController.Instance?.ViewWholeGalaxy(), 30);
+        UIFactory.Button(content, "Planet", () => CameraController.Instance?.ViewPlanet(), 34);
+        UIFactory.Button(content, "System", () => CameraController.Instance?.ViewSystem(), 34);
+        UIFactory.Button(content, "Galaxy", () => CameraController.Instance?.ViewWholeGalaxy(), 34);
 
         // ---- Zoom nudge ----
         UIFactory.Label(content, "ZOOM", UITheme.SmallSize, UITheme.SubText, 18);
         var zoomRow = UIFactory.NewUI(content, "ZoomRow");
-        UIFactory.AddLayout(zoomRow, 30);
+        UIFactory.AddLayout(zoomRow, 34, 34);
         var zh = zoomRow.AddComponent<UnityEngine.UI.HorizontalLayoutGroup>();
         zh.spacing = 6; zh.childControlWidth = true; zh.childForceExpandWidth = true;
-        UIFactory.Button(zoomRow.transform, "− Out", () => CameraController.Instance?.NudgeZoom(1), 28);
-        UIFactory.Button(zoomRow.transform, "+ In", () => CameraController.Instance?.NudgeZoom(-1), 28);
+        UIFactory.Button(zoomRow.transform, "- Out", () => CameraController.Instance?.NudgeZoom(1), 32);
+        UIFactory.Button(zoomRow.transform, "+ In", () => CameraController.Instance?.NudgeZoom(-1), 32);
 
         // ---- Rotation ----
         UIFactory.Label(content, "ROTATE", UITheme.SmallSize, UITheme.SubText, 18);
         var rotRow = UIFactory.NewUI(content, "RotRow");
-        UIFactory.AddLayout(rotRow, 30);
+        UIFactory.AddLayout(rotRow, 34, 34);
         var rh = rotRow.AddComponent<UnityEngine.UI.HorizontalLayoutGroup>();
         rh.spacing = 6; rh.childControlWidth = true; rh.childForceExpandWidth = true;
 
         // Press-and-hold rather than click-to-step: HoldButton reports whether it is currently down, and
         // Update spins while it is. A per-click step can't frame a shot.
-        var left = UIFactory.Button(rotRow.transform, "⟲ Left", null, 28);
-        var right = UIFactory.Button(rotRow.transform, "Right ⟳", null, 28);
+        var left = UIFactory.Button(rotRow.transform, "< Left", null, 32);
+        var right = UIFactory.Button(rotRow.transform, "Right >", null, 32);
         AttachHold(left.gameObject, -1f);
         AttachHold(right.gameObject, +1f);
 
-        UIFactory.Button(content, "Reset rotation", () => CameraController.Instance?.ResetRotation(), 28);
+        UIFactory.Button(content, "Reset rotation", () => CameraController.Instance?.ResetRotation(), 34);
 
         bearingText = UIFactory.Label(content, "", UITheme.SmallSize, UITheme.Text, 18);
         heightText = UIFactory.Label(content, "", UITheme.SmallSize, UITheme.SubText, 18);
 
-        UIFactory.WrapText(content,
-            "WASD pans · wheel zooms · middle-drag spins the view",
+        // Two lines' worth of height, explicitly. WrapText wraps, so its preferred height is whatever the
+        // string needs at this width — and a layout group hands out only what it was asked for, which was
+        // one line. The second line was being cut off (the UISanity "text-clipped" report).
+        var hint = UIFactory.WrapText(content,
+            "WASD pans, wheel zooms, middle-drag spins the view",
             UITheme.SmallSize, UITheme.SubText);
+        UIFactory.AddLayout(hint.gameObject, 40f, 40f);
 
         root.SetActive(false);
     }
