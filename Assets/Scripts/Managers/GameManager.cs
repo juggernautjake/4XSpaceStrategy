@@ -39,6 +39,77 @@ public class GameManager : MonoBehaviour
     // Default new game — a small galaxy (fallback / used by the R debug key).
     public void GenerateStartingSystem() => GenerateGalaxy(5, 4);
 
+    /// Generate a galaxy with a loading screen, a system at a time.
+    ///
+    /// Same work as GenerateGalaxy, spread across frames so the bar can actually repaint. Every value it
+    /// reports is a step that really completed — the generator is phased (Begin / AddSystem / Finish) for
+    /// exactly this reason, rather than the screen guessing against a timer.
+    ///
+    /// Systems are ~70% of the budget because they are ~70% of the work: each one rolls a star, lays out
+    /// its worlds, and generates a full terrain grid for every one of them.
+    public void GenerateGalaxyAsync(int systemCount, int avgPlanets, System.Action onDone = null)
+        => StartCoroutine(GenerateGalaxyRoutine(systemCount, avgPlanets, onDone));
+
+    System.Collections.IEnumerator GenerateGalaxyRoutine(int systemCount, int avgPlanets, System.Action onDone)
+    {
+        if (solarSystemGenerator == null)
+        {
+            Debug.LogError("Assign SolarSystemGenerator in Inspector!");
+            onDone?.Invoke();
+            yield break;
+        }
+
+        var screen = LoadingScreen.Instance;
+        screen?.Open("Generating the universe");
+        // One frame before any work, so the screen is actually on-screen before the main thread is busy.
+        yield return null;
+
+        ResearchManager.NewGame();
+        EmpireTech.Reset();
+        TechManager.Reset();
+        AncientLore.Reset();
+        AncientClues.Reset();
+
+        int count = GalaxyGenerator.ClampSystems(systemCount);
+        var galaxy = GalaxyGenerator.Begin(solarSystemGenerator, systemCount, avgPlanets);
+        screen?.Report(0.03f, "Seeding " + galaxy.name);
+        yield return null;
+
+        const float SystemsShare = 0.70f;
+        for (int i = 0; i < count; i++)
+        {
+            GalaxyGenerator.AddSystem(galaxy, solarSystemGenerator, i, count);
+            screen?.Report(0.03f + SystemsShare * ((i + 1) / (float)count),
+                           $"Forming star systems  {i + 1} / {count}");
+            yield return null;
+        }
+
+        screen?.Report(0.78f, "Settling the home world");
+        yield return null;
+        GalaxyGenerator.Finish(galaxy, SpeciesManager.Current, count);
+
+        Galaxy = galaxy;
+        FocusedSystem = Galaxy.Home;
+
+        screen?.Report(0.86f, "Lighting the stars");
+        yield return null;
+        Visualize();
+
+        screen?.Report(0.94f, "Founding your empire");
+        yield return null;
+        var homePlanet = FindHomePlanet();
+        PlayerEconomy.NewGame(homePlanet, SpeciesManager.Current);
+        UnitManager.Instance?.NewGame(homePlanet);
+        FactionAI.NewGame(Galaxy);
+
+        screen?.Report(1f, "Ready");
+        // Hold the full bar for a beat. Reaching 100% and vanishing in the same frame reads as a glitch
+        // rather than as completion.
+        yield return new WaitForSecondsRealtime(0.35f);
+        screen?.Close();
+        onDone?.Invoke();
+    }
+
     public void GenerateGalaxy(int systemCount, int avgPlanets)
     {
         if (solarSystemGenerator == null)

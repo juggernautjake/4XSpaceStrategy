@@ -7,9 +7,23 @@ using UnityEngine;
 // by NPC factions or unclaimed.
 public static class GalaxyGenerator
 {
+    /// Generate a whole galaxy in one call. Unchanged behaviour — it is now expressed as the three
+    /// phases below so a loading screen can drive the same work a step at a time and report real
+    /// progress. Anything that does not need progress should keep calling this.
     public static Galaxy Generate(SolarSystemGenerator gen, int systemCount, int avgPlanets, Species homeSpecies)
     {
-        systemCount = Mathf.Clamp(systemCount, 1, 12);
+        int count = ClampSystems(systemCount);
+        var galaxy = Begin(gen, systemCount, avgPlanets);
+        for (int i = 0; i < count; i++) AddSystem(galaxy, gen, i, count);
+        Finish(galaxy, homeSpecies, count);
+        return galaxy;
+    }
+
+    public static int ClampSystems(int systemCount) => Mathf.Clamp(systemCount, 1, 12);
+
+    /// Phase 1 — the empty galaxy: its name, its seed, its core.
+    public static Galaxy Begin(SolarSystemGenerator gen, int systemCount, int avgPlanets)
+    {
         avgPlanets = Mathf.Clamp(avgPlanets, 1, 8);
         gen.minBodies = Mathf.Max(1, avgPlanets - 1);
         gen.maxBodies = avgPlanets + 2;
@@ -25,23 +39,31 @@ public static class GalaxyGenerator
         // named place rather than a generic black hole floating in a generic galaxy.
         galaxy.center.name = $"{galaxy.name} Core";
         galaxy.centerPosition = Vector3.zero;
+        return galaxy;
+    }
 
-        for (int i = 0; i < systemCount; i++)
+    /// Phase 2 — one star system, with all its worlds. This is the expensive part and the reason the
+    /// loading bar exists: it is called once per system so the caller can yield between them.
+    public static void AddSystem(Galaxy galaxy, SolarSystemGenerator gen, int i, int systemCount)
+    {
+        var bodies = gen.GenerateSystem();
+        var sys = new StarSystemData
         {
-            var bodies = gen.GenerateSystem();
-            var sys = new StarSystemData
-            {
-                name = gen.currentSystemName,
-                stars = new List<StarData>(gen.stars),
-                isBlackHole = gen.isBlackHole,
-                combinedStar = gen.currentStar,
-                bodies = bodies,
-                galaxyPosition = SpiralPosition(i, systemCount)
-            };
-            LinkBodies(sys);
-            galaxy.systems.Add(sys);
-        }
+            name = gen.currentSystemName,
+            stars = new List<StarData>(gen.stars),
+            isBlackHole = gen.isBlackHole,
+            combinedStar = gen.currentStar,
+            bodies = bodies,
+            galaxyPosition = SpiralPosition(i, systemCount)
+        };
+        LinkBodies(sys);
+        galaxy.systems.Add(sys);
+    }
 
+    /// Phase 3 — everything that can only be done once every system exists: the home world, ownership,
+    /// habitability, and the things scattered across the finished galaxy.
+    public static void Finish(Galaxy galaxy, Species homeSpecies, int systemCount)
+    {
         galaxy.homeIndex = 0;
         var home = galaxy.systems[0];
         home.isHome = true;
@@ -62,8 +84,6 @@ public static class GalaxyGenerator
         // AND those derelicts (so some fragments drift out at a black hole or in dead space, not just on a moon).
         DerelictGen.Populate(galaxy);
         AncientClues.SeedGalaxy(galaxy);
-
-        return galaxy;
     }
 
     // Golden-angle spiral so systems spread out and don't overlap.

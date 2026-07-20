@@ -94,11 +94,17 @@ public class GenerationMenu : MonoBehaviour
         GameConfig.FactionName = fn;
         if (FactionManager.Player != null) FactionManager.Player.name = fn;
 
-        GameManager.Instance?.GenerateGalaxy(Mathf.RoundToInt(systemsS.value), Mathf.RoundToInt(planetsS.value));
-
+        // Menus close FIRST, so the loading screen covers an empty backdrop rather than the wizard.
         root.SetActive(false);
         StartMenu.Instance?.Close();
         EscapeMenu.Instance?.Close();
-        TimeControl.Resume();
+
+        // Time stays paused until the galaxy exists. Resuming here would run the simulation against a
+        // half-built world for the frames generation spans — colony ticks and faction AI on a galaxy
+        // whose systems are still being added.
+        GameManager.Instance?.GenerateGalaxyAsync(
+            Mathf.RoundToInt(systemsS.value),
+            Mathf.RoundToInt(planetsS.value),
+            TimeControl.Resume);
     }
 }

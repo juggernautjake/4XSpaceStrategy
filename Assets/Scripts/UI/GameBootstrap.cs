@@ -76,6 +76,8 @@ public static class GameBootstrap
         SystemSummaryWindow.Create(canvas.transform);
         ViewEditorWindow.Create(canvas.transform);
         PlanetGlobeWindow.Create(canvas.transform);
+        // Created last so it is the last sibling — it has to cover every other window.
+        LoadingScreen.Create(canvas.transform);
         GalaxyLOD.Create(canvas.transform);
         BoxSelectController.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);
