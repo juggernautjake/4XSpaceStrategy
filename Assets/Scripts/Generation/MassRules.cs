@@ -60,6 +60,38 @@ public static class MassRules
         return Mathf.Clamp(Mathf.RoundToInt(mass * 3f), 3, 32);
     }
 
+    // ---- Visual size -----------------------------------------------------------------------------
+
+    // The rendered DIAMETER of a body, straight from its mass.
+    //
+    // This used to run through SurfaceSize, and that was the bug: SurfaceSize rounds to an int and clamps
+    // at 3, so every body under mass ~1 produced the same integer, and the MoonScaleMin floor then flattened
+    // everything under mass ~2.3 to one identical size on top of that. A 0.5 moon and a 0.6 moon rendered
+    // pixel-for-pixel the same, and so did a 0.1 and a 2.0.
+    //
+    // Reading mass DIRECTLY keeps the value continuous, so every difference in mass shows up as some
+    // difference in size. The square root is what makes the small end readable: mass is a volume-like
+    // quantity, so a linear map spends almost all its range on the giants and crushes the moons into
+    // nothing. sqrt spreads it — 0.1 -> 0.32, 0.5 -> 0.71, 1 -> 1, 10 -> 3.16 — so neighbouring small
+    // moons stay ~10% apart in size, which is visible, while a gas giant is still an order of magnitude
+    // bigger than the smallest moon.
+    //
+    // Moons use a smaller coefficient than planets, so a moon reads as a satellite rather than a twin even
+    // when its mass is close to its host's.
+    public const float PlanetDiameterPerRootMass = 0.75f;
+    public const float MoonDiameterPerRootMass = 0.55f;
+
+    public static float VisualDiameter(float mass, bool isMoon)
+    {
+        // Saves written before Mass existed can carry 0; callers back-fill from surfaceSize, but guard
+        // anyway so a missing mass renders as something rather than a zero-size dot.
+        if (mass <= 0.0001f) mass = 0.1f;
+        float d = Mathf.Sqrt(mass) * (isMoon ? MoonDiameterPerRootMass : PlanetDiameterPerRootMass);
+        // Floors low enough that they never bind for a real body (the smallest mass is 0.1), so they are
+        // a guard against bad data rather than the thing deciding how big small moons look.
+        return Mathf.Max(isMoon ? 0.10f : 0.18f, d);
+    }
+
     // Inverse of SurfaceSize, for backfilling Mass on a save written before Mass existed: the world's size
     // is known, so recover the mass that would have produced it. Quantized to the same scheme.
     public static float FromSurfaceSize(int surfaceSize)

@@ -18,8 +18,14 @@ using UnityEngine;
 // SystemVisualizer and both generators, so a change in one silently broke spacing in the others.
 public static class OrbitSafety
 {
-    // ---- Visual size (must match what SystemVisualizer actually renders — it reads these) ----
-    public const float PlanetScalePerSize = 0.08f;   // localScale = surfaceSize * this (scale == diameter)
+    // ---- Visual size ----
+    // Now derived from MASS (MassRules.VisualDiameter), not from surfaceSize. surfaceSize is a rounded,
+    // clamped integer, and running the render size through it flattened every body under ~mass 2.3 to one
+    // identical dot — a 0.1 moon and a 2.0 moon drew the same. See the note in MassRules.
+    //
+    // These constants are kept only to size a body whose mass is missing (pre-Mass saves, before the
+    // backfill runs). Nothing in normal generation reaches them.
+    public const float PlanetScalePerSize = 0.08f;
     public const float PlanetScaleMin = 0.6f;
     public const float MoonScalePerSize = 0.05f;
     public const float MoonScaleMin = 0.35f;
@@ -34,9 +40,16 @@ public static class OrbitSafety
     public static float Scale(CelestialBody b)
     {
         if (b == null) return PlanetScaleMin;
-        return b.parentBody != null || b.type == CelestialBodyType.Moon
-            ? Mathf.Max(MoonScaleMin, b.surfaceSize * MoonScalePerSize)
-            : Mathf.Max(PlanetScaleMin, b.surfaceSize * PlanetScalePerSize);
+        bool isMoon = b.parentBody != null || b.type == CelestialBodyType.Moon;
+
+        // A pre-Mass save can arrive with mass 0 before the backfill runs. Fall back to the old
+        // surfaceSize formula in that case rather than rendering it at the floor.
+        if (b.mass <= 0.0001f)
+            return isMoon
+                ? Mathf.Max(MoonScaleMin, b.surfaceSize * MoonScalePerSize)
+                : Mathf.Max(PlanetScaleMin, b.surfaceSize * PlanetScalePerSize);
+
+        return MassRules.VisualDiameter(b.mass, isMoon);
     }
 
     /// Rendered RADIUS of a body (scale is a diameter — forgetting the halving is an easy way to

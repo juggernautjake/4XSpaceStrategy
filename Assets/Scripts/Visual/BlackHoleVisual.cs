@@ -3,14 +3,20 @@ using UnityEngine;
 // The one black hole builder, shared by every place one is drawn: the detailed system view, the galaxy
 // overview proxy, and the deep view where the galactic core stands in for the whole galaxy.
 //
-// It used to live privately inside SystemVisualizer as a static disc of seven concentric rings, which read
-// as a flat orange target from directly above — and the galaxy view drew no black hole at all, just a
-// near-black sphere on a black background. What makes this look like a black hole rather than a dark ball:
+// ONE DISC. This is the load-bearing constraint, and it was learned the hard way.
 //
-//   * The disc is TWO counter-tilted layers turning at different rates. A single rigid disc rotating as
-//     one body reads as a solid object; differential rotation is what sells "matter falling in".
+// An earlier version drew two counter-tilted accretion layers turning at different rates, on the theory
+// that differential rotation sells "matter falling in" better than a single rigid disc. In motion, and
+// especially at galaxy zoom, it did not read as one object at all — it read as several separate sets of
+// rings orbiting the hole at odd angles, sliding through each other. Add the polar jets that version also
+// had and the result was a tangle rather than a black hole.
+//
+// So: one tilted disc, a handful of rings, and everything else is LIGHT rather than geometry. What makes
+// it read as a black hole:
+//
 //   * Relativistic BEAMING — the side of the disc turning toward the camera is brighter. This is the
-//     single most recognisable feature of a real black hole image and costs one dot product.
+//     single most recognisable feature of a real black hole image, and it costs no extra geometry.
+//   * A hot temperature gradient across the disc: blue-white at the inner edge, orange-red at the outer.
 //   * The photon ring pulses slightly and always faces the camera, so the bright rim survives the fact
 //     that the game is locked to a 55-degree top-down pitch and a flat ring would foreshorten to a line.
 //   * The horizon is pure black and UNLIT, so it stays a hole rather than becoming a shaded grey sphere.
@@ -42,19 +48,15 @@ public static class BlackHoleVisual
         horizon.transform.localScale = Vector3.one * scale;
         var hr = horizon.GetComponent<Renderer>();
         // Fadeable so the tier crossfade can dissolve it, but keepDepth so it still OCCLUDES: without a
-        // depth write its own accretion rings and the far-side jet sort in front of it and the hole reads
-        // as a translucent grey ball with rings visible through the middle.
+        // depth write, the far half of its own accretion disc sorts in front of it and the hole reads as
+        // a translucent grey ball with rings visible straight through the middle.
         if (hr != null)
             hr.material = SpaceMaterials.Unlit(new Color(0.005f, 0.005f, 0.01f, 1f),
                                                fadeable: true, keepDepth: true);
 
-        // --- Accretion disc: two counter-tilted layers at different speeds. ---
-        // Tilts differ by ~16 degrees so the layers cross rather than nest, which is what gives the disc
-        // visible thickness from the game's fixed overhead pitch.
-        BuildDiscLayer(root.transform, scale, tilt: 74f, speed: 38f, rings: 7,
-                       inner: 0.72f, outer: 1.85f, alphaScale: 1f, seedPhase: 0f);
-        BuildDiscLayer(root.transform, scale, tilt: 58f, speed: -23f, rings: 5,
-                       inner: 0.95f, outer: 2.25f, alphaScale: 0.55f, seedPhase: 40f);
+        // --- Accretion disc: ONE tilted layer. See the note at the top of the file. ---
+        BuildDiscLayer(root.transform, scale, tilt: 74f, speed: 34f, rings: 6,
+                       inner: 0.74f, outer: 1.9f);
 
         // --- Photon ring: the bright rim hugging the horizon. ---
         var photon = SpaceMaterials.MakeRing(root.transform, "PhotonRing", scale * 0.62f,
@@ -68,11 +70,9 @@ public static class BlackHoleVisual
         SpaceMaterials.MakeRing(root.transform, "Halo", scale * 2.15f,
                                 new Color(1f, 0.45f, 0.2f, 0.16f), scale * 0.5f, 96, additive: true);
 
-        // --- Polar jets: thin bright spikes along the spin axis. ---
-        // Real black holes with an accretion disc throw relativistic jets, and they read instantly as
-        // "black hole" from a top-down camera where the disc itself is foreshortened.
-        BuildJet(root.transform, scale, 1f);
-        BuildJet(root.transform, scale, -1f);
+        // No polar jets. They were a long bright cylinder through the poles, and from the game's fixed
+        // overhead camera that is a hard vertical bar straight across the middle of the hole — it read as
+        // a rendering error, not as a jet, and it stayed visible at every zoom.
 
         if (withLight)
         {
@@ -91,18 +91,18 @@ public static class BlackHoleVisual
     // One tilted, rotating layer of the accretion disc. Hot blue-white at the inner edge fading to
     // orange-red at the outer, which is the real temperature gradient of infalling matter.
     static void BuildDiscLayer(Transform parent, float scale, float tilt, float speed, int rings,
-                               float inner, float outer, float alphaScale, float seedPhase)
+                               float inner, float outer)
     {
-        var disc = new GameObject($"AccretionDisc_{tilt:F0}");
+        var disc = new GameObject("AccretionDisc");
         disc.transform.SetParent(parent, false);
-        disc.transform.localRotation = Quaternion.Euler(tilt, seedPhase, 0f);
+        disc.transform.localRotation = Quaternion.Euler(tilt, 0f, 0f);
 
         for (int i = 0; i < rings; i++)
         {
             float t = rings > 1 ? i / (float)(rings - 1) : 0f;
             float r = Mathf.Lerp(scale * inner, scale * outer, t);
             Color c = Color.Lerp(new Color(1f, 0.97f, 0.92f), new Color(1f, 0.28f, 0.06f), t);
-            c.a = Mathf.Lerp(0.95f, 0.30f, t) * alphaScale;
+            c.a = Mathf.Lerp(0.95f, 0.30f, t);
             float w = Mathf.Lerp(scale * 0.09f, scale * 0.24f, t);
             var lr = SpaceMaterials.MakeRing(disc.transform, "Acc" + i, r, c, w, 96, additive: true);
 
@@ -116,18 +116,6 @@ public static class BlackHoleVisual
         var spin = disc.AddComponent<SelfSpin>();
         spin.speed = speed;
         spin.unscaled = true;   // a black hole is scenery, not simulation — it keeps turning while paused
-    }
-
-    // A jet: a thin cone stretched along the spin axis, brightest at the base.
-    static void BuildJet(Transform parent, float scale, float dir)
-    {
-        var jet = SpaceMaterials.Primitive(PrimitiveType.Cylinder, parent, dir > 0 ? "JetUp" : "JetDown");
-        // Unity's cylinder is 2 units tall, so a y-scale of 1.5*scale gives a jet 3*scale long; it is
-        // offset by half that so its base sits at the horizon rather than passing through it.
-        jet.transform.localScale = new Vector3(scale * 0.10f, scale * 1.5f, scale * 0.10f);
-        jet.transform.localPosition = new Vector3(0f, dir * scale * 1.5f, 0f);
-        var r = jet.GetComponent<Renderer>();
-        if (r != null) r.material = SpaceMaterials.Additive(new Color(0.6f, 0.8f, 1f, 0.22f));
     }
 }
 

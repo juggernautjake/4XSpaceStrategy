@@ -78,8 +78,8 @@ public static class SurfaceTextureRenderer
         // From MapMetrics, which is also what the grid is built at — so this renders exactly one texel
         // per cell, same as BuildGrid. The bare `* 6` that used to live here was the whole bug: it made
         // this render six times finer than the grid it was supposed to be depicting.
-        int w = MapMetrics.SurfW(body.surfaceSize);
-        int h = MapMetrics.SurfH(body.surfaceSize);
+        int w = MapMetrics.SurfW(body);
+        int h = MapMetrics.SurfH(body);
 
         var tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
         {

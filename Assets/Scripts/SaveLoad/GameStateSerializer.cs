@@ -205,22 +205,34 @@ public static class GameStateSerializer
                 sys.combinedStar = StarDatabase.Combine(sys.stars);
             }
 
-            // Bodies are stored FLAT (see BodyDTO.parentId). Rebuild them all, then hang the moons off
-            // their planets. Two passes, because a moon can appear before its parent in the list.
+            // Bodies are stored FLAT (see BodyDTO.parentId), and a moon can appear before its parent in
+            // the list — so this is two passes: PLANETS FIRST, then moons with their parent resolved.
+            //
+            // This used to build every body with `FromDTO(bd, null)` and link parents in a second pass.
+            // That is no longer safe: FromDTO bakes the surface, and a moon's GRID SIZE is capped at half
+            // its host's (MapMetrics.SurfW), which reads parentBody. Building with a null parent baked the
+            // moon at its uncapped size — so a moon's grid changed dimensions across a save/load round
+            // trip, terrain is sampled by normalized u/v so the world came back DIFFERENT, and the
+            // re-stamped building coordinates landed on tiles they were never placed on.
+            //
+            // A moon's parent is always a top-level planet (parentId < 0 identifies planets), so one
+            // ordering pass is enough — no dependency sort needed.
             var built = new Dictionary<int, CelestialBody>();
             foreach (var bd in sd.bodies)
             {
+                if (bd.parentId >= 0) continue;            // moons in the next pass
                 var nb = FromDTO(bd, null);
                 built[bd.id] = nb;
-                if (bd.parentId < 0) sys.bodies.Add(nb);   // top-level planet
+                sys.bodies.Add(nb);                        // top-level planet
             }
             foreach (var bd in sd.bodies)
             {
                 if (bd.parentId < 0) continue;
-                if (!built.TryGetValue(bd.id, out var moon)) continue;
-                if (!built.TryGetValue(bd.parentId, out var parent)) { sys.bodies.Add(moon); continue; }
-                moon.parentBody = parent;
-                parent.moons.Add(moon);
+                built.TryGetValue(bd.parentId, out var parent);
+                var moon = FromDTO(bd, parent);            // parent set BEFORE the surface is baked
+                built[bd.id] = moon;
+                if (parent != null) parent.moons.Add(moon);
+                else sys.bodies.Add(moon);                 // orphaned moon — keep it rather than lose it
             }
 
             // Older saves nested moons inside their planet; those come back already linked by FromDTO,

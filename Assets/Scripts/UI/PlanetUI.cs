@@ -194,7 +194,7 @@ public class PlanetUI : MonoBehaviour
         }
         else
         {
-            sb.AppendLine($"Surface: {MapMetrics.SurfW(body.surfaceSize)}x{MapMetrics.SurfH(body.surfaceSize)}");
+            sb.AppendLine($"Surface: {MapMetrics.SurfW(body)}x{MapMetrics.SurfH(body)}");
             string habLabel = Habitability.Label(body.habitability, body.isHabitable);
             string habColor = Habitability.ScoreColorHex(body.habitability);
             sb.AppendLine($"Habitability ({SpeciesManager.Current.name}): <color={habColor}><b>{body.habitability:F0}/100</b> ({habLabel})</color>");

@@ -90,8 +90,8 @@ public static class PlanetTerrainGenerator
         // here as `surfaceSize * 2` while the detail renderer independently used `surfaceSize * 2 * 6`,
         // and the two silently disagreed by a factor of six on each axis — which is exactly why a 1x1
         // building was drawn six terrain pixels wide.
-        int width = MapMetrics.SurfW(body.surfaceSize);
-        int height = MapMetrics.SurfH(body.surfaceSize);
+        int width = MapMetrics.SurfW(body);
+        int height = MapMetrics.SurfH(body);
 
         PlanetSurface surface = new PlanetSurface(width, height);
         for (int x = 0; x < width; x++)
@@ -129,7 +129,20 @@ public static class PlanetTerrainGenerator
 
         // ---- 1) Water bodies -> Ocean (large) or Lake (small enclosed) ----
         var visited = new bool[w, h];
-        int seaMin = Mathf.Max(10, (w * h) / 18);   // a body at least this big is open sea, not a lake
+        // A water body at least this big is open sea rather than an enclosed lake.
+        //
+        // The floor used to be a flat 10 cells, which was fine when the smallest grid was 96x48 (4,608
+        // cells) and is nonsense now that grid size tracks mass: a mass-0.1 moon gets 10x5, where a
+        // 10-cell minimum means a fifth of the entire globe must be one connected body of water before
+        // anything counts as an ocean — so tiny worlds came out with no oceans, and since beaches only
+        // ring Ocean tiles, no coastlines either.
+        //
+        // ONLY the floor changed. The old expression was `Max(10, (w*h)/18)`, and it is worth being
+        // precise about which half of it was doing the work: at the old 96x48 minimum, (w*h)/18 is 256,
+        // so the divisor always won and the flat 10 never bound at all. 1/18 IS the rule, and it stays.
+        // Lowering the floor from 10 to 3 changes behaviour only below ~180 cells — grids that could not
+        // exist before and now can.
+        int seaMin = Mathf.Max(3, (w * h) / 18);
         var stack = new Stack<int>();
         var bodyCells = new List<int>();
 

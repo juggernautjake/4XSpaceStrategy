@@ -16,6 +16,10 @@ public class AssociatedObjectsWindow : MonoBehaviour
     // world simply shows a bigger thumbnail, never bigger tiles.
     const float ThumbTilePx = 2.4f;
 
+    // Hard ceiling on a thumbnail's width in pixels. Below it a bigger world really does show a bigger
+    // thumbnail; past it the tiles shrink instead, so a mass-6 world cannot hand a list row a 1500px box.
+    const float ThumbMaxW = 320f;
+
     GameObject root;
     TMP_Text title;
     RectTransform listRoot;
@@ -75,9 +79,14 @@ public class AssociatedObjectsWindow : MonoBehaviour
             bool isSel = body == selected;
             bool isMoon = body.parentBody != null;
 
-            // Thumbnail dimensions honour the constant-tile rule: box = grid tiles * constant px.
-            int sw = MapMetrics.SurfW(body.surfaceSize), sh = MapMetrics.SurfH(body.surfaceSize);
-            float thumbW = sw * ThumbTilePx, thumbH = sh * ThumbTilePx;
+            // Thumbnail dimensions. These used to be `cells * ThumbTilePx` with no ceiling, which was
+            // already producing 920px-wide rows at the old 384-cell maximum and would produce 1500px rows
+            // now that grid width tracks mass. A list row is a fixed piece of UI — the thumbnail has to
+            // fit the row, not the other way round — so the tile size is derived from a target box and
+            // the grid's aspect, rather than the box being derived from the tile size.
+            int sw = MapMetrics.SurfW(body), sh = MapMetrics.SurfH(body);
+            float scale = Mathf.Min(ThumbTilePx, ThumbMaxW / Mathf.Max(1, sw));
+            float thumbW = sw * scale, thumbH = sh * scale;
 
             var row = UIFactory.Panel(listRoot, "Row", isSel ? new Color(0.16f, 0.26f, 0.36f, 0.98f) : UITheme.RowBg);
             UIFactory.AddLayout(row.gameObject, Mathf.Max(40f, thumbH + 10f));

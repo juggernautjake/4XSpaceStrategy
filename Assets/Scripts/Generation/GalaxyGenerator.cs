@@ -79,13 +79,21 @@ public static class GalaxyGenerator
     // Everything downstream is derived from GalaxyRadius() rather than hardcoded — the camera's framing
     // height, the render-tier boundaries, the proxy sizes and the zoom ceiling — so widening the layout
     // rescales the entire zoom ladder with it and no constant elsewhere needs touching.
-    const float InnerRadius = 900f;
-    const float RadiusStep = 260f;
+    const float InnerRadius = 1400f;
+    const float RadiusStep = 420f;
 
     static Vector3 SpiralPosition(int i, int count)
     {
         // Home sits on the inner ring like everything else, rather than at a hardcoded offset near the
         // core — that offset is what used to put it inside the black hole's own halo.
+        //
+        // The inner ring is 1400 units out and the step is 420, which is wide enough that the spacing
+        // survives every zoom level rather than only reading well at one. Two things squeeze it: the
+        // galactic core's accretion glow, which is drawn large on purpose and grows with the zoom ramp,
+        // and the system proxies themselves, which grow to hold a constant on-screen size. At the old
+        // 900/260 the innermost systems were inside the core's halo at wide zoom and their proxies were
+        // beginning to crowd each other. Pushing the ring out and widening the step keeps clear air in
+        // both directions at every height.
         float angle = i * 2.399963f;                     // golden angle (radians)
         float radius = InnerRadius + i * RadiusStep;
         return new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
@@ -167,17 +175,37 @@ public static class GalaxyGenerator
         // Moons: usually 1, sometimes 2, rarely 3.
         int moonCount = Random.value < 0.6f ? 1 : (Random.value < 0.75f ? 2 : 3);
         planet.moons.Clear();
+
+        // Continue the system's id sequence rather than leaving these at the default 0.
+        //
+        // `id` is not decoration: it is the parent reference in the save file, the cache key for
+        // TectonicsMap, part of the (body, kind) key for SurfaceIndex, and now the seed for a body's grid
+        // size jitter. Three home moons all sharing id 0 — and colliding with whichever body genuinely
+        // holds id 0 — is a real aliasing bug in every one of those, and it has been latent here because
+        // ForceHomeWorld builds its moons by hand instead of going through the generator.
+        int nextId = 0;
+        foreach (var b in home.AllBodies()) nextId = Mathf.Max(nextId, b.id);
+        nextId++;
         // Start clear of the home world's own surface rather than at a fixed 2.6, which a large world
         // (surfaceSize up to 16) came close to touching.
         float moonR = Mathf.Max(0.6f, planet.surfaceSize * 0.08f) * 0.5f + 0.3f + 0.9f;
         for (int m = 0; m < moonCount; m++)
         {
-            var moon = new CelestialBody(CelestialBodyType.Moon) { name = $"Homeworld-{(char)('a' + m)}" };
+            var moon = new CelestialBody(CelestialBodyType.Moon)
+            {
+                id = nextId++,
+                name = $"Homeworld-{(char)('a' + m)}"
+            };
             moon.mass = MassRules.ForMoon(planet.mass);
             moon.surfaceSize = MassRules.SurfaceSize(moon.mass);
             moon.atmosphereThickness = AtmosphereRules.ForBody(moon.type, moon.surfaceSize);
             moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.surfaceSize);
             SeedTerrain(moon);
+            // BEFORE GenerateSurface. The grid size is capped at half the host's (MapMetrics.SurfW), and
+            // that cap reads parentBody — so setting it afterwards meant the moon was BUILT at its
+            // uncapped size and then RENDERED and reported at the capped one. Two grids that disagree,
+            // which is the exact bug MapMetrics exists to prevent.
+            moon.parentBody = planet;
             moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
             OreGenerator.Populate(moon);
             ResourceGenerator.GenerateResources(moon);
@@ -186,7 +214,6 @@ public static class GalaxyGenerator
             moon.spinSpeed = OrbitalMechanics.Spin(moon, Random.Range(0.7f, 1.3f));
             moon.orbitPhase = Random.Range(0f, 360f);
             moon.distanceFromStar = planet.distanceFromStar;
-            moon.parentBody = planet;
             moon.hostStar = home.combinedStar;
             moon.system = home;
             // Claimed by BIRTHRIGHT — ours from the start, and fully surveyed — but NOT yet settled

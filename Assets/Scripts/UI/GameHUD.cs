@@ -46,6 +46,9 @@ public class GameHUD : MonoBehaviour
         BarButton(bar.transform, "Surface", 72, () => PlanetViewWindow.Instance?.Toggle());
         // Pull all the way back to the whole generated map in one click (Home also does it).
         BarButton(bar.transform, "Galaxy", 64, () => CameraController.Instance?.ViewWholeGalaxy());
+        // Camera controls — pan/zoom/spin plus the three named zoom levels. Not Dev-gated: it moves the
+        // camera and nothing else, and it is where the rotate control is actually written down.
+        BarButton(bar.transform, "View", 56, () => ViewEditorWindow.Instance?.Toggle());
         devBtn = BarButton(bar.transform, "Dev: OFF", 78, () => GameMode.Toggle());
 
         Spacer(bar.transform, 10);

@@ -148,6 +148,11 @@ public class SolarSystemGenerator : MonoBehaviour
                 // planet; GeneratesWithBiosphere still returns false for barren/airless/ice/volcanic moons,
                 // so most moons stay sterile. Set before the bake so the first render agrees with the flag.
                 moon.biosphereActive = BiosphereRules.GeneratesWithBiosphere(moon);
+                // BEFORE GenerateSurface. The grid size is capped at half the host's (MapMetrics.SurfW),
+                // and that cap reads parentBody — so setting it afterwards meant the moon was BUILT at its
+                // uncapped size and then RENDERED and reported at the capped one. Two grids that disagree,
+                // which is the exact bug MapMetrics exists to prevent.
+                moon.parentBody = body;
                 moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
                 OreGenerator.Populate(moon);
                 ResourceGenerator.GenerateResources(moon);
@@ -159,7 +164,6 @@ public class SolarSystemGenerator : MonoBehaviour
                 moon.orbitDirection = Random.value < 0.85f ? 1 : -1;
                 moon.inclination = Random.Range(-15f, 15f);
                 moon.eccentricity = Random.Range(0f, 0.2f);
-                moon.parentBody = body;
                 ApplyHabitability(moon);
                 POIGenerator.Populate(moon);
 

@@ -207,7 +207,7 @@ public class GalaxyLOD : MonoBehaviour
         // mid-transition. A small galaxy can frame below MinGalaxyEnter, which would leave Home sitting
         // inside the switch band with a half-faded proxy on top of the still-rendered star — and its
         // collider in front of it, stealing clicks from the star underneath. (With the current layout the
-        // inner ring alone is 900 units out, so the clamp no longer binds in practice; it stays because
+        // inner ring alone is 1400 units out, so the clamp no longer binds in practice; it stays because
         // nothing else guarantees the relationship if the layout is retuned.)
         // The 0.999 keeps the clamp strictly below cFrame rather than landing a float ULP either side of
         // it, so "frame the whole galaxy" is unambiguously in galaxy mode at every galaxy size.
@@ -458,8 +458,8 @@ public class GalaxyLOD : MonoBehaviour
 
         // Deliberately much larger than a system's star — this is the supermassive object the whole
         // galaxy turns around, and at the widest playable zoom it is the anchor the eye goes to. It gets
-        // the FULL article, same builder the system view uses: event horizon, photon ring, both
-        // counter-rotating accretion discs with relativistic beaming, halo and polar jets.
+        // the FULL article, same builder the system view uses: event horizon, one tilted accretion disc
+        // with relativistic beaming, a camera-facing photon ring, and a halo.
         coreProxyBaseSize = size * 3.2f;
         BlackHoleVisual.Build(art, coreProxyBaseSize, withLight: false);
 
@@ -650,7 +650,13 @@ public class GalaxyStarProxy : MonoBehaviour
             // 1.3x the proxy size, not 2.1x. The ring scales with the art, so at wide zoom the old radius
             // swept out past several neighbouring systems and encircled the galactic core — it read as a
             // boundary around a region rather than a marker on one system.
-            SpaceMaterials.MakeRing(art, "OwnerRing", size * 1.3f, rc, size * 0.12f, 72);
+            var ring = SpaceMaterials.MakeRing(art, "OwnerRing", size * 1.3f, rc, size * 0.12f, 72);
+
+            // Hold a minimum on-screen thickness. Which empire holds a system is INFORMATION, and at the
+            // widest zoom these rings were thinning to a shimmering hairline — technically drawn, and
+            // unreadable. The floor is angular, so nothing changes until distance would make it too thin.
+            var minW = ring.gameObject.AddComponent<MinScreenWidthLine>();
+            minW.baseWidth = size * 0.12f;
         }
 
         proxy.fade = root.AddComponent<FadeGroup>();

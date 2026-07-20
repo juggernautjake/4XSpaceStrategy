@@ -130,6 +130,60 @@ public class CameraController : MonoBehaviour
         return Mathf.Clamp(HeightToFrame(r) * DeepZoomFactor, 200f, maxHeight);
     }
 
+    // ---- Named zoom levels -----------------------------------------------------------------------
+    //
+    // The three rungs of the ladder, as things the player can ask for by name rather than by scrolling
+    // until it looks right. Each targets the height GalaxyLOD actually switches at, so "System" lands
+    // safely inside system mode and "Galaxy" safely inside galaxy mode rather than on a boundary.
+
+    /// Frame the selected body (or the focused system's first world) close up.
+    public void ViewPlanet()
+    {
+        var body = PlanetUI.Selected;
+        if (body == null)
+        {
+            var sys = GameManager.Instance != null ? GameManager.Instance.FocusedSystem : null;
+            if (sys != null && sys.bodies != null && sys.bodies.Count > 0) body = sys.bodies[0];
+        }
+        if (body == null || body.visualObject == null) { ViewSystem(); return; }
+
+        FocusAndZoom(body.visualObject.transform, body.surfaceSize, false);
+    }
+
+    /// Frame the focused system: its star(s) and every planet in it.
+    public void ViewSystem()
+    {
+        var sys = GameManager.Instance != null ? GameManager.Instance.FocusedSystem : null;
+        if (sys == null) { ViewWholeGalaxy(); return; }
+
+        // Reach of the outermost body, so the whole system fits rather than just the inner planets.
+        float reach = 12f;
+        if (sys.bodies != null)
+            foreach (var b in sys.bodies)
+            {
+                if (b == null) continue;
+                reach = Mathf.Max(reach, b.orbitRadius + OrbitSafety.SystemReach(b));
+            }
+
+        ClearFocus();
+        float want = HeightToFrame(reach);
+
+        // Hold it below the system/galaxy boundary, or asking for "System" would hand you the galaxy
+        // overview — the systems are laid out far enough apart that a large one can frame above it.
+        want = Mathf.Min(want, SystemModeCeiling());
+
+        JumpTo(sys.galaxyPosition, want);
+    }
+
+    /// The highest height that is still system mode, with a margin off the boundary.
+    float SystemModeCeiling()
+    {
+        float frame = HeightToFrame(GalaxyRadius());
+        // Mirrors GalaxyLOD's GalaxyEnterFrac (0.40). Kept as a fraction of the same framing height so
+        // the two move together if the galaxy is resized.
+        return Mathf.Max(50f, frame * 0.40f * 0.85f);
+    }
+
     /// Pull all the way back so the entire generated galaxy is on screen at once.
     public void ViewWholeGalaxy()
     {
@@ -253,6 +307,10 @@ public class CameraController : MonoBehaviour
         // so a selected planet pans just like a selected star.
         bool canPan = !following && !menuOpen && !planetViewOpen;
         if (canPan) HandlePanning();
+
+        // Rotation is allowed even while following a body — spinning around what you are watching is the
+        // main reason to want it. Blocked only by a modal menu and the full-screen Planet View.
+        if (!menuOpen && !planetViewOpen) HandleRotationInput();
 
         // Wheel-zoom the WORLD only when the wheel isn't wanted elsewhere: not while a modal menu is open,
         // not while the full-screen Planet View is up (its own map owns the wheel there), and — the fix for
@@ -464,7 +522,13 @@ public class CameraController : MonoBehaviour
         ClearAnchor();
 
         float heightFactor = Mathf.Clamp(transform.position.y / 20f, 1f, 200f);
-        Vector3 move = new Vector3(h, 0, v) * panSpeed * heightFactor * Time.unscaledDeltaTime;
+
+        // Rotated into the camera's own bearing, so W is always "away from the viewer" whichever way the
+        // view has been spun. Panning in raw world axes was correct only while yaw was locked at 0; the
+        // moment the player rotates, unrotated WASD sends the camera sideways relative to what they see,
+        // which reads as broken controls rather than as a different heading.
+        Vector3 move = Quaternion.Euler(0f, yaw, 0f) * new Vector3(h, 0f, v);
+        move *= panSpeed * heightFactor * Time.unscaledDeltaTime;
         transform.Translate(move, Space.World);
     }
 
@@ -682,7 +746,111 @@ public class CameraController : MonoBehaviour
 
     private void KeepCameraAngle()
     {
-        // Keep a nice 55 degree top-down angle
-        transform.rotation = Quaternion.Euler(Pitch, transform.eulerAngles.y, 0);
+        // Fixed top-down pitch, free yaw. See the Yaw region below.
+        transform.rotation = Quaternion.Euler(Pitch, yaw, 0);
+    }
+
+    // ============================================================================================
+    // YAW — spinning the view around.
+    //
+    // The camera was locked to a single compass bearing: KeepCameraAngle rebuilt the rotation every frame
+    // from `transform.eulerAngles.y`, which nothing ever wrote, so it was always 0. Yaw is now real state.
+    //
+    // PITCH STAYS FIXED at 55 degrees, deliberately. It is a `const` that HeightToFrame and UpdateClipPlanes
+    // both solve geometry against, and every render-tier boundary in GalaxyLOD is derived from
+    // HeightToFrame — so making pitch adjustable would move the framing height, and with it the zoom
+    // thresholds, every time the player tilted the view. Yaw has no such coupling: spinning about the
+    // world's up axis leaves every one of those distances unchanged.
+    // ============================================================================================
+
+    float yaw;
+
+    /// Current bearing in degrees. Setting it takes effect on the next frame's KeepCameraAngle.
+    public float Yaw
+    {
+        get => yaw;
+        set { yaw = Mathf.Repeat(value, 360f); KeepCameraAngle(); }
+    }
+
+    /// Spin the view, ORBITING the point currently at screen centre rather than the camera's own position.
+    ///
+    /// This distinction is the whole feature. Rotating in place pivots about the camera, and because the
+    /// camera looks down at 55 degrees it sits `h / tan(55)` ≈ 0.7*h to one side of what it is actually
+    /// looking at — so at galaxy zoom a 90-degree turn swings the thing you were studying thousands of
+    /// units across the screen, and a half-turn throws the whole galaxy out of frame. Orbiting the
+    /// look-at point keeps the subject nailed to the middle, which is what "spin the view around" means.
+    public void RotateBy(float degrees)
+    {
+        if (Mathf.Abs(degrees) < 0.0001f) return;
+
+        Vector3 pivot = GroundAtScreenCentre();
+        Vector3 offset = transform.position - pivot;
+        // Rotate the camera's offset from the pivot about world up, then set the bearing to match.
+        offset = Quaternion.AngleAxis(degrees, Vector3.up) * offset;
+        transform.position = pivot + offset;
+
+        // A yaw change invalidates a zoom anchor solved for the previous bearing — otherwise the eased
+        // X/Z keeps pulling toward a point that no longer means what it did.
+        ClearAnchor();
+        Yaw = yaw + degrees;
+    }
+
+    public void ResetRotation() => RotateBy(-yaw);
+
+    /// The point on the y=0 plane under the middle of the screen — what the camera is looking at.
+    Vector3 GroundAtScreenCentre()
+    {
+        Vector3 p = transform.position;
+        Vector3 f = transform.forward;
+
+        // Guard a level or upward-facing camera; with the pitch fixed at 55 this cannot happen, but the
+        // division is the kind that turns into a NaN position if it ever does.
+        if (f.y > -0.01f) return new Vector3(p.x, 0f, p.z);
+
+        float t = p.y / -f.y;
+        return p + f * t;
+    }
+
+    /// One notch of zoom, for UI buttons. Positive pulls out, negative pushes in — the same proportional
+    /// step the wheel uses, and clamped by the same floor and ceiling, so a button press and a wheel click
+    /// are the same action.
+    public void NudgeZoom(int notches)
+    {
+        if (notches == 0) return;
+        // Same as panning and rotating: a deliberate camera move overrides wherever the last cursor-
+        // anchored zoom was still easing toward, or X/Z keeps drifting to a stale anchor point.
+        ClearAnchor();
+        float factor = Mathf.Exp(notches * 0.35f);
+        targetHeight = Mathf.Clamp(targetHeight * factor, ZoomFloor(), ZoomCeiling());
+        UpdateClipPlanes();
+    }
+
+    /// Degrees per second while a rotate button is held, and per 100px of middle-drag.
+    public const float RotateSpeed = 90f;
+    const float RotateDragPerPixel = 0.35f;
+
+    bool dragRotating;
+    Vector3 lastDragPos;
+
+    // Middle-mouse drag spins the view. Middle button because left is selection and right is already
+    // taken by structure rotation in the Planet View — this is the one button with nothing on it.
+    void HandleRotationInput()
+    {
+        if (Input.GetMouseButtonDown(2))
+        {
+            dragRotating = true;
+            lastDragPos = Input.mousePosition;
+        }
+        else if (Input.GetMouseButtonUp(2))
+        {
+            dragRotating = false;
+        }
+
+        if (dragRotating)
+        {
+            Vector3 d = Input.mousePosition - lastDragPos;
+            lastDragPos = Input.mousePosition;
+            if (Mathf.Abs(d.x) > 0.01f) RotateBy(d.x * RotateDragPerPixel);
+        }
     }
 }

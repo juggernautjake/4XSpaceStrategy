@@ -107,6 +107,24 @@ The enlarged stars hold a constant on-screen size (~1.75% of screen height) from
 way to the ceiling, and never overlap: the closest two systems are 1339 units apart and a star is 226
 units across at its largest.
 
+- [x] **13 — Grid size, visual size, black hole, view editor (follow-up).**
+      - Surface grids now derive from MASS: width ≈ 100 × mass, height always half. Mass 0.5 → 50×25,
+        mass 2 → 200×100. The old formula clamped to `[96, 384]`, and the *lower* clamp was doing the
+        damage — every body under mass ~2.7 got the same 96×48 grid, so a moon was routinely issued the
+        same map as the planet it orbits. Moons are additionally capped at half their host's dimensions.
+      - Visual size also comes from mass now (`MassRules.VisualDiameter`), via a square root so the small
+        end stays readable. It used to run through `surfaceSize`, which rounds and clamps at 3 — that is
+        why every moon under mass ~2.3 rendered identically.
+      - Black hole simplified back to ONE accretion disc. The second counter-tilted layer read as separate
+        ring sets sliding through each other, and the polar jets read as a bar across the screen.
+      - Empire rings hold a minimum on-screen thickness so they stay legible at the widest zoom.
+      - Systems pushed further out and further apart: inner ring 1400 (was 900), step 420 (was 260).
+      - **New View Editor** (HUD "View", available in normal play): Planet / System / Galaxy zoom levels,
+        zoom nudge, and rotate. The camera now has YAW — middle-drag or the panel's arrows spin the view,
+        orbiting what is at screen centre rather than pivoting about the camera. Pitch stays fixed at 55°
+        deliberately: it is what `HeightToFrame` solves against, and every render-tier boundary derives
+        from that, so a tiltable pitch would move the zoom thresholds as you tilted.
+
 ## Things worth knowing
 
 - **Nothing here is compiled.** There is no Unity in this environment. Every file has now been through
@@ -129,6 +147,17 @@ units across at its largest.
 - **Dead code removed.** `PlanetUI.cs` still called `StarInfoPanel.Instance?.Hide()` — a harmless no-op
   since `StarInfoPanel` is never instantiated anymore (`StarOverview` replaced it), but a stale reference
   to a retired panel. Deleted.
+- **[!] The grid top end is capped at 640 wide, not the 1000×500 you asked for at mass 10.** The mapping
+  is exact up to mass 4 (400×200) and then tapers, so a mass-13 gas giant lands ~640×320 rather than
+  1300×650. Not a taste call — `TerrainTile` is a *class*, so each cell is a separate heap object
+  (~48 bytes), surfaces are generated eagerly for every body, and four things fall over past ~400:
+  ore is saved per-cell (`GameStateSerializer.cs:145`), so a literal mass-10 world is ~25k saved ore
+  cells per body through JsonUtility; `SurfaceBuildManager.FindSpot` is O((2r+1)²) per ring and runs for
+  every body on every load; `CityGrowth.FindSettlementSpot`'s `tries > 4000` guard only breaks its inner
+  loop; and the Survey/Power overlays are full-grid passes, the Power one repainting 4×/second.
+  Raising `MapMetrics.KneeWidth` / `MaxWidth` is a one-line change once those four are fixed — they are
+  the only thing holding the ceiling down. Even at 640 this is roughly a 10× rise in typical grid size,
+  so watch generation and load times.
 - Several fixes from the earlier runs traded one behaviour for another and are worth a look in play: the
   galaxy-view pick spheres now grow with zoom but cap at 2.5×, and the empire ring was reduced from 2.1×
   to 1.3× the proxy size because at wide zoom the old radius swept past neighbouring systems.

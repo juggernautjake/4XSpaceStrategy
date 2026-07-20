@@ -142,6 +142,57 @@ public static class SpaceMaterials
     }
 }
 
+// Keeps a LineRenderer's width from collapsing to a hairline as the camera pulls away.
+//
+// A LineRenderer's width is in WORLD units, so its on-screen thickness falls off with distance like
+// everything else. That is right for scenery and wrong for an INDICATOR: the coloured ring marking which
+// empire holds a system is information, and at the galaxy's widest zoom it was thinning to a single
+// shimmering pixel — present, technically, and unreadable.
+//
+// This holds a minimum ANGULAR width instead: the ring is never allowed to be thinner than
+// `minScreenFraction` of the viewport height, whatever the distance. Close up the authored world width
+// wins and nothing changes; far out this takes over and the ring stays legible.
+[DisallowMultipleComponent]
+public class MinScreenWidthLine : MonoBehaviour
+{
+    /// The authored world width, used whenever it is already thick enough on screen.
+    public float baseWidth = 0.1f;
+
+    /// Floor on apparent thickness, as a fraction of viewport height. ~0.0022 is about 2.4px at 1080p.
+    public float minScreenFraction = 0.0022f;
+
+    LineRenderer lr;
+    Camera cam;
+
+    void Awake()
+    {
+        lr = GetComponent<LineRenderer>();
+        if (baseWidth <= 0f && lr != null) baseWidth = lr.startWidth;
+    }
+
+    void LateUpdate()
+    {
+        if (lr == null) return;
+        if (cam == null) { cam = Camera.main; if (cam == null) return; }
+
+        float dist = Vector3.Distance(cam.transform.position, transform.position);
+        if (dist <= 0.001f) return;
+
+        // World size that subtends `minScreenFraction` of the viewport at this distance. The vertical
+        // FOV gives the full world height visible at `dist`; a fraction of that is the floor.
+        float worldPerViewport = 2f * dist * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+        float floorWorld = worldPerViewport * minScreenFraction;
+
+        // LineRenderer width is multiplied by the transform's scale, and these rings hang off a parent
+        // the zoom ramp scales — so a width computed in world units has to be divided back out, or the
+        // floor would be applied twice over and the ring would balloon as you pull away.
+        float s = Mathf.Max(0.0001f, transform.lossyScale.x);
+        float floorLocal = floorWorld / s;
+
+        lr.startWidth = lr.endWidth = Mathf.Max(baseWidth, floorLocal);
+    }
+}
+
 // Fades a whole subtree by alpha, as one unit.
 //
 // Captures every Renderer and LineRenderer under itself once, remembers each one's authored colour, and

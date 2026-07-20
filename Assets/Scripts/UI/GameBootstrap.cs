@@ -74,6 +74,7 @@ public static class GameBootstrap
         // and never pops up. Left as dead code for now.
         //   ColonyWindow.Create(canvas.transform);
         SystemSummaryWindow.Create(canvas.transform);
+        ViewEditorWindow.Create(canvas.transform);
         GalaxyLOD.Create(canvas.transform);
         BoxSelectController.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);
