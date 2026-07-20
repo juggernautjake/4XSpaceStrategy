@@ -506,7 +506,9 @@ public static class PlanetTerrainGenerator
             case CelestialBodyType.GasGiant:       return GasGiant(lat, elev, moist);
             case CelestialBodyType.VolcanicPlanet: return Volcanic(elev, temp, ridge, lat);
             case CelestialBodyType.IcePlanet:      return Ice(elev, moist, temp, ridge, lat);
-            case CelestialBodyType.OceanPlanet:    return OceanWorld(elev, temp, lat);
+            // `moist` is the jitter field: independent of latitude, so it can actually break up a
+            // latitude threshold. See PolarIceEdge.
+            case CelestialBodyType.OceanPlanet:    return OceanWorld(elev, temp, lat, moist);
             case CelestialBodyType.BarrenPlanet:   return Barren(elev, ridge);
             case CelestialBodyType.Moon:
             case CelestialBodyType.Asteroid:       return Airless(elev, temp, ridge);
@@ -551,10 +553,18 @@ public static class PlanetTerrainGenerator
         if (ridge > 0.8f)  return TerrainType.Mountains;
         if (elev > 0.72f)  return frozen ? TerrainType.Glacier : TerrainType.Highlands;
         if (moist > 0.72f) return frozen ? TerrainType.CrystalField : TerrainType.Lake;
-        // Equatorial belt, perturbed for the same reason the polar edge is: a bare `lat < 0.25f` draws a
-        // ruled horizontal line. It is already broken up by the elevation test, so it needs less help
-        // than the ice edge — but on flat ground the two straight edges still showed.
-        if (lat < 0.19f + Mathf.Clamp01(temp) * 0.12f && elev > 0.5f)
+        // The equatorial snow belt: near the equator, high ground takes fresh snow (or, once thawed,
+        // beach) rather than the tundra that covers the rest of the world.
+        //
+        // Perturbed with MOISTURE, not temperature. An earlier attempt used `temp` and did nothing
+        // visible, because `temp` is itself mostly a function of latitude — so using it to jitter a
+        // latitude threshold is very nearly circular, and the boundary stayed a smooth horizontal line.
+        // On an ice world it is worse than useless: temp is near zero everywhere, so the jitter term
+        // collapsed to a constant and the edge was exactly as ruled as before.
+        //
+        // `moist` is an independent noise field. It has no latitude term at all, so it actually breaks
+        // the line up — and tying a snow belt to where the air is wet reads correctly besides.
+        if (lat < EquatorSnowEdge(moist) && elev > 0.5f)
             return frozen ? TerrainType.Snow : TerrainType.Beach;
         // The bulk mid-elevation band is genuine ice SHEET, not a frozen sea — only the low-elevation
         // band above is actually water once melted (elev<0.3, handled above). Melting the rest into
@@ -563,15 +573,22 @@ public static class PlanetTerrainGenerator
         return frozen ? TerrainType.Ice : TerrainType.Tundra;
     }
 
-    // Where the polar ice reaches on a given column, as a latitude.
+    // Where a latitude belt ends, as a latitude — perturbed by an INDEPENDENT noise field.
     //
-    // Centred on the old fixed 0.85 so the ice cap is the same size on average as before; the whole
-    // effect of `temp` is to make the EDGE wander by roughly +/-0.07 of latitude instead of being a
-    // ruled line. Shared by the classifiers that draw a cap, so they all ripple together rather than one
-    // being ragged and its neighbour straight.
-    static float PolarIceEdge(float temp) => 0.78f + Mathf.Clamp01(temp) * 0.14f;
+    // The independence is the whole point. Any value that carries a latitude term of its own (`temp`
+    // does: it is mostly (1-lat)) produces a jitter that is itself smooth in latitude, so the boundary
+    // it draws is still a smooth horizontal line — a ruled edge moved slightly, not a ragged one. The
+    // caller must pass a field with no latitude component: moisture or ridge, not temperature.
+    //
+    // Both are centred on the old fixed thresholds, so belts are the same size on average as before and
+    // only their EDGES changed. Shared so every classifier drawing a belt ripples the same way rather
+    // than one being ragged and its neighbour ruled.
+    const float EdgeJitter = 0.18f;
 
-    static TerrainType OceanWorld(float elev, float temp, float lat)
+    static float PolarIceEdge(float noise) => 0.85f - EdgeJitter * 0.5f + Mathf.Clamp01(noise) * EdgeJitter;
+    static float EquatorSnowEdge(float noise) => 0.25f - EdgeJitter * 0.5f + Mathf.Clamp01(noise) * EdgeJitter;
+
+    static TerrainType OceanWorld(float elev, float temp, float lat, float noise)
     {
         if (elev > 0.80f) return TerrainType.Mountains;
         if (elev > 0.70f) return TerrainType.Island;
@@ -587,7 +604,7 @@ public static class PlanetTerrainGenerator
         // `temp` already carries the heat-noise field, so using it to move the threshold makes the
         // boundary wander with local climate at no extra sampling cost. A colder patch freezes further
         // toward the equator, a warmer one holds open water closer to the pole.
-        if (lat > PolarIceEdge(temp)) return TerrainType.FrozenSea;
+        if (lat > PolarIceEdge(noise)) return TerrainType.FrozenSea;
         if (temp < 0.25f) return TerrainType.FrozenSea;   // a cooled ocean world freezes over, pole to pole
         if (elev < 0.40f && temp > 0.6f) return TerrainType.Reef;
         return TerrainType.Ocean;
