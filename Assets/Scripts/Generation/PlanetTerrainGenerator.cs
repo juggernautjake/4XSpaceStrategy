@@ -553,19 +553,21 @@ public static class PlanetTerrainGenerator
         if (ridge > 0.8f)  return TerrainType.Mountains;
         if (elev > 0.72f)  return frozen ? TerrainType.Glacier : TerrainType.Highlands;
         if (moist > 0.72f) return frozen ? TerrainType.CrystalField : TerrainType.Lake;
-        // The equatorial snow belt: near the equator, high ground takes fresh snow (or, once thawed,
-        // beach) rather than the tundra that covers the rest of the world.
+        // THE EQUATOR IS THE MELT ZONE. This used to be the other way round — high ground near the
+        // equator took fresh Snow while the mid-latitudes stayed Tundra — which drew a white band across
+        // the middle of every ice world and had the climate backwards: the equator is the warmest part of
+        // any world, so on a frozen one it is where the ice gives way FIRST, not last.
         //
-        // Perturbed with MOISTURE, not temperature. An earlier attempt used `temp` and did nothing
-        // visible, because `temp` is itself mostly a function of latitude — so using it to jitter a
-        // latitude threshold is very nearly circular, and the boundary stayed a smooth horizontal line.
-        // On an ice world it is worse than useless: temp is near zero everywhere, so the jitter term
-        // collapsed to a constant and the edge was exactly as ruled as before.
-        //
-        // `moist` is an independent noise field. It has no latitude term at all, so it actually breaks
-        // the line up — and tying a snow belt to where the air is wet reads correctly besides.
-        if (lat < EquatorSnowEdge(moist) && elev > 0.5f)
-            return frozen ? TerrainType.Snow : TerrainType.Beach;
+        // Flipped, the belt reads as what it is: a thawed band around the middle of a frozen world.
+        // Grassland is only nominal here — ClimateCoherence re-judges it against the tile's actual °C
+        // immediately after, so it survives only where the world genuinely is above freezing and reverts
+        // to frozen ground otherwise. One rule decides what "warm enough for plants" means, not two.
+        if (lat < EquatorMeltEdge(moist))
+            return frozen ? TerrainType.Tundra : TerrainType.Grassland;
+
+        // ...and the deep snow belongs at the POLES, on ground high enough to hold it.
+        if (lat > PolarSnowEdge(moist) && elev > 0.5f)
+            return TerrainType.Snow;
         // The bulk mid-elevation band is genuine ice SHEET, not a frozen sea — only the low-elevation
         // band above is actually water once melted (elev<0.3, handled above). Melting the rest into
         // Tundra keeps "how much of the map is water" tied to elevation the same way every other
@@ -585,8 +587,18 @@ public static class PlanetTerrainGenerator
     // than one being ragged and its neighbour ruled.
     const float EdgeJitter = 0.18f;
 
-    static float PolarIceEdge(float noise) => 0.85f - EdgeJitter * 0.5f + Mathf.Clamp01(noise) * EdgeJitter;
-    static float EquatorSnowEdge(float noise) => 0.25f - EdgeJitter * 0.5f + Mathf.Clamp01(noise) * EdgeJitter;
+    static float Belt(float centre, float noise)
+        => centre - EdgeJitter * 0.5f + Mathf.Clamp01(noise) * EdgeJitter;
+
+    /// Where open water gives way to permanent sea ice, as a latitude.
+    static float PolarIceEdge(float noise) => Belt(0.85f, noise);
+
+    /// How far from the equator an ice world's thawed band reaches.
+    static float EquatorMeltEdge(float noise) => Belt(0.25f, noise);
+
+    /// Where an ice world's high ground starts holding deep snow. Well inside the ice cap, so the snow
+    /// reads as the coldest part of an already-frozen world rather than as its own separate band.
+    static float PolarSnowEdge(float noise) => Belt(0.62f, noise);
 
     static TerrainType OceanWorld(float elev, float temp, float lat, float noise)
     {
