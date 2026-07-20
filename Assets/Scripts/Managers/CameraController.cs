@@ -376,8 +376,23 @@ public class CameraController : MonoBehaviour
     // falling back to scale, and only then to the hint.
     public void FocusAndZoom(Transform target, float objectSizeHint, bool follow)
     {
+        // Already watching this exact body? Then this is a re-focus, not a new one — keep the distance the
+        // player has settled on rather than re-framing them.
+        //
+        // Re-framing is what made editing a planet's orbit appear to zoom the camera: anything that
+        // re-focused the same body (a notification, a rebuilt panel, a second press of Focus) recomputed
+        // the framing height from the body's current reach and eased there, so the view jumped even though
+        // nothing about the subject had changed. Re-centring is always wanted; re-zooming almost never is.
+        bool reFocus = following && followTarget == target && target != null;
+
         followTarget = target;
         following = follow;
+
+        if (reFocus)
+        {
+            FocusOn(target.position);
+            return;
+        }
 
         float radius = WorldRadius(target, objectSizeHint);
         // For a PLANET, frame its whole neighbourhood — the planet AND its moons / orbiting stations —

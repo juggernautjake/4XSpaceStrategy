@@ -78,8 +78,16 @@ public static class MassRules
     //
     // Moons use a smaller coefficient than planets, so a moon reads as a satellite rather than a twin even
     // when its mass is close to its host's.
-    public const float PlanetDiameterPerRootMass = 0.75f;
-    public const float MoonDiameterPerRootMass = 0.55f;
+    // Reduced from 0.75 / 0.55.
+    //
+    // These feed OrbitSafety, which reserves each body a non-overlapping BAND of orbital radius sized
+    // from its rendered disc — so making bodies bigger pushes every orbit outward, and the system stops
+    // fitting on screen. The switch to mass-derived sizing roughly doubled a typical mass-2 planet (the
+    // old formula floored it at 0.6; sqrt-based gave 1.06), and the orbits moved out to match. These
+    // values put a typical world back near its old size while keeping the continuous scaling that makes
+    // small moons distinguishable.
+    public const float PlanetDiameterPerRootMass = 0.48f;
+    public const float MoonDiameterPerRootMass = 0.34f;
 
     public static float VisualDiameter(float mass, bool isMoon)
     {

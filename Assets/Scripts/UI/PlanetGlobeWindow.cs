@@ -109,8 +109,12 @@ public class PlanetGlobeWindow : MonoBehaviour
         UIFactory.VerticalLayout(content, 6);
 
         // The render target.
+        // 330, not 400. The window's content area is ~480px tall and a VerticalLayoutGroup SHRINKS its
+        // children when their preferred heights overflow it — so a 400px viewport plus a button plus a
+        // hint line left the button squashed to 3px, unclickable and with its label clipped. The viewport
+        // is the flexible one here, so it is the one that gives ground.
         var holder = UIFactory.NewUI(content, "ViewHolder");
-        UIFactory.AddLayout(holder, 400f);
+        UIFactory.AddLayout(holder, 330f, 160f);
         view = holder.AddComponent<RawImage>();
         view.color = Color.white;
 
@@ -119,8 +123,14 @@ public class PlanetGlobeWindow : MonoBehaviour
         var input = holder.AddComponent<GlobeInput>();
         input.owner = this;
 
-        UIFactory.Button(content, "Reset view", ResetView, 28);
-        UIFactory.WrapText(content, "Drag to spin · wheel to zoom", UITheme.SmallSize, UITheme.SubText);
+        // Explicit MINIMUM heights, so the layout group cannot squash these to nothing when space is
+        // tight. A preferred height alone is only a request; a minimum is the floor a control needs to
+        // stay clickable and its label readable.
+        var resetBtn = UIFactory.Button(content, "Reset view", ResetView, 28);
+        UIFactory.AddLayout(resetBtn.gameObject, 28f, 28f);
+
+        var hint = UIFactory.WrapText(content, "Drag to spin · wheel to zoom", UITheme.SmallSize, UITheme.SubText);
+        UIFactory.AddLayout(hint.gameObject, 20f, 20f);
 
         BuildStage();
         root.SetActive(false);

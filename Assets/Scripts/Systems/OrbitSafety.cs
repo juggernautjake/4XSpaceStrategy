@@ -33,8 +33,12 @@ public static class OrbitSafety
     // ---- Clearances ----
     public const float MoonSurfaceGap = 0.9f;   // air between a planet's surface and its innermost moon
     public const float MoonGap = 1.4f;          // air between one moon's disc and the next
-    public const float LaneGap = 6f;            // air between one planet's band and the next
-    public const float StarClearance = 8f;      // air between the star and the innermost planet's band
+    // Tightened from 6 / 8. These are pure padding between reserved bands, and they compound: every lane
+    // gap pushes each subsequent planet further out, so an eight-planet system spent 48 units on nothing
+    // but air. Enough to keep orbit rings visibly separate, small enough that a whole system fits on
+    // screen at once — which is the thing that had stopped being true.
+    public const float LaneGap = 3.2f;          // air between one planet's band and the next
+    public const float StarClearance = 4.5f;    // air between the star and the innermost planet's band
 
     /// Rendered diameter of a body, exactly as SystemVisualizer scales it.
     public static float Scale(CelestialBody b)
