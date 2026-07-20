@@ -14,8 +14,41 @@ public class SolarSystemGenerator : MonoBehaviour
 
     int _idCounter;
 
+    /// The finished system, written by GenerateSystemStepped.
+    ///
+    /// A field rather than a return value because the generator is an ITERATOR now: an IEnumerator cannot
+    /// return a result, so the one place the system is built has to hand it back some other way.
+    public List<CelestialBody> lastSystem;
+
+    /// Generate a whole system in one call, by draining the stepped version — which is the single
+    /// implementation, so the two can never diverge.
+    ///
+    /// Currently unused: every path now runs through GalaxyGenerator.AddSystemStepped, including the R
+    /// debug key. Kept because "generate one system, synchronously" is the obvious thing an external
+    /// caller reaches for, and it is one line to keep correct.
     public List<CelestialBody> GenerateSystem()
     {
+        var it = GenerateSystemStepped();
+        while (it.MoveNext()) { }
+        return lastSystem;
+    }
+
+    /// The same generation, yielding after each world's terrain is built.
+    ///
+    /// WHY THIS EXISTS. Terrain generation is the expensive part of making a galaxy — a mass-6 planet is
+    /// 600x300 cells at roughly twenty noise lookups each — and it all used to happen inside one
+    /// synchronous call. That meant the loading screen got ONE rendered frame per star system, so its bar
+    /// stepped and its animated dots appeared frozen: not because the animation was wrong, but because
+    /// there was nothing to draw them on. Yielding per BODY turns each system into a handful of frames
+    /// instead of one, which is what actually makes the screen move.
+    ///
+    /// The yields are placed immediately after each GenerateSurface, because that is where the time goes.
+    public System.Collections.IEnumerator GenerateSystemStepped()
+    {
+        // Cleared up front: if this throws before the tail, lastSystem would otherwise still hold the
+        // PREVIOUS system, and a caller that ignored the exception would hand the same List to two
+        // StarSystemData — LinkBodies then repoints every body.system to the second.
+        lastSystem = null;
         _idCounter = 0;
         List<CelestialBody> system = new();
 
@@ -79,6 +112,7 @@ public class SolarSystemGenerator : MonoBehaviour
             // world would still come out sterile (the flag the classifier reads would still be false).
             body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body);
             body.surface = PlanetTerrainGenerator.GenerateSurface(body);      // regenerate with correct heat
+            yield return null;   // a world's terrain is the expensive step — let the screen breathe after each
             // Ore has to be populated against THIS surface, not the provisional one MakeBody baked —
             // that one is already gone (a fresh grid, no tile carryover). Pre-existing bug, found while
             // reviewing an unrelated change: every top-level planet was generating with zero ore, because
@@ -154,6 +188,7 @@ public class SolarSystemGenerator : MonoBehaviour
                 // which is the exact bug MapMetrics exists to prevent.
                 moon.parentBody = body;
                 moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
+                yield return null;
                 OreGenerator.Populate(moon);
                 ResourceGenerator.GenerateResources(moon);
 
@@ -202,7 +237,7 @@ public class SolarSystemGenerator : MonoBehaviour
         if (!OrbitSafety.Validate(system, out string problem))
             Debug.LogWarning($"[OrbitSafety] {currentSystemName}: {problem}");
 
-        return system;
+        lastSystem = system;
     }
 
     // ---- Orbit spacing ----

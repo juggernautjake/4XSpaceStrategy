@@ -47,14 +47,30 @@ public class GameManager : MonoBehaviour
     ///
     /// Systems are ~70% of the budget because they are ~70% of the work: each one rolls a star, lays out
     /// its worlds, and generates a full terrain grid for every one of them.
+    bool generating;
+
     public void GenerateGalaxyAsync(int systemCount, int avgPlanets, System.Action onDone = null)
-        => StartCoroutine(GenerateGalaxyRoutine(systemCount, avgPlanets, onDone));
+    {
+        // One at a time. SolarSystemGenerator keeps its working state on the component itself —
+        // _idCounter, stars, currentStar, currentSystemName, isBlackHole — and Finalise reads several of
+        // those AFTER the per-body yields. Before generation was stepped a system was built atomically
+        // inside one frame, so two overlapping runs could not interleave; now they can, and the result is
+        // corruption rather than a clean failure: bodies typed against another system's star, colliding
+        // ids, and systems finalised with the wrong name. Nothing enforced this before — the menu merely
+        // made a second click hard to reach, which is not the same thing.
+        if (generating) return;
+        generating = true;
+        StartCoroutine(GenerateGalaxyRoutine(systemCount, avgPlanets, onDone));
+    }
 
     System.Collections.IEnumerator GenerateGalaxyRoutine(int systemCount, int avgPlanets, System.Action onDone)
     {
         if (solarSystemGenerator == null)
         {
             Debug.LogError("Assign SolarSystemGenerator in Inspector!");
+            // Clear the guard on the way out, or one bad-config attempt latches it and every later
+            // Start Game silently does nothing.
+            generating = false;
             onDone?.Invoke();
             yield break;
         }
@@ -85,7 +101,11 @@ public class GameManager : MonoBehaviour
                            $"Forming star system  {i + 1} / {count}", LoadingScreen.Subject.Star);
             yield return null;
 
-            GalaxyGenerator.AddSystem(galaxy, solarSystemGenerator, i, count);
+            // Stepped: this yields once per WORLD, not once per system, so a system with six planets and
+            // their moons renders a dozen frames instead of one. That is what lets the bar move and the
+            // dots animate during the part of the load that actually takes the time.
+            var step = GalaxyGenerator.AddSystemStepped(galaxy, solarSystemGenerator, i, count);
+            while (step.MoveNext()) yield return step.Current;
 
             screen?.Report(0.03f + SystemsShare * ((i + 1) / (float)count),
                            $"Worlds of system {i + 1}", LoadingScreen.Subject.Planet);
@@ -122,6 +142,7 @@ public class GameManager : MonoBehaviour
         // rather than as completion.
         yield return new WaitForSecondsRealtime(0.35f);
         screen?.Close();
+        generating = false;
         onDone?.Invoke();
     }
 

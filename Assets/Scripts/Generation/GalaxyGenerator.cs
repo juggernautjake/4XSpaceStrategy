@@ -46,7 +46,23 @@ public static class GalaxyGenerator
     /// loading bar exists: it is called once per system so the caller can yield between them.
     public static void AddSystem(Galaxy galaxy, SolarSystemGenerator gen, int i, int systemCount)
     {
-        var bodies = gen.GenerateSystem();
+        var it = AddSystemStepped(galaxy, gen, i, systemCount);
+        while (it.MoveNext()) { }
+    }
+
+    /// The same, yielding after each world so a loading screen gets frames to animate in. One
+    /// implementation: AddSystem above just drains this.
+    public static System.Collections.IEnumerator AddSystemStepped(
+        Galaxy galaxy, SolarSystemGenerator gen, int i, int systemCount)
+    {
+        var inner = gen.GenerateSystemStepped();
+        while (inner.MoveNext()) yield return inner.Current;
+        Finalise(galaxy, gen, gen.lastSystem, i, systemCount);
+    }
+
+    static void Finalise(Galaxy galaxy, SolarSystemGenerator gen, List<CelestialBody> bodies,
+                         int i, int systemCount)
+    {
         var sys = new StarSystemData
         {
             name = gen.currentSystemName,
