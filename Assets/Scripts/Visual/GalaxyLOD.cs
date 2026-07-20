@@ -624,13 +624,37 @@ public class GalaxyStarProxy : MonoBehaviour
                     float a = i * Mathf.PI * 2f / n;
                     off = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * size * 0.9f;
                 }
+                float dia = size * (n > 1 ? 0.8f : 1f);
                 sphere.transform.localPosition = off;
-                sphere.transform.localScale = Vector3.one * size * (n > 1 ? 0.8f : 1f);
+                sphere.transform.localScale = Vector3.one * dia;
+
+                // THE SAME BRIGHTNESS CURVE THE REAL STAR USES.
+                //
+                // These were plain LDR unlit spheres tinted with sun.color, and that is why they looked
+                // dull and washed-out next to the same star in system view. A real star gets
+                // `_EmissionColor = color * EmissionStrength(s)` — up to 3.5x, i.e. HDR — so bloom and the
+                // ACES tonemapper pick it up and it reads as a light source. A flat colour under 1.0
+                // reads as a painted ball, and no amount of picking a nicer colour fixes that, because
+                // the difference is luminance range rather than hue.
+                //
+                // An unlit material writes its base colour straight into the HDR buffer, so pushing the
+                // colour above 1 is all it takes to get the same treatment without needing the URP Unlit
+                // shader to expose an emission slot.
+                float emK = StarDatabase.EmissionStrength(sun);
+                Color hot = new Color(c.r * emK, c.g * emK, c.b * emK, 1f);
 
                 var rend = sphere.GetComponent<Renderer>();
                 // Fadeable: the tier crossfade dissolves these in and out, and an opaque material would
-                // ignore the alpha entirely and pop instead.
-                if (rend != null) rend.material = SpaceMaterials.Unlit(c, fadeable: true);
+                // ignore the alpha entirely and pop instead. FadeGroup scales only alpha, so the HDR
+                // colour survives a fade intact.
+                if (rend != null) rend.material = SpaceMaterials.Unlit(hot, fadeable: true);
+
+                // A corona, so the star still glows when it is small on screen and whatever bloom is
+                // configured has stopped helping. Additive, so it brightens the sky rather than sitting
+                // on it as a disc.
+                var glow = SpaceMaterials.Glow(art, "Glow" + i, dia * 3.2f,
+                                               new Color(c.r, c.g, c.b, 0.55f));
+                glow.transform.localPosition = off;
             }
         }
 

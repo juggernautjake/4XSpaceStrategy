@@ -92,6 +92,54 @@ public static class SpaceMaterials
         return m;
     }
 
+    /// A soft round falloff, for glows and coronae. Cached — one texture serves every star in the galaxy.
+    static Texture2D softDot;
+
+    public static Texture2D SoftDot()
+    {
+        if (softDot != null) return softDot;
+        const int N = 64;
+        var t = new Texture2D(N, N, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+        var px = new Color32[N * N];
+        for (int y = 0; y < N; y++)
+            for (int x = 0; x < N; x++)
+            {
+                float u = (x / (float)(N - 1)) * 2f - 1f;
+                float v = (y / (float)(N - 1)) * 2f - 1f;
+                float r = Mathf.Sqrt(u * u + v * v);
+                // Hot core with a wide soft skirt: a plain linear falloff reads as a fuzzy ball, this
+                // reads as a light source.
+                float a = Mathf.Clamp01(1f - r);
+                a = a * a * (0.35f + 0.65f * a);
+                px[y * N + x] = new Color(1f, 1f, 1f, a);
+            }
+        t.SetPixels32(px);
+        t.Apply();
+        softDot = t;
+        return t;
+    }
+
+    /// A camera-facing additive glow quad — the corona around a star.
+    ///
+    /// This exists because post-processing bloom cannot be relied on to do the whole job. Bloom only
+    /// blooms what is already over its threshold, it can be disabled, and its radius does not scale with
+    /// how far away a thing is — so a star that is bright and glowing up close goes flat and hard-edged
+    /// once it is small on screen. A real quad in the scene is bright at every distance.
+    public static GameObject Glow(Transform parent, string name, float diameter, Color color)
+    {
+        var go = Primitive(PrimitiveType.Quad, parent, name);
+        go.transform.localScale = Vector3.one * diameter;
+        var r = go.GetComponent<Renderer>();
+        if (r != null)
+        {
+            var m = Additive(color);
+            m.mainTexture = SoftDot();
+            r.material = m;
+        }
+        go.AddComponent<FaceCamera>();
+        return go;
+    }
+
     /// A flat looped ring in the XZ plane — the galaxy and every orbit are viewed top-down.
     public static LineRenderer MakeRing(Transform parent, string name, float radius, Color color,
                                         float width, int seg = 72, bool additive = false)
@@ -139,6 +187,22 @@ public static class SpaceMaterials
             r.receiveShadows = false;
         }
         return go;
+    }
+}
+
+// Turns a flat quad to face the camera. Without it a glow authored in the XZ plane is seen at the game's
+// fixed 55-degree pitch and reads as a squashed ellipse rather than a round corona.
+[DisallowMultipleComponent]
+public class FaceCamera : MonoBehaviour
+{
+    Camera cam;
+
+    void LateUpdate()
+    {
+        if (cam == null) { cam = Camera.main; if (cam == null) return; }
+        // Match the camera's own orientation rather than looking AT it: a screen-aligned billboard keeps
+        // every glow in the field identically shaped, where look-at would skew the ones near the edges.
+        transform.rotation = cam.transform.rotation;
     }
 }
 
