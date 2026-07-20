@@ -162,6 +162,56 @@ public class LoadingScreen : MonoBehaviour
         Report(t, stage);
     }
 
+    /// Show the REAL home star rather than the generic placeholder.
+    ///
+    /// Called once the home star has been decided (GalaxyGenerator.Begin), which is why that roll was
+    /// moved out of ForceHomeWorld: ForceHomeWorld runs at the very end, so while the loading screen is
+    /// up there was no answer to "which star does the player's home have". Now there is, and the star on
+    /// screen is the one the player will actually be orbiting.
+    public void SetHomeStar(StarData star)
+    {
+        // Takes the STAR, not its type. StarDatabase.Get re-rolls colour, temperature and size on every
+        // call, so looking it up here from a StarType would have produced a different-looking star than
+        // the one the player ends up orbiting — the same spectral class and nothing more.
+        if (star == null) return;
+        homeStar = star;
+
+
+        if (subjectMats != null)
+        {
+            // Free the material this replaces. The screen is a singleton that outlives any one game, so
+            // overwriting across repeated generations without destroying would leak steadily.
+            var old = subjectMats[(int)Subject.Star];
+            if (old != null) Destroy(old);
+
+            // Same brightness curve the real star uses in the system view, kept in gamut because the
+            // preview renders to an LDR target composited after post — HDR here clamps rather than blooms.
+            var c = homeStar.color;
+            float k = Mathf.Clamp(StarDatabase.EmissionStrength(homeStar) * 0.55f, 0.35f, 1f);
+            subjectMats[(int)Subject.Star] = SpaceMaterials.Unlit(
+                new Color(Mathf.Min(1f, c.r + k * 0.4f), Mathf.Min(1f, c.g + k * 0.3f),
+                          Mathf.Min(1f, c.b + k * 0.2f)));
+            if (subject == Subject.Star && previewRend != null)
+            {
+                previewRend.sharedMaterial = subjectMats[(int)Subject.Star];
+                ApplyStarScale();   // the new star has its own size; don't keep the previous one's
+            }
+        }
+    }
+
+    /// Size the preview to the real star's own visual scale, so a dim K dwarf reads visibly smaller than
+    /// a bright G — the same distinction the system view makes.
+    void ApplyStarScale()
+    {
+        if (previewBody == null) return;
+        float s = 1.15f;
+        if (homeStar != null) s *= Mathf.Clamp(homeStar.visualScale / 2f, 0.75f, 1.35f);
+        previewBody.localScale = Vector3.one * PreviewScale * s;
+    }
+
+    StarData homeStar;
+
+
     Material[] subjectMats;
 
     /// Build one material per subject, once.
@@ -219,6 +269,8 @@ public class LoadingScreen : MonoBehaviour
         float scale = s == Subject.Star ? 1.15f
                     : s == Subject.Moon ? 0.62f
                     : s == Subject.Galaxy ? 1.3f : 1f;
+
+        if (s == Subject.Star) { ApplyStarScale(); return; }
         previewBody.localScale = Vector3.one * PreviewScale * scale;
     }
 

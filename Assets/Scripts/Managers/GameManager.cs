@@ -91,6 +91,11 @@ public class GameManager : MonoBehaviour
         screen?.Report(0.03f, "Seeding " + galaxy.name, LoadingScreen.Subject.Galaxy);
         yield return null;
 
+        // The home star itself was rolled in Begin — the whole reason that roll moved out of
+        // ForceHomeWorld, which runs last. So the preview can show the real star from the very first
+        // frame; only its NAME has to wait for system 0 to be built.
+        screen?.SetHomeStar(galaxy.homeStar);
+
         const float SystemsShare = 0.70f;
         for (int i = 0; i < count; i++)
         {
@@ -107,8 +112,16 @@ public class GameManager : MonoBehaviour
             var step = GalaxyGenerator.AddSystemStepped(galaxy, solarSystemGenerator, i, count);
             while (step.MoveNext()) yield return step.Current;
 
+            // The home system's star gets NAMED on screen. Passing it as the stage string rather than
+            // having SetHomeStar write the caption is deliberate: Report always sets the caption, so a
+            // caption written anywhere else is overwritten by the very next report — which is exactly
+            // what happened the first time this was wired up, and the name never appeared at all.
+            string caption = (i == 0 && galaxy.systems.Count > 0)
+                ? $"{galaxy.systems[0].name} — your home star"
+                : $"Worlds of system {i + 1}";
+
             screen?.Report(0.03f + SystemsShare * ((i + 1) / (float)count),
-                           $"Worlds of system {i + 1}", LoadingScreen.Subject.Planet);
+                           caption, LoadingScreen.Subject.Planet);
             // Give the screen a couple of frames to actually animate in.
             //
             // One `yield return null` per system means one rendered frame per system, and a bar cannot
@@ -117,6 +130,14 @@ public class GameManager : MonoBehaviour
             // few milliseconds against work measured in hundreds.
             yield return null;
             yield return null;
+
+            // Hold on the home star long enough to actually read its name.
+            //
+            // Without this it survives about two frames: the next iteration reports "Forming star
+            // system 2" before its own yield, so on a twelve-system galaxy the one caption the player is
+            // meant to remember is on screen for ~30ms. A beat here is the difference between naming
+            // their home star and technically having displayed it.
+            if (i == 0 && count > 1) yield return new WaitForSecondsRealtime(1.1f);
         }
 
         screen?.Report(0.78f, "Settling the home world", LoadingScreen.Subject.Planet);

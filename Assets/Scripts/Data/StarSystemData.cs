@@ -43,6 +43,21 @@ public class Galaxy
     // hash of the name would work until someone renamed it, and then the sky would silently change.
     public int visualSeed;
 
+    // The home system's star, DECIDED UP FRONT.
+    //
+    // ForceHomeWorld used to roll this itself, and ForceHomeWorld runs at the very end of generation —
+    // so for the whole time the loading screen is running, "which star does the player's home have"
+    // had no answer yet. Rolling it in Begin and having ForceHomeWorld consume it means what the loading
+    // screen shows and what the player lands in are the same star by construction rather than by two
+    // rolls happening to agree.
+    // The INSTANCE, not just the class.
+    //
+    // StarDatabase.Get is not a lookup — it re-rolls temperature, per-channel colour and visual scale on
+    // every call. So storing only the StarType and calling Get twice would give the loading screen and
+    // the actual home system two different-looking stars that merely share a spectral class, which is
+    // exactly the coincidence this field exists to eliminate. Roll once, hand the same object to both.
+    public StarData homeStar;
+
     public List<StarSystemData> systems = new List<StarSystemData>();
     public int homeIndex;
     public StarData center;                 // central supermassive object (visual)

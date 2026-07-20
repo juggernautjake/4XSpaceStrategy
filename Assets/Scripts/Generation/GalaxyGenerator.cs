@@ -39,6 +39,10 @@ public static class GalaxyGenerator
         // named place rather than a generic black hole floating in a generic galaxy.
         galaxy.center.name = $"{galaxy.name} Core";
         galaxy.centerPosition = Vector3.zero;
+
+        // The home sun, rolled here so the loading screen can show the real one while the galaxy builds.
+        // A pleasant G or K either way — the cradle needs a stable habitable zone.
+        galaxy.homeStar = StarDatabase.Get(Random.value < 0.5f ? StarType.G : StarType.K);
         return galaxy;
     }
 
@@ -85,7 +89,7 @@ public static class GalaxyGenerator
         home.isHome = true;
         home.galaxyPosition = SpiralPosition(0, systemCount);
 
-        ForceHomeWorld(home, homeSpecies);
+        ForceHomeWorld(home, homeSpecies, galaxy.homeStar);
         AssignOwnership(galaxy);
         Recompute(galaxy);
 
@@ -146,11 +150,12 @@ public static class GalaxyGenerator
     }
 
     // Ensures a >=85%-habitable home world for the species, with 1-3 moons, all player-owned.
-    static void ForceHomeWorld(StarSystemData home, Species species)
+    static void ForceHomeWorld(StarSystemData home, Species species, StarData homeStar)
     {
         // A pleasant single sun so the home always has a stable habitable zone.
-        var starType = Random.value < 0.5f ? StarType.G : StarType.K;
-        home.stars = new List<StarData> { StarDatabase.Get(starType) };
+        // Type comes from the plan rolled in Begin, NOT from a fresh roll here — that is what makes the
+        // star the loading screen showed and the star the player actually gets the same one.
+        home.stars = new List<StarData> { homeStar ?? StarDatabase.Get(StarType.G) };
         home.stars[0].name = home.name;
         home.isBlackHole = false;
         home.combinedStar = home.stars[0];
