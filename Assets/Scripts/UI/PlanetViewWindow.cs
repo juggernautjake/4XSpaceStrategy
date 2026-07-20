@@ -148,6 +148,27 @@ public class PlanetViewWindow : MonoBehaviour
 
     // Build-mode state.
     SurfaceBuildingType? selected;      // null = nothing picked up
+
+    /// True while the player is carrying an Electrical Engineering piece and has not placed it yet.
+    ///
+    /// Siting a plant, node or capacitor is entirely a question of what the existing grid already reaches
+    /// — an unpowered mine two tiles out of range looks identical to a powered one on the plain map. So
+    /// the power overlay comes up on its own for as long as the piece is in hand. The player never has to
+    /// know the overlay exists, which is the point: the information appears when it is what you need.
+    ///
+    /// "In hand" outlasts a single placement, deliberately. DoPlace does not clear `selected` — you keep
+    /// the piece so you can lay a run of nodes without re-picking it each time — so the overlay stays up
+    /// across the whole run and clears when you actually put the piece down (Esc, or leaving the Build
+    /// tab). Clearing it on the first placement would flash the overlay off and on for every node in a
+    /// chain, which is the case where it is most wanted.
+    bool CarryingPowerPiece =>
+        selected.HasValue &&
+        SurfaceBuildingDatabase.Get(selected.Value).category == SurfaceBuildingCategory.Electrical;
+
+    /// The power overlay is up — either switched on from the Survey tab, or automatically because a
+    /// power piece is in hand on the Build tab.
+    bool PowerOverlayActive =>
+        (tab == Tab.Survey && showPowerOverlay) || (tab == Tab.Build && CarryingPowerPiece);
     int rotation;
     Vector2Int hoverCell = new Vector2Int(-1, -1);
     bool hoverValid;
@@ -814,7 +835,7 @@ public class PlanetViewWindow : MonoBehaviour
         // economy moves rather than only when the window rebuilds. A few times a second is plenty: it's
         // following a number that drifts, and repainting up to 70,000 texels every frame to do it would
         // be a real cost for something the eye can't see happening anyway.
-        if (tab == Tab.Survey && showPowerOverlay && body.surface != null)
+        if (PowerOverlayActive && body.surface != null)
         {
             powerRepaintIn -= Time.unscaledDeltaTime;
             if (powerRepaintIn <= 0f) { powerRepaintIn = 0.25f; RefreshPowerOverlay(); }
@@ -2607,7 +2628,7 @@ public class PlanetViewWindow : MonoBehaviour
             return;
         }
 
-        if (tab == Tab.Survey && showPowerOverlay && body.surface != null)
+        if (PowerOverlayActive && body.surface != null)
         {
             overlayImage.gameObject.SetActive(true);
             RefreshPowerOverlay();

@@ -75,6 +75,7 @@ public static class GameBootstrap
         //   ColonyWindow.Create(canvas.transform);
         SystemSummaryWindow.Create(canvas.transform);
         ViewEditorWindow.Create(canvas.transform);
+        PlanetGlobeWindow.Create(canvas.transform);
         GalaxyLOD.Create(canvas.transform);
         BoxSelectController.Create(canvas.transform);
         SettingsWindow.Create(canvas.transform);

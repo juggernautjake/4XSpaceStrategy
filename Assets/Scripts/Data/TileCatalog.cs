@@ -34,7 +34,11 @@ public static class TileCatalog
             "Low channels", "Above freezing (0°C+)", "Wet", "Life-bearing worlds"),
         E(TerrainType.Reef, "Water", "Coral shallows in warm, sunlit ocean.",
             "Shallow (just below sea level)", "Warm ocean", "—", "Ocean worlds"),
-        E(TerrainType.Island, "Water", "Land poking above a world-spanning ocean.",
+        // "Coast", not "Water". An island is dry ground — PlanetTerrainGenerator.IsWater excludes it, you
+        // can build on it, and it takes a beach ring like any other shoreline. Filing it under Water made
+        // the catalogue contradict the engine, and the catalogue is what a player reads to learn the
+        // rules. Its own description says "land poking above" the ocean.
+        E(TerrainType.Island, "Coast", "Land poking above a world-spanning ocean.",
             "Rises above the sea", "Temperate", "—", "Ocean worlds"),
         E(TerrainType.Beach, "Coast", "Sandy shore where soft lowland meets the open ocean.",
             "At the waterline", "Above freezing", "—", "Any world with oceans"),

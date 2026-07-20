@@ -44,7 +44,9 @@ public static class SurfaceTextureRenderer
         var tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
         {
             filterMode = FilterMode.Point,   // hard cell edges: each texel reads as one buildable tile
-            wrapMode = TextureWrapMode.Clamp
+            // Repeat, not Clamp: the map is a cylinder, so u=1 must blend into u=0. Under Clamp the edge
+            // texel blends with itself and the join shows as a faint line on the 3D globe.
+            wrapMode = TextureWrapMode.Repeat
         };
 
         var pixels = new Color[w * h];
@@ -84,7 +86,9 @@ public static class SurfaceTextureRenderer
         var tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
         {
             filterMode = FilterMode.Point,   // crisp "pixel map" look
-            wrapMode = TextureWrapMode.Clamp
+            // Repeat, not Clamp: the map is a cylinder, so u=1 must blend into u=0. Under Clamp the edge
+            // texel blends with itself and the join shows as a faint line on the 3D globe.
+            wrapMode = TextureWrapMode.Repeat
         };
 
         var p = body.terrainParams; // same params as the grid -> both views always match

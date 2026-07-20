@@ -49,6 +49,9 @@ public class GameHUD : MonoBehaviour
         // Camera controls — pan/zoom/spin plus the three named zoom levels. Not Dev-gated: it moves the
         // camera and nothing else, and it is where the rotate control is actually written down.
         BarButton(bar.transform, "View", 56, () => ViewEditorWindow.Instance?.Toggle());
+        // Free-look 3D globe of the selected body — spin it to any angle, including the poles and the far
+        // side, which the fixed-pitch world camera can never reach.
+        BarButton(bar.transform, "Globe", 60, () => PlanetGlobeWindow.Instance?.Toggle());
         devBtn = BarButton(bar.transform, "Dev: OFF", 78, () => GameMode.Toggle());
 
         Spacer(bar.transform, 10);

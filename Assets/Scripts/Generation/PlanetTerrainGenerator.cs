@@ -232,25 +232,53 @@ public static class PlanetTerrainGenerator
         float seed = body.terrainSeed;
         float freq = Mathf.Max(1f, body.continentFrequency) * p.scale;
 
-        // 2:1 map aspect -> stretch u so continents stay roughly square.
-        float fx = u * freq * 2f;
+        // 2:1 map aspect -> stretch u so continents stay roughly square. The u term is folded into WrapU
+        // (which needs the span, not the coordinate), so only the v term is precomputed here.
         float fy = v * freq;
 
-        float elevation = FBm(fx + seed, fy + seed * 1.3f, octaves) * p.elevation;
-        float moisture  = FBm(fx * 1.3f + seed + 31f, fy * 1.3f + seed + 17f, octaves) * p.moisture;
-        float ridge     = FBm(fx * 2.2f + seed + 91f, fy * 2.2f + seed + 53f, octaves) * p.ridge;
+        // Every longitude field goes through WrapU so the map JOINS: the value at u=1 is identical to the
+        // value at u=0, by construction rather than by luck. Wrapped on a globe the two edges are the same
+        // meridian, so anything sampled on a flat plane leaves a hard seam there — a continent chopped in
+        // half, a coastline that stops dead, a climate band that jumps. See WrapU.
+        float elevation = WrapU(u, freq * 2f,        1f,   fy,        seed,       seed * 1.3f, octaves) * p.elevation;
+        float moisture  = WrapU(u, freq * 2f,        1.3f, fy * 1.3f, seed + 31f, seed + 17f,  octaves) * p.moisture;
+        float ridge     = WrapU(u, freq * 2f,        2.2f, fy * 2.2f, seed + 91f, seed + 53f,  octaves) * p.ridge;
 
         float lat = Mathf.Abs(v - 0.5f) * 2f;                 // 0 equator, 1 pole
-        float heatNoise = FBm(fx * 0.9f + seed + 11f, fy * 0.9f + seed + 7f, 2);
+        float heatNoise = WrapU(u, freq * 2f,        0.9f, fy * 0.9f, seed + 11f, seed + 7f,   2);
         // Altitude cools the surface (atmospheric lapse rate): ground high above sea level runs colder than
         // lowland at the same latitude, so mountains and highlands cap with snow and ice even in a warm
         // band, and the coldest peaks freeze outright. Only ground ABOVE the mid-elevation is cooled, so
         // seas and lowlands are untouched. `altCool` is reused for the °C reading below so the map and the
         // temperature readout agree on how cold the heights are.
         float altCool = Mathf.Max(0f, elevation - 0.6f);
-        float temperature = Mathf.Clamp01(((1f - lat) * 0.75f + heatNoise * 0.45f) * p.heat - altCool * 0.55f);
 
-        float fine = Mathf.PerlinNoise(fx * 6f + seed, fy * 6f + seed);
+        // THE FLAT LATITUDE BAND BUG.
+        //
+        // This used to be `Clamp01(((1-lat)*0.75 + heatNoise*0.45) * p.heat - altCool*0.55)`, and the
+        // bracket peaks at 0.75 + 0.45 = 1.20 at the equator. Multiply by any p.heat >= 1 and the result
+        // passes 1 well before the equator, so Clamp01 pinned an entire latitude band to exactly 1.0 —
+        // noise, altitude and all. Inside that band every tile got an identical temperature, so the
+        // classifier returned one terrain for the whole strip: a perfectly rectangular horizontal bar
+        // across the map, with hard straight edges at the latitudes where the expression crossed 1.
+        //
+        // The fix is to make saturation impossible rather than to tune around it. The latitude+noise term
+        // is normalised to 0..1 BY CONSTRUCTION, and heat is applied as a power curve instead of a
+        // multiplier. A power curve is strictly monotonic on 0..1: it warms or cools the whole world and
+        // maps the endpoints to themselves, but it can never map two different inputs to the same output,
+        // so a flat band cannot form at any heat setting.
+        const float LatWeight = 0.75f;
+        const float NoiseWeight = 0.45f;
+        float band = ((1f - lat) * LatWeight + heatNoise * NoiseWeight) / (LatWeight + NoiseWeight);
+        band = Mathf.Clamp01(band - altCool * 0.55f);
+
+        // heat > 1 -> exponent < 1 -> curve bends up (warmer); heat < 1 -> exponent > 1 -> cooler.
+        float heatExp = Mathf.Clamp(1f / Mathf.Max(0.05f, p.heat), 0.2f, 5f);
+        float temperature = Mathf.Pow(band, heatExp);
+
+        // Wrapped too. This is the highest-frequency field, so an unwrapped one shows as a thin line of
+        // mismatched per-tile detail down the join even when the continents themselves line up.
+        float fine = WrapU(u, freq * 2f, 6f, fy * 6f, seed, seed, 1);
 
         // A directed Planetary Remodelling project spreads a NEW world type across the old one. Tiles
         // whose low-frequency mask value has been overtaken by the transition progress (body.remodelT,
@@ -261,7 +289,7 @@ public static class PlanetTerrainGenerator
         CelestialBodyType classifyType = body.type;
         if (body.remodelToType >= 0 && body.remodelT > 0.001f && body.remodelToType != (int)body.type)
         {
-            float mask = FBm(fx * 0.6f + seed + 211f, fy * 0.6f + seed + 173f, 3);
+            float mask = WrapU(u, freq * 2f, 0.6f, fy * 0.6f, seed + 211f, seed + 173f, 3);
             if (mask < body.remodelT) classifyType = (CelestialBodyType)body.remodelToType;
         }
 
@@ -407,6 +435,54 @@ public static class PlanetTerrainGenerator
             }
         }
         return t;
+    }
+
+    // FBm that TILES SEAMLESSLY along u — the map's east/west join.
+    //
+    // A planet map is a cylinder: u = 0 and u = 1 are the same meridian. Perlin noise sampled on a plane
+    // has no idea about that, so the two edges carry unrelated values and wrapping the map onto a globe
+    // leaves a visible seam — a continent sliced in half, a coastline that stops mid-ocean, a desert that
+    // becomes tundra across one pixel.
+    //
+    // The fix is the standard tileable-noise construction: sample the field twice, one period apart, and
+    // cross-fade between them using u itself as the blend. At u = 0 the result is exactly sample A; at
+    // u = 1 the second sample has slid onto A's starting coordinate, so the result is exactly the same
+    // value. Seamless by construction, not by tuning.
+    //
+    //     u = 0  ->  lerp(A(0),   B(-P),  0) = A(0)
+    //     u = 1  ->  lerp(A(P),   B(0),   1) = B(0) = A(0)
+    //
+    // The cost is two Perlin lookups per octave instead of one, and slightly softer contrast near the
+    // middle of the map where the two samples are blended most evenly. The alternative — writing a real
+    // 3D noise and sampling the actual cylinder — has no contrast loss but means hand-rolling gradient
+    // noise, since Unity only ships a 2D PerlinNoise.
+    //
+    // `mult` is the per-field frequency multiplier (elevation 1, ridge 2.2, fine detail 6 …). It has to be
+    // folded into the PERIOD as well as the coordinate, or a field sampled at 2.2x the base frequency
+    // would tile every 1/2.2 of the map and produce a repeating pattern rather than one seamless wrap.
+    static float WrapU(float u, float baseSpanX, float mult, float y, float offX, float offY, int octaves)
+    {
+        float period = baseSpanX * mult;
+        float x = u * period;
+        float a = FBm(x + offX, y + offY, octaves);
+        float b = FBm(x - period + offX, y + offY, octaves);
+
+        // VARIANCE-PRESERVING blend, not a plain Lerp.
+        //
+        // A straight Lerp(a, b, u) is seamless but flattens the middle of every map. At u = 0.5 it
+        // averages two independent noise fields, and averaging halves the variance while leaving the mean
+        // at ~0.5 — so a vertical band down the centre meridian of every world gets pushed toward the
+        // middle of the range. That is not a subtle contrast loss: deep ocean and high mountain are
+        // threshold tests on these fields, so that band would systematically grow fewer of both. A
+        // longitude-dependent bias in what terrain exists is far worse than the seam being fixed.
+        //
+        // Weighting each sample by w/sqrt(w1^2 + w2^2) instead of by w keeps the combined deviation
+        // constant across the whole map. The endpoints are untouched — at u = 0 and u = 1 one weight is
+        // 1 and the other 0, so the seam is still exact.
+        float w2 = u, w1 = 1f - u;
+        float k = Mathf.Sqrt(w1 * w1 + w2 * w2);
+        if (k < 0.0001f) return a;
+        return 0.5f + ((a - 0.5f) * w1 + (b - 0.5f) * w2) / k;
     }
 
     static float FBm(float x, float y, int octaves)
