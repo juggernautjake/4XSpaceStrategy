@@ -76,7 +76,8 @@ public static class GameBootstrap
         SystemSummaryWindow.Create(canvas.transform);
         ViewEditorWindow.Create(canvas.transform);
         PlanetGlobeWindow.Create(canvas.transform);
-        // Created last so it is the last sibling — it has to cover every other window.
+        // Sibling order here does not matter — the menus are created after this. Open() calls
+        // SetAsLastSibling(), which is what actually puts it in front of everything.
         LoadingScreen.Create(canvas.transform);
         GalaxyLOD.Create(canvas.transform);
         BoxSelectController.Create(canvas.transform);

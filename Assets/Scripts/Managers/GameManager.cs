@@ -71,7 +71,7 @@ public class GameManager : MonoBehaviour
         AncientClues.Reset();
 
         int count = GalaxyGenerator.ClampSystems(systemCount);
-        var galaxy = GalaxyGenerator.Begin(solarSystemGenerator, systemCount, avgPlanets);
+        var galaxy = GalaxyGenerator.Begin(solarSystemGenerator, avgPlanets);
         screen?.Report(0.03f, "Seeding " + galaxy.name);
         yield return null;
 
@@ -81,6 +81,13 @@ public class GameManager : MonoBehaviour
             GalaxyGenerator.AddSystem(galaxy, solarSystemGenerator, i, count);
             screen?.Report(0.03f + SystemsShare * ((i + 1) / (float)count),
                            $"Forming star systems  {i + 1} / {count}");
+            // Give the screen a couple of frames to actually animate in.
+            //
+            // One `yield return null` per system means one rendered frame per system, and a bar cannot
+            // look smooth when it is only drawn eight times across the whole load — the fade on the dots
+            // and the easing on the fill both need frames to happen in. A handful of idle frames costs a
+            // few milliseconds against work measured in hundreds.
+            yield return null;
             yield return null;
         }
 

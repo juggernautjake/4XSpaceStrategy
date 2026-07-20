@@ -13,7 +13,7 @@ public static class GalaxyGenerator
     public static Galaxy Generate(SolarSystemGenerator gen, int systemCount, int avgPlanets, Species homeSpecies)
     {
         int count = ClampSystems(systemCount);
-        var galaxy = Begin(gen, systemCount, avgPlanets);
+        var galaxy = Begin(gen, avgPlanets);
         for (int i = 0; i < count; i++) AddSystem(galaxy, gen, i, count);
         Finish(galaxy, homeSpecies, count);
         return galaxy;
@@ -22,7 +22,7 @@ public static class GalaxyGenerator
     public static int ClampSystems(int systemCount) => Mathf.Clamp(systemCount, 1, 12);
 
     /// Phase 1 — the empty galaxy: its name, its seed, its core.
-    public static Galaxy Begin(SolarSystemGenerator gen, int systemCount, int avgPlanets)
+    public static Galaxy Begin(SolarSystemGenerator gen, int avgPlanets)
     {
         avgPlanets = Mathf.Clamp(avgPlanets, 1, 8);
         gen.minBodies = Mathf.Max(1, avgPlanets - 1);

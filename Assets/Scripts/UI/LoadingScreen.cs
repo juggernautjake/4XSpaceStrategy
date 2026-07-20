@@ -21,8 +21,22 @@ public class LoadingScreen : MonoBehaviour
     RectTransform barTrack;
 
     string headlineBase = "Generating the universe";
+
     float shown;          // eased display value, so the bar glides rather than jumping between steps
-    float target;
+    float goal;           // where `shown` is heading right now (target, plus any creep)
+    float target;         // the last progress actually reported
+    float prevTarget;     // the one before it — gives the size of a typical step
+    float creepCeiling;   // how far the goal may drift ahead of `target` between reports
+
+    // How fast the fill converges on its target, as a rate constant rather than units-per-second.
+    // Exponential smoothing is used instead of MoveTowards because the frames during generation are
+    // wildly uneven — a frame that spans a whole star system can be 300ms — and a fixed rate either
+    // crawls on long frames or overshoots on short ones. exp(-k*dt) is correct at any dt.
+    const float FillSmoothing = 6f;
+
+    // While waiting for the next report the fill creeps on at this fraction of the last step per second,
+    // so it never looks frozen during a long one. Bounded by creepCeiling.
+    const float CreepRate = 0.35f;
 
     const float BarWidth = 520f;
     const float BarHeight = 14f;
@@ -98,7 +112,7 @@ public class LoadingScreen : MonoBehaviour
     {
         if (root == null) return;
         headlineBase = string.IsNullOrEmpty(headlineText) ? "Generating the universe" : headlineText;
-        shown = 0f; target = 0f;
+        shown = 0f; goal = 0f; target = 0f; prevTarget = 0f; creepCeiling = 0f;
         SetStage("");
         root.SetActive(true);
         // In front of every window that may already be open behind it.
@@ -111,7 +125,20 @@ public class LoadingScreen : MonoBehaviour
     /// Report progress. `t` is 0..1; `stage` is what is happening right now.
     public void Report(float t, string stage)
     {
-        target = Mathf.Clamp01(t);
+        float next = Mathf.Clamp01(t);
+        if (next > target)
+        {
+            prevTarget = target;
+            target = next;
+            // Allow the fill to drift most of the way toward where the NEXT step will land, but never
+            // past it. Without this the bar reaches each milestone and then sits dead still for the whole
+            // of the following step — which is exactly the part that takes longest and most needs to look
+            // like something is happening.
+            float step = Mathf.Max(0.01f, target - prevTarget);
+            // Never below where the goal has already crept to. A step smaller than the last one would
+            // otherwise lower the ceiling under the current goal and the bar would visibly run backwards.
+            creepCeiling = Mathf.Max(goal, Mathf.Min(1f, target + step * 0.8f));
+        }
         if (stage != null) SetStage(stage);
     }
 
@@ -124,15 +151,54 @@ public class LoadingScreen : MonoBehaviour
     {
         if (!IsOpen) return;
 
-        // The dots. Three of them, cycling — the one thing here that is purely decorative, and the reason
-        // the screen reads as "working" rather than "hung" during a step that takes a while.
-        int dots = Mathf.FloorToInt(Time.unscaledTime * 2.5f) % 4;
-        if (headline != null) headline.text = headlineBase + new string('.', dots);
+        float dt = Time.unscaledDeltaTime;
 
-        // Ease toward the reported value. Generation reports in discrete jumps (one per system), and a bar
-        // that teleports between them reads as broken even though the numbers are honest. Never eases
-        // backwards, and never past what was actually reported.
-        shown = Mathf.Min(target, Mathf.MoveTowards(shown, target, Time.unscaledDeltaTime * 1.4f));
+        // ---- The dots ----
+        //
+        // Always three of them, FADING rather than being appended one at a time. Appending changes the
+        // string's width every cycle, so a centred headline shifts left and right as it animates — read
+        // as jitter, not motion. Three dots at varying alpha keeps the text metrics fixed and the wave
+        // continuous instead of stepping through four discrete states.
+        //
+        // Driven purely by unscaled TIME, so its pace is completely independent of how fast the bar is
+        // moving, of timeScale, and of whether any progress has been reported at all.
+        if (headline != null)
+        {
+            var sb = new System.Text.StringBuilder(headlineBase.Length + 40);
+            sb.Append(headlineBase);
+            for (int i = 0; i < 3; i++)
+            {
+                // Each dot trails the one before it by a third of a cycle.
+                float phase = Time.unscaledTime * 2.2f - i * 0.55f;
+                float wave = (Mathf.Sin(phase) + 1f) * 0.5f;          // 0..1, smooth
+                int a = Mathf.RoundToInt(Mathf.Lerp(45f, 255f, wave));
+                // The '>' is not optional. Without it TMP opens tag mode at the first '<', scans for a
+                // closing '>' that only appears at the very end, parses the whole run as one malformed
+                // tag and renders it as literal text — the raw markup on screen instead of three dots.
+                sb.Append("<alpha=#").Append(a.ToString("X2")).Append(">.");
+            }
+            sb.Append("<alpha=#FF>");   // don't leak the fade into anything appended later
+            headline.text = sb.ToString();
+        }
+
+        // ---- The fill ----
+        //
+        // Exponential smoothing, which is correct at any frame time. Generation frames are wildly uneven
+        // — one frame can span an entire star system — and a fixed units-per-second rate either crawls
+        // through the long ones or overshoots the short ones.
+        // The goal creeps from the last reported value toward the ceiling; `shown` chases the goal.
+        // Two separate quantities on purpose — folding the creep into `shown` makes the smoothing chase a
+        // target derived from its own output, which either stalls or runs away depending on the rates.
+        float creepSpeed = Mathf.Max(0f, creepCeiling - target) * CreepRate;
+        goal = Mathf.Min(creepCeiling, Mathf.Max(goal, target) + creepSpeed * dt);
+
+        shown = Mathf.Lerp(shown, goal, 1f - Mathf.Exp(-FillSmoothing * dt));
+
+        // Snap the last sliver. Exponential smoothing approaches its goal but never arrives, so at the
+        // end of a load the bar sits a few pixels short and the label reads 99% for the whole hold before
+        // the screen closes — the one number a loading bar must get right.
+        if (goal - shown < 0.004f) shown = goal;
+
         Apply(shown);
     }
 
