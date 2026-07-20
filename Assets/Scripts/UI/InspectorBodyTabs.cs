@@ -30,6 +30,13 @@ public partial class InspectorWindow
     {
         var b = target.body;
 
+        // The globe sits above the readout: drag it to turn the world to any angle, wheel to zoom.
+        //
+        // It shares PlanetGlobeWindow's single render stage rather than building its own camera, sphere,
+        // light and RenderTexture. Both viewers always want the same subject — the selected body — so a
+        // second stage would be a second copy of the same picture at twice the cost.
+        EmbeddedGlobe.Build(p, b, 210f);
+
         var card = Card(p);
         Stat(card, "Type", () => TerraformDiagnosis.Pretty(b.type));
         Stat(card, "Owner", () =>

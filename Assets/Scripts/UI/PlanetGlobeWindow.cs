@@ -68,6 +68,32 @@ public class PlanetGlobeWindow : MonoBehaviour
 
     public bool IsOpen => root != null && root.activeSelf;
 
+    /// The live globe render, for anything that wants to show it without owning a stage of its own.
+    public RenderTexture Texture => rt;
+
+    // Frame-STAMPED rather than a bool, because MonoBehaviour LateUpdate order is undefined.
+    //
+    // With a boolean that this consumes, an embedded viewer whose LateUpdate happens to run after this
+    // one has its request cleared before it is ever seen — the stage switches off for a frame and the
+    // panel shows a stale render. A stamp tolerates either order: a request from this frame or the last
+    // one counts, and it expires itself with no clearing step to get the order wrong.
+    int wantFrame = -1;
+    CelestialBody externalBody;
+
+    /// Ask for the globe to be rendered this frame, for `b`, from somewhere other than this window.
+    ///
+    /// One stage serves every viewer rather than each building its own camera, sphere, light and
+    /// RenderTexture. They all want the same thing — the selected body — so a second stage would be a
+    /// second copy of the same picture at twice the cost. Callers must call this EVERY frame they are
+    /// visible; the stage switches itself off on the first frame nobody asks, which is what stops it
+    /// rendering behind a closed panel.
+    public void RequestFrame(CelestialBody b)
+    {
+        if (b == null) return;
+        wantFrame = Time.frameCount;
+        externalBody = b;
+    }
+
     public static void Create(Transform parent)
     {
         if (Instance != null) return;
@@ -202,15 +228,34 @@ public class PlanetGlobeWindow : MonoBehaviour
 
     void LateUpdate()
     {
-        // The window's built-in X deactivates `root` directly without going through Hide(), so the stage
-        // has to notice on its own — otherwise the globe and its light stay alive and rendering behind a
-        // closed window. Cheap: one bool compare per frame.
-        if (!IsOpen)
+        // Render if EITHER this window is open or an embedded viewer asked for a frame. The window's
+        // built-in X deactivates `root` directly without going through Hide(), so the stage has to notice
+        // on its own — otherwise the globe and its light stay alive and rendering behind a closed window.
+        // A request from this frame or the previous one counts — see the note on wantFrame.
+        bool wasExternal = wantFrame >= Time.frameCount - 1;
+        bool want = IsOpen || wasExternal;
+
+        if (!want)
         {
             if (stage != null && stage.gameObject.activeSelf) stage.gameObject.SetActive(false);
             return;
         }
         if (previewCam == null || globe == null) return;
+
+        if (stage != null && !stage.gameObject.activeSelf) stage.gameObject.SetActive(true);
+
+        // Last requester wins, whether or not this window is open.
+        //
+        // The alternative — letting the open window keep the subject — sounds more respectful of the
+        // player's explicit choice and is worse: with one shared stage, the embedded globe in the
+        // Inspector would then render a DIFFERENT planet than the stats printed underneath it. A viewer
+        // showing the wrong world silently is a bug; a window whose title follows the selection is not.
+        if (wasExternal && externalBody != null && externalBody != body)
+        {
+            body = externalBody;
+            if (titleText != null) titleText.text = body.name;
+            ApplyAppearance();
+        }
 
         // Place the camera on its orbit around the globe and look inward.
         Quaternion rot = Quaternion.Euler(pitch, yaw, 0f);
