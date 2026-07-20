@@ -1,6 +1,6 @@
 # Loading screen showcase: the real home star(s) and homeworld forming — 2026-07-20
 
-**Status: In progress**
+**Status: Complete**
 
 ## What was asked
 
@@ -184,3 +184,30 @@ Confirmed the species itself can't be stale or wrong by the time `ForceHomeWorld
 Select`/mutates `CurrentIndex` during generation — so `SpeciesManager.Current`, read fresh by
 `GalaxyGenerator.Finish(galaxy, SpeciesManager.Current, count)` after the whole system loop, is
 guaranteed to be the same species the player actually picked, for every one of the five.
+
+## Closing note
+
+All six slices are done. Slices 1 and 3 (real home star, named) landed in an earlier run; slices 2, 4,
+5 and 6 landed in this one. A final pass over the WHOLE diff (`git diff 2799c54...HEAD`, the commit
+before this run started) — not just each slice against the code as it stood at the time — turned up no
+new cross-slice issues: `Galaxy.homeStars`' type/nullability assumptions agree everywhere it's read,
+`StarCluster.Layout` is fed the same star-list order by both the loading-screen preview and the real
+system renderer (so the pop-out ends in the arrangement the player actually lands in), the two
+`GameManager` holds (star pop-out, homeworld morph) are sequenced correctly with no double-hold, and
+nothing outside `GalaxyGenerator`/`GameManager`/`LoadingScreen` reads `Galaxy.homeStar(s)` in a way the
+list change could have broken (save/load never touches it — it's generation-time-only).
+
+**What got built:** the loading screen now shows the player's REAL home star (or cluster, ~14% of the
+time binary/trinary) — coloured, sized, and named correctly, with a timed pop-out for a multi-star
+home — and the REAL homeworld, morphing tile-by-tile from barren rock to its finished terrain, for
+whichever of the five species the player picked. The star(s) and the terrain shown are the same object
+instances the player then plays with, not lookalikes.
+
+**What I couldn't verify (no Unity here):** none of this is compiled. The trinary sun sizing in the
+120x120 preview (`ClusterFrameRadius`) is derived from real formulas and checked against the camera
+frustum mathematically, but not actually seen — worth a look in-editor, and a possible tuning pass if
+the smallest sun in a tight trinary reads too small. Everything else was verified by 9 independent
+review-agent passes across the code-bearing slices (2, 4, 5) plus this final whole-diff pass, each
+reading the real declarations of what it called rather than trusting memory of the API.
+
+**Please build before playing.**
