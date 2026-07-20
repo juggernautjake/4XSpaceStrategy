@@ -204,17 +204,26 @@ public class PlanetViewWindow : MonoBehaviour
     // screen, with a small margin so the frame isn't flush to the edge. Re-measured on every open
     // (ShowFor) since the canvas rect isn't known at bootstrap. The map zooms inside its viewport; the
     // resize grip and draggable title bar still work, so it can be shrunk by hand afterwards.
-    const float ScreenMargin = 8f;
+    // The SAME margin WindowFit clamps to. It used to be its own 8, while WindowFit enforced 14 — so this
+    // sized the window 12px wider and taller than the clamp would allow, and every open began with the
+    // window over the edge until something re-fitted it. Two numbers describing one relationship is how
+    // that happens; there is now one, and it lives with the code that enforces it.
     static Vector2 WindowSize(Transform parent)
     {
         var canvas = parent != null ? parent.GetComponentInParent<Canvas>() : null;
         var crt = canvas != null ? canvas.GetComponent<RectTransform>() : null;
-        Vector2 screen = crt != null && crt.rect.width > 1f
-            ? crt.rect.size
-            : new Vector2(1920f, 1080f);   // fallback: the canvas reference resolution
-        return new Vector2(
-            Mathf.Max(640f, screen.x - ScreenMargin * 2f),
-            Mathf.Max(400f, screen.y - ScreenMargin * 2f));
+        bool measured = crt != null && crt.rect.width > 1f && crt.rect.height > 1f;
+        Vector2 screen = measured ? crt.rect.size : new Vector2(1920f, 1080f);   // fallback: reference res
+
+        // Fill the canvas, less the margin, and nothing else.
+        //
+        // There were 640x400 minimums here. They are deliberately gone rather than reinstated: a minimum
+        // can only ever be honoured by exceeding the canvas, which is precisely the off-canvas state this
+        // is meant to prevent — and WindowFit would immediately shrink it back anyway, so the floor was
+        // never real. (An earlier attempt wrote it as Min(Max(640, X), X), which is algebraically just X:
+        // a floor that reads as a guarantee and provides none. Better to not claim it.)
+        float m = WindowFit.Margin * 2f;
+        return new Vector2(screen.x - m, screen.y - m);
     }
 
     // Raptok's layout: the surface map anchors to the LEFT and never takes more than 3/4 of the window
