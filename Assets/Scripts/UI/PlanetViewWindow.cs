@@ -642,14 +642,33 @@ public class PlanetViewWindow : MonoBehaviour
 
     /// The viewport the scroll arrows act on.
     ///
-    /// The HOST planet map. Moon panes keep their pan in a separate dictionary (moonPan) with their own
-    /// tile scale and no wrap mirrors of their own, so scrolling one would move a map that cannot loop —
-    /// it would hit its edge and stop, which is worse than the arrows plainly belonging to the main map.
-    RectTransform ActiveScrollViewport() => hostViewport;
+    /// Whichever pane was last clicked — host or moon. `activePane` is already this window's notion of
+    /// "the map you are working in" (the tab strip, the zoom buttons and Fit all follow it), so the
+    /// arrows follow it too rather than inventing a second idea of which map has focus.
+    RectTransform ActiveScrollViewport()
+    {
+        var m = activePane;
+        if (m != null && m != body && moonFrame.TryGetValue(m, out var fr) && fr != null) return fr;
+        return hostViewport;
+    }
 
-    /// Note the NEGATION. `dx` is which way the player asked the VIEW to travel; mapPan moves the MAP,
+    /// Note the NEGATION. `dx` is which way the player asked the VIEW to travel; the pan moves the MAP,
     /// and those are opposites — pressing ">" to look further east has to slide the map west.
-    void ScrollActive(float dx) => ScrollMap(-dx);
+    void ScrollActive(float dx)
+    {
+        var m = activePane;
+        if (m != null && m != body && moonFrame.TryGetValue(m, out var fr) && fr != null
+            && moonImg.TryGetValue(m, out var img) && img != null)
+        {
+            Vector2 pan = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
+            pan.x -= dx;
+            ClampPanePan(fr.rect, img.rectTransform, ref pan);
+            moonPan[m] = pan;
+            SyncMoonMirrors(img, fr.rect);
+            return;
+        }
+        ScrollMap(-dx);
+    }
 
     /// Continuous scroll while an arrow is held. Frame-rate independent, and unscaled so it works while
     /// the game is paused — the Planet View is a place you use while paused.
@@ -2395,6 +2414,13 @@ public class PlanetViewWindow : MonoBehaviour
 
         SliderRow("Temperature", "extreme cold <-> extreme heat", TempMin, TempMax, p.heat, v => SetTerrain(3, v));
 
+        // Relief. SetTerrain already had a ridge case (index 4) and nothing had ever been wired to it, so
+        // the one axis that decides how mountainous a world is was the one axis the sandbox could not
+        // touch. Ridge is the mountain-building field: the classifiers test it directly (`ridge > 0.8` is
+        // Mountains on most world types), so raising it converts more of the map to peaks and lowering it
+        // flattens the world toward plains.
+        SliderRow("Relief", "rolling plains <-> extreme mountains", 0.3f, 2.5f, p.ridge, v => SetTerrain(4, v));
+
         Header("SEED");
         var seed = Card();
         Stat(seed, "Terrain seed", () => $"{body.terrainSeed:F0}");
@@ -3460,7 +3486,18 @@ public class PlanetViewWindow : MonoBehaviour
         // while still scrolling and looking perfectly normal. At a half-width pan that is half the
         // viewport. Wrapping u maps a point on a mirror back onto the cell it is a copy of, which is the
         // whole reason the mirror looks like that cell.
-        if (mapRect == mapRT && WrapEnabled) u = Mathf.Repeat(u, 1f);
+        // Moon panes wrap too. Their map is centre-anchored inside its frame, which is its parent, so the
+        // same "is the map at least as wide as what shows it" test applies — and without this a moon
+        // would grow the identical dead zone the host map just had fixed.
+        bool wrapU;
+        if (mapRect == mapRT) wrapU = WrapEnabled;
+        else
+        {
+            var frameRT = mapRect.parent as RectTransform;
+            wrapU = frameRT != null && PaneWrapEnabled(frameRT.rect, mapRect.sizeDelta);
+        }
+
+        if (wrapU) u = Mathf.Repeat(u, 1f);
         else if (u < 0f || u > 1f) return false;
 
         if (v < 0f || v > 1f) return false;
@@ -4125,6 +4162,7 @@ public class PlanetViewWindow : MonoBehaviour
         Vector2 pan = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
         ClampPanePan(fr, img.rectTransform, ref pan);
         moonPan[m] = pan;
+        SyncMoonMirrors(img, fr);
     }
 
     // Pixels per cell at which a map exactly COVERS a frame (fills it, cropping the proportionally longer
@@ -4151,11 +4189,61 @@ public class PlanetViewWindow : MonoBehaviour
     void ClampPanePan(Rect frame, RectTransform content, ref Vector2 pan)
     {
         Vector2 size = content.sizeDelta;
-        float sx = Mathf.Max(0f, (size.x - frame.width) * 0.5f);
+
+        // Longitude wraps here exactly as it does on the host map: a moon is a cylinder too, its terrain
+        // is generated to join at the seam by the same sampler, and a moon map that stops dead at its edge
+        // while the planet's loops would just look like one of them is broken.
+        if (PaneWrapEnabled(frame, size) )
+            pan.x = Mathf.Repeat(pan.x + size.x * 0.5f, size.x) - size.x * 0.5f;
+        else
+        {
+            float sx = Mathf.Max(0f, (size.x - frame.width) * 0.5f);
+            pan.x = Mathf.Clamp(pan.x, -sx, sx);
+        }
+
         float sy = Mathf.Max(0f, (size.y - frame.height) * 0.5f);
-        pan.x = Mathf.Clamp(pan.x, -sx, sx);
         pan.y = Mathf.Clamp(pan.y, -sy, sy);
         content.anchoredPosition = pan;
+    }
+
+    /// Same rule as the host map: wrapping only means something once the map is at least as wide as the
+    /// frame showing it. Below that the whole moon already fits and there is no edge to run off.
+    static bool PaneWrapEnabled(Rect frame, Vector2 size)
+        => size.x > 0.5f && size.x >= frame.width - 0.5f;
+
+    /// Give a moon's map the same two wrap mirrors the host map has, and keep them in step.
+    ///
+    /// Terrain only — a moon pane draws no structures, ghost or markers, so unlike the host there is
+    /// nothing else to mirror. Idempotent: it creates the mirrors on first call and thereafter just
+    /// re-syncs them, so ApplyMoonSize can call it unconditionally.
+    void SyncMoonMirrors(RawImage img, Rect frame)
+    {
+        if (img == null) return;
+        var rt = img.rectTransform;
+        bool on = PaneWrapEnabled(frame, rt.sizeDelta);
+
+        for (int i = 0; i < 2; i++)
+        {
+            string nm = i == 0 ? "WrapL" : "WrapR";
+            var child = rt.Find(nm) as RectTransform;
+            if (child == null)
+            {
+                if (!on) continue;                       // don't build mirrors a map will never need
+                child = UIFactory.NewUI(rt, nm).GetComponent<RectTransform>();
+                UIFactory.Stretch(child);
+                var ri = child.gameObject.AddComponent<RawImage>();
+                ri.raycastTarget = false;                // moon panes are viewers, not build surfaces
+            }
+
+            var mi = child.GetComponent<RawImage>();
+            if (child.gameObject.activeSelf != on) child.gameObject.SetActive(on);
+            if (!on) continue;
+
+            float dx = i == 0 ? -rt.rect.width : rt.rect.width;
+            child.offsetMin = new Vector2(dx, 0f);
+            child.offsetMax = new Vector2(dx, 0f);
+            if (mi != null) { mi.texture = img.texture; mi.color = img.color; }
+        }
     }
 
     // Is the cursor over an open moon frame? Keeps PollMapPan from starting a host pan at a shared edge.

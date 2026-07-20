@@ -107,8 +107,94 @@ public static class PlanetTerrainGenerator
         // pool touching the open sea IS the sea) and ring the oceans with beaches. Runs on the GRID — the
         // surface the Planet View map and gameplay read — so those agree; the distant 3D globe (a separate
         // per-pixel render) keeps the smooth noise view, which reads the same from orbit.
+        // Remove speckle BEFORE the water/shore pass, so flood-fill and beaches run on the terrain the
+        // player will actually see rather than on a noisier draft of it.
+        DespeckleTerrain(surface);
         ApplyWaterAndShores(surface);
         return surface;
+    }
+
+    // Neighbour coherence: a tile with no neighbour of its own kind becomes the local majority.
+    //
+    // The classifier decides each cell independently from continuous fields, so wherever a field sits on
+    // a threshold it flickers cell to cell and the map speckles — one tundra pixel in a desert, a lone
+    // jungle tile on a glacier. Individually each is a defensible reading of the noise; together they
+    // read as static, and they make terrain look random rather than placed.
+    //
+    // Only ISOLATED cells are touched — zero orthogonal neighbours matching — so genuine two-cell
+    // features, coastlines and thin ridges all survive. Water is left alone entirely: an isolated water
+    // tile is a pond, which is a real thing, and ApplyWaterAndShores is the pass that judges water bodies
+    // by size on purpose.
+    //
+    // Decided from a SNAPSHOT rather than in place, so the result does not depend on which corner the
+    // loop started from — an in-place filter feeds its own output forward and smears features east.
+    /// Tiles that are SUPPOSED to appear alone, and so must survive a filter that deletes lone tiles.
+    ///
+    /// A volcano is a single cell where a fault crosses high ground — that is what it is. Despeckling
+    /// treats "no neighbour like me" as evidence of noise, which is right for a stray tundra pixel in a
+    /// desert and exactly wrong for these: it would quietly delete the rarest and most interesting
+    /// features on a world, and they are the ones the survey overlays and ore generation key off.
+    static bool IsRareFeature(TerrainType t)
+    {
+        switch (t)
+        {
+            case TerrainType.Volcano:
+            case TerrainType.GeyserField:
+            case TerrainType.CrystalField:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    static void DespeckleTerrain(PlanetSurface surf)
+    {
+        int w = surf.width, h = surf.height;
+        if (w < 3 || h < 3) return;   // too small for "isolated" to mean anything
+
+        var src = new TerrainType[w, h];
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++)
+                src[x, y] = surf.tiles[x, y].type;
+
+        var counts = new Dictionary<TerrainType, int>();
+
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++)
+            {
+                var t = src[x, y];
+                if (IsWater(t)) continue;
+                if (IsRareFeature(t)) continue;
+
+                // Longitude wraps, latitude does not — the same asymmetry the flood fill uses.
+                int xl = (x - 1 + w) % w, xr = (x + 1) % w;
+                counts.Clear();
+
+                bool anySame = false;
+                void Consider(TerrainType n)
+                {
+                    if (n == t) anySame = true;
+                    if (IsWater(n)) return;              // never promote a land tile to water
+                    counts.TryGetValue(n, out int c);
+                    counts[n] = c + 1;
+                }
+
+                Consider(src[xl, y]);
+                Consider(src[xr, y]);
+                if (y > 0) Consider(src[x, y - 1]);
+                if (y < h - 1) Consider(src[x, y + 1]);
+
+                if (anySame) continue;                   // not isolated — leave it alone
+
+                TerrainType best = t; int bestCount = 0;
+                foreach (var kv in counts)
+                    if (kv.Value > bestCount) { bestCount = kv.Value; best = kv.Key; }
+
+                // Needs a real majority: two of the four neighbours agreeing. One vote is not a consensus,
+                // and at a genuine three-way border every choice is arbitrary — better to leave the
+                // classifier's answer than to pick one at random.
+                if (bestCount >= 2) surf.tiles[x, y].type = best;
+            }
     }
 
     // Post-classification clean-up that needs to see a tile's NEIGHBOURS (the per-cell sampler can't).
