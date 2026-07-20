@@ -70,6 +70,18 @@ public class LoadingScreen : MonoBehaviour
         col.sizeDelta = new Vector2(BarWidth, 150f);
         col.anchoredPosition = Vector2.zero;
 
+        // The preview sits to the LEFT of the column rather than inside it, so it can be vertically
+        // centred against the whole stack without being one more row the layout has to make space for.
+        var pv = UIFactory.NewUI(col, "Preview").GetComponent<RectTransform>();
+        pv.anchorMin = new Vector2(0f, 0.5f); pv.anchorMax = new Vector2(0f, 0.5f);
+        pv.pivot = new Vector2(1f, 0.5f);
+        pv.sizeDelta = new Vector2(120f, 120f);
+        pv.anchoredPosition = new Vector2(-28f, 0f);
+        previewView = pv.gameObject.AddComponent<RawImage>();
+        previewView.raycastTarget = false;
+        BuildPreview(parent);
+        if (previewRT != null) previewView.texture = previewRT;
+
         headline = UIFactory.Text(col, headlineBase, 30, UITheme.Accent, TextAlignmentOptions.Center);
         var hrt = headline.rectTransform;
         hrt.anchorMin = new Vector2(0, 1); hrt.anchorMax = new Vector2(1, 1);
@@ -113,6 +125,8 @@ public class LoadingScreen : MonoBehaviour
         if (root == null) return;
         headlineBase = string.IsNullOrEmpty(headlineText) ? "Generating the universe" : headlineText;
         shown = 0f; goal = 0f; target = 0f; prevTarget = 0f; creepCeiling = 0f;
+        SetSubject(Subject.None);
+        if (previewStage != null) previewStage.gameObject.SetActive(true);
         SetStage("");
         root.SetActive(true);
         // In front of every window that may already be open behind it.
@@ -120,9 +134,142 @@ public class LoadingScreen : MonoBehaviour
         Apply(0f);
     }
 
-    public void Close() { if (root != null) root.SetActive(false); }
+    public void Close()
+    {
+        if (root != null) root.SetActive(false);
+        if (previewStage != null) previewStage.gameObject.SetActive(false);
+    }
 
-    /// Report progress. `t` is 0..1; `stage` is what is happening right now.
+    /// What the generator is working on, so the screen can show it.
+    public enum Subject { None, Star, Planet, Moon, Galaxy }
+
+    Subject subject = Subject.None;
+    Transform previewStage, previewBody;
+    Camera previewCam;
+    RenderTexture previewRT;
+    RawImage previewView;
+    Renderer previewRend;
+    Light previewLight;
+
+    // Far past the main camera's far plane, for the same reason PlanetGlobeWindow's stage is: it needs
+    // to be invisible to the game camera without claiming a layer from project settings.
+    static readonly Vector3 PreviewOrigin = new Vector3(-200000f, 0f, 0f);
+    const float PreviewScale = 100f;
+
+    public void Report(float t, string stage, Subject what)
+    {
+        SetSubject(what);
+        Report(t, stage);
+    }
+
+    Material[] subjectMats;
+
+    /// Build one material per subject, once.
+    ///
+    /// LIT, not unlit — and that is the difference between a spinning ball and a coloured circle. An
+    /// unlit material ignores lighting entirely, so the sphere renders as a flat disc of uniform colour:
+    /// the key light contributes nothing and the spin has no visible surface feature to move, making both
+    /// pure decoration that does nothing. A lit material gives it a terminator, which is what reads as a
+    /// three-dimensional body turning. The star is the exception and stays unlit, because a star emits
+    /// rather than reflects.
+    void BuildSubjectMaterials()
+    {
+        var lit = Shader.Find("Universal Render Pipeline/Lit");
+        if (lit == null) lit = Shader.Find("Standard");
+
+        subjectMats = new Material[5];
+        subjectMats[(int)Subject.None] = null;
+        // IN GAMUT, not HDR. The preview camera renders to a plain LDR RenderTexture with no
+        // post-processing, and the canvas composites that image after URP's post stack — so an HDR colour
+        // here does not bloom, it simply clamps per channel. (3.2, 2.6, 1.4) would arrive as pure white
+        // with the warm tint destroyed: worse than a colour that fits.
+        subjectMats[(int)Subject.Star] = SpaceMaterials.Unlit(new Color(1f, 0.90f, 0.62f));
+        subjectMats[(int)Subject.Planet] = LitMat(lit, new Color(0.30f, 0.52f, 0.76f));
+        subjectMats[(int)Subject.Moon] = LitMat(lit, new Color(0.62f, 0.60f, 0.58f));
+        subjectMats[(int)Subject.Galaxy] = LitMat(lit, new Color(0.62f, 0.42f, 0.92f));
+    }
+
+    static Material LitMat(Shader sh, Color c)
+    {
+        if (sh == null) return SpaceMaterials.Unlit(c);
+        var m = new Material(sh);
+        SpaceMaterials.ApplyColor(m, c);
+        if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", 0.15f);
+        if (m.HasProperty("_Glossiness")) m.SetFloat("_Glossiness", 0.15f);
+        return m;
+    }
+
+    void SetSubject(Subject s)
+    {
+        // Deliberately does NOT record `s` when the preview is missing. Recording it would make the
+        // matching later call a no-op via the equality guard below, so the subject would be permanently
+        // stuck on whatever was requested while the preview did not exist.
+        if (previewRend == null || previewBody == null) return;
+        if (s == subject) return;
+        subject = s;
+
+        previewBody.gameObject.SetActive(s != Subject.None);
+        if (s == Subject.None) return;
+
+        // sharedMaterial, and from a prebuilt set. Assigning `.material` instantiates a fresh copy every
+        // time and never frees the last one — and the subject changes twice per system, so a twelve-system
+        // load would leak two dozen materials that live for the rest of the process.
+        if (subjectMats != null) previewRend.sharedMaterial = subjectMats[(int)s];
+
+        float scale = s == Subject.Star ? 1.15f
+                    : s == Subject.Moon ? 0.62f
+                    : s == Subject.Galaxy ? 1.3f : 1f;
+        previewBody.localScale = Vector3.one * PreviewScale * scale;
+    }
+
+    void BuildPreview(Transform parent)
+    {
+        previewStage = new GameObject("LoadingPreviewStage").transform;
+        previewStage.position = PreviewOrigin;
+
+        var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        sphere.name = "PreviewBody";
+        sphere.transform.SetParent(previewStage, false);
+        var col = sphere.GetComponent<Collider>();
+        if (col != null) Destroy(col);
+        previewBody = sphere.transform;
+        previewBody.localScale = Vector3.one * PreviewScale;
+        previewRend = sphere.GetComponent<Renderer>();
+
+        // Spins in place. Unscaled, because the whole screen exists while nothing else is running.
+        var spin = sphere.AddComponent<SelfSpin>();
+        spin.speed = 22f;
+        spin.unscaled = true;
+
+        var camGo = new GameObject("LoadingPreviewCam");
+        camGo.transform.SetParent(previewStage, false);
+        camGo.transform.localPosition = new Vector3(0f, 0f, -PreviewScale * 2.9f);
+        previewCam = camGo.AddComponent<Camera>();
+        previewCam.clearFlags = CameraClearFlags.SolidColor;
+        previewCam.backgroundColor = new Color(0f, 0f, 0f, 0f);
+        previewCam.fieldOfView = 38f;
+        previewCam.nearClipPlane = 0.05f * PreviewScale;
+        previewCam.farClipPlane = 20f * PreviewScale;
+        previewCam.enabled = false;      // driven by hand, one Render per frame
+
+        previewRT = new RenderTexture(192, 192, 16) { name = "LoadingPreviewRT" };
+        previewCam.targetTexture = previewRT;
+
+        // A point light with a short range — a directional one would light the whole game scene behind
+        // the loading screen, which is the mistake the globe viewer already made once.
+        var lightGo = new GameObject("PreviewKey");
+        lightGo.transform.SetParent(previewStage, false);
+        lightGo.transform.localPosition = new Vector3(-PreviewScale, PreviewScale * 0.8f, -PreviewScale * 1.6f);
+        previewLight = lightGo.AddComponent<Light>();
+        previewLight.type = LightType.Point;
+        previewLight.range = PreviewScale * 8f;
+        previewLight.intensity = 1.5f;
+
+        BuildSubjectMaterials();
+        previewBody.gameObject.SetActive(false);   // nothing on screen until a subject is reported
+        previewStage.gameObject.SetActive(false);
+    }
+
     public void Report(float t, string stage)
     {
         float next = Mathf.Clamp01(t);
@@ -192,6 +339,9 @@ public class LoadingScreen : MonoBehaviour
         float creepSpeed = Mathf.Max(0f, creepCeiling - target) * CreepRate;
         goal = Mathf.Min(creepCeiling, Mathf.Max(goal, target) + creepSpeed * dt);
 
+        if (previewCam != null && previewStage != null && previewStage.gameObject.activeSelf)
+            previewCam.Render();
+
         shown = Mathf.Lerp(shown, goal, 1f - Mathf.Exp(-FillSmoothing * dt));
 
         // Snap the last sliver. Exponential smoothing approaches its goal but never arrives, so at the
@@ -210,5 +360,13 @@ public class LoadingScreen : MonoBehaviour
         if (percentLabel != null) percentLabel.text = Mathf.RoundToInt(Mathf.Clamp01(t) * 100f) + "%";
     }
 
-    void OnDestroy() { if (Instance == this) Instance = null; }
+    void OnDestroy()
+    {
+        if (previewStage != null) Destroy(previewStage.gameObject);
+        if (previewRT != null) { previewRT.Release(); Destroy(previewRT); }
+        if (subjectMats != null)
+            foreach (var m in subjectMats)
+                if (m != null) Destroy(m);
+        if (Instance == this) Instance = null;
+    }
 }

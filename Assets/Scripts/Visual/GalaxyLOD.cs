@@ -640,7 +640,16 @@ public class GalaxyStarProxy : MonoBehaviour
                 // An unlit material writes its base colour straight into the HDR buffer, so pushing the
                 // colour above 1 is all it takes to get the same treatment without needing the URP Unlit
                 // shader to expose an emission slot.
-                float emK = StarDatabase.EmissionStrength(sun);
+                // GalaxyBoost on top of the star's own emission curve.
+                //
+                // Matching the system view's emission exactly still read as dimmer out here, and the
+                // reason is context rather than colour: in system view a star is the brightest thing on
+                // screen and fills a good fraction of it, while in the overview it is a small disc
+                // competing with a full starfield backdrop. Bloom is thresholded, so a small bright disc
+                // spills far less glow than a large one at the same value. Overshooting the curve is what
+                // makes the two read as equally hot to the eye, which is the actual requirement.
+                const float GalaxyBoost = 2.2f;
+                float emK = StarDatabase.EmissionStrength(sun) * GalaxyBoost;
                 Color hot = new Color(c.r * emK, c.g * emK, c.b * emK, 1f);
 
                 var rend = sphere.GetComponent<Renderer>();
@@ -652,9 +661,16 @@ public class GalaxyStarProxy : MonoBehaviour
                 // A corona, so the star still glows when it is small on screen and whatever bloom is
                 // configured has stopped helping. Additive, so it brightens the sky rather than sitting
                 // on it as a disc.
-                var glow = SpaceMaterials.Glow(art, "Glow" + i, dia * 3.2f,
-                                               new Color(c.r, c.g, c.b, 0.55f));
+                // Two coronae, not one: a tight bright halo that reads as the star's own light, and a
+                // wide faint one that gives it presence against the backdrop. A single quad has to
+                // choose between looking hot and looking big, and ends up doing neither.
+                var glow = SpaceMaterials.Glow(art, "Glow" + i, dia * 3.0f,
+                                               new Color(c.r, c.g, c.b, 0.85f));
                 glow.transform.localPosition = off;
+
+                var halo = SpaceMaterials.Glow(art, "Halo" + i, dia * 4.6f,
+                                               new Color(c.r, c.g, c.b, 0.30f));
+                halo.transform.localPosition = off;
             }
         }
 

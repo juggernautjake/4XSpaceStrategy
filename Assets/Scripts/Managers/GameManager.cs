@@ -72,15 +72,23 @@ public class GameManager : MonoBehaviour
 
         int count = GalaxyGenerator.ClampSystems(systemCount);
         var galaxy = GalaxyGenerator.Begin(solarSystemGenerator, avgPlanets);
-        screen?.Report(0.03f, "Seeding " + galaxy.name);
+        screen?.Report(0.03f, "Seeding " + galaxy.name, LoadingScreen.Subject.Galaxy);
         yield return null;
 
         const float SystemsShare = 0.70f;
         for (int i = 0; i < count; i++)
         {
+            // Announce the subject BEFORE the work, so the preview shows what is about to be built rather
+            // than what has just finished — during a long step the caption and the model would otherwise
+            // both be describing the previous system.
+            screen?.Report(0.03f + SystemsShare * (i / (float)count),
+                           $"Forming star system  {i + 1} / {count}", LoadingScreen.Subject.Star);
+            yield return null;
+
             GalaxyGenerator.AddSystem(galaxy, solarSystemGenerator, i, count);
+
             screen?.Report(0.03f + SystemsShare * ((i + 1) / (float)count),
-                           $"Forming star systems  {i + 1} / {count}");
+                           $"Worlds of system {i + 1}", LoadingScreen.Subject.Planet);
             // Give the screen a couple of frames to actually animate in.
             //
             // One `yield return null` per system means one rendered frame per system, and a bar cannot
@@ -91,25 +99,25 @@ public class GameManager : MonoBehaviour
             yield return null;
         }
 
-        screen?.Report(0.78f, "Settling the home world");
+        screen?.Report(0.78f, "Settling the home world", LoadingScreen.Subject.Planet);
         yield return null;
         GalaxyGenerator.Finish(galaxy, SpeciesManager.Current, count);
 
         Galaxy = galaxy;
         FocusedSystem = Galaxy.Home;
 
-        screen?.Report(0.86f, "Lighting the stars");
+        screen?.Report(0.86f, "Lighting the stars", LoadingScreen.Subject.Star);
         yield return null;
         Visualize();
 
-        screen?.Report(0.94f, "Founding your empire");
+        screen?.Report(0.94f, "Founding your empire", LoadingScreen.Subject.Moon);
         yield return null;
         var homePlanet = FindHomePlanet();
         PlayerEconomy.NewGame(homePlanet, SpeciesManager.Current);
         UnitManager.Instance?.NewGame(homePlanet);
         FactionAI.NewGame(Galaxy);
 
-        screen?.Report(1f, "Ready");
+        screen?.Report(1f, "Ready", LoadingScreen.Subject.Galaxy);
         // Hold the full bar for a beat. Reaching 100% and vanishing in the same frame reads as a glitch
         // rather than as completion.
         yield return new WaitForSecondsRealtime(0.35f);
