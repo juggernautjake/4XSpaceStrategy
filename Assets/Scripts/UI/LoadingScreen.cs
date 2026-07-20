@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -125,6 +126,7 @@ public class LoadingScreen : MonoBehaviour
         if (root == null) return;
         headlineBase = string.IsNullOrEmpty(headlineText) ? "Generating the universe" : headlineText;
         shown = 0f; goal = 0f; target = 0f; prevTarget = 0f; creepCeiling = 0f;
+        ResetPlanetPlaceholder();
         SetSubject(Subject.None);
         if (previewStage != null) previewStage.gameObject.SetActive(true);
         SetStage("");
@@ -151,6 +153,74 @@ public class LoadingScreen : MonoBehaviour
     Renderer previewRend;
     Light previewLight;
 
+    // ---- The home star CLUSTER (the "pop-out") ----
+    //
+    // sunBody[0]/sunRend[0] ARE previewBody/previewRend — the single sun every other Subject already
+    // reuses. sunBody[1]/[2] are two extra spheres that only ever appear while showing the real home
+    // system, and only once it turns out to be a binary or trinary (StarCluster.Layout.orbits.Length > 1).
+    List<StarData> homeStars;
+    StarCluster homeLayout;              // null for a single-sun home — StepSunCluster then never runs
+    readonly Transform[] sunBody = new Transform[3];
+    readonly Renderer[] sunRend = new Renderer[3];
+    readonly Material[] sunMat = new Material[3];   // [0] is unused — sun 0 reads subjectMats[Star]
+    Transform pairPivot;                 // trinary's close inner pair orbits this; unused otherwise
+    readonly float[] sunAngle = new float[3];
+    readonly bool[] sunActive = new bool[3];
+    readonly float[] sunGrow = new float[3];   // 0..1 "popping out" scale-in for a newly revealed sun
+    float pairAngle;
+    float sunRevealClock;                // seconds since the Star subject last came on screen
+    bool clusterMoving;                  // true once the FIRST pop has happened — before that the whole
+                                          // cluster sits frozen at the centre, reading as one lone star
+    bool clusterRevealed;                // true once every companion has fully popped — Subject.Star is
+                                          // reported again for every LATER system in the load, and this
+                                          // is what stops the reveal replaying (truncated) each time
+    float clusterScale = 1f;             // real orbit-units -> preview-local units, for a cluster home only
+    // Public so GameManager can size its own hold on the Star subject to match — see GenerateGalaxyRoutine.
+    public const float PopBeat = 1.3f;   // seconds between each additional sun popping out
+    public const float PopGrow = 0.45f;  // seconds a freshly-popped sun takes to reach full size
+    // How much of the preview's local space (same units as PreviewScale) the WHOLE cluster's reach may
+    // fill. Roughly matches a lone sun's own radius so a binary/trinary home doesn't suddenly look
+    // cramped or oversized next to the single-star case just because it has company.
+    const float ClusterFrameRadius = 62f;
+
+    // ---- The homeworld morph: barren rock -> its real finished surface, tile by tile ----
+    //
+    // Fixed and small ON PURPOSE, independent of the real body's grid (which can be 200x100+): this reads
+    // the ALREADY-GENERATED surface once (a nearest-tile downsample, not a re-sample of the noise field)
+    // and only ever repaints this tiny texture afterwards, so the reveal costs the same whether the real
+    // world is a 20x10 moon or a 220x110 planet.
+    const int MorphW = 40, MorphH = 20;
+    // Public so GameManager can hold the Planet subject on screen long enough to see the whole reveal —
+    // see GenerateGalaxyRoutine, same reasoning as PopBeat/PopGrow above.
+    public const float MorphDuration = 2.4f;
+
+    Texture2D morphTex;
+    Color[] morphPixels;     // the texture's CURRENT (partially revealed) contents, mutated in place
+    Color[] morphFinal;      // the finished surface, sampled once — never touched again after that
+    int morphRevealed;       // how many of morphOrder's tiles have already been swapped to morphFinal
+    float morphClock;
+    bool morphActive;
+
+    // A FIXED reveal order, shared by every planet this session — built once from System.Random (never
+    // UnityEngine.Random), so this purely cosmetic animation can never perturb the shared gameplay RNG
+    // stream that FactionAI and the generators keep drawing from while the morph plays out in the
+    // background over the next couple of seconds.
+    static readonly int[] morphOrder = BuildMorphOrder();
+
+    static int[] BuildMorphOrder()
+    {
+        int n = MorphW * MorphH;
+        var order = new int[n];
+        for (int i = 0; i < n; i++) order[i] = i;
+        var rng = new System.Random(20260720);
+        for (int i = n - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (order[i], order[j]) = (order[j], order[i]);
+        }
+        return order;
+    }
+
     // Far past the main camera's far plane, for the same reason PlanetGlobeWindow's stage is: it needs
     // to be invisible to the game camera without claiming a layer from project settings.
     static readonly Vector3 PreviewOrigin = new Vector3(-200000f, 0f, 0f);
@@ -176,21 +246,13 @@ public class LoadingScreen : MonoBehaviour
         if (star == null) return;
         homeStar = star;
 
-
         if (subjectMats != null)
         {
             // Free the material this replaces. The screen is a singleton that outlives any one game, so
             // overwriting across repeated generations without destroying would leak steadily.
             var old = subjectMats[(int)Subject.Star];
             if (old != null) Destroy(old);
-
-            // Same brightness curve the real star uses in the system view, kept in gamut because the
-            // preview renders to an LDR target composited after post — HDR here clamps rather than blooms.
-            var c = homeStar.color;
-            float k = Mathf.Clamp(StarDatabase.EmissionStrength(homeStar) * 0.55f, 0.35f, 1f);
-            subjectMats[(int)Subject.Star] = SpaceMaterials.Unlit(
-                new Color(Mathf.Min(1f, c.r + k * 0.4f), Mathf.Min(1f, c.g + k * 0.3f),
-                          Mathf.Min(1f, c.b + k * 0.2f)));
+            subjectMats[(int)Subject.Star] = BuildStarMaterial(homeStar);
             if (subject == Subject.Star && previewRend != null)
             {
                 previewRend.sharedMaterial = subjectMats[(int)Subject.Star];
@@ -199,14 +261,314 @@ public class LoadingScreen : MonoBehaviour
         }
     }
 
+    /// Show the whole home CLUSTER rather than just its first sun — called with the same list
+    /// GalaxyGenerator.ForceHomeWorld will consume, so a binary/trinary home shows the real suns before
+    /// they've been named. Sun 0 goes through the existing single-star path (SetHomeStar) unchanged;
+    /// suns 1-2, if the cluster has them, only ever appear via the pop-out in StepSunCluster.
+    public void SetHomeCluster(List<StarData> stars)
+    {
+        if (stars == null || stars.Count == 0) return;
+        SetHomeStar(stars[0]);
+
+        homeStars = stars;
+        // StarCluster.Layout is the SAME geometry the system view builds its stars from (binary about a
+        // mass-split barycenter; trinary as a close inner pair plus a third) — so the loading screen's
+        // pop-out ends in the exact arrangement the player will actually see once they're in-system.
+        homeLayout = stars.Count > 1 ? StarCluster.Layout(stars) : null;
+        // One factor shrinks (or grows) the cluster's REAL orbit-unit geometry to fit ClusterFrameRadius,
+        // so a wide-set binary and a tight one both end up framed the same — position and every sun's
+        // size are scaled by the same factor, so their real proportions to each other are preserved.
+        clusterScale = homeLayout != null ? ClusterFrameRadius / Mathf.Max(0.5f, homeLayout.reach) : 1f;
+
+        for (int i = 1; i < sunMat.Length; i++)
+        {
+            if (sunMat[i] != null) Destroy(sunMat[i]);
+            sunMat[i] = i < stars.Count ? BuildStarMaterial(stars[i]) : null;
+            if (sunRend[i] != null) sunRend[i].sharedMaterial = sunMat[i];
+            if (sunBody[i] != null) sunBody[i].gameObject.SetActive(false);
+        }
+
+        clusterRevealed = false;
+        if (subject == Subject.Star) BeginSunCluster();
+    }
+
+    /// Trinary: suns [0]/[1] are StarCluster's own "close inner pair" convention, orbiting a shared pivot
+    /// that itself swings around the system barycenter; sun [2] orbits the barycenter directly. Binary
+    /// and single homes keep sun 0 (and sun 1, for a binary) directly under previewStage.
+    ///
+    /// Called both when the cluster is first set AND every time the Star subject is (re-)entered — not
+    /// just once — because ResetSunCluster (leaving Star) reparents sun 0 back under previewStage so
+    /// every OTHER subject's sphere sits at the stage centre regardless of where pairPivot last drifted
+    /// to. Reparenting under pairPivot means that pivot's own per-frame motion (StepSunCluster) carries
+    /// both inner suns with it for free, exactly as Unity's transform hierarchy already does for any
+    /// other parent/child pair — no separate "orbit the orbit" bookkeeping needed.
+    void ApplyClusterParenting()
+    {
+        bool trinaryPair = homeLayout != null && homeLayout.hasPair;
+        Transform innerParent = trinaryPair && pairPivot != null ? pairPivot : previewStage;
+        if (sunBody[0] != null) sunBody[0].SetParent(innerParent, false);
+        if (sunBody[1] != null) sunBody[1].SetParent(innerParent, false);
+        if (sunBody[2] != null) sunBody[2].SetParent(previewStage, false);
+    }
+
+    /// Same brightness curve the real star uses in the system view, kept in gamut because the preview
+    /// renders to an LDR target composited after post — HDR here clamps rather than blooms. Shared by
+    /// the primary sun (SetHomeStar) and every companion sun in a binary/trinary home (SetHomeCluster),
+    /// so a cluster's suns are coloured by the identical rule a lone home star already was.
+    static Material BuildStarMaterial(StarData star)
+    {
+        var c = star.color;
+        float k = Mathf.Clamp(StarDatabase.EmissionStrength(star) * 0.55f, 0.35f, 1f);
+        return SpaceMaterials.Unlit(new Color(Mathf.Min(1f, c.r + k * 0.4f), Mathf.Min(1f, c.g + k * 0.3f),
+                                               Mathf.Min(1f, c.b + k * 0.2f)));
+    }
+
     /// Size the preview to the real star's own visual scale, so a dim K dwarf reads visibly smaller than
     /// a bright G — the same distinction the system view makes.
     void ApplyStarScale()
     {
         if (previewBody == null) return;
-        float s = 1.15f;
-        if (homeStar != null) s *= Mathf.Clamp(homeStar.visualScale / 2f, 0.75f, 1.35f);
-        previewBody.localScale = Vector3.one * PreviewScale * s;
+        previewBody.localScale = Vector3.one * SunVisualSize(homeStar);
+    }
+
+    // Same clamp/curve ApplyStarScale already used for the single-sun case, factored out so every
+    // companion sun in a cluster is sized by the identical rule.
+    static float SunVisualSize(StarData s)
+    {
+        float scale = 1.15f;
+        if (s != null) scale *= Mathf.Clamp(s.visualScale / 2f, 0.75f, 1.35f);
+        return PreviewScale * scale;
+    }
+
+    /// Entering the Star subject. The home cluster's pop-out is a ONE-TIME reveal for the whole
+    /// generation, not a per-system animation: Subject.Star is reported again for every later system in
+    /// the loop, and without this guard the "one lone star, then a companion pops out" sequence would
+    /// restart (and mostly get cut off) on every single one of them. So: the FIRST time this generation,
+    /// start from "just sun 0" and let StepSunCluster reveal the rest on schedule. Every time after that
+    /// (clusterRevealed already true), show the cluster already fully popped and resume its orbit from
+    /// wherever it was — no replay.
+    void BeginSunCluster()
+    {
+        ApplyClusterParenting();   // re-establish pairPivot parenting that ResetSunCluster undid on exit
+
+        if (clusterRevealed)
+        {
+            clusterMoving = true;
+            for (int i = 1; i < sunBody.Length; i++)
+            {
+                bool has = homeLayout != null && i < homeLayout.orbits.Length;
+                sunActive[i] = has;
+                sunGrow[i] = has ? 1f : 0f;
+                if (sunBody[i] != null) sunBody[i].gameObject.SetActive(has);
+            }
+            return;
+        }
+
+        sunRevealClock = 0f;
+        clusterMoving = false;
+        sunAngle[0] = homeLayout != null && homeLayout.orbits.Length > 0 ? homeLayout.orbits[0].phase : 0f;
+        pairAngle = homeLayout != null ? homeLayout.pairPhase : 0f;
+        if (pairPivot != null) pairPivot.localPosition = Vector3.zero;
+        if (previewBody != null) previewBody.localPosition = Vector3.zero;
+        for (int i = 1; i < sunBody.Length; i++)
+        {
+            sunActive[i] = false;
+            sunGrow[i] = 0f;
+            if (i < (homeLayout?.orbits.Length ?? 0)) sunAngle[i] = homeLayout.orbits[i].phase;
+            if (sunBody[i] != null) sunBody[i].gameObject.SetActive(false);
+        }
+    }
+
+    /// Leaving the Star subject: put sun 0 back at the stage centre under previewStage directly — NOT
+    /// still hanging off pairPivot, which keeps drifting even while nothing is displaying it — and hide
+    /// the companions, rather than leaving a trinary's inner pair mid-orbit under a different subject's
+    /// model (which previously left, say, the Planet placeholder rendering off-centre for the rest of the
+    /// load, since it was still parented under a pivot nothing was resetting).
+    void ResetSunCluster()
+    {
+        if (sunBody[0] != null) sunBody[0].SetParent(previewStage, false);
+        if (sunBody[1] != null) sunBody[1].SetParent(previewStage, false);
+        if (previewBody != null) previewBody.localPosition = Vector3.zero;
+        if (pairPivot != null) pairPivot.localPosition = Vector3.zero;
+        for (int i = 1; i < sunBody.Length; i++)
+            if (sunBody[i] != null) sunBody[i].gameObject.SetActive(false);
+    }
+
+    /// Advance the cluster's orbits and, on schedule, pop the next sun out of the first. Only ever
+    /// called while homeLayout != null (a binary/trinary home) — a single-sun home never touches this
+    /// and previewBody just sits at the stage centre exactly as it always did.
+    void StepSunCluster(float dt)
+    {
+        sunRevealClock += dt;
+        int n = homeLayout.orbits.Length;
+
+        // Reveal the second sun after a beat, the third after another. It "pops out of the first" by
+        // starting its grow-in at 0 scale on the orbit it will already be following, rather than fading
+        // in in place or appearing at full size.
+        for (int i = 1; i < n && i < sunBody.Length; i++)
+        {
+            if (!sunActive[i] && sunRevealClock >= PopBeat * i)
+            {
+                sunActive[i] = true;
+                sunGrow[i] = 0f;
+                clusterMoving = true;   // the FIRST pop is also the cue for sun 0 to start orbiting
+                if (sunBody[i] != null) sunBody[i].gameObject.SetActive(true);
+            }
+            if (sunActive[i] && sunGrow[i] < 1f) sunGrow[i] = Mathf.Min(1f, sunGrow[i] + dt / PopGrow);
+        }
+
+        // Once every companion has popped and finished growing, the reveal is done for the whole
+        // generation — BeginSunCluster reads this to stop replaying it for every later system's turn.
+        if (!clusterRevealed && clusterMoving)
+        {
+            bool allGrown = true;
+            for (int i = 1; i < n && i < sunBody.Length; i++)
+                if (!sunActive[i] || sunGrow[i] < 1f) { allGrown = false; break; }
+            if (allGrown) clusterRevealed = true;
+        }
+
+        // Sizes are correct — and consistent with each other, since they share one clusterScale — from
+        // the very first frame, even before the pop starts. Only ORBITAL MOTION waits on clusterMoving
+        // below, so the primary sun doesn't visibly resize the instant its companion appears.
+        for (int i = 0; i < n && i < sunBody.Length; i++)
+        {
+            if (sunBody[i] == null || (i > 0 && !sunActive[i])) continue;
+            float grow = i == 0 ? 1f : sunGrow[i];
+            sunBody[i].localScale = Vector3.one * homeStars[i].visualScale * clusterScale * grow;
+        }
+
+        // Still reading as a single star: nothing has popped yet, so nothing should move — the cluster
+        // stays parked at the stage centre until the first companion actually appears.
+        if (!clusterMoving) return;
+
+        for (int i = 0; i < n && i < sunAngle.Length; i++)
+            sunAngle[i] += homeLayout.orbits[i].speed * dt;
+        if (homeLayout.hasPair) pairAngle += homeLayout.pairSpeed * dt;
+
+        if (homeLayout.hasPair && pairPivot != null)
+        {
+            float pr = pairAngle * Mathf.Deg2Rad;
+            pairPivot.localPosition = new Vector3(Mathf.Cos(pr), 0f, Mathf.Sin(pr)) * (homeLayout.pairRadius * clusterScale);
+        }
+
+        for (int i = 0; i < n && i < sunBody.Length; i++)
+        {
+            if (sunBody[i] == null || (i > 0 && !sunActive[i])) continue;
+            var o = homeLayout.orbits[i];
+            float rad = sunAngle[i] * Mathf.Deg2Rad;
+            sunBody[i].localPosition = new Vector3(Mathf.Cos(rad), 0f, Mathf.Sin(rad)) * (o.radius * clusterScale);
+        }
+    }
+
+    /// Show the REAL homeworld — barren rock morphing tile by tile into its finished surface — rather
+    /// than the generic Planet placeholder. Called once ForceHomeWorld has actually built the world (its
+    /// terrain is deterministic from terrainSeed, so the finished state is already fully known; this only
+    /// reveals it), so unlike SetHomeCluster this can't run before the thing it's showing exists.
+    public void SetHomePlanet(CelestialBody planet)
+    {
+        if (planet?.surface == null || subjectMats == null) return;
+        EnsureMorphTexture();
+
+        Color barren = TerrainColorMap.Get(TerrainType.Barren);
+        for (int i = 0; i < morphPixels.Length; i++) morphPixels[i] = barren;
+
+        // A nearest-tile downsample of the FINISHED grid — never a re-sample of the noise field, and
+        // never at the real body's own resolution — so this costs the same fixed, tiny amount whether
+        // the world is a small moon or a 220x110 planet.
+        int sw = planet.surface.width, sh = planet.surface.height;
+        for (int y = 0; y < MorphH; y++)
+        {
+            int sy = Mathf.Clamp(y * sh / MorphH, 0, sh - 1);
+            for (int x = 0; x < MorphW; x++)
+            {
+                int sx = Mathf.Clamp(x * sw / MorphW, 0, sw - 1);
+                var tile = sw > 0 && sh > 0 ? planet.surface.tiles[sx, sy] : null;
+                Color c = barren;
+                if (tile != null)
+                {
+                    c = TerrainColorMap.Get(tile.type);
+                    float b = Mathf.Lerp(0.86f, 1.12f, tile.shade);
+                    c = new Color(c.r * b, c.g * b, c.b * b, 1f);
+                    if (tile.HasOre) c = Color.Lerp(c, OreDatabase.Get(tile.ore).color, 0.35f);
+                }
+                morphFinal[y * MorphW + x] = c;
+            }
+        }
+
+        morphRevealed = 0;
+        morphClock = 0f;
+        morphActive = true;
+
+        morphTex.SetPixels(morphPixels);
+        morphTex.Apply();
+
+        // Same idiom PlanetAppearance.Apply uses for the real in-game globe: write the texture under
+        // every property name a shader might expose it as, and reset the tint to white so the placeholder's
+        // flat blue doesn't multiply into the real terrain colours.
+        var mat = subjectMats[(int)Subject.Planet];
+        if (mat != null)
+        {
+            mat.mainTexture = morphTex;
+            if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", morphTex);
+            mat.color = Color.white;
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", Color.white);
+            if (subject == Subject.Planet && previewRend != null) previewRend.sharedMaterial = mat;
+        }
+    }
+
+    /// Put the Planet material back to its generic placeholder look. Called once per NEW generation
+    /// (Open()), BEFORE that generation's own SetHomePlanet call — without this, a second galaxy in the
+    /// same session would show the FIRST game's fully-morphed homeworld texture during its own early
+    /// "Forming star system N" placeholder phase, since SetHomePlanet mutates this same persistent
+    /// Material in place rather than replacing it.
+    void ResetPlanetPlaceholder()
+    {
+        morphActive = false;
+        if (subjectMats == null) return;
+        var mat = subjectMats[(int)Subject.Planet];
+        if (mat == null) return;
+        mat.mainTexture = null;
+        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", null);
+        mat.color = PlanetPlaceholderColor;
+        if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", PlanetPlaceholderColor);
+    }
+
+    void EnsureMorphTexture()
+    {
+        if (morphTex != null) return;
+        morphTex = new Texture2D(MorphW, MorphH, TextureFormat.RGBA32, false)
+        {
+            filterMode = FilterMode.Point,     // blocky reveal reads as discrete TILES, not a soft blur
+            wrapMode = TextureWrapMode.Repeat  // wraps cleanly around the sphere's longitude
+        };
+        morphPixels = new Color[MorphW * MorphH];
+        morphFinal = new Color[MorphW * MorphH];
+    }
+
+    /// Advance the reveal: how many tiles SHOULD be shown by now is derived from elapsed time, so a
+    /// slow frame reveals a batch at once rather than the animation falling behind real time.
+    void StepMorph(float dt)
+    {
+        morphClock += dt;
+        int total = morphOrder.Length;
+        int target = Mathf.Min(total, Mathf.FloorToInt(total * Mathf.Clamp01(morphClock / MorphDuration)));
+        if (target <= morphRevealed)
+        {
+            if (target >= total) morphActive = false;
+            return;
+        }
+
+        for (int i = morphRevealed; i < target; i++)
+        {
+            int idx = morphOrder[i];
+            morphPixels[idx] = morphFinal[idx];
+        }
+        morphRevealed = target;
+
+        morphTex.SetPixels(morphPixels);
+        morphTex.Apply();
+
+        if (morphRevealed >= total) morphActive = false;
     }
 
     StarData homeStar;
@@ -222,6 +584,12 @@ public class LoadingScreen : MonoBehaviour
     /// pure decoration that does nothing. A lit material gives it a terminator, which is what reads as a
     /// three-dimensional body turning. The star is the exception and stays unlit, because a star emits
     /// rather than reflects.
+    // Shared with ResetPlanetPlaceholder, which puts the Planet material back to exactly this look at
+    // the start of every new generation — otherwise a second game reuses the first one's finished
+    // homeworld texture (SetHomePlanet mutates this same Material in place) during the early "generic
+    // placeholder" phase, before the new SetHomePlanet call replaces it again near 78%.
+    static readonly Color PlanetPlaceholderColor = new Color(0.30f, 0.52f, 0.76f);
+
     void BuildSubjectMaterials()
     {
         var lit = Shader.Find("Universal Render Pipeline/Lit");
@@ -234,7 +602,7 @@ public class LoadingScreen : MonoBehaviour
         // here does not bloom, it simply clamps per channel. (3.2, 2.6, 1.4) would arrive as pure white
         // with the warm tint destroyed: worse than a colour that fits.
         subjectMats[(int)Subject.Star] = SpaceMaterials.Unlit(new Color(1f, 0.90f, 0.62f));
-        subjectMats[(int)Subject.Planet] = LitMat(lit, new Color(0.30f, 0.52f, 0.76f));
+        subjectMats[(int)Subject.Planet] = LitMat(lit, PlanetPlaceholderColor);
         subjectMats[(int)Subject.Moon] = LitMat(lit, new Color(0.62f, 0.60f, 0.58f));
         subjectMats[(int)Subject.Galaxy] = LitMat(lit, new Color(0.62f, 0.42f, 0.92f));
     }
@@ -256,10 +624,15 @@ public class LoadingScreen : MonoBehaviour
         // stuck on whatever was requested while the preview did not exist.
         if (previewRend == null || previewBody == null) return;
         if (s == subject) return;
+        bool leavingStar = subject == Subject.Star;
         subject = s;
 
         previewBody.gameObject.SetActive(s != Subject.None);
-        if (s == Subject.None) return;
+        if (s == Subject.None)
+        {
+            if (leavingStar) ResetSunCluster();
+            return;
+        }
 
         // sharedMaterial, and from a prebuilt set. Assigning `.material` instantiates a fresh copy every
         // time and never frees the last one — and the subject changes twice per system, so a twelve-system
@@ -270,7 +643,9 @@ public class LoadingScreen : MonoBehaviour
                     : s == Subject.Moon ? 0.62f
                     : s == Subject.Galaxy ? 1.3f : 1f;
 
-        if (s == Subject.Star) { ApplyStarScale(); return; }
+        if (s == Subject.Star) { ApplyStarScale(); BeginSunCluster(); return; }
+
+        if (leavingStar) ResetSunCluster();
         previewBody.localScale = Vector3.one * PreviewScale * scale;
     }
 
@@ -292,6 +667,23 @@ public class LoadingScreen : MonoBehaviour
         var spin = sphere.AddComponent<SelfSpin>();
         spin.speed = 22f;
         spin.unscaled = true;
+
+        sunBody[0] = previewBody;
+        sunRend[0] = previewRend;
+
+        // Two more suns, built once and reused across every generation — only a binary/trinary home ever
+        // activates them (SetHomeCluster), and only after they've popped out (StepSunCluster).
+        for (int i = 1; i < sunBody.Length; i++)
+        {
+            var go = MakeCompanionSun(i);
+            go.transform.SetParent(previewStage, false);
+            sunBody[i] = go.transform;
+            sunRend[i] = go.GetComponent<Renderer>();
+        }
+
+        // The trinary inner pair's shared pivot — see SetHomeCluster/StepSunCluster.
+        pairPivot = new GameObject("PreviewPairPivot").transform;
+        pairPivot.SetParent(previewStage, false);
 
         var camGo = new GameObject("LoadingPreviewCam");
         camGo.transform.SetParent(previewStage, false);
@@ -320,6 +712,21 @@ public class LoadingScreen : MonoBehaviour
         BuildSubjectMaterials();
         previewBody.gameObject.SetActive(false);   // nothing on screen until a subject is reported
         previewStage.gameObject.SetActive(false);
+    }
+
+    // A second or third sun for a binary/trinary home. No click collider and no StarInteraction — this
+    // is decoration on a loading screen, not a clickable body — but the same self-spin every sun gets.
+    static GameObject MakeCompanionSun(int index)
+    {
+        var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        sphere.name = "PreviewCompanionSun" + index;
+        var col = sphere.GetComponent<Collider>();
+        if (col != null) Destroy(col);
+        var spin = sphere.AddComponent<SelfSpin>();
+        spin.speed = 22f;
+        spin.unscaled = true;
+        sphere.SetActive(false);
+        return sphere;
     }
 
     public void Report(float t, string stage)
@@ -391,6 +798,9 @@ public class LoadingScreen : MonoBehaviour
         float creepSpeed = Mathf.Max(0f, creepCeiling - target) * CreepRate;
         goal = Mathf.Min(creepCeiling, Mathf.Max(goal, target) + creepSpeed * dt);
 
+        if (subject == Subject.Star && homeLayout != null) StepSunCluster(dt);
+        if (subject == Subject.Planet && morphActive) StepMorph(dt);
+
         if (previewCam != null && previewStage != null && previewStage.gameObject.activeSelf)
             previewCam.Render();
 
@@ -419,6 +829,9 @@ public class LoadingScreen : MonoBehaviour
         if (subjectMats != null)
             foreach (var m in subjectMats)
                 if (m != null) Destroy(m);
+        foreach (var m in sunMat)
+            if (m != null) Destroy(m);
+        if (morphTex != null) Destroy(morphTex);
         if (Instance == this) Instance = null;
     }
 }

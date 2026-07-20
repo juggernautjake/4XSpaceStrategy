@@ -91,10 +91,11 @@ public class GameManager : MonoBehaviour
         screen?.Report(0.03f, "Seeding " + galaxy.name, LoadingScreen.Subject.Galaxy);
         yield return null;
 
-        // The home star itself was rolled in Begin — the whole reason that roll moved out of
-        // ForceHomeWorld, which runs last. So the preview can show the real star from the very first
-        // frame; only its NAME has to wait for system 0 to be built.
-        screen?.SetHomeStar(galaxy.homeStar);
+        // The home star CLUSTER itself was rolled in Begin — the whole reason that roll moved out of
+        // ForceHomeWorld, which runs last. So the preview can show the real star(s) from the very first
+        // frame — including the pop-out if the home turns out to be a binary or trinary — and only the
+        // NAME has to wait for system 0 to be built.
+        screen?.SetHomeCluster(galaxy.homeStars);
 
         const float SystemsShare = 0.70f;
         for (int i = 0; i < count; i++)
@@ -111,6 +112,17 @@ public class GameManager : MonoBehaviour
             // dots animate during the part of the load that actually takes the time.
             var step = GalaxyGenerator.AddSystemStepped(galaxy, solarSystemGenerator, i, count);
             while (step.MoveNext()) yield return step.Current;
+
+            // A binary/trinary home needs real time on screen to show its pop-out (LoadingScreen.
+            // StepSunCluster) — a companion sun after a beat, a third after another — and system
+            // generation alone may finish in well under that on a small galaxy. Held HERE, while the
+            // Subject is still Star, rather than after the caption below switches to Subject.Planet and
+            // the pop-out is no longer even on screen to hold.
+            if (i == 0 && galaxy.homeStars.Count > 1)
+            {
+                float popDuration = LoadingScreen.PopBeat * (galaxy.homeStars.Count - 1) + LoadingScreen.PopGrow + 0.5f;
+                yield return new WaitForSecondsRealtime(popDuration);
+            }
 
             // The home system's star gets NAMED on screen. Passing it as the stage string rather than
             // having SetHomeStar write the caption is deliberate: Report always sets the caption, so a
@@ -147,13 +159,23 @@ public class GameManager : MonoBehaviour
         Galaxy = galaxy;
         FocusedSystem = Galaxy.Home;
 
+        // The homeworld's actual surface only exists once Finish() has run — Subject.Planet has been
+        // showing the generic placeholder up to this point. Switch it to the real world (barren rock,
+        // morphing tile by tile toward its finished terrain) and hold long enough to actually see the
+        // reveal, the same reasoning as the star cluster's own hold above.
+        var homePlanet = FindHomePlanet();
+        if (homePlanet != null)
+        {
+            screen?.SetHomePlanet(homePlanet);
+            yield return new WaitForSecondsRealtime(LoadingScreen.MorphDuration + 0.4f);
+        }
+
         screen?.Report(0.86f, "Lighting the stars", LoadingScreen.Subject.Star);
         yield return null;
         Visualize();
 
         screen?.Report(0.94f, "Founding your empire", LoadingScreen.Subject.Moon);
         yield return null;
-        var homePlanet = FindHomePlanet();
         PlayerEconomy.NewGame(homePlanet, SpeciesManager.Current);
         UnitManager.Instance?.NewGame(homePlanet);
         FactionAI.NewGame(Galaxy);
