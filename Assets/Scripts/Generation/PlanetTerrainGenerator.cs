@@ -551,7 +551,11 @@ public static class PlanetTerrainGenerator
         if (ridge > 0.8f)  return TerrainType.Mountains;
         if (elev > 0.72f)  return frozen ? TerrainType.Glacier : TerrainType.Highlands;
         if (moist > 0.72f) return frozen ? TerrainType.CrystalField : TerrainType.Lake;
-        if (lat < 0.25f && elev > 0.5f) return frozen ? TerrainType.Snow : TerrainType.Beach;
+        // Equatorial belt, perturbed for the same reason the polar edge is: a bare `lat < 0.25f` draws a
+        // ruled horizontal line. It is already broken up by the elevation test, so it needs less help
+        // than the ice edge — but on flat ground the two straight edges still showed.
+        if (lat < 0.19f + Mathf.Clamp01(temp) * 0.12f && elev > 0.5f)
+            return frozen ? TerrainType.Snow : TerrainType.Beach;
         // The bulk mid-elevation band is genuine ice SHEET, not a frozen sea — only the low-elevation
         // band above is actually water once melted (elev<0.3, handled above). Melting the rest into
         // Tundra keeps "how much of the map is water" tied to elevation the same way every other
@@ -559,12 +563,31 @@ public static class PlanetTerrainGenerator
         return frozen ? TerrainType.Ice : TerrainType.Tundra;
     }
 
+    // Where the polar ice reaches on a given column, as a latitude.
+    //
+    // Centred on the old fixed 0.85 so the ice cap is the same size on average as before; the whole
+    // effect of `temp` is to make the EDGE wander by roughly +/-0.07 of latitude instead of being a
+    // ruled line. Shared by the classifiers that draw a cap, so they all ripple together rather than one
+    // being ragged and its neighbour straight.
+    static float PolarIceEdge(float temp) => 0.78f + Mathf.Clamp01(temp) * 0.14f;
+
     static TerrainType OceanWorld(float elev, float temp, float lat)
     {
         if (elev > 0.80f) return TerrainType.Mountains;
         if (elev > 0.70f) return TerrainType.Island;
         if (elev > 0.64f) return TerrainType.Beach;
-        if (lat > 0.85f)  return TerrainType.FrozenSea;
+
+        // The polar ice edge, perturbed rather than flat.
+        //
+        // This was a bare `lat > 0.85f`, and lat is a pure function of the row — so the test flipped at
+        // exactly the same latitude for every column and the ice cap ended in a dead-straight horizontal
+        // line across the top and bottom of the map. Real ice edges are ragged: they follow water
+        // temperature, which varies along the coast.
+        //
+        // `temp` already carries the heat-noise field, so using it to move the threshold makes the
+        // boundary wander with local climate at no extra sampling cost. A colder patch freezes further
+        // toward the equator, a warmer one holds open water closer to the pole.
+        if (lat > PolarIceEdge(temp)) return TerrainType.FrozenSea;
         if (temp < 0.25f) return TerrainType.FrozenSea;   // a cooled ocean world freezes over, pole to pole
         if (elev < 0.40f && temp > 0.6f) return TerrainType.Reef;
         return TerrainType.Ocean;
