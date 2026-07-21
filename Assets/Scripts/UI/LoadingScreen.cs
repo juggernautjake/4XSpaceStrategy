@@ -64,6 +64,10 @@ public class LoadingScreen : MonoBehaviour
         rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
         rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
 
+        // Black to begin with — space fills in as the galaxy does. Built first so it sits behind
+        // everything else on the panel.
+        BuildSky(rt);
+
         // Centred stack: headline, bar, stage line.
         var col = UIFactory.NewUI(rt, "Column").GetComponent<RectTransform>();
         col.anchorMin = col.anchorMax = new Vector2(0.5f, 0.5f);
@@ -121,11 +125,136 @@ public class LoadingScreen : MonoBehaviour
         root.SetActive(false);
     }
 
+    // ---- The starfield ------------------------------------------------------------------------
+    //
+    // The panel starts BLACK and space fills in as the galaxy is built, so the backdrop is doing the same
+    // thing the progress bar is describing: a universe being made. Stars accrue at a rate tied to actual
+    // progress rather than to a timer — pause the generation and the sky stops filling too.
+    //
+    // Plain UI Images on the panel, not the 3D SpaceBackground: that one is parented to the game camera,
+    // which is looking at a half-built galaxy behind a full-screen panel. Borrowing it would mean either
+    // moving it or rendering the very scene this screen exists to hide.
+    RectTransform skyLayer;
+    readonly List<RectTransform> skyStars = new List<RectTransform>();
+    readonly List<float> skyPhase = new List<float>();
+    float shootTimer = 2f;
+
+    const int SkyStarTarget = 220;   // how many stars a fully-generated sky holds
+
+    void BuildSky(RectTransform parent)
+    {
+        skyLayer = UIFactory.NewUI(parent, "Sky").GetComponent<RectTransform>();
+        UIFactory.Stretch(skyLayer);
+        skyLayer.SetAsFirstSibling();   // behind the bar, the preview and every caption
+
+        // The sky is the only part of the UI that moves every single frame, and this project has ONE
+        // canvas for the whole game (UIFactory.CreateCanvas is the only AddComponent<Canvas>). Without
+        // this, a couple of hundred drifting stars dirty that shared canvas each frame and every open
+        // window rebatches with them. A nested Canvas confines the rebuild to the starfield.
+        // No GraphicRaycaster: nothing in here is clickable (every star sets raycastTarget = false), and
+        // no overrideSorting, so the layer keeps its place in hierarchy order — behind everything.
+        skyLayer.gameObject.AddComponent<Canvas>();
+    }
+
+    /// Fill the sky to match how far generation has got.
+    void TickSky(float progress, float dt)
+    {
+        if (skyLayer == null) return;
+
+        int want = Mathf.RoundToInt(SkyStarTarget * Mathf.Clamp01(progress));
+        var size = skyLayer.rect.size;
+
+        // Add a few per frame rather than all at once on a threshold, so the sky thickens visibly instead
+        // of appearing in blocks.
+        int add = Mathf.Min(3, want - skyStars.Count);
+        for (int i = 0; i < add; i++)
+        {
+            var go = UIFactory.NewUI(skyLayer, "Star");
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            float s = Random.Range(1.2f, 2.9f);
+            rt.sizeDelta = new Vector2(s, s);
+            rt.anchoredPosition = new Vector2(Random.Range(-size.x * 0.5f, size.x * 0.5f),
+                                              Random.Range(-size.y * 0.5f, size.y * 0.5f));
+            var img = go.AddComponent<Image>();
+            img.raycastTarget = false;
+            // Mostly white, occasionally warm or cool — a monochrome field reads as noise, not as stars.
+            float r = Random.value;
+            img.color = r < 0.72f ? new Color(1f, 1f, 1f, 0.85f)
+                      : r < 0.88f ? new Color(0.72f, 0.82f, 1f, 0.8f)
+                                  : new Color(1f, 0.85f, 0.7f, 0.8f);
+            skyStars.Add(rt);
+            skyPhase.Add(Random.Range(0f, 6.28f));
+        }
+
+        // Twinkle, and a slow drift so the field has depth rather than sitting flat behind the panel.
+        int slice = Time.frameCount & 3;
+        for (int i = 0; i < skyStars.Count; i++)
+        {
+            var rt = skyStars[i];
+            if (rt == null) continue;
+            // Re-tint a QUARTER of the field per frame. A colour write dirties the graphic and costs a
+            // mesh rebuild; at 1.7 rad/s a star's alpha moves so little between frames that spreading the
+            // work over four of them is invisible, and it cuts the per-frame rebuild count by 4x. The
+            // drift below still runs on every star every frame — that one IS visible if it stutters.
+            if ((i & 3) == slice)
+            {
+                float tw = 0.55f + 0.45f * Mathf.Sin(Time.unscaledTime * 1.7f + skyPhase[i]);
+                var img = rt.GetComponent<Image>();
+                if (img != null)
+                {
+                    var c = img.color; c.a = 0.35f + 0.5f * tw; img.color = c;
+                }
+            }
+            // Parallax: the nearer (larger) stars drift faster than the small distant ones.
+            float depth = Mathf.Clamp01((rt.sizeDelta.x - 1.2f) / 1.7f);
+            rt.anchoredPosition += new Vector2(-dt * (2f + depth * 7f), 0f);
+            if (rt.anchoredPosition.x < -size.x * 0.5f)
+                rt.anchoredPosition = new Vector2(size.x * 0.5f, Random.Range(-size.y * 0.5f, size.y * 0.5f));
+        }
+
+        // Shooting stars, but only once there is a sky for them to cross.
+        shootTimer -= dt;
+        if (shootTimer <= 0f && skyStars.Count > 40)
+        {
+            shootTimer = Random.Range(1.8f, 4.5f);
+            SpawnShootingStar(size);
+        }
+    }
+
+    void SpawnShootingStar(Vector2 size)
+    {
+        var go = UIFactory.NewUI(skyLayer, "Shooting");
+        var rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(Random.Range(34f, 70f), 2f);
+        rt.anchoredPosition = new Vector2(Random.Range(-size.x * 0.4f, size.x * 0.2f),
+                                          Random.Range(-size.y * 0.35f, size.y * 0.45f));
+        rt.localRotation = Quaternion.Euler(0, 0, Random.Range(-28f, -12f));
+        var img = go.AddComponent<Image>();
+        img.raycastTarget = false;
+        img.color = new Color(0.9f, 0.95f, 1f, 0.9f);
+        go.AddComponent<LoadingShootingStar>().Init(rt, Random.Range(620f, 1000f));
+    }
+
     public void Open(string headlineText = null)
     {
         if (root == null) return;
         headlineBase = string.IsNullOrEmpty(headlineText) ? "Generating the universe" : headlineText;
         shown = 0f; goal = 0f; target = 0f; prevTarget = 0f; creepCeiling = 0f;
+
+        // Empty the sky, so every load starts from black and builds again rather than opening on the
+        // last game's finished starfield.
+        //
+        // Clear the whole LAYER, not just the tracked list: shooting stars are children of it too and are
+        // deliberately untracked (they delete themselves after ~1s). Close() only deactivates the root, so
+        // a streak that was mid-flight when the last load ended is frozen rather than gone, and would
+        // resume across a sky that is supposed to be starting from black.
+        for (int i = skyLayer != null ? skyLayer.childCount - 1 : -1; i >= 0; i--)
+            Destroy(skyLayer.GetChild(i).gameObject);
+        skyStars.Clear();
+        skyPhase.Clear();
+        shootTimer = 2f;
         ResetPlanetPlaceholder();
         SetSubject(Subject.None);
         if (previewStage != null) previewStage.gameObject.SetActive(true);
@@ -163,6 +292,17 @@ public class LoadingScreen : MonoBehaviour
     readonly Transform[] sunBody = new Transform[3];
     readonly Renderer[] sunRend = new Renderer[3];
     readonly Material[] sunMat = new Material[3];   // [0] is unused — sun 0 reads subjectMats[Star]
+
+    // The corona quads that make a preview sun read as a light source rather than a coloured ball.
+    //
+    // Bloom cannot do this job here: the preview renders to a plain LDR RenderTexture with no post stack,
+    // which the canvas composites afterwards — so the HDR emission the galaxy view relies on would clamp
+    // to white instead of blooming (the same reason BuildStarMaterial keeps its colour in gamut). Real
+    // additive geometry glows with no post-processing at all, which is exactly why SpaceMaterials.Glow
+    // exists for the in-game stars; this is the same two-quad treatment GalaxyLOD gives them.
+    readonly Transform[] sunGlow = new Transform[3];
+    readonly Renderer[] sunGlowInner = new Renderer[3];
+    readonly Renderer[] sunGlowOuter = new Renderer[3];
     Transform pairPivot;                 // trinary's close inner pair orbits this; unused otherwise
     readonly float[] sunAngle = new float[3];
     readonly bool[] sunActive = new bool[3];
@@ -192,7 +332,7 @@ public class LoadingScreen : MonoBehaviour
     const int MorphW = 40, MorphH = 20;
     // Public so GameManager can hold the Planet subject on screen long enough to see the whole reveal —
     // see GenerateGalaxyRoutine, same reasoning as PopBeat/PopGrow above.
-    public const float MorphDuration = 2.4f;
+    public const float MorphDuration = 7f;
 
     Texture2D morphTex;
     Color[] morphPixels;     // the texture's CURRENT (partially revealed) contents, mutated in place
@@ -253,6 +393,7 @@ public class LoadingScreen : MonoBehaviour
             var old = subjectMats[(int)Subject.Star];
             if (old != null) Destroy(old);
             subjectMats[(int)Subject.Star] = BuildStarMaterial(homeStar);
+            TintSunCorona(0, homeStar);
             if (subject == Subject.Star && previewRend != null)
             {
                 previewRend.sharedMaterial = subjectMats[(int)Subject.Star];
@@ -285,6 +426,7 @@ public class LoadingScreen : MonoBehaviour
             if (sunMat[i] != null) Destroy(sunMat[i]);
             sunMat[i] = i < stars.Count ? BuildStarMaterial(stars[i]) : null;
             if (sunRend[i] != null) sunRend[i].sharedMaterial = sunMat[i];
+            if (i < stars.Count) TintSunCorona(i, stars[i]);
             if (sunBody[i] != null) sunBody[i].gameObject.SetActive(false);
         }
 
@@ -628,6 +770,9 @@ public class LoadingScreen : MonoBehaviour
         subject = s;
 
         previewBody.gameObject.SetActive(s != Subject.None);
+        // Sun 0's sphere is shared with every other subject, so its corona has to be switched off by hand
+        // — otherwise the homeworld would be revealed inside a star's halo.
+        if (sunGlow[0] != null) sunGlow[0].gameObject.SetActive(s == Subject.Star);
         if (s == Subject.None)
         {
             if (leavingStar) ResetSunCluster();
@@ -670,6 +815,7 @@ public class LoadingScreen : MonoBehaviour
 
         sunBody[0] = previewBody;
         sunRend[0] = previewRend;
+        BuildSunCorona(0, previewBody);
 
         // Two more suns, built once and reused across every generation — only a binary/trinary home ever
         // activates them (SetHomeCluster), and only after they've popped out (StepSunCluster).
@@ -679,6 +825,9 @@ public class LoadingScreen : MonoBehaviour
             go.transform.SetParent(previewStage, false);
             sunBody[i] = go.transform;
             sunRend[i] = go.GetComponent<Renderer>();
+            // Companion coronae need no toggling: the whole companion GameObject is only ever active
+            // while the cluster is on screen, and its corona is a child of it.
+            BuildSunCorona(i, sunBody[i]);
         }
 
         // The trinary inner pair's shared pivot — see SetHomeCluster/StepSunCluster.
@@ -712,6 +861,71 @@ public class LoadingScreen : MonoBehaviour
         BuildSubjectMaterials();
         previewBody.gameObject.SetActive(false);   // nothing on screen until a subject is reported
         previewStage.gameObject.SetActive(false);
+    }
+
+    /// Hang two additive corona quads on a preview sun: a tight bright one that reads as the star's own
+    /// light, and a wide faint one that gives it presence. Same split, and the same reasoning, as
+    /// GalaxyLOD's in-game stars — one quad has to choose between looking hot and looking big.
+    ///
+    /// Sizes are MULTIPLES of the sun's diameter, because these are children of the sun sphere and so
+    /// inherit its scale — which is what keeps a small K dwarf's corona proportionally small too, for
+    /// free, as ApplyStarScale resizes the parent.
+    void BuildSunCorona(int index, Transform sun)
+    {
+        if (sun == null) return;
+
+        var holder = new GameObject("Corona").transform;
+        holder.SetParent(sun, false);
+        sunGlow[index] = holder;
+
+        sunGlowInner[index] = MakeCoronaQuad(holder, "Glow", 2.0f, 0.55f);
+        sunGlowOuter[index] = MakeCoronaQuad(holder, "Halo", 3.2f, 0.14f);
+    }
+
+    static Renderer MakeCoronaQuad(Transform parent, string name, float mult, float alpha)
+    {
+        var go = SpaceMaterials.Glow(parent, name, mult, new Color(1f, 1f, 1f, alpha));
+
+        // Glow() bills its quad at Camera.main, which here is the GAME camera looking at a half-built
+        // galaxy 200,000 units away — it would leave every corona edge-on to the preview camera and so
+        // invisible. The preview camera never rotates and neither does the stage, so a fixed identity
+        // world rotation IS facing it; LoadingBillboard reasserts that each frame against the parent
+        // sun's own spin (SelfSpin), which would otherwise carry the quads round with it.
+        var face = go.GetComponent<FaceCamera>();
+        if (face != null) Destroy(face);
+        go.AddComponent<LoadingBillboard>();
+
+        return go.GetComponent<Renderer>();
+    }
+
+    /// Tint one sun's corona to that star's own colour, so a red dwarf glows red and a blue giant blue.
+    /// Alpha is authored per quad and preserved — only the hue is taken from the star.
+    void TintSunCorona(int index, StarData star)
+    {
+        if (star == null) return;
+        var c = star.color;
+        TintQuad(sunGlowInner[index], c, CoronaInnerAlpha);
+        TintQuad(sunGlowOuter[index], c, CoronaOuterAlpha);
+    }
+
+    // Authored here rather than read back off the material: Material.color maps to _Color, and the URP
+    // shaders these quads use expose _BaseColor instead, so a read-back would return white and quietly
+    // drive both quads to full strength.
+    // The inner quad is only 2x the sun's diameter, so the opaque sphere hides everything inside texture
+    // radius 0.5 — which is most of a soft dot's energy. What is left is the outer annulus, and it needs a
+    // high alpha to still read as a hot rim. (GalaxyLOD can use 0.85 at 3x because out there the star's
+    // disc covers barely a sixth of its glow; here it covers half.) Widening the quad instead is not an
+    // option — at 2x it already overruns this 200-unit frame.
+    const float CoronaInnerAlpha = 0.9f;
+    const float CoronaOuterAlpha = 0.14f;
+
+    static void TintQuad(Renderer r, Color c, float alpha)
+    {
+        // sharedMaterial, not material: Glow() already assigned a per-renderer instance, so this mutates
+        // that one in place. Reading `.material` here would instantiate ANOTHER copy on every call — and
+        // this runs once per generation, for the life of a singleton that outlives every game.
+        if (r == null || r.sharedMaterial == null) return;
+        SpaceMaterials.ApplyColor(r.sharedMaterial, new Color(c.r, c.g, c.b, alpha));
     }
 
     // A second or third sun for a binary/trinary home. No click collider and no StarInteraction — this
@@ -758,6 +972,10 @@ public class LoadingScreen : MonoBehaviour
         if (!IsOpen) return;
 
         float dt = Time.unscaledDeltaTime;
+
+        // Space fills in behind everything, paced by REAL progress rather than a clock — so the sky and
+        // the bar are describing the same thing.
+        TickSky(shown, dt);
 
         // ---- The dots ----
         //
@@ -831,7 +1049,70 @@ public class LoadingScreen : MonoBehaviour
                 if (m != null) Destroy(m);
         foreach (var m in sunMat)
             if (m != null) Destroy(m);
+        // The corona materials too — destroying previewStage takes the quads but not the runtime
+        // materials hung off them.
+        foreach (var r in sunGlowInner)
+            if (r != null && r.sharedMaterial != null) Destroy(r.sharedMaterial);
+        foreach (var r in sunGlowOuter)
+            if (r != null && r.sharedMaterial != null) Destroy(r.sharedMaterial);
         if (morphTex != null) Destroy(morphTex);
         if (Instance == this) Instance = null;
+    }
+}
+
+// A streak that crosses the loading sky and removes itself.
+//
+// Self-destructing rather than pooled: they spawn every couple of seconds for the length of one load and
+// never again, so a pool would be more machinery than the thing it manages.
+public class LoadingShootingStar : MonoBehaviour
+{
+    RectTransform rt;
+    float speed, life = 1.1f, age;
+
+    public void Init(RectTransform r, float px)
+    {
+        rt = r; speed = px;
+    }
+
+    void Update()
+    {
+        if (rt == null) { Destroy(gameObject); return; }
+        age += Time.unscaledDeltaTime;
+
+        // Travels along its own rotation, so the streak points the way it is going.
+        rt.anchoredPosition += (Vector2)(rt.localRotation * Vector3.right) * speed * Time.unscaledDeltaTime;
+
+        var img = GetComponent<UnityEngine.UI.Image>();
+        if (img != null)
+        {
+            var c = img.color;
+            c.a = Mathf.Clamp01(1f - age / life) * 0.9f;
+            img.color = c;
+        }
+        if (age >= life) Destroy(gameObject);
+    }
+}
+
+// Holds a loading-preview corona quad square-on to the preview camera.
+//
+// Not FaceCamera: that one bills at Camera.main, which during a load is the game camera pointed at a
+// half-built galaxy 200,000 units from this stage — every corona would end up edge-on and invisible. The
+// preview camera and its stage are both built unrotated and never turn, so identity world rotation is
+// facing it. This has to reassert that every frame because the quads are children of the sun spheres,
+// and SelfSpin would otherwise carry them round with the surface.
+public class LoadingBillboard : MonoBehaviour
+{
+    // LateUpdate, so it runs after SelfSpin's Update has moved the parent this frame.
+    void LateUpdate()
+    {
+        transform.rotation = Quaternion.identity;
+    }
+
+    // Also on enable, because the preview camera is rendered from Update — before any LateUpdate. On the
+    // frame a corona is first switched on it would otherwise render at whatever rotation its parent sun
+    // had spun to, which can be edge-on: one frame of the halo flickering out as the star appears.
+    void OnEnable()
+    {
+        transform.rotation = Quaternion.identity;
     }
 }

@@ -88,7 +88,10 @@ public class GameManager : MonoBehaviour
 
         int count = GalaxyGenerator.ClampSystems(systemCount);
         var galaxy = GalaxyGenerator.Begin(solarSystemGenerator, avgPlanets);
-        screen?.Report(0.03f, "Seeding " + galaxy.name, LoadingScreen.Subject.Galaxy);
+        // Subject.None, not Galaxy: this frame is immediately followed by the first Subject.Star report,
+        // so showing the galaxy model here means one frame of it appearing and vanishing — a flash, which
+        // is the exact artifact the star/planet split below exists to remove.
+        screen?.Report(0.03f, "Seeding " + galaxy.name, LoadingScreen.Subject.None);
         yield return null;
 
         // The home star CLUSTER itself was rolled in Begin — the whole reason that roll moved out of
@@ -97,7 +100,20 @@ public class GameManager : MonoBehaviour
         // NAME has to wait for system 0 to be built.
         screen?.SetHomeCluster(galaxy.homeStars);
 
-        const float SystemsShare = 0.70f;
+        // The load is split in HALF by subject, deliberately: stars for the first 50%, the homeworld
+        // forming for the second. Alternating star/planet per system meant neither ever held the screen
+        // long enough to watch — the pop-out and the tile reveal are both several seconds of animation,
+        // and both were being interrupted by the next system before they finished.
+        const float SystemsShare = 0.47f;
+
+        // A floor on how long the star half lasts, in wall-clock seconds.
+        //
+        // The bar is split evenly by PROGRESS, but progress and time are not the same thing: a small
+        // galaxy can generate every system in a second or two, and the star half would flash past before
+        // the pop-out finished — or, on a single-sun game, before the player had really looked at it.
+        // Padding to a floor makes the two halves feel even as well as measure even.
+        const float MinStarPhase = 6f;
+        float starPhaseBegan = Time.unscaledTime;
         for (int i = 0; i < count; i++)
         {
             // Announce the subject BEFORE the work, so the preview shows what is about to be built rather
@@ -128,12 +144,15 @@ public class GameManager : MonoBehaviour
             // having SetHomeStar write the caption is deliberate: Report always sets the caption, so a
             // caption written anywhere else is overwritten by the very next report — which is exactly
             // what happened the first time this was wired up, and the name never appeared at all.
+            // STILL Subject.Star. The whole first half belongs to the suns — switching to Planet here is
+            // what used to cut the pop-out short and leave the placeholder planet on screen for most of
+            // the load, before the real homeworld even existed to show.
             string caption = (i == 0 && galaxy.systems.Count > 0)
                 ? $"{galaxy.systems[0].name} — your home star"
-                : $"Worlds of system {i + 1}";
+                : $"Forming star system  {i + 1} / {count}";
 
             screen?.Report(0.03f + SystemsShare * ((i + 1) / (float)count),
-                           caption, LoadingScreen.Subject.Planet);
+                           caption, LoadingScreen.Subject.Star);
             // Give the screen a couple of frames to actually animate in.
             //
             // One `yield return null` per system means one rendered frame per system, and a bar cannot
@@ -152,35 +171,69 @@ public class GameManager : MonoBehaviour
             if (i == 0 && count > 1) yield return new WaitForSecondsRealtime(1.1f);
         }
 
-        screen?.Report(0.78f, "Settling the home world", LoadingScreen.Subject.Planet);
+        // Let the star half run its full time before handing over, so the suns are actually watched
+        // rather than glimpsed. Costs nothing on a large galaxy, where generation already outlasts it.
+        while (Time.unscaledTime - starPhaseBegan < MinStarPhase)
+        {
+            screen?.Report(0.03f + SystemsShare, "The system settles", LoadingScreen.Subject.Star);
+            yield return null;
+        }
+
+        // ---- Second half: the homeworld ----
+        screen?.Report(0.50f, "Settling the home world", LoadingScreen.Subject.Star);
         yield return null;
         GalaxyGenerator.Finish(galaxy, SpeciesManager.Current, count);
 
         Galaxy = galaxy;
         FocusedSystem = Galaxy.Home;
 
-        // The homeworld's actual surface only exists once Finish() has run — Subject.Planet has been
-        // showing the generic placeholder up to this point. Switch it to the real world (barren rock,
-        // morphing tile by tile toward its finished terrain) and hold long enough to actually see the
-        // reveal, the same reasoning as the star cluster's own hold above.
-        var homePlanet = FindHomePlanet();
-        if (homePlanet != null)
-        {
-            screen?.SetHomePlanet(homePlanet);
-            yield return new WaitForSecondsRealtime(LoadingScreen.MorphDuration + 0.4f);
-        }
-
-        screen?.Report(0.86f, "Lighting the stars", LoadingScreen.Subject.Star);
-        yield return null;
+        // The remaining engine work FIRST, so the reveal that follows is uninterrupted.
+        //
+        // Visualize and the economy setup are quick but not free, and a frame that stalls partway through
+        // the tile reveal is exactly the kind of hitch the reveal exists to avoid. Getting them out of the
+        // way means the whole second half of the bar is nothing but the planet forming.
         Visualize();
-
-        screen?.Report(0.94f, "Founding your empire", LoadingScreen.Subject.Moon);
-        yield return null;
+        var homePlanet = FindHomePlanet();
         PlayerEconomy.NewGame(homePlanet, SpeciesManager.Current);
         UnitManager.Instance?.NewGame(homePlanet);
         FactionAI.NewGame(Galaxy);
+        yield return null;
 
-        screen?.Report(1f, "Ready", LoadingScreen.Subject.Galaxy);
+        // The homeworld's surface only exists once Finish has run, which is why the star held the screen
+        // until now. Hand the real world over — barren rock morphing tile by tile toward its finished
+        // terrain — and walk the bar across the second half at the reveal's own pace, so the progress
+        // the player sees IS the world appearing rather than a number racing ahead of it.
+        if (homePlanet != null)
+        {
+            screen?.SetHomePlanet(homePlanet);
+
+            // Built once: the loop below runs for MorphDuration seconds at frame rate, and rebuilding an
+            // identical string several hundred times is several hundred allocations during the one stretch
+            // of the load where a GC hitch would show as a stutter in the reveal.
+            string homeCaption = $"{homePlanet.name} — your homeworld";
+
+            float reveal = LoadingScreen.MorphDuration;
+            for (float e = 0f; e < reveal; e += Time.unscaledDeltaTime)
+            {
+                screen?.Report(Mathf.Lerp(0.52f, 0.94f, e / reveal), homeCaption, LoadingScreen.Subject.Planet);
+                yield return null;
+            }
+
+            // Let the finished world simply turn for a moment before anything else happens.
+            //
+            // The reveal ends on its last tile and the screen used to close almost immediately after —
+            // so the one thing the whole sequence was building toward, the completed planet, was the
+            // thing the player never actually got to look at.
+            screen?.Report(0.97f, homeCaption, LoadingScreen.Subject.Planet);
+            yield return new WaitForSecondsRealtime(2.2f);
+        }
+
+        // Two closing beats rather than one. "Ready" told the player nothing they could not see from the
+        // full bar; naming what finished and then what happens next turns the last second from dead air
+        // into a hand-off.
+        screen?.Report(1f, "Generation complete", LoadingScreen.Subject.Planet);
+        yield return new WaitForSecondsRealtime(1.1f);
+        screen?.Report(1f, "Entering solar system", LoadingScreen.Subject.Planet);
         // Hold the full bar for a beat. Reaching 100% and vanishing in the same frame reads as a glitch
         // rather than as completion.
         yield return new WaitForSecondsRealtime(0.35f);
