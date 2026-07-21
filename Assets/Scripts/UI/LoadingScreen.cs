@@ -171,12 +171,30 @@ public class LoadingScreen : MonoBehaviour
         // reference whose underlying object is gone — and `??` tests for real null, so it hands back the
         // fake instead of ever calling AddComponent. The next line then threw
         // MissingComponentException. Owning the reference from the start removes the question.
-        skyGroup = skyLayer.gameObject.AddComponent<CanvasGroup>();
+        skyGroup = UIFactory.Ensure<CanvasGroup>(skyLayer.gameObject);
         skyGroup.blocksRaycasts = false;
         skyGroup.interactable = false;
     }
 
     CanvasGroup skyGroup;
+
+    /// The sky's fade group, re-created if it has gone missing.
+    ///
+    /// Belt and braces over the cached field. The screen is a singleton that outlives every game, and a
+    /// cached component reference is only as good as the object under it — anything that destroyed the
+    /// Sky object or stripped the component would leave a fake-null here, and the next `alpha =` would
+    /// throw MissingComponentException in the middle of the hand-off, which is the worst possible place
+    /// for it. Ensure re-adds rather than trusting; the null test is Unity's overloaded ==, which is
+    /// what catches a fake null in the first place.
+    CanvasGroup SkyGroup
+    {
+        get
+        {
+            if (skyGroup == null && skyLayer != null)
+                skyGroup = UIFactory.Ensure<CanvasGroup>(skyLayer.gameObject);
+            return skyGroup;
+        }
+    }
 
     /// Fill the sky to match how far generation has got.
     void TickSky(float progress, float dt)
@@ -290,7 +308,7 @@ public class LoadingScreen : MonoBehaviour
         OrbitController.SetRevealAlpha(1f);
         var panelImg0 = root.GetComponent<Image>();
         if (panelImg0 != null) panelImg0.color = new Color(0.02f, 0.03f, 0.06f, 1f);
-        if (skyGroup != null) skyGroup.alpha = 1f;
+        { var sg = SkyGroup; if (sg != null) sg.alpha = 1f; }
         if (previewView != null)
         {
             previewView.color = Color.white;
@@ -466,7 +484,7 @@ public class LoadingScreen : MonoBehaviour
         {
             float t = Mathf.Clamp01(e / HandoffBeat);
             if (panelImg != null) { var c = panelStart; c.a = panelStart.a * (1f - t); panelImg.color = c; }
-            if (skyGroup != null) skyGroup.alpha = 1f - t;
+            { var sg = SkyGroup; if (sg != null) sg.alpha = 1f - t; }
             if (previewView != null)
             {
                 var c = previewView.color;
@@ -527,7 +545,7 @@ public class LoadingScreen : MonoBehaviour
     {
         var panelImg = root != null ? root.GetComponent<Image>() : null;
         if (panelImg != null) panelImg.color = panelColor;
-        if (skyGroup != null) skyGroup.alpha = 1f;
+        { var sg = SkyGroup; if (sg != null) sg.alpha = 1f; }
         if (previewView != null)
         {
             previewView.color = Color.white;
