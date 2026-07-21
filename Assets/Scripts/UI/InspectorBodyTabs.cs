@@ -30,14 +30,32 @@ public partial class InspectorWindow
     {
         var b = target.body;
 
-        // The globe sits above the readout: drag it to turn the world to any angle, wheel to zoom.
+        // The globe sits BESIDE the readout, not above it: type, owner, status and habitability on the
+        // left, the world itself on the right, at just the size needed to see the whole sphere.
+        //
+        // It was a full-width 210px band above the card, which spent most of its area on letterbox —
+        // the render target is square and the Inspector is not — and pushed the numbers you actually
+        // read down the panel. Sized to the sphere and set alongside them, both halves earn their space.
         //
         // It shares PlanetGlobeWindow's single render stage rather than building its own camera, sphere,
         // light and RenderTexture. Both viewers always want the same subject — the selected body — so a
         // second stage would be a second copy of the same picture at twice the cost.
-        EmbeddedGlobe.Build(p, b, 210f);
+        const float GlobeSize = 156f;
 
-        var card = Card(p);
+        var row = UIFactory.NewUI(p, "OverviewRow");
+        UIFactory.AddLayout(row, GlobeSize, GlobeSize);
+        var rh = row.AddComponent<HorizontalLayoutGroup>();
+        rh.spacing = 8; rh.childControlWidth = true; rh.childControlHeight = true;
+        // childForceExpandWidth OFF: with it on, Unity treats every child as flexible and the globe's
+        // own flexibleWidth = 0 is overridden — the holder stretches past its fixed size and the
+        // AspectRatioFitter letterboxes the sides, which is the exact waste this layout removes.
+        rh.childForceExpandWidth = false; rh.childForceExpandHeight = true;
+
+        // Only the four IDENTITY stats sit beside the globe. The rest (surface, moons, ships, points of
+        // interest) go in their own card below, because eight stat rows — two of which wrap — will not
+        // fit in 156px and a HorizontalLayoutGroup answers that by crushing them.
+        var card = Card(row.transform);
+        EmbeddedGlobe.Build(row.transform, b, GlobeSize, GlobeSize);
         Stat(card, "Type", () => TerraformDiagnosis.Pretty(b.type));
         Stat(card, "Owner", () =>
         {
@@ -71,10 +89,12 @@ public partial class InspectorWindow
         }
         else
         {
-            Stat(card, "Surface", () => $"{MapMetrics.SurfW(b)}×{MapMetrics.SurfH(b)} cells");
-            Stat(card, "Moons", () => b.moons != null ? b.moons.Count.ToString() : "0");
-            Stat(card, "Ships here", () => b.units != null ? b.units.Count.ToString() : "0");
-            Stat(card, "Points of interest", () => b.pointsOfInterest != null ? b.pointsOfInterest.Count.ToString() : "0");
+            // Its own card BELOW the globe row, not squeezed in beside it — see the note there.
+            var detail = Card(p);
+            Stat(detail, "Surface", () => $"{MapMetrics.SurfW(b)}×{MapMetrics.SurfH(b)} cells");
+            Stat(detail, "Moons", () => b.moons != null ? b.moons.Count.ToString() : "0");
+            Stat(detail, "Ships here", () => b.units != null ? b.units.Count.ToString() : "0");
+            Stat(detail, "Points of interest", () => b.pointsOfInterest != null ? b.pointsOfInterest.Count.ToString() : "0");
         }
 
         // Colonization progress by someone else.

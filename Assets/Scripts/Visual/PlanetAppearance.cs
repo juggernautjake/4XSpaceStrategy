@@ -70,7 +70,8 @@ public static class PlanetAppearance
     // A slowly-drifting cloud shell for worlds with real air, sat just above the surface and below the
     // atmosphere haze. Deterministic (seeded from the world's terrain seed) so it's stable across
     // re-renders and reloads, and it rotates a touch faster than the planet so the weather visibly moves.
-    static void AddClouds(CelestialBody body, GameObject go)
+    /// Public for the same reason as AddAtmosphere: the preview and the real world must agree.
+    public static void AddClouds(CelestialBody body, GameObject go)
     {
         var existing = go.transform.Find("Clouds");
         if (existing != null)
@@ -162,7 +163,9 @@ public static class PlanetAppearance
         }
     }
 
-    static void AddAtmosphere(CelestialBody body, GameObject go)
+    /// Public so the loading screen can give its preview sphere the SAME atmosphere the real body
+    /// gets — the transition is only seamless if both are the same shell built by the same rule.
+    public static void AddAtmosphere(CelestialBody body, GameObject go)
     {
         // Remove any previous atmosphere (e.g. when re-applying).
         var existing = go.transform.Find("Atmosphere");

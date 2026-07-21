@@ -297,6 +297,21 @@ public class LoadingScreen : MonoBehaviour
         shootTimer = 2f;
         ClearMoons();               // last game's moons are not this game's
 
+        // A fresh load starts unaligned and airless, and the preview spins on its own again — the
+        // finale turns all three off on its way out, and these are the fields it would otherwise leave
+        // set for the next game.
+        aligning = false;
+        atmosphereOn = false;
+        homeBody = null;
+        RestoreIdleSpin(previewBody, 22f);
+        if (previewBody != null)
+        {
+            var oldAir = previewBody.Find("Atmosphere");
+            if (oldAir != null) Destroy(oldAir.gameObject);
+            var oldCloud = previewBody.Find("Clouds");
+            if (oldCloud != null) Destroy(oldCloud.gameObject);
+        }
+
         // Defensive: the finale's own cleanup runs at the end of its coroutine, so anything that killed
         // that coroutine part-way (a scene load, StopAllCoroutines) would leave the singleton stuck in
         // the finale state — translucent panel, invisible sky, frozen bar — for every load afterwards.
@@ -355,6 +370,7 @@ public class LoadingScreen : MonoBehaviour
     const float WelcomeFadeIn = 0.5f; // "Welcome to <world>" arriving
     const float HandoffBeat = 0.7f;   // the panel dissolving out from behind it
     const float WelcomeHold = 1.1f;   // the message over the live solar system
+    const float AlignBeat = 0.6f;      // the preview turning to match the real planet
     const float WelcomeFadeOut = 0.6f; // and then completely gone, before anything else happens
     const float RingRevealGap = 0.25f; // a beat of empty sky, so the cue reads as its own event
     const float RingRevealBeat = 1.2f; // the orbits drawing in — the "you have control" cue
@@ -466,6 +482,18 @@ public class LoadingScreen : MonoBehaviour
         // system geometry before any of it is visible.
         onReady?.Invoke();
         yield return null;
+
+        // --- 4b. TURN THE PREVIEW TO MATCH. ---
+        //
+        // The camera is now on the real planet, so the preview finally has something to line up WITH:
+        // it swings to the same bearing, the sphere takes the real world's spin, the moons move to their
+        // real positions relative to it, and the light comes from the real star. Eased over a beat so it
+        // reads as the model settling into place rather than snapping.
+        //
+        // From here to the dissolve, AlignToReal runs every frame (see Update) — the planet is orbiting
+        // and its moons are moving, so a one-off match would be stale within a second.
+        aligning = true;
+        for (float e = 0f; e < AlignBeat; e += Time.unscaledDeltaTime) yield return null;
 
         // --- 5. WELCOME, fading up over the still-opaque panel. ---
         EnsureWelcome();
@@ -952,6 +980,8 @@ public class LoadingScreen : MonoBehaviour
     public void SetHomePlanet(CelestialBody planet)
     {
         if (planet?.surface == null || subjectMats == null) return;
+        homeBody = planet;       // the real world this preview is standing in for
+        atmosphereOn = false;    // a fresh reveal starts as bare rock and earns its sky
         EnsureMorphTexture();
 
         Color barren = TerrainColorMap.Get(TerrainType.Barren);
@@ -1015,6 +1045,9 @@ public class LoadingScreen : MonoBehaviour
 
     class MoonPreview
     {
+        /// The real moon this stands for — so the preview can take its atmosphere and, at the hand-off,
+        /// its actual position relative to the planet.
+        public CelestialBody source;
         public Transform body;
         public Renderer rend;
         public Material mat;
@@ -1057,6 +1090,7 @@ public class LoadingScreen : MonoBehaviour
 
             var m = new MoonPreview
             {
+                source = src,
                 body = sphere.transform,
                 rend = sphere.GetComponent<Renderer>(),
                 // Sized against the planet, not against reality: a real moon at true relative scale is a
@@ -1153,6 +1187,170 @@ public class LoadingScreen : MonoBehaviour
         return shareOfTarget * (boxH / panelH);
     }
 
+    // ---- Atmosphere, and matching the real world exactly ---------------------------------------
+    //
+    // The preview's whole job by this point is to be indistinguishable from the planet the player is
+    // about to be looking at. So it does not approximate it — it is given the SAME atmosphere and cloud
+    // shells the real body carries (PlanetAppearance builds both, from the same body data), and then
+    // aligned to the real geometry: same viewing angle, same spin, same moon positions, same sunlight.
+    CelestialBody homeBody;
+    bool atmosphereOn;
+    bool aligning;      // true once the camera is on the real world and the preview must track it
+
+    /// Wrap the preview planet — and its moons — in the air they actually have.
+    ///
+    /// Called when the surface reveal finishes and the moons start forming, so the world gains its sky
+    /// at the moment it stops being bare rock. A moon with no air gets none: PlanetAppearance skips the
+    /// shell below atmosphereThickness 0.06, which is the same rule that decides it in the real system,
+    /// so an airless rock looks airless in both places.
+    void RevealAtmosphere()
+    {
+        if (atmosphereOn || homeBody == null || previewBody == null) return;
+        atmosphereOn = true;
+
+        // THE REAL TEXTURE, not the reveal's own.
+        //
+        // The morph runs on a deliberately tiny 96x48 point-filtered grid — that is what makes the
+        // tile-by-tile reveal cost the same on a moon and a gas giant. But the real globe is the full
+        // surface grid, hundreds of texels wide and bilinear-filtered, so cross-fading one into the
+        // other would dissolve a hard-edged mosaic into a smooth detailed world and visibly re-shape
+        // every coastline. Handing the preview the exact texture the real planet wears closes that gap
+        // completely, and this is the right moment: the world "finishes" as it gains its sky.
+        PlanetAppearance.RefreshTexture(homeBody, previewBody.gameObject);
+
+        PlanetAppearance.AddAtmosphere(homeBody, previewBody.gameObject);
+        PlanetAppearance.AddClouds(homeBody, previewBody.gameObject);
+
+        for (int i = 0; i < moons.Count; i++)
+        {
+            if (moons[i].body == null || moons[i].source == null) continue;
+            PlanetAppearance.RefreshTexture(moons[i].source, moons[i].body.gameObject);
+            PlanetAppearance.AddAtmosphere(moons[i].source, moons[i].body.gameObject);
+            PlanetAppearance.AddClouds(moons[i].source, moons[i].body.gameObject);
+        }
+    }
+
+    /// Point the preview at the real world the same way the game camera is about to.
+    ///
+    /// This is what makes the hand-off invisible. Three things have to agree, and all three are read
+    /// from the live scene rather than guessed:
+    ///
+    ///   * THE ANGLE. The game camera looks down at a fixed pitch from a rotatable yaw. Copying its
+    ///     rotation onto the preview camera, and placing that camera along the same direction from the
+    ///     stage centre, means the player is looking at the preview sphere from exactly the bearing they
+    ///     will be looking at the real one.
+    ///   * THE SPIN. The real body's visual has its own rotation, driven by SelfSpin since it was built.
+    ///     Copying it puts the same continent under the same pixel.
+    ///   * THE MOONS. Their real positions relative to the planet, scaled into preview space, so a moon
+    ///     that is to the upper-left of the planet stays upper-left through the dissolve.
+    ///
+    /// And the light: aimed along the real star-to-planet vector, so the terminator falls in the same
+    /// place. Without that the two images can be identically framed and still obviously different.
+    void AlignToReal()
+    {
+        if (homeBody?.visualObject == null || previewCam == null || previewBody == null) return;
+
+        var cam = CameraController.Instance;
+        var gameCam = cam != null ? cam.GetComponent<Camera>() : Camera.main;
+        if (gameCam == null) return;
+
+        Vector3 planetPos = homeBody.visualObject.transform.position;
+        Vector3 toCam = gameCam.transform.position - planetPos;
+        if (toCam.sqrMagnitude < 0.0001f) return;
+
+        // The preview's own idle spin has to stop, or it and the real rotation fight for the same
+        // transform in an undefined component order and the sphere jitters. From here the real world
+        // drives it.
+        StopIdleSpin(previewBody);
+        for (int i = 0; i < moons.Count; i++) StopIdleSpin(moons[i].body);
+
+        // Same bearing, preview's own distance — the framing is set by HandoffScreenFraction, not by
+        // however far the real camera happens to be.
+        previewCam.transform.localPosition = toCam.normalized * PreviewCamDistance;
+        previewCam.transform.localRotation = Quaternion.LookRotation(-toCam.normalized, gameCam.transform.up);
+
+        // The sphere's own spin. SelfSpin drives the preview independently, so overwrite it outright
+        // rather than nudging it — this is the frame where the two must simply be the same.
+        previewBody.localRotation = homeBody.visualObject.transform.rotation;
+
+        // The cloud layer's PHASE. Both shells carry their own SelfSpin at the same speed, but the real
+        // one has been turning since Visualize and the preview's was created seconds ago, so they sit at
+        // unrelated angles — over a bright ocean world that is the most legible mismatch left once the
+        // texture matches. Freeze the preview's and copy the real angle outright.
+        MatchChildRotation("Clouds");
+
+        // Sunlight from where the star actually is, in the star's own colour — the terminator can land
+        // perfectly and still read wrong if one image is lit white and the other amber.
+        if (previewLight != null && homeBody.hostStar != null)
+        {
+            previewLight.color = homeBody.hostStar.color;
+            Vector3 starPos = StarWorldPosition(homeBody);
+            Vector3 toStar = starPos - planetPos;
+            if (toStar.sqrMagnitude > 0.0001f)
+                previewLight.transform.localPosition = toStar.normalized * (PreviewScale * 3f);
+        }
+
+        // Moons: ONE world-to-preview factor for both position AND size.
+        //
+        // These were previously normalised so the outermost moon always sat at a fixed framing radius,
+        // while their sizes stayed cosmetic. That matched only their BEARINGS: the preview showed three
+        // fat moons hugging the planet, and the real scene — framed on the planet alone — showed tiny
+        // specks far outside the frame. The cross-fade cannot survive that.
+        //
+        // Deriving both from the same factor means a moon that is genuinely off-frame leaves the frame
+        // in the preview too, which is the correct answer rather than a flattering one.
+        float planetWorld = OrbitSafety.Scale(homeBody);
+        if (planetWorld < 0.0001f) return;
+        float k = PreviewScale / planetWorld;
+
+        for (int i = 0; i < moons.Count; i++)
+        {
+            var m = moons[i];
+            if (m.body == null || m.source?.visualObject == null) continue;
+            m.body.localPosition = (m.source.visualObject.transform.position - planetPos) * k;
+            m.body.localScale = Vector3.one * (OrbitSafety.Scale(m.source) * k);
+            m.body.localRotation = m.source.visualObject.transform.rotation;
+        }
+    }
+
+    /// Put a named shell (Clouds, Atmosphere) on the preview at the same angle as the real body's.
+    void MatchChildRotation(string childName)
+    {
+        if (homeBody?.visualObject == null || previewBody == null) return;
+        var real = homeBody.visualObject.transform.Find(childName);
+        var prev = previewBody.Find(childName);
+        if (real == null || prev == null) return;
+        StopIdleSpin(prev);
+        prev.rotation = real.rotation;
+    }
+
+    static void RestoreIdleSpin(Transform t, float speed)
+    {
+        if (t == null) return;
+        var spin = t.GetComponent<SelfSpin>();
+        if (spin == null) spin = t.gameObject.AddComponent<SelfSpin>();
+        spin.speed = speed;
+        spin.unscaled = true;
+        spin.enabled = true;
+        t.localRotation = Quaternion.identity;
+    }
+
+    static void StopIdleSpin(Transform t)
+    {
+        if (t == null) return;
+        var spin = t.GetComponent<SelfSpin>();
+        if (spin != null && spin.enabled) spin.enabled = false;
+    }
+
+    /// Where this world's star actually is in the scene.
+    static Vector3 StarWorldPosition(CelestialBody b)
+    {
+        // The system pivot is the star's own position — bodies orbit it — so the system's render root
+        // is the light source's location.
+        var sys = b.system;
+        return sys?.pivot != null ? sys.pivot.position : Vector3.zero;
+    }
+
     /// How many moons are actually staged — which is not the same as how many the planet HAS, since one
     /// with no baked surface is skipped. GameManager sizes its closing hold off this, so the screen does
     /// not sit on a still frame waiting for a moon that was never built.
@@ -1166,10 +1364,18 @@ public class LoadingScreen : MonoBehaviour
 
     void StepMoons(float dt)
     {
-        if (moons.Count == 0) return;
-
         // Nothing until the planet itself is finished — that is the whole staging.
         if (morphActive) return;
+
+        // The world gains its sky at exactly the moment the moons begin forming, so the two happen
+        // together: the planet stops being bare rock as its moons arrive.
+        //
+        // BEFORE the moon-count guard, deliberately: a homeworld with NO moons still has air, and while
+        // this sat after the early-out such a world revealed as bare rock and then cross-faded into a
+        // real planet wearing both an atmosphere and a cloud layer.
+        RevealAtmosphere();
+
+        if (moons.Count == 0) return;
 
         if (moonsShown < moons.Count)
         {
@@ -1607,6 +1813,11 @@ public class LoadingScreen : MonoBehaviour
         // After the planet, its moons: they appear one at a time, reveal quicker, and orbit. StepMoons
         // holds off on its own until morphActive clears, so the staging lives in one place.
         if (subject == Subject.Planet) StepMoons(dt);
+
+        // Once the finale has handed the camera over, the preview tracks the real world every frame —
+        // the planet is orbiting and its moons are moving, so a one-off match goes stale immediately.
+        // Runs AFTER StepMoons, which sets its own cosmetic orbit positions, so the real geometry wins.
+        if (aligning) AlignToReal();
 
         if (previewCam != null && previewStage != null && previewStage.gameObject.activeSelf)
             previewCam.Render();

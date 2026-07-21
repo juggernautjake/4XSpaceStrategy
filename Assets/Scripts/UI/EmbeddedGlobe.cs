@@ -22,12 +22,21 @@ public class EmbeddedGlobe : MonoBehaviour,
     const float DegPerPixel = 0.45f;
 
     /// Add a globe panel of `height` pixels to `parent`, showing `b`.
-    public static EmbeddedGlobe Build(Transform parent, CelestialBody b, float height)
+    /// `fixedWidth` > 0 pins the holder's width as well as its height — for sitting beside a card in a
+    /// horizontal row rather than spanning the panel. Without it the holder takes whatever width the
+    /// layout offers and letterboxes the sides, which is only right when it is on its own row.
+    public static EmbeddedGlobe Build(Transform parent, CelestialBody b, float height, float fixedWidth = 0f)
     {
         if (b == null) return null;
 
         var holder = UIFactory.NewUI(parent, "Globe");
-        UIFactory.AddLayout(holder, height);
+        var le = UIFactory.AddLayout(holder, height, height);
+        if (fixedWidth > 0f)
+        {
+            le.preferredWidth = fixedWidth;
+            le.minWidth = fixedWidth;
+            le.flexibleWidth = 0f;   // the card beside it takes the slack
+        }
 
         // The render target is SQUARE (512x512) while this holder is as wide as the Inspector — roughly
         // 490x210 — so painting the texture straight onto the holder would stretch the planet into a
