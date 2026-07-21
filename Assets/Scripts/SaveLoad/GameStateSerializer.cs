@@ -166,7 +166,7 @@ public static class GameStateSerializer
                 revealTitle = p.revealTitle, revealText = p.revealText,
                 kind = p.kind, researchDuration = p.researchDuration, reportText = p.reportText,
                 researchPointCost = p.researchPointCost, researchReward = p.researchReward,
-                yieldsSchematic = p.yieldsSchematic
+                yieldsSchematic = p.yieldsSchematic, surveyed = p.surveyed
             });
 
         return dto;
@@ -471,6 +471,9 @@ public static class GameStateSerializer
                 // rather than handing out free excavations.
                 researchPointCost = p.researchPointCost <= 0 ? 20 : p.researchPointCost,
                 researchReward = p.researchReward <= 0 ? 25 : p.researchReward,
+                // Old saves predate the charting step. Infer it from deepSurveyed on the body below —
+                // set after this list is built, so read the DTO's own flag here.
+                surveyed = p.surveyed || dto.deepSurveyed,
                 // Old saves have no yieldsSchematic at all, and false is indistinguishable from a
                 // genuine minor ruin — so those games would permanently lose every major ruin's
                 // schematic, the only entrance to the Ancients branch. Infer it instead: POIGenerator

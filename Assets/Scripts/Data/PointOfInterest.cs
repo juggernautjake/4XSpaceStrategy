@@ -32,10 +32,21 @@ public class PointOfInterest
     public int researchReward = 25;
     public bool yieldsSchematic = false;   // precursor ruins can recover a schematic
 
+    // Has a research ship charted this site closely enough to work out what studying it would involve?
+    //
+    // A DEEP SURVEY sets this — and that is all a deep survey does to a site. The ship does not dig; it
+    // finds, identifies, and works out the price. What the survey produces is an OPPORTUNITY: a job you
+    // can commission, that costs resources and research points, runs on a timer with a progress bar, and
+    // pays out in ore or technology when it lands. The deep survey used to resolve every site on the
+    // spot for free, which meant the excavation system existed but could never be reached — the button
+    // to start a dig was removed by the very act that revealed the dig.
+    public bool surveyed = false;
+
     // Ruins are researchable until studied; settlements are context, not a project.
-    public bool IsResearchable => (type == POIType.Mystery && !explored)
-                                  || (type == POIType.AncientRuins && !explored)
-                                  || (type == POIType.SpecialResource && relatedOre != OreType.None && !ResearchManager.IsResearched(relatedOre));
+    public bool IsResearchable => surveyed &&
+                                  ((type == POIType.Mystery && !explored)
+                                   || (type == POIType.AncientRuins && !explored)
+                                   || (type == POIType.SpecialResource && relatedOre != OreType.None && !ResearchManager.IsResearched(relatedOre)));
 
     public string HoverText()
     {

@@ -192,6 +192,12 @@ public class GameManager : MonoBehaviour
         // Visualize and the economy setup are quick but not free, and a frame that stalls partway through
         // the tile reveal is exactly the kind of hitch the reveal exists to avoid. Getting them out of the
         // way means the whole second half of the bar is nothing but the planet forming.
+        // Orbit rings OFF before anything is drawn. They are built eagerly inside Visualize, so without
+        // this they would already be on screen at full brightness the instant the loading panel
+        // dissolves — and the finale saves them for its last beat, where their arrival is what tells the
+        // player they have control. Restored by the finale itself.
+        OrbitController.SetRevealAlpha(0f);
+
         Visualize();
         var homePlanet = FindHomePlanet();
         PlayerEconomy.NewGame(homePlanet, SpeciesManager.Current);
@@ -259,7 +265,10 @@ public class GameManager : MonoBehaviour
         }
         else
         {
+            // No screen, so no finale to restore the rings — put them back by hand rather than leaving
+            // the galaxy permanently without orbit lines.
             SnapCameraToHome(homePlanet, 0f);
+            OrbitController.SetRevealAlpha(1f);
         }
 
         generating = false;
@@ -316,6 +325,9 @@ public class GameManager : MonoBehaviour
     {
         Galaxy = g;
         FocusedSystem = g.Home;
+        // A loaded game has no finale to turn them back on, and the reveal alpha is a static that
+        // survives whatever the last new-game left it at.
+        OrbitController.SetRevealAlpha(1f);
         Visualize();
     }
 

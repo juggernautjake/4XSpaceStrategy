@@ -228,6 +228,10 @@ public class POIDTO
     public int researchPointCost = 20;
     public int researchReward = 25;
     public bool yieldsSchematic;
+
+    /// Charted by a deep survey, and so offerable as a job. Without this a save would forget which
+    /// worlds had been studied and quietly withdraw every excavation the player had unlocked.
+    public bool surveyed;
 }
 
 [System.Serializable]

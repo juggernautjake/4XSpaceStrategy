@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 // Drives a body's orbit around a parent and draws its orbit ring.
@@ -78,9 +79,51 @@ public class OrbitController : MonoBehaviour
             orbitRing.receiveShadows = false;
         }
         orbitRing.startWidth = orbitRing.endWidth = lineWidth;
-        orbitRing.startColor = orbitRing.endColor = ringColor;
+        ApplyRingColor();
         DrawEllipse(orbitRing, orbitRadius, SemiMinor(orbitRadius, eccentricity));
-        orbitRing.enabled = ringVisible;
+        orbitRing.enabled = ringVisible && RevealAlpha > 0.001f;
+        Live.Add(this);
+    }
+
+    // ============================================================================================
+    // THE GLOBAL REVEAL — orbit lines as the "you have control now" cue
+    //
+    // Rings are built eagerly inside GameManager.Visualize(), which runs at roughly the halfway point of
+    // the load. So by the time the loading panel dissolves they already exist at full brightness, and
+    // the galaxy arrives complete — every orbit drawn, nothing left to happen. The finale instead holds
+    // them at zero and fades them in once the welcome message has gone, which is the moment the player
+    // is handed control: the lines appearing IS the signal that the game is live.
+    //
+    // A global MULTIPLIER rather than a global on/off, so per-body intent (CelestialBody.showRing, the
+    // Orbit panel's toggle, the star tab's system-wide toggle) is untouched and comes back exactly as
+    // the player left it. `ringColor` keeps the authored colour; only what is written to the
+    // LineRenderer is scaled — the same non-destructive pattern FadeGroup uses.
+    // ============================================================================================
+    public static float RevealAlpha { get; private set; } = 1f;
+
+    // Every live controller, so the reveal can reach rings that already exist. Registered in BuildRing
+    // (the one place a ring comes into being) and dropped in OnDestroy.
+    static readonly List<OrbitController> Live = new List<OrbitController>();
+
+    /// Set the global ring reveal. 0 = fully hidden, 1 = as authored.
+    public static void SetRevealAlpha(float a)
+    {
+        RevealAlpha = Mathf.Clamp01(a);
+        for (int i = Live.Count - 1; i >= 0; i--)
+        {
+            var oc = Live[i];
+            if (oc == null) { Live.RemoveAt(i); continue; }   // destroyed without OnDestroy running
+            oc.ApplyRingColor();
+            if (oc.orbitRing != null) oc.orbitRing.enabled = oc.ringVisible && RevealAlpha > 0.001f;
+        }
+    }
+
+    void ApplyRingColor()
+    {
+        if (orbitRing == null) return;
+        var c = ringColor;
+        c.a *= RevealAlpha;
+        orbitRing.startColor = orbitRing.endColor = c;
     }
 
     float SemiMinor(float a, float e) => a * Mathf.Sqrt(Mathf.Max(0.0001f, 1f - e * e));
@@ -164,8 +207,12 @@ public class OrbitController : MonoBehaviour
     public void SetEccentricity(float v){ eccentricity = Mathf.Clamp(v, 0f, 0.7f); RedrawRing(); UpdatePosition(); }
     public void SetVerticalOffset(float v){ verticalOffset = v; UpdatePosition(); }
 
-    public void SetRingVisible(bool v)  { ringVisible = v; if (orbitRing != null) orbitRing.enabled = v; }
-    public void SetRingColor(Color c)   { ringColor = c; if (orbitRing != null) orbitRing.startColor = orbitRing.endColor = c; }
+    // ANDed with the global reveal: during the loading finale every ring is held at zero, and a per-body
+    // toggle must not be able to switch one back on ahead of the cue.
+    public void SetRingVisible(bool v)  { ringVisible = v; if (orbitRing != null) orbitRing.enabled = v && RevealAlpha > 0.001f; }
+    // Through ApplyRingColor, not straight to the LineRenderer: writing the colour directly would light
+    // this one ring at full alpha ahead of the loading finale's reveal.
+    public void SetRingColor(Color c)   { ringColor = c; ApplyRingColor(); }
 
     public void RedrawRing()
     {
@@ -242,6 +289,7 @@ public class OrbitController : MonoBehaviour
 
     void OnDestroy()
     {
+        Live.Remove(this);
         if (orbitRing != null) Destroy(orbitRing.gameObject);
         if (habitableRing != null) Destroy(habitableRing.gameObject);
         if (ownerRing != null) Destroy(ownerRing.gameObject);

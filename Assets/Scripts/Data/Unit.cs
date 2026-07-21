@@ -64,7 +64,7 @@ public class Unit
     public bool queuePaused;
 
     // Ore samples collected by surveying but not yet researched (scouts can carry these back to a
-    // research ship or a world with a research centre to have them researched).
+    // world with a research centre to have them analysed).
     public List<int> samples = new List<int>();
 
     static readonly float[] RankXp = { 0f, 60f, 180f, 400f, 800f };

@@ -46,6 +46,7 @@ public class ResearchTaskManager : MonoBehaviour
     {
         reason = null;
         if (body == null || poi == null) { reason = "nothing here"; return false; }
+        if (!poi.surveyed) { reason = "not charted yet — deep-survey this world first"; return false; }
         if (!poi.IsResearchable) { reason = "already studied"; return false; }
         if (IsResearching(poi)) { reason = "already under study"; return false; }
         if (!GameMode.DevMode && ResearchManager.ResearchPoints < poi.researchPointCost)
@@ -95,8 +96,11 @@ public class ResearchTaskManager : MonoBehaviour
 
         // The payoff. Each site pays back more than the points it cost to study — that margin is the
         // entire economic reason to explore rather than sit at home.
-        ResearchManager.AddPoints(poi.researchReward);
-        extra += $"  <color=#8FD0FF>+{poi.researchReward} research points</color> (cost {poi.researchPointCost}).";
+        // The site's own figure, falling back to the per-type default for anything that lost its value
+        // (a very old save, or a POI built without one).
+        int reward = poi.researchReward > 0 ? poi.researchReward : UnitManager.POIReward(poi);
+        ResearchManager.AddPoints(reward);
+        extra += $"  <color=#8FD0FF>+{reward} research points</color> (cost {poi.researchPointCost}).";
 
         // Precursor ruins are the only source of ancient schematics, which gate the Ancients tree.
         if (poi.yieldsSchematic)

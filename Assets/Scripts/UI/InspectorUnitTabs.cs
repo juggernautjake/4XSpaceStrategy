@@ -50,7 +50,7 @@ public partial class InspectorWindow
         // Carried ore samples — easy to forget a scout is holding research you haven't cashed in.
         var samples = UIFactory.WrapText(p, "", UITheme.SmallSize, UITheme.Accent);
         live.Text(samples, () => u.samples != null && u.samples.Count > 0
-            ? $"<color=#8FD0FF>Carrying {u.samples.Count} ore sample(s)</color> — take them to a research ship or a world with a research centre."
+            ? $"<color=#8FD0FF>Carrying {u.samples.Count} ore sample(s)</color> — take them to a world with a research centre."
             : "");
 
         // Actions. Each explains itself when it can't be used.

@@ -118,7 +118,7 @@ public static class UnitDatabase
     {
         _all = new UnitInfo[System.Enum.GetValues(typeof(UnitType)).Length];
         _all[(int)UnitType.Scout] = new UnitInfo(UnitType.Scout, "Scout",
-            "Cheap, fast explorer with a survey BONUS. Surveys worlds and collects ore samples, but can't research them itself — bring samples to a research ship or a world with a research centre. Cannot colonize. Must return home from hostile worlds.",
+            "Cheap, fast explorer with a survey BONUS. Surveys worlds and collects ore samples, but can't research them itself — bring samples to a world with a research centre. Cannot colonize. Must return home from hostile worlds.",
             20, 10, 8f, 1, 20, 9, 2, 1, explore: true, doResearch: false, colonize: false, iconShape: 0, iconColor: new Color(0.5f, 0.85f, 1f), range: 270, power: 1);
 
         _all[(int)UnitType.ResearchShip] = new UnitInfo(UnitType.ResearchShip, "Research Ship",

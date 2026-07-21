@@ -801,7 +801,7 @@ public class UnitManager : MonoBehaviour
             NotificationManager.Instance?.Push($"{b.name} surveyed", "Survey complete — map revealed.",
                 FlyTo(b), NotifKind.Research,
                 detail: $"{u.name} finished surveying {b.name}. Its detailed map and points of interest are now available.{found}{deeper}" +
-                (u.samples.Count > 0 ? $" {u.name} is carrying {u.samples.Count} ore sample(s) — take them to a research ship or a world with a research centre to research them." : ""));
+                (u.samples.Count > 0 ? $" {u.name} is carrying {u.samples.Count} ore sample(s) — take them to a world with a research centre to have them analysed." : ""));
             RevealBodyVisual(b);
             AncientLore.SurveyBody(b);   // announce any ancient ruins the surface pass turned up
             FinishAction(u, OrderKind.Survey, b);
@@ -867,14 +867,21 @@ public class UnitManager : MonoBehaviour
         }
     }
 
-    // Convert discovered ores here (and carried samples of all ships present) into researched tech,
-    // award research points, and resolve any points of interest.
-    // A research ship finishing a deep study of a world. Every ore it cracks COSTS research points —
-    // the ship does the legwork, but the analysis is paid for out of the empire's research bank. Ores
-    // it can't afford stay merely discovered (and any samples stay in the hold) until you can pay.
+    // A research ship finishing a deep survey of a world.
+    //
+    // IT RESEARCHES NOTHING AND EXCAVATES NOTHING. What it produces is OPPORTUNITIES: the sites it
+    // charts become jobs the player can commission — each with a cost in research points, a duration
+    // with a progress bar, and a payout in ore, technology or a precursor schematic (see
+    // ResearchTaskManager). The ores it finds become entries in the codex that can then be researched
+    // as paid projects.
+    //
+    // It used to do all of that work itself, for free, the moment it finished. That did not just make
+    // exploring trivially rewarding — it made the entire timed-research system unreachable, because
+    // resolving a site is exactly what removes the button offering to resolve it. The ship's job is to
+    // find things and price them. Paying for them is the player's.
     public void DoDeepResearch(Unit researcher, CelestialBody b)
     {
-        int studied = 0, unaffordable = 0;
+        int studied = 0;
 
         // A deep study is what puts people on the ground long enough to chart the geothermal vents, the
         // soil and the weather — it unlocks the Heat, Fertile and Weather survey overlays used when
@@ -887,83 +894,67 @@ public class UnitManager : MonoBehaviour
             AncientClues.Reveal(b);
         }
 
+        // ORES ARE DISCOVERED, NOT RESEARCHED.
+        //
+        // The ship's job is to find things and say what they are. Turning a discovered ore into a
+        // researched one is a project you commission and pay for — it has a cost, a timer and a payout —
+        // and doing it automatically here made every one of those projects resolve itself before the
+        // player ever saw it offered.
         foreach (var ore in OreGenerator.OresOnBody(b))
-        {
-            ResearchManager.Discover(ore);
-            if (ResearchManager.IsResearched(ore)) continue;
-            if (ResearchManager.TryResearchSample(ore)) studied++;
-            else unaffordable++;
-        }
+            if (ResearchManager.Discover(ore)) studied++;
 
-        // Samples carried by any ship parked here get analysed too — that's the whole point of hauling
-        // them to a research vessel. Ones you can't afford stay in the hold rather than being lost.
-        if (b.units != null)
-            foreach (var unit in b.units)
-            {
-                if (unit.samples.Count == 0) continue;
-                var kept = new List<int>();
-                foreach (var id in unit.samples)
-                {
-                    if (ResearchManager.TryResearchSample((OreType)id)) studied++;
-                    else { kept.Add(id); unaffordable++; }
-                }
-                unit.samples.Clear();
-                unit.samples.AddRange(kept);
-            }
-
-        // Resolving a world's anomalies is the PAYOFF of exploring: it hands points back.
-        //
-        // ANCIENT RUINS ARE DELIBERATELY LEFT ALONE. A deep survey reads a world; it does not excavate
-        // a precursor site, which is a dig with its own cost, its own duration and its own reward
-        // (ResearchTaskManager, the "Study this site" button). Resolving them here for free was making
-        // that entire system unreachable content: one deep survey marked every ruin explored, which
-        // flipped IsResearchable false and removed the button before it could ever be pressed.
-        //
-        // So the deep survey does what a survey does — it finds things and tells you what they are —
-        // and the ruins it turns up become diggable. That is also what makes the schematic worth having.
-        int sites = 0, points = 0, ruins = 0;
+        // Every site is CHARTED, which is what turns it into a commissionable job. Nothing is dug.
+        int opened = 0, ruins = 0;
+        int quoted = 0;
         var reports = new System.Text.StringBuilder();
 
         if (b.pointsOfInterest != null)
             foreach (var poi in b.pointsOfInterest)
             {
-                if (poi.explored) continue;
+                // Skip on `surveyed`, NOT on `explored`.
+                //
+                // POIGenerator marks SpecialResource and Settlement sites explored at generation — they
+                // are not mysteries, you can see what they are. But a rich seam is still a DIG: its
+                // IsResearchable clause asks whether its ore has been researched, not whether the site
+                // has been visited. Skipping explored sites here would leave every ore deposit
+                // permanently uncharted and so permanently un-diggable, quietly deleting the
+                // special-resource excavation from the game.
+                if (poi.surveyed) continue;
 
-                if (poi.type == POIType.AncientRuins) { ruins++; continue; }
+                poi.surveyed = true;          // now offerable in the Survey tab's site list
+                if (!poi.IsResearchable) continue;   // context, not a job (settlements)
+                opened++;
+                quoted += poi.researchPointCost;
+                if (poi.type == POIType.AncientRuins) ruins++;
 
-                poi.explored = true;
-                // The site's OWN reward, not a flat per-type figure — POIGenerator sets these per site,
-                // and they are what the paid excavation pays out too, so both routes agree on worth.
-                int reward = poi.researchReward > 0 ? poi.researchReward : POIReward(poi);
-                ResearchManager.AddPoints(reward);
-                points += reward;
-                sites++;
-
-                // The site's own field report — this is the "what is really going on with this world"
-                // the deep survey exists for. Collected into ONE notification rather than fired
-                // separately: five popups in a frame is noise, not a discovery.
-                if (!string.IsNullOrEmpty(poi.reportText))
-                    reports.Append($"\n\n<b>{poi.title}</b>\n{poi.reportText}");
+                // What the ship could tell from the surface — enough to say what the site IS and what
+                // studying it would take, not what it holds. Collected into ONE notification: five
+                // popups in a frame is noise, not a discovery.
+                string blurb = !string.IsNullOrEmpty(poi.description) ? poi.description : poi.title;
+                reports.Append($"\n\n<b>{poi.title}</b>\n{blurb}\n" +
+                               $"<color=#8FD0FF>Study: {poi.researchPointCost} research points, " +
+                               $"~{Mathf.RoundToInt(poi.researchDuration)}s</color>");
             }
 
-        // One closing report, so the payoff is legible rather than implied by a pile of separate popups.
+        // One closing report, so what the survey produced is legible as a list of things to now DO.
         SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
         var summary = new System.Text.StringBuilder();
-        summary.Append(studied > 0 ? $"{studied} ore(s) analysed. " : "No new ores to analyse. ");
-        if (sites > 0) summary.Append($"{sites} site(s) resolved for {points} research points. ");
-        if (ruins > 0)
-            summary.Append($"{ruins} ancient ruin(s) located but not disturbed — excavate them from the " +
-                           "Survey tab's site list; that is where precursor schematics come from. ");
+        summary.Append(studied > 0
+            ? $"{studied} new ore(s) identified — research them from the Ore Codex. "
+            : "No new ores here. ");
+        if (opened > 0)
+        {
+            summary.Append($"{opened} site(s) charted and ready to study");
+            if (ruins > 0) summary.Append($", {ruins} of them ancient ruins");
+            summary.Append($" — {quoted} research points to work through them all. Commission them from " +
+                           "the Survey tab's site list. ");
+        }
         summary.Append("Heat, Fertile and Weather indexes are now available for this world.");
 
         NotificationManager.Instance?.Push($"Deep survey complete at {b.name}", summary.ToString(),
                                            FlyTo(b), NotifKind.Research,
                                            detail: summary.ToString() + reports.ToString());
-
-        if (unaffordable > 0)
-            NotificationManager.Instance?.Push($"Analysis stalled at {b.name}",
-                $"{unaffordable} sample(s) could not be afforded — they are being held until you have the research points.",
-                null, NotifKind.Info);
+        PlanetViewWindow.Instance?.RefreshIfShowing(b);
     }
 
     // What resolving a point of interest is worth. Ancient ruins are the prize — they're what open the

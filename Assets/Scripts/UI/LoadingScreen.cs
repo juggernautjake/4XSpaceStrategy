@@ -271,6 +271,10 @@ public class LoadingScreen : MonoBehaviour
         // the finale state — translucent panel, invisible sky, frozen bar — for every load afterwards.
         // Opening is the one moment it is unambiguously safe to assert the normal state.
         finaleRunning = false;
+        // Orbit rings too: the finale is what turns them back on, so anything that stopped it part-way
+        // would leave the galaxy with no orbit lines for the rest of the session. The generation routine
+        // sets this straight back to 0 a moment later, so asserting it here costs nothing.
+        OrbitController.SetRevealAlpha(1f);
         var panelImg0 = root.GetComponent<Image>();
         if (panelImg0 != null) panelImg0.color = new Color(0.02f, 0.03f, 0.06f, 1f);
         if (skyLayer != null)
@@ -320,9 +324,11 @@ public class LoadingScreen : MonoBehaviour
     const float SettleBeat = 1.4f;    // the finished world simply turning
     const float CollapseBeat = 0.45f; // the bar closing in on itself
     const float BlinkBeat = 0.18f;    // the flash as it goes
-    const float TravelBeat = 0.9f;    // planet + moons moving to centre
-    const float WelcomeBeat = 1.6f;   // "Welcome to <world>"
-    const float HandoffBeat = 0.5f;   // cross-fade into the real scene
+    const float TravelBeat = 1.1f;    // planet + moons moving to centre, alongside the collapse
+    const float WelcomeFadeIn = 0.5f; // "Welcome to <world>" arriving
+    const float HandoffBeat = 0.7f;   // the panel dissolving out from behind it
+    const float WelcomeHold = 1.1f;   // the message over the live solar system
+    const float RingRevealBeat = 1.2f; // the orbits drawing in — the "you have control" cue
 
     RectTransform welcomeRT;
     TMP_Text welcomeLabel;
@@ -348,19 +354,49 @@ public class LoadingScreen : MonoBehaviour
         finaleRunning = true;
         for (float e = 0f; e < SettleBeat; e += Time.unscaledDeltaTime) yield return null;
 
-        // --- 2. COLLAPSE. The bar closes horizontally into its own midpoint. ---
-        // Scale rather than width: the track, the fill and the percentage all shrink together toward the
-        // centre without any of them having to know about the others' layout.
+        // --- 2. COLLAPSE AND TRAVEL, TOGETHER. ---
+        //
+        // One movement, not two. The bar closes horizontally into its own midpoint while the homeworld
+        // slides into that same spot and grows — so the planet is arriving as the bar is leaving, and
+        // the space the bar occupied is handed straight over rather than sitting empty in between. The
+        // planet keeps spinning and the moons keep orbiting throughout (Update drives both).
         if (percentLabel != null) percentLabel.gameObject.SetActive(false);
+
         var barGroup = barTrack;
         Vector3 startScale = barGroup != null ? barGroup.localScale : Vector3.one;
-        for (float e = 0f; e < CollapseBeat; e += Time.unscaledDeltaTime)
+
+        var pv = previewView != null ? previewView.rectTransform : null;
+        Vector2 from = pv != null ? pv.anchoredPosition : Vector2.zero;
+        Vector2 fromSize = pv != null ? pv.sizeDelta : Vector2.zero;
+        Vector2 toSize = fromSize * 1.35f;
+        // Where the bar's midpoint was, in the preview's own coordinates.
+        //
+        // Two corrections live in this one line. The preview is anchored to the column's LEFT EDGE
+        // (anchorMin/Max 0, 0.5) — not its centre — so reaching the column's midpoint needs an explicit
+        // half-column offset; and its pivot is its RIGHT edge, so landing the planet's CENTRE there
+        // needs another half-width, measured at the size it will BE on arrival rather than the size it
+        // started at. Without both, the planet stops about 300px short and the cross-fade that the whole
+        // finale exists to make seamless is the exact frame it jumps sideways.
+        Vector2 to = new Vector2(BarWidth * 0.5f + toSize.x * 0.5f, 0f);
+
+        float move = Mathf.Max(CollapseBeat, TravelBeat);
+        for (float e = 0f; e < move; e += Time.unscaledDeltaTime)
         {
-            float t = Mathf.Clamp01(e / CollapseBeat);
+            // The bar collapses on its own, SHORTER beat and finishes early — it should be gone before
+            // the planet lands, not race it to the middle.
+            float tb = Mathf.Clamp01(e / CollapseBeat);
             // Eased IN — slow to leave, then quick. A linear collapse reads as the bar being deleted;
             // this reads as it being drawn shut.
-            float k = t * t * t;
-            if (barGroup != null) barGroup.localScale = new Vector3(Mathf.Lerp(startScale.x, 0f, k), startScale.y, 1f);
+            float kb = tb * tb * tb;
+            if (barGroup != null) barGroup.localScale = new Vector3(Mathf.Lerp(startScale.x, 0f, kb), startScale.y, 1f);
+
+            float tp = Mathf.Clamp01(e / TravelBeat);
+            float kp = 1f - Mathf.Pow(1f - tp, 3f);   // eased out — arrives gently
+            if (pv != null)
+            {
+                pv.anchoredPosition = Vector2.Lerp(from, to, kp);
+                pv.sizeDelta = Vector2.Lerp(fromSize, toSize, kp);
+            }
             yield return null;
         }
         if (barGroup != null) barGroup.localScale = new Vector3(0f, startScale.y, 1f);
@@ -385,57 +421,34 @@ public class LoadingScreen : MonoBehaviour
         if (headline != null) headline.gameObject.SetActive(false);
         if (stageLabel != null) stageLabel.gameObject.SetActive(false);
 
-        // --- 4. TRAVEL. The planet moves from its slot to where the bar's midpoint was. ---
-        var pv = previewView != null ? previewView.rectTransform : null;
-        Vector2 from = pv != null ? pv.anchoredPosition : Vector2.zero;
-        Vector2 fromSize = pv != null ? pv.sizeDelta : Vector2.zero;
-        Vector2 toSize = fromSize * 1.35f;
-        // Where the bar's midpoint was, in the preview's own coordinates.
+        // --- 4. THE CAMERA TAKES OVER, still hidden. ---
         //
-        // Two corrections live in this one line. The preview is anchored to the column's LEFT EDGE
-        // (anchorMin/Max 0, 0.5) — not its centre — so reaching the column's midpoint needs an explicit
-        // half-column offset; and its pivot is its RIGHT edge, so landing the planet's CENTRE there
-        // needs another half-width, measured at the size it will BE on arrival rather than the size it
-        // started at. Without both, the planet stops about 300px short and the cross-fade that the whole
-        // finale exists to make seamless is the exact frame it jumps sideways.
-        Vector2 to = new Vector2(BarWidth * 0.5f + toSize.x * 0.5f, 0f);
+        // Framed on the real homeworld while the panel is fully opaque, so that when the panel goes the
+        // thing underneath is already the same planet at the same size in the same place. One frame's
+        // grace so GalaxyLOD sees the new camera height and swaps the galaxy proxies out for real
+        // system geometry before any of it is visible.
+        onReady?.Invoke();
+        yield return null;
 
-        for (float e = 0f; e < TravelBeat; e += Time.unscaledDeltaTime)
-        {
-            float t = Mathf.Clamp01(e / TravelBeat);
-            float k = 1f - Mathf.Pow(1f - t, 3f);   // eased out — arrives gently
-            if (pv != null)
-            {
-                pv.anchoredPosition = Vector2.Lerp(from, to, k);
-                pv.sizeDelta = Vector2.Lerp(fromSize, toSize, k);
-            }
-            yield return null;
-        }
-
-        // --- 5. WELCOME. ---
+        // --- 5. WELCOME, fading up over the still-opaque panel. ---
         EnsureWelcome();
         if (welcomeLabel != null)
         {
             welcomeLabel.text = $"Welcome to {homeName}";
             welcomeLabel.gameObject.SetActive(true);
-            for (float e = 0f; e < WelcomeBeat; e += Time.unscaledDeltaTime)
+            for (float e = 0f; e < WelcomeFadeIn; e += Time.unscaledDeltaTime)
             {
-                float t = Mathf.Clamp01(e / WelcomeBeat);
-                // In over the first third, hold, then start leaving — the fade out finishes during the
-                // handoff below, so the text is never simply switched off.
-                float a = t < 0.33f ? t / 0.33f : t > 0.8f ? 1f - (t - 0.8f) / 0.2f : 1f;
-                var c = welcomeLabel.color; c.a = a; welcomeLabel.color = c;
+                var c = welcomeLabel.color; c.a = Mathf.Clamp01(e / WelcomeFadeIn); welcomeLabel.color = c;
                 yield return null;
             }
+            var wc = welcomeLabel.color; wc.a = 1f; welcomeLabel.color = wc;
         }
 
-        // The real game takes the wheel HERE — camera onto the real homeworld — while this panel is
-        // still covering the screen. By the time it dissolves, what is underneath already matches.
-        onReady?.Invoke();
-        yield return null;
-
-        // --- 6. HANDOFF. Dissolve the panel; the preview goes last so the planet is the final thing
-        //     standing, overlapping the real one already drawn beneath it. ---
+        // --- 6. HANDOFF. Dissolve the panel out from behind the welcome message. ---
+        //
+        // The text stays up through this, so what the player watches is the loading screen becoming the
+        // solar system around a planet that never moved — no cut, no black. The preview image is the
+        // last thing to go, overlapping the real planet already drawn beneath it.
         var panelImg = root.GetComponent<Image>();
         Color panelStart = panelImg != null ? panelImg.color : Color.clear;
         for (float e = 0f; e < HandoffBeat; e += Time.unscaledDeltaTime)
@@ -447,9 +460,6 @@ public class LoadingScreen : MonoBehaviour
                 var cg = skyLayer.GetComponent<CanvasGroup>() ?? skyLayer.gameObject.AddComponent<CanvasGroup>();
                 cg.alpha = 1f - t;
             }
-            if (welcomeLabel != null) { var c = welcomeLabel.color; c.a = Mathf.Min(c.a, 1f - t); welcomeLabel.color = c; }
-            // The preview holds full opacity until the last third, then goes — the real planet is
-            // already there behind it, in the same place at the same size.
             if (previewView != null)
             {
                 var c = previewView.color;
@@ -458,6 +468,34 @@ public class LoadingScreen : MonoBehaviour
             }
             yield return null;
         }
+
+        // A beat with the welcome message over the live solar system before it goes.
+        for (float e = 0f; e < WelcomeHold; e += Time.unscaledDeltaTime) yield return null;
+
+        // --- 7. THE WELCOME FADES, AND THE ORBITS DRAW IN. ---
+        //
+        // This is the moment the player is handed control, and the orbit lines are how they are told.
+        // Everything up to here has been a performance they could not touch; the rings arriving is a
+        // visual cue with a real meaning behind it — the system is live, and so are you.
+        //
+        // Held at zero since Visualize built them (see OrbitController.SetRevealAlpha), because rings
+        // that were simply already there would make the galaxy arrive finished, with nothing left to
+        // happen at the one moment something should.
+        for (float e = 0f; e < RingRevealBeat; e += Time.unscaledDeltaTime)
+        {
+            float t = Mathf.Clamp01(e / RingRevealBeat);
+            if (welcomeLabel != null)
+            {
+                var c = welcomeLabel.color;
+                // Out over the first half, so the text is gone while the rings are still arriving.
+                c.a = Mathf.Clamp01(1f - t * 2f);
+                welcomeLabel.color = c;
+            }
+            // Eased out, so the lines swell in quickly and settle rather than ramping linearly.
+            OrbitController.SetRevealAlpha(1f - Mathf.Pow(1f - t, 2f));
+            yield return null;
+        }
+        OrbitController.SetRevealAlpha(1f);
 
         finaleRunning = false;
         Close();

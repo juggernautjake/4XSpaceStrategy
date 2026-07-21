@@ -251,7 +251,7 @@ public class UnitInfoPanel : MonoBehaviour
         if (u.orders != null && u.orders.Count > 1)
             queueLine = $"\n<color=#9FB4C8>Queue:</color> {u.orders.Count - 1} more order(s)";
         string sampleLine = u.samples != null && u.samples.Count > 0
-            ? $"\n<color=#8FD0FF>Carrying {u.samples.Count} ore sample(s)</color> (needs a research ship/centre)"
+            ? $"\n<color=#8FD0FF>Carrying {u.samples.Count} ore sample(s)</color> (needs a world with a research centre)"
             : "";
 
         float er = UnitManager.Instance != null ? UnitManager.Instance.EffectiveRange(u) : u.Info.range;
