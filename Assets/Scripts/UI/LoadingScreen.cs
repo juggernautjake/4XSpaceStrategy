@@ -359,6 +359,14 @@ public class LoadingScreen : MonoBehaviour
     const float RingRevealGap = 0.25f; // a beat of empty sky, so the cue reads as its own event
     const float RingRevealBeat = 1.2f; // the orbits drawing in — the "you have control" cue
 
+    /// How much bigger the preview gets as it travels to the centre.
+    ///
+    /// This is also what sets the ZOOM the game opens at, because HandoffScreenFraction reads it and
+    /// the real camera is framed to match — so the planet is as present in the game as it was on the
+    /// loading screen. At 1.35 it arrived reading as a thumbnail that had merely moved; the planet
+    /// wants to be the subject of the shot by the time the panel goes.
+    const float TravelGrow = 1.9f;
+
     RectTransform welcomeRT;
     TMP_Text welcomeLabel;
     Image blinkFlash;
@@ -397,7 +405,7 @@ public class LoadingScreen : MonoBehaviour
         var pv = previewView != null ? previewView.rectTransform : null;
         Vector2 from = pv != null ? pv.anchoredPosition : Vector2.zero;
         Vector2 fromSize = pv != null ? pv.sizeDelta : Vector2.zero;
-        Vector2 toSize = fromSize * 1.35f;
+        Vector2 toSize = fromSize * TravelGrow;
         // Where the bar's midpoint was, in the preview's own coordinates.
         //
         // Two corrections live in this one line. The preview is anchored to the column's LEFT EDGE
@@ -1141,7 +1149,7 @@ public class LoadingScreen : MonoBehaviour
         float panelH = rootRT != null ? rootRT.rect.height : 0f;
         if (panelH <= 1f) return 0f;                    // unmeasured canvas — let the caller fall back
 
-        float boxH = previewHomeSize.y * 1.35f;
+        float boxH = previewHomeSize.y * TravelGrow;
         return shareOfTarget * (boxH / panelH);
     }
 

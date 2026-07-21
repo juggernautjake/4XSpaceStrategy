@@ -576,6 +576,13 @@ public class CameraController : MonoBehaviour
         // this the anchor keeps easing X/Z back and WASD fights it.
         ClearAnchor();
 
+        // It also RELEASES a followed body. LateUpdate re-centres on the follow target every frame, so
+        // panning while following is a fight the player cannot win — they push the view off the planet
+        // and it snaps straight back. This matters now that a new game opens already following the
+        // homeworld around its orbit: the first WASD press is the moment the player takes over, and it
+        // has to actually hand them the camera.
+        ClearFocus();
+
         float heightFactor = Mathf.Clamp(transform.position.y / 20f, 1f, 200f);
 
         // Rotated into the camera's own bearing, so W is always "away from the viewer" whichever way the
