@@ -245,7 +245,12 @@ public static class GalaxyGenerator
         OreGenerator.Populate(planet);
         planet.resources = new ResourceDeposit();
         ResourceGenerator.GenerateResources(planet);
-        planet.name = "Homeworld";
+        // KEEPS ITS GENERATED NAME. This used to overwrite it with the literal string "Homeworld",
+        // which is why the loading screen's reveal caption read "Homeworld — your homeworld" and the
+        // welcome message read "Welcome to Homeworld". Every other planet in the galaxy is named by
+        // NameGenerator.PlanetName from its system and index; the player's own world is the last one
+        // that should be the exception. It is already flagged as home by system.isHome and by being the
+        // player's first colony — it does not also need to be called it.
         planet.hostStar = home.combinedStar;
         planet.system = home;
 

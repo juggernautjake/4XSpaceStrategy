@@ -176,9 +176,26 @@ public static class UIFactory
         rt.offsetMax = new Vector2(0, rt.offsetMax.y);
     }
 
+    /// Get a component, adding it if it isn't there. Use this instead of `GetComponent<T>() ?? Add...`.
+    ///
+    /// That idiom is broken for Unity components and it has already caused one crash
+    /// (MissingComponentException on a CanvasGroup during the loading finale). GetComponent can hand
+    /// back a FAKE null — a live C# reference wrapping a native object that isn't there — and Unity
+    /// expresses that through an overloaded `==` operator. `??` does not call operator==; it tests for
+    /// real null. So the fake sails straight through, AddComponent is never reached, and the first
+    /// member access on the result throws.
+    ///
+    /// `c == null` DOES call Unity's overload, which is why this works where `??` doesn't.
+    public static T Ensure<T>(GameObject go) where T : Component
+    {
+        if (go == null) return null;
+        var c = go.GetComponent<T>();
+        return c == null ? go.AddComponent<T>() : c;
+    }
+
     public static LayoutElement AddLayout(GameObject go, float preferredHeight, float minHeight = -1)
     {
-        var le = go.GetComponent<LayoutElement>() ?? go.AddComponent<LayoutElement>();
+        var le = Ensure<LayoutElement>(go);
         le.preferredHeight = preferredHeight;
         if (minHeight >= 0) le.minHeight = minHeight;
         return le;
@@ -393,7 +410,7 @@ public static class UIFactory
     public static void Tooltip(GameObject go, string text)
     {
         if (go == null) return;
-        var t = go.GetComponent<HoverTip>() ?? go.AddComponent<HoverTip>();
+        var t = Ensure<HoverTip>(go);
         t.text = text;
     }
 }

@@ -245,7 +245,7 @@ public class TerraformWindow : MonoBehaviour
             if (mgr != null && mgr.IsRunning(body, p.type)) continue;   // already shown under UNDER WAY
 
             var card = Card(UITheme.RowBg);
-            var group = card.gameObject.GetComponent<CanvasGroup>() ?? card.gameObject.AddComponent<CanvasGroup>();
+            var group = UIFactory.Ensure<CanvasGroup>(card.gameObject);
 
             UIFactory.WrapText(card, $"<b>{p.name}</b>  <size=10><color=#8FD0FF>fixes: {TerraformDiagnosis.Describe(p.solves)}</color></size>",
                 UITheme.BodySize, new Color(0.5f, 0.95f, 0.75f));

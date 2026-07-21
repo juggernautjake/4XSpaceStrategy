@@ -3907,7 +3907,7 @@ public class PlanetViewWindow : MonoBehaviour
         var captured = target;
         bool open = openMaps.Contains(target);
         var btn = UIFactory.Button(moonTabStrip, "", () => ToggleMap(captured), size);
-        var le = btn.GetComponent<LayoutElement>() ?? btn.gameObject.AddComponent<LayoutElement>();
+        var le = UIFactory.Ensure<LayoutElement>(btn.gameObject);
         le.preferredWidth = size; le.minWidth = size;
         le.preferredHeight = size; le.minHeight = size;
         le.flexibleWidth = 0; le.flexibleHeight = 0;
@@ -4503,7 +4503,7 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
 
         // A standout border around the little terrain thumbnail, so a moon tab reads as its own thing.
         // Its COLOUR is set per-moon in Configure() (each tab a different, stable colour).
-        outline = gameObject.GetComponent<Outline>() ?? gameObject.AddComponent<Outline>();
+        outline = UIFactory.Ensure<Outline>(gameObject);
         outline.effectDistance = new Vector2(1.6f, -1.6f);
         outline.effectColor = new Color(0.55f, 0.85f, 1.00f, 0.95f);   // placeholder until Configure
 

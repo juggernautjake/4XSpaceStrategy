@@ -121,7 +121,7 @@ public class SystemVisualizer : MonoBehaviour
                 SetStarSystem(go, sys);
                 var o = layout.orbits[i];
                 Transform center = o.aboutPair ? pairCenter : pivot.transform;
-                var oc = go.GetComponent<OrbitController>() ?? go.AddComponent<OrbitController>();
+                var oc = UIFactory.Ensure<OrbitController>(go);
                 oc.ringVisible = false;
                 oc.Setup(center, o.radius, o.speed);
                 oc.SetPhase(o.phase);
@@ -150,7 +150,7 @@ public class SystemVisualizer : MonoBehaviour
             // returns the FIRST, i.e. the inert prefab copy. Their SetRadius calls then moved nothing (its
             // UpdatePosition early-returns on the null parent, its RedrawRing no-ops on a null ring) while
             // this appended controller silently drove the planet. One controller, configured AND fetched.
-            var oc = visual.GetComponent<OrbitController>() ?? visual.AddComponent<OrbitController>();
+            var oc = UIFactory.Ensure<OrbitController>(visual);
             oc.SetupFromData(pivot.transform, body);
             if (body.Surveyed) PlanetAppearance.Apply(body, visual);
             else visual.AddComponent<BodyFog>().Init(body);   // fog-of-war silhouette
@@ -171,7 +171,7 @@ public class SystemVisualizer : MonoBehaviour
 
                 // Same as the planet above: reuse the prefab's controller so the one that's configured is
                 // the one GetComponent later returns.
-                var moc = moonVisual.GetComponent<OrbitController>() ?? moonVisual.AddComponent<OrbitController>();
+                var moc = UIFactory.Ensure<OrbitController>(moonVisual);
                 moc.SetupFromData(body.visualObject.transform, moon);
                 if (moon.Surveyed) PlanetAppearance.Apply(moon, moonVisual);
                 else moonVisual.AddComponent<BodyFog>().Init(moon);
@@ -213,7 +213,7 @@ public class SystemVisualizer : MonoBehaviour
         var stray = star.GetComponent<PlanetClick>();
         if (stray != null) Destroy(stray);
 
-        var si = star.GetComponent<StarInteraction>() ?? star.AddComponent<StarInteraction>();
+        var si = UIFactory.Ensure<StarInteraction>(star);
         si.star = combined;   // combined cluster data (shared light/heat/HZ)
         si.member = s;         // this sun's OWN data, so the editor can target it individually
 
@@ -260,7 +260,7 @@ public class SystemVisualizer : MonoBehaviour
         sc.radius = Mathf.Max(0.5f, minWorldRadius / sl);
 
         // Keep it clickable when zoomed out (grows the pick radius with camera height).
-        var scaler = go.GetComponent<ClickColliderScaler>() ?? go.AddComponent<ClickColliderScaler>();
+        var scaler = UIFactory.Ensure<ClickColliderScaler>(go);
         scaler.baseRadius = sc.radius;
     }
 }

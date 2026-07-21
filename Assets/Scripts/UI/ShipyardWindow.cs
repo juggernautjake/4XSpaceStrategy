@@ -201,7 +201,7 @@ public class ShipyardWindow : MonoBehaviour
                 if (!headerAdded)
                 {
                     var h = UIFactory.WrapText(catalogue, $"<b>{cat.name}</b>", UITheme.HeaderSize, UITheme.Accent);
-                    var hle = h.gameObject.GetComponent<LayoutElement>() ?? h.gameObject.AddComponent<LayoutElement>();
+                    var hle = UIFactory.Ensure<LayoutElement>(h.gameObject);
                     hle.minHeight = 24;
                     headerAdded = true;
                 }

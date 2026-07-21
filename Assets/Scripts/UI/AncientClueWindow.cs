@@ -210,7 +210,7 @@ public class AncientClueWindow : MonoBehaviour
 
     static void AddH(GameObject go, float h)
     {
-        var le = go.GetComponent<LayoutElement>() ?? go.AddComponent<LayoutElement>();
+        var le = UIFactory.Ensure<LayoutElement>(go);
         le.preferredHeight = h; le.minHeight = h;
     }
 

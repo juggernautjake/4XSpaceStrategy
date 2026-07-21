@@ -191,14 +191,6 @@ public class PlacedBuilding
 
 public static class SurfaceBuildingDatabase
 {
-    // How far the capitol's own reactor lights the ground around it — the radius of a colony's core.
-    //
-    // Sized against how far a player actually builds from their landing site, NOT against the capitol's
-    // footprint. It is the single number that decides whether the power grid is a system you engage
-    // with or a tax you can't pay: too small and every colony opens crippled with no first move
-    // available, too large and there's never a reason to build a plant at all.
-    public const float ColonyReactorRange = 14f;
-
     static SurfaceBuildingInfo[] _all;
 
     public static SurfaceBuildingInfo[] All { get { if (_all == null) Build(); return _all; } }
@@ -454,26 +446,22 @@ public static class SurfaceBuildingDatabase
         // modestly, three tiles, so it's a local tidy-up rather than a substitute for a node chain.
         Project(SurfaceBuildingType.PowerDistribution, 3f);
 
-        // THE COLONY'S FOUNDING REACTOR, and the reason a settled world is never dark.
+        // THE SEATS OF GOVERNMENT GENERATE, BUT THEY LIGHT ONLY THEIR OWN DOORSTEP.
         //
-        // The colony ship's reactor doesn't stop working when the ship lands, and the capitol built
-        // around it inherits it — so upgrading the base never puts the lights out.
+        // Both the landed colony ship and the capitol it upgrades into carry a reactor — a settled world
+        // is never entirely dark — but each reaches exactly one tile.
         //
-        // Its range is COLONY-SCALE (see ColonyReactorRange) rather than the ring a plant lights, and
-        // that number is load-bearing. Every other generator has to be BUILT, and every building —
-        // including the generators — needs a colony to build it. If a new colony's grid only covered its
-        // own four tiles, then every world would open with its industry sited out on the seams it was
-        // sited on FOR, all of it unpowered, and on a world with neither fuel nor water to hand there
-        // would be no first plant you could build to escape it. A colony arrives with its core lit, and
-        // reaching past that core is what the rest of this category is for.
-        Reactor(SurfaceBuildingType.ColonyShipBase, 0.8f, ColonyReactorRange);
-        // THE CAPITOL LIGHTS ONLY ITS OWN DOORSTEP — one tile, not the colony-scale ring below.
+        // These used to project a fourteen-tile colony-scale disc, on the reasoning that a new colony
+        // must be able to make a first move. In practice it meant a developed world never had a reason
+        // to build a power plant at all: the capitol powered everything that mattered, forever, and the
+        // whole grid system was decoration on the world you cared most about. One tile makes them
+        // buildings that need connecting like any other, and makes the first power plant a real
+        // decision rather than a formality.
         //
-        // The founding base keeps the wide reach (a new colony has to be able to make a first move), but
-        // the permanent seat of government does not: a capitol that powered a fourteen-tile disc forever
-        // meant a developed world never had a reason to build a power plant at all, and the whole grid
-        // system was decoration on the world you cared most about. One tile makes the capitol a building
-        // that needs connecting like any other.
+        // They MATCH each other deliberately. While the base was wide and the capitol narrow, upgrading
+        // the base collapsed a colony's grid from fourteen tiles to one and blacked out everything built
+        // inside the old radius — a trap laid for the player by their own progress.
+        Reactor(SurfaceBuildingType.ColonyShipBase, 0.8f, 1f);
         Reactor(SurfaceBuildingType.PlanetCapitol, 1.2f, 1f);
 
         // Cities carry their own generation and light their own ground, so an inhabited world grows a

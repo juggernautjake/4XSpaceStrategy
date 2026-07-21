@@ -222,6 +222,8 @@ public class GameManager : MonoBehaviour
             // identical string several hundred times is several hundred allocations during the one stretch
             // of the load where a GC hitch would show as a stutter in the reveal.
             string homeCaption = $"{homePlanet.name} — your homeworld";
+            // Reads correctly now that ForceHomeWorld no longer renames the world to the literal
+            // "Homeworld" — that was producing "Homeworld — your homeworld" for the whole reveal.
 
             float reveal = LoadingScreen.MorphDuration;
             for (float e = 0f; e < reveal; e += Time.unscaledDeltaTime)
@@ -257,7 +259,11 @@ public class GameManager : MonoBehaviour
 
         if (screen != null)
         {
-            string welcome = homePlanet != null ? homePlanet.name : "your homeworld";
+            // The world's REAL generated name. The fallback exists only for the impossible case of a
+            // galaxy with no home planet at all — if it ever shows up on screen, that is the bug.
+            string welcome = homePlanet != null && !string.IsNullOrWhiteSpace(homePlanet.name)
+                ? homePlanet.name
+                : "an unnamed world";
             // The apparent size the real planet has to match, solved from the preview's own framing.
             float frac = screen.HandoffScreenFraction();
             var fin = screen.Finale(welcome, () => SnapCameraToHome(homePlanet, frac));
@@ -281,6 +287,25 @@ public class GameManager : MonoBehaviour
     {
         if (home?.visualObject == null) return;
         CameraController.Instance?.SnapFocus(home.visualObject.transform, true, screenFraction);
+
+        // START THE CLOCK HERE, not when the loading screen finally closes.
+        //
+        // Generation runs with timeScale at 0, and orbits advance on scaled time — so with the clock
+        // still stopped the planet would arrive at the centre of the screen frozen in place, sitting
+        // dead in its system while the welcome message played over it. Resuming at the moment the camera
+        // takes over means that by the time the panel dissolves the system is genuinely running: the
+        // homeworld is orbiting its star, its moons are orbiting it, and zooming out shows a live system
+        // rather than a still. The player still cannot CLICK anything until the panel goes — it blocks
+        // raycasts to the end — so this starts the world moving without handing over control early.
+        //
+        // SnapFocus was given follow:true for the same reason: the planet is now moving, and a camera
+        // that merely pointed at where it used to be would drift off it within a second.
+        // Set(1f), NOT Resume(). TimeControl.last is a process-wide static that survives a new game, so
+        // Resume would restore whatever speed the player left the LAST session on — start a new galaxy
+        // after playing at 5x and the remaining few seconds of finale would run twenty simulation
+        // seconds of economy and faction AI before the player could touch anything. A new game starts
+        // at normal speed.
+        TimeControl.Set(1f);
     }
 
     public void GenerateGalaxy(int systemCount, int avgPlanets)

@@ -163,7 +163,20 @@ public class LoadingScreen : MonoBehaviour
         // No GraphicRaycaster: nothing in here is clickable (every star sets raycastTarget = false), and
         // no overrideSorting, so the layer keeps its place in hierarchy order — behind everything.
         skyLayer.gameObject.AddComponent<Canvas>();
+
+        // Built here, ONCE, rather than fetched-or-added during the finale.
+        //
+        // That fetch-or-add was written as `GetComponent<CanvasGroup>() ?? AddComponent<CanvasGroup>()`,
+        // which is the classic Unity trap: a missing component comes back as a FAKE null — a live C#
+        // reference whose underlying object is gone — and `??` tests for real null, so it hands back the
+        // fake instead of ever calling AddComponent. The next line then threw
+        // MissingComponentException. Owning the reference from the start removes the question.
+        skyGroup = skyLayer.gameObject.AddComponent<CanvasGroup>();
+        skyGroup.blocksRaycasts = false;
+        skyGroup.interactable = false;
     }
+
+    CanvasGroup skyGroup;
 
     /// Fill the sky to match how far generation has got.
     void TickSky(float progress, float dt)
@@ -277,11 +290,7 @@ public class LoadingScreen : MonoBehaviour
         OrbitController.SetRevealAlpha(1f);
         var panelImg0 = root.GetComponent<Image>();
         if (panelImg0 != null) panelImg0.color = new Color(0.02f, 0.03f, 0.06f, 1f);
-        if (skyLayer != null)
-        {
-            var cg0 = skyLayer.GetComponent<CanvasGroup>();
-            if (cg0 != null) cg0.alpha = 1f;
-        }
+        if (skyGroup != null) skyGroup.alpha = 1f;
         if (previewView != null)
         {
             previewView.color = Color.white;
@@ -328,6 +337,8 @@ public class LoadingScreen : MonoBehaviour
     const float WelcomeFadeIn = 0.5f; // "Welcome to <world>" arriving
     const float HandoffBeat = 0.7f;   // the panel dissolving out from behind it
     const float WelcomeHold = 1.1f;   // the message over the live solar system
+    const float WelcomeFadeOut = 0.6f; // and then completely gone, before anything else happens
+    const float RingRevealGap = 0.25f; // a beat of empty sky, so the cue reads as its own event
     const float RingRevealBeat = 1.2f; // the orbits drawing in — the "you have control" cue
 
     RectTransform welcomeRT;
@@ -434,7 +445,7 @@ public class LoadingScreen : MonoBehaviour
         EnsureWelcome();
         if (welcomeLabel != null)
         {
-            welcomeLabel.text = $"Welcome to {homeName}";
+            welcomeLabel.text = $"Welcome to your homeworld, <color=#FFD24D>{homeName}</color>";
             welcomeLabel.gameObject.SetActive(true);
             for (float e = 0f; e < WelcomeFadeIn; e += Time.unscaledDeltaTime)
             {
@@ -455,11 +466,7 @@ public class LoadingScreen : MonoBehaviour
         {
             float t = Mathf.Clamp01(e / HandoffBeat);
             if (panelImg != null) { var c = panelStart; c.a = panelStart.a * (1f - t); panelImg.color = c; }
-            if (skyLayer != null)
-            {
-                var cg = skyLayer.GetComponent<CanvasGroup>() ?? skyLayer.gameObject.AddComponent<CanvasGroup>();
-                cg.alpha = 1f - t;
-            }
+            if (skyGroup != null) skyGroup.alpha = 1f - t;
             if (previewView != null)
             {
                 var c = previewView.color;
@@ -481,16 +488,26 @@ public class LoadingScreen : MonoBehaviour
         // Held at zero since Visualize built them (see OrbitController.SetRevealAlpha), because rings
         // that were simply already there would make the galaxy arrive finished, with nothing left to
         // happen at the one moment something should.
+        // The message goes FIRST, completely, before a single orbit line appears. Overlapping the two
+        // made the cue ambiguous — the rings looked like part of the text's exit rather than the thing
+        // that follows it. Gone, a beat of nothing, then the orbits.
+        if (welcomeLabel != null)
+        {
+            Color w0 = welcomeLabel.color;
+            for (float e = 0f; e < WelcomeFadeOut; e += Time.unscaledDeltaTime)
+            {
+                var c = w0; c.a = 1f - Mathf.Clamp01(e / WelcomeFadeOut); welcomeLabel.color = c;
+                yield return null;
+            }
+            var done = w0; done.a = 0f; welcomeLabel.color = done;
+            welcomeLabel.gameObject.SetActive(false);   // not merely transparent — gone
+        }
+
+        for (float e = 0f; e < RingRevealGap; e += Time.unscaledDeltaTime) yield return null;
+
         for (float e = 0f; e < RingRevealBeat; e += Time.unscaledDeltaTime)
         {
             float t = Mathf.Clamp01(e / RingRevealBeat);
-            if (welcomeLabel != null)
-            {
-                var c = welcomeLabel.color;
-                // Out over the first half, so the text is gone while the rings are still arriving.
-                c.a = Mathf.Clamp01(1f - t * 2f);
-                welcomeLabel.color = c;
-            }
             // Eased out, so the lines swell in quickly and settle rather than ramping linearly.
             OrbitController.SetRevealAlpha(1f - Mathf.Pow(1f - t, 2f));
             yield return null;
@@ -510,11 +527,7 @@ public class LoadingScreen : MonoBehaviour
     {
         var panelImg = root != null ? root.GetComponent<Image>() : null;
         if (panelImg != null) panelImg.color = panelColor;
-        if (skyLayer != null)
-        {
-            var cg = skyLayer.GetComponent<CanvasGroup>();
-            if (cg != null) cg.alpha = 1f;
-        }
+        if (skyGroup != null) skyGroup.alpha = 1f;
         if (previewView != null)
         {
             previewView.color = Color.white;

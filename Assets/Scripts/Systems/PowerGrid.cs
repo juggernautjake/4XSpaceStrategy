@@ -16,7 +16,8 @@ using UnityEngine;
 //   POWER NODE    — a 1x1 relay with a wide circular reach and no output of its own. The thing you
 //                   chain across a continent to join two cities together.
 //   SWITCHYARD    — Power Distribution: a modest relay that also boosts the plants it touches.
-//   THE CAPITOL   — the colony's founding reactor. See ColonyReactorRange in SurfaceBuilding.cs.
+//   THE CAPITOL   — the colony's founding reactor, but it lights only its own doorstep (one tile),
+//                   so reaching anywhere else is what the rest of the Electrical category is for.
 //
 // Two projectors are in the same grid when the ground they light OVERLAPS. That single rule is the
 // whole system, and every behaviour in the spec falls out of it:

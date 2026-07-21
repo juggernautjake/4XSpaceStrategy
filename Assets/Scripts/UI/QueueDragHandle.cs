@@ -26,7 +26,7 @@ public class QueueDragHandle : MonoBehaviour, IBeginDragHandler, IDragHandler, I
     {
         if (row == null) return;
         Dragging = true;
-        rowGroup = row.GetComponent<CanvasGroup>() ?? row.gameObject.AddComponent<CanvasGroup>();
+        rowGroup = UIFactory.Ensure<CanvasGroup>(row.gameObject);
         rowGroup.alpha = 0.65f;           // visibly "lifted" while it's being carried
         onDragStateChanged?.Invoke();
     }
