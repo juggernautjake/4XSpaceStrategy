@@ -1757,7 +1757,7 @@ public class PlanetViewWindow : MonoBehaviour
         sb.Append(Mathf.Abs(b.inclination) > 28f ? "Its severe axial tilt gives it savage seasons. " : "Mild seasons. ");
         // Read the water actually on the surface (its Water Level), not the disconnected Water resource
         // number — so a world covered in ocean tiles never reads "bone dry".
-        float waterLevel = PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation);
+        float waterLevel = PlanetTerrainGenerator.WaterLevelFromSeaLevel(b.terrainParams.SeaLevelOrNeutral);
         sb.Append(waterLevel < 0.15f ? "Bone dry — no weather to speak of. "
                 : waterLevel > 0.6f ? "Wet, with heavy cloud and frequent storms. "
                 : "Moderate moisture and weather. ");
@@ -2571,9 +2571,15 @@ public class PlanetViewWindow : MonoBehaviour
 
         var p = body.terrainParams;
         SliderRow("Feature scale", "continent size", 0.4f, 3f, p.scale, v => SetTerrain(0, v));
-        SliderRow("Water Level", "dry world <-> fully covered", 0f, 1f,
-            PlanetTerrainGenerator.WaterLevelFromElevation(p.elevation),
-            v => SetTerrain(1, PlanetTerrainGenerator.ElevationFromWaterLevel(v)));
+        // Water Level and Relief are now SEPARATE axes. Water drives seaLevel (slot 5) and only floods;
+        // Relief drives elevation amplitude (slot 1) and only changes how tall the land is. They used to
+        // be the same number, so dragging water up flattened the mountains rather than drowning them.
+        SliderRow("Water Level", "dry world <-> even the peaks drowned", 0f, 1f,
+            PlanetTerrainGenerator.WaterLevelFromSeaLevel(p.SeaLevelOrNeutral),
+            v => SetTerrain(5, PlanetTerrainGenerator.SeaLevelFromWaterLevel(v)));
+        SliderRow("Elevation range", "flat world <-> deep basins and high peaks",
+            PlanetTerrainGenerator.ElevationMin, PlanetTerrainGenerator.ElevationMax, p.elevation,
+            v => SetTerrain(1, v));
 
         // Dev Mode lets you paint plant life on ANY world (the whole Terrain tab is a Dev sandbox), so the
         // slider is freed there — otherwise it stays gated on a genuinely habitable, biosphere-active world.
@@ -2598,7 +2604,7 @@ public class PlanetViewWindow : MonoBehaviour
         // touch. Ridge is the mountain-building field: the classifiers test it directly (`ridge > 0.8` is
         // Mountains on most world types), so raising it converts more of the map to peaks and lowering it
         // flattens the world toward plains.
-        SliderRow("Relief", "rolling plains <-> extreme mountains", 0.3f, 2.5f, p.ridge, v => SetTerrain(4, v));
+        SliderRow("Ruggedness", "smooth ground <-> broken, jagged mountain country", 0.3f, 2.5f, p.ridge, v => SetTerrain(4, v));
 
         Header("SEED");
         var seed = Card();
@@ -2649,6 +2655,8 @@ public class PlanetViewWindow : MonoBehaviour
                 break;
             case 3: p.heat = v; break;
             case 4: p.ridge = v; break;
+            // Sea level — the height the water sits at, independent of how tall the land is.
+            case 5: p.seaLevel = Mathf.Clamp01(v); break;
         }
         body.terrainParams = p;
         RegenerateTerrain();
@@ -2891,7 +2899,7 @@ public class PlanetViewWindow : MonoBehaviour
 
         // Describe the water actually on the surface (its Water Level), not the disconnected Water resource
         // number, and call out frozen water as frozen rather than absent.
-        float surfaceWater = PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation);
+        float surfaceWater = PlanetTerrainGenerator.WaterLevelFromSeaLevel(b.terrainParams.SeaLevelOrNeutral);
         if (surfaceWater < 0.15f) parts.Add("There is essentially no water on the surface.");
         else if (!BiosphereRules.HasLiquidWaterClimate(b)) parts.Add("Its water is all here — but frozen solid.");
         else if (surfaceWater > 0.6f) parts.Add("Water is abundant — arguably too abundant.");

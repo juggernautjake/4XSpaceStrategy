@@ -41,33 +41,41 @@ public static class TerraformClimate
     // reason TerraformVisuals.Ideal leaves it alone.
     public struct ClimateDelta
     {
-        public float heat, moisture, elevation, ridge;
+        /// `seaLevel` replaces what used to be an `elevation` push. Water projects raise or lower THE
+        /// SEA; they do not reshape the land. Flooding a world by flattening its elevation amplitude
+        /// meant "Haul Water" quietly demolished its mountains, and reversing the project could never
+        /// give them back because the relief itself had been thrown away.
+        public float heat, moisture, seaLevel, ridge;
 
         public static ClimateDelta Zero => new ClimateDelta();
 
-        public ClimateDelta(float heat, float moisture, float elevation = 0f, float ridge = 0f)
-        { this.heat = heat; this.moisture = moisture; this.elevation = elevation; this.ridge = ridge; }
+        public ClimateDelta(float heat, float moisture, float seaLevel = 0f, float ridge = 0f)
+        { this.heat = heat; this.moisture = moisture; this.seaLevel = seaLevel; this.ridge = ridge; }
 
         public static ClimateDelta operator +(ClimateDelta a, ClimateDelta b)
-            => new ClimateDelta(a.heat + b.heat, a.moisture + b.moisture, a.elevation + b.elevation, a.ridge + b.ridge);
+            => new ClimateDelta(a.heat + b.heat, a.moisture + b.moisture, a.seaLevel + b.seaLevel, a.ridge + b.ridge);
 
         public static ClimateDelta operator *(ClimateDelta a, float k)
-            => new ClimateDelta(a.heat * k, a.moisture * k, a.elevation * k, a.ridge * k);
+            => new ClimateDelta(a.heat * k, a.moisture * k, a.seaLevel * k, a.ridge * k);
     }
 
     // The signature terrain change each project drives. Review the SIGN against what the project is FOR:
-    // water in lowers elevation (basins flood), water out raises it (land emerges), warmers raise heat,
-    // coolers lower it, life raises moisture (green spreads).
+    // water in RAISES the sea (basins flood first, then the hills), water out LOWERS it (land emerges),
+    // warmers raise heat, coolers lower it, life raises moisture (green spreads).
+    //
+    // The water signs are the opposite of what they were, and deliberately so: these used to push the
+    // elevation amplitude DOWN to flood a world, which drowned it by flattening it. The sea moves now,
+    // not the land.
     public static ClimateDelta Delta(TerraformProjectType t)
     {
         switch (t)
         {
-            // ---- Water in: low ground floods into lakes and seas (elevation down); land greens a little
+            // ---- Water in: the sea rises and low ground floods into lakes and seas; land greens a little
             //      (moisture up); some also warm the world ----
-            case TerraformProjectType.HaulWater:         return new ClimateDelta(0f,    0.20f, -0.30f);
-            case TerraformProjectType.TapAquifers:       return new ClimateDelta(0f,    0.20f, -0.28f);
-            case TerraformProjectType.MeltIceCaps:       return new ClimateDelta(0.12f, 0.15f, -0.28f);  // melting also warms
-            case TerraformProjectType.CometBombardment:  return new ClimateDelta(0.06f, 0.22f, -0.34f);  // ice + volatiles
+            case TerraformProjectType.HaulWater:         return new ClimateDelta(0f,    0.20f,  0.30f);
+            case TerraformProjectType.TapAquifers:       return new ClimateDelta(0f,    0.20f,  0.28f);
+            case TerraformProjectType.MeltIceCaps:       return new ClimateDelta(0.12f, 0.15f,  0.28f);  // melting also warms
+            case TerraformProjectType.CometBombardment:  return new ClimateDelta(0.06f, 0.22f,  0.34f);  // ice + volatiles
 
             // ---- Air: a breathable envelope nudges the world toward temperate and holds a little water ----
             case TerraformProjectType.SeedAtmosphere:    return new ClimateDelta(0.05f, 0.10f);
@@ -84,9 +92,9 @@ public static class TerraformClimate
             case TerraformProjectType.CoreCooling:       return new ClimateDelta(-0.40f, 0f);     // bleed a furnace world's own heat
             case TerraformProjectType.CoreIgnition:      return new ClimateDelta(0.15f, 0f);      // a restarted core warms the crust
 
-            // ---- Taking water away: land emerges (elevation up), climate dries (moisture down) ----
-            case TerraformProjectType.HydrosphereVenting:    return new ClimateDelta(0f, -0.35f, 0.35f);
-            case TerraformProjectType.CrustalSequestration:  return new ClimateDelta(0f, -0.28f, 0.28f);
+            // ---- Taking water away: the sea drops and land emerges, climate dries (moisture down) ----
+            case TerraformProjectType.HydrosphereVenting:    return new ClimateDelta(0f, -0.35f, -0.35f);
+            case TerraformProjectType.CrustalSequestration:  return new ClimateDelta(0f, -0.28f, -0.28f);
             case TerraformProjectType.AtmosphericThinning:   return new ClimateDelta(-0.10f, -0.05f);
 
             // Spin / orbit / magnetosphere / gravity / moons / shellworld / directed remodelling:

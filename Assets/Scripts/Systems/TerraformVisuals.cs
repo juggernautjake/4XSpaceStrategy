@@ -45,7 +45,13 @@ public static class TerraformVisuals
         p.moisture = s.PrefersDry ? 0.55f : 1.35f;
 
         // A balanced land/sea split and gentler ground. Nobody's ideal world is all mountain.
+        //
+        // Two knobs now, and they say different things: ordinary relief (so there ARE hills and valleys
+        // to live among) with the sea sitting at a middling height (so roughly half of it is land). The
+        // "balanced split" used to be expressed as elevation alone, which produced a flat world rather
+        // than a temperate one.
         p.elevation = 1.0f;
+        p.seaLevel = s.PrefersDry ? 0.42f : 0.52f;
         p.ridge = 0.75f;
 
         // NOTE: `scale` is meaningless here and Blend never reads it. Feature scale is the world's own
@@ -62,6 +68,9 @@ public static class TerraformVisuals
         p.heat = Mathf.Lerp(natural.heat, ideal.heat, t);
         p.moisture = Mathf.Lerp(natural.moisture, ideal.moisture, t);
         p.elevation = Mathf.Lerp(natural.elevation, ideal.elevation, t);
+        // The sea moves with the rest of the climate. Blended from the neutral-safe accessor so a world
+        // loaded from a pre-seaLevel save does not lerp from a literal zero and dry itself out.
+        p.seaLevel = Mathf.Lerp(natural.SeaLevelOrNeutral, ideal.SeaLevelOrNeutral, t);
         p.ridge = Mathf.Lerp(natural.ridge, ideal.ridge, t);
         // scale is NOT blended — see Ideal. The continents stay put.
         return p;
@@ -76,13 +85,15 @@ public static class TerraformVisuals
         var p = PlanetTerrainGenerator.NoiseParams.Default;
         switch (t)
         {
-            case CelestialBodyType.VolcanicPlanet: p.heat = 1.85f; p.moisture = 0.35f; p.elevation = 1.10f; p.ridge = 1.35f; break;
-            case CelestialBodyType.OceanPlanet:    p.heat = 1.05f; p.moisture = 1.70f; p.elevation = 0.60f; p.ridge = 0.70f; break;
-            case CelestialBodyType.IcePlanet:      p.heat = 0.50f; p.moisture = 1.00f; p.elevation = 1.00f; p.ridge = 0.95f; break;
-            case CelestialBodyType.RockyPlanet:    p.heat = 1.00f; p.moisture = 1.20f; p.elevation = 1.00f; p.ridge = 0.90f; break;
-            case CelestialBodyType.BarrenPlanet:   p.heat = 1.25f; p.moisture = 0.20f; p.elevation = 1.00f; p.ridge = 1.05f; break;
+            case CelestialBodyType.VolcanicPlanet: p.heat = 1.85f; p.moisture = 0.35f; p.elevation = 1.10f; p.ridge = 1.35f; p.seaLevel = 0.20f; break;
+            // An ocean world is DROWNED, not FLAT — high sea level over ordinary relief, so its islands
+            // are real mountain tops rather than the last bumps of a world sanded down.
+            case CelestialBodyType.OceanPlanet:    p.heat = 1.05f; p.moisture = 1.70f; p.elevation = 0.95f; p.ridge = 0.70f; p.seaLevel = 0.80f; break;
+            case CelestialBodyType.IcePlanet:      p.heat = 0.50f; p.moisture = 1.00f; p.elevation = 1.00f; p.ridge = 0.95f; p.seaLevel = 0.60f; break;
+            case CelestialBodyType.RockyPlanet:    p.heat = 1.00f; p.moisture = 1.20f; p.elevation = 1.00f; p.ridge = 0.90f; p.seaLevel = 0.50f; break;
+            case CelestialBodyType.BarrenPlanet:   p.heat = 1.25f; p.moisture = 0.20f; p.elevation = 1.00f; p.ridge = 1.05f; p.seaLevel = 0.12f; break;
             case CelestialBodyType.Moon:
-            case CelestialBodyType.Asteroid:       p.heat = 0.90f; p.moisture = 0.15f; p.elevation = 1.00f; p.ridge = 1.15f; break;
+            case CelestialBodyType.Asteroid:       p.heat = 0.90f; p.moisture = 0.15f; p.elevation = 1.00f; p.ridge = 1.15f; p.seaLevel = 0.08f; break;
             // GasGiant has no solid surface to reclassify toward; leave default.
         }
         return p;
@@ -119,7 +130,8 @@ public static class TerraformVisuals
         var d = TerraformClimate.Accumulated(b);
         p.heat      = Mathf.Clamp(p.heat      + d.heat      * power, 0.30f, 2.20f);
         p.moisture  = Mathf.Clamp(p.moisture  + d.moisture  * power, 0.20f, 2.00f);
-        p.elevation = Mathf.Clamp(p.elevation + d.elevation * power, 0.30f, 2.00f);
+        // The SEA is what water projects move — the land keeps its shape. See TerraformClimate.ClimateDelta.
+        p.seaLevel = Mathf.Clamp01(p.SeaLevelOrNeutral + d.seaLevel * power);
         p.ridge     = Mathf.Clamp(p.ridge     + d.ridge     * power, 0.30f, 2.00f);
         return p;
     }

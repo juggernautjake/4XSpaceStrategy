@@ -116,7 +116,7 @@ public static class BiosphereRules
     }
 
     public static bool HasEnoughWaterLevel(CelestialBody b) =>
-        b != null && PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation) >= MinWaterLevel;
+        b != null && PlanetTerrainGenerator.WaterLevelFromSeaLevel(b.terrainParams.SeaLevelOrNeutral) >= MinWaterLevel;
 
     public static bool HasAtmosphere(CelestialBody b) => b != null && b.atmosphereThickness >= MinAtmosphere;
 
@@ -224,7 +224,7 @@ public static class TerraformDiagnosis
 
         // ---- Water ----
         // Read the water ACTUALLY ON THE SURFACE, not the stored Water resource number. The two used to
-        // disagree badly: surface water is a function of the world's Water Level (terrainParams.elevation)
+        // disagree badly: surface water is a function of the world"s Water Level (terrainParams.seaLevel)
         // and is exactly what the map is drawn from, while resources.Water was an unrelated per-type random
         // roll — so a rocky world visibly covered in ocean could still report "no water" because its
         // resource number happened to be low. Water Level is the single source of truth here.
@@ -232,7 +232,7 @@ public static class TerraformDiagnosis
         // "Needs water" means needs LIQUID water: a world with a high Water Level that's frozen (an ice
         // world) still reads as needing it — which keeps "Melt the Ice Caps" on offer — while a rocky/ocean
         // world with liquid seas correctly reads as watered.
-        float waterLevel = PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation);
+        float waterLevel = PlanetTerrainGenerator.WaterLevelFromSeaLevel(b.terrainParams.SeaLevelOrNeutral);
         bool hasWaterLevel = waterLevel >= BiosphereRules.MinWaterLevel;      // there ARE water/ice tiles
         bool hasLiquidWater = hasWaterLevel && BiosphereRules.HasLiquidWaterClimate(b);
         if (NeedsWater(s) && !hasLiquidWater && b.type != CelestialBodyType.GasGiant)

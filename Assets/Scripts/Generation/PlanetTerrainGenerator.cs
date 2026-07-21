@@ -14,19 +14,50 @@ public static class PlanetTerrainGenerator
     {
         public float scale;      // frequency multiplier (feature density)
         public float elevation, moisture, heat, ridge; // amplitude multipliers
+
+        /// WHERE THE SEA SITS, 0 (bone dry) .. 1 (everything drowned). 0.5 is neutral.
+        ///
+        /// Separate from `elevation`, which is now purely how much RELIEF a world has. These used to be
+        /// the same number: water level was implemented by scaling the elevation amplitude, so asking
+        /// for more water squashed the whole terrain toward the mid-line and the mountains flattened
+        /// out instead of being flooded. A world at maximum water had no relief left to drown.
+        ///
+        /// Now they are independent. Relief is the shape of the land; sea level slides up and down
+        /// across that fixed shape, so raising it swallows the lowlands first, then the hills, and at
+        /// maximum covers even the peaks — while the peaks themselves never change height.
+        public float seaLevel;
+
+        /// NEGATIVE means "never set" — a default-constructed struct or a save written before this
+        /// existed. Zero is a legal, meaningful value (a bone-dry world) and must not be confused with
+        /// absence: treating 0 as unset made the driest setting on the slider silently snap back to
+        /// half-flooded, made draining a world past a point re-flood it, and persisted a dry world as
+        /// a wet one.
+        public float SeaLevelOrNeutral => seaLevel >= 0f ? Mathf.Clamp01(seaLevel) : 0.5f;
+
+        public bool HasSeaLevel => seaLevel >= 0f;
+
         public static NoiseParams Default => new NoiseParams
-        { scale = 1f, elevation = 1f, moisture = 1f, heat = 1f, ridge = 1f };
+        { scale = 1f, elevation = 1f, moisture = 1f, heat = 1f, ridge = 1f, seaLevel = 0.5f };
     }
 
     // "Water Level" bounds — the Terrain Sandbox's Elevation slider's old range, kept as the amplitude
     // window the Water Level slider maps onto (see WaterLevelFromElevation/ElevationFromWaterLevel).
     public const float ElevationMin = 0.3f, ElevationMax = 2f;
 
-    // Lower elevation amplitude means more of the noise field falls below the biome classifiers' water
-    // thresholds (Terran/OceanWorld/Ice all threshold low elev as water), so "more water" is the LOW end
-    // of elevation. Water Level reads the opposite way round (full = fully covered), hence the inversion.
-    // Public/shared so both the sandbox UI (PlanetViewWindow) and terraforming gates (BiosphereRules) read
-    // "how much water" through the one place that knows how elevation maps to it.
+    // Water Level is now its OWN axis (NoiseParams.seaLevel), not a re-reading of elevation amplitude.
+    // These two remain the shared translation between "how much water does this world have" (0..1, the
+    // slider and the terraforming gates) and the parameter that expresses it, so every caller —
+    // PlanetViewWindow's sandbox, BiosphereRules, the generators — still goes through one place.
+    //
+    // The mapping is now the identity, because seaLevel IS the water level. Kept as named functions
+    // rather than deleted: they document the relationship, and the old names meant the change did not
+    // have to ripple through every call site.
+    public static float WaterLevelFromSeaLevel(float seaLevel) => Mathf.Clamp01(seaLevel);
+    public static float SeaLevelFromWaterLevel(float waterLevel) => Mathf.Clamp01(waterLevel);
+
+    // Back-compat shims for callers that still speak in elevation. A world loaded from a save made
+    // before seaLevel existed had its water baked into its elevation amplitude, so this recovers the
+    // water level that amplitude used to mean.
     public static float WaterLevelFromElevation(float elevation) => Mathf.InverseLerp(ElevationMax, ElevationMin, elevation);
     public static float ElevationFromWaterLevel(float waterLevel) => Mathf.Lerp(ElevationMax, ElevationMin, waterLevel);
 
@@ -80,7 +111,11 @@ public static class PlanetTerrainGenerator
             elevation = Mathf.Max(0.1f, elevationStrength),
             moisture = Mathf.Max(0.1f, moistureStrength),
             heat = Mathf.Max(0.1f, heatStrength),
-            ridge = Mathf.Max(0.1f, ridgeStrength)
+            ridge = Mathf.Max(0.1f, ridgeStrength),
+            // Carried over rather than left at the struct default: this rebuilds terrainParams wholesale
+            // from five arguments, and omitting sea level silently reset every world it touched to a
+            // half-flooded default.
+            seaLevel = body.terrainParams.SeaLevelOrNeutral
         };
         return Build(body, body.terrainParams, Octaves);
     }
@@ -381,7 +416,37 @@ public static class PlanetTerrainGenerator
         // value at u=0, by construction rather than by luck. Wrapped on a globe the two edges are the same
         // meridian, so anything sampled on a flat plane leaves a hard seam there — a continent chopped in
         // half, a coastline that stops dead, a climate band that jumps. See WrapU.
-        float elevation = WrapU(u, freq * 2f,        1f,   fy,        seed,       seed * 1.3f, octaves) * p.elevation;
+        // RELIEF around the mid-line, then the SEA slid across it — two independent things.
+        //
+        // `p.elevation` scales the land's variation about 0.5, so raising it makes deeper valleys AND
+        // higher peaks while leaving the average ground where it was. `seaLevel` then shifts the whole
+        // field against the classifiers' fixed water thresholds: a higher sea pushes everything down
+        // past them, drowning the lowlands first and finally the summits, without ever changing how
+        // tall those summits are relative to each other.
+        //
+        // Multiplying the raw field (the old behaviour) did both jobs with one number and did neither
+        // properly: "more water" was really "less relief", so a maximally wet world was a flat one.
+        float rawElev = WrapU(u, freq * 2f, 1f, fy, seed, seed * 1.3f, octaves);
+
+        // THE LAND'S OWN HEIGHT — relief only, sea level nowhere in it. This is the terrain's real
+        // shape, and it is what Sample.elevation reports, so a drowned mountain range is still a
+        // mountain range to everything that asks: the Mineral index still finds the ore in its ridges,
+        // the temperature model still cools its peaks, and dropping the sea back down uncovers exactly
+        // the terrain that was always there.
+        // NOT clamped. At full Elevation Range this spans roughly -0.5..1.5, and that headroom is the
+        // point: clamping here would pin every high peak to exactly 1 and every deep basin to exactly 0,
+        // turning both ends of the world into flat plateaus at precisely the setting the player chose in
+        // order to get dramatic terrain. The classifiers only ever compare against thresholds, so
+        // out-of-range values are meaningful — a 1.4 summit really is higher than a 1.0 one.
+        float landHeight = 0.5f + (rawElev - 0.5f) * p.elevation;
+
+        // HEIGHT RELATIVE TO THE SEA — what the classifiers read to decide water from land.
+        //
+        // Deliberately NOT clamped at the bottom. The classifiers only ever ask `elev < someThreshold`,
+        // so a deeply submerged peak reading -0.3 is water exactly as -0.0 would be — but clamping to
+        // zero would have flattened every underwater feature into one indistinguishable seabed, and at
+        // maximum sea level that is the entire planet.
+        float elevation = landHeight - (p.SeaLevelOrNeutral - 0.5f);
         float moisture  = WrapU(u, freq * 2f,        1.3f, fy * 1.3f, seed + 31f, seed + 17f,  octaves) * p.moisture;
         float ridge     = WrapU(u, freq * 2f,        2.2f, fy * 2.2f, seed + 91f, seed + 53f,  octaves) * p.ridge;
 
@@ -392,7 +457,9 @@ public static class PlanetTerrainGenerator
         // band, and the coldest peaks freeze outright. Only ground ABOVE the mid-elevation is cooled, so
         // seas and lowlands are untouched. `altCool` is reused for the °C reading below so the map and the
         // temperature readout agree on how cold the heights are.
-        float altCool = Mathf.Max(0f, elevation - 0.6f);
+        // landHeight: altitude cooling is about how high the GROUND is, not how deep the water over it
+        // is. Reading the sea-relative figure would have made every world colder as it flooded.
+        float altCool = Mathf.Max(0f, landHeight - 0.6f);
 
         // THE FLAT LATITUDE BAND BUG.
         //
@@ -486,7 +553,11 @@ public static class PlanetTerrainGenerator
 
         return new Sample
         {
-            terrain = t, shade = fine, elevation = elevation, water = IsWater(t),
+            // landHeight, not the sea-relative figure: callers asking a tile's elevation want the
+            // ground's real height, which does not change when the tide comes in.
+            // Clamped only HERE, on the way out: Sample.elevation is documented 0..1 and SurfaceIndex
+            // and the overlays rely on that, while the generator above needs the unclamped range.
+            terrain = t, shade = fine, elevation = Mathf.Clamp01(landHeight), water = IsWater(t),
             temperature = temperature, moisture = Mathf.Clamp01(moisture),
             ridge = Mathf.Clamp01(ridge), latitude = lat
         };

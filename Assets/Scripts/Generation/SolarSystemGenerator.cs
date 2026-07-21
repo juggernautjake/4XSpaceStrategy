@@ -97,7 +97,7 @@ public class SolarSystemGenerator : MonoBehaviour
             if (rolledWaterLevel >= 0f)
             {
                 var wp = body.terrainParams;
-                wp.elevation = PlanetTerrainGenerator.ElevationFromWaterLevel(rolledWaterLevel);
+                wp.seaLevel = PlanetTerrainGenerator.SeaLevelFromWaterLevel(rolledWaterLevel);
                 body.terrainParams = wp;
             }
 
@@ -182,7 +182,7 @@ public class SolarSystemGenerator : MonoBehaviour
                 if (moonWaterLevel >= 0f)
                 {
                     var wp = moon.terrainParams;
-                    wp.elevation = PlanetTerrainGenerator.ElevationFromWaterLevel(moonWaterLevel);
+                    wp.seaLevel = PlanetTerrainGenerator.SeaLevelFromWaterLevel(moonWaterLevel);
                     moon.terrainParams = wp;
                 }
                 BiasHeat(moon, moon.distanceFromStar, currentStar);           // same climate band as its planet

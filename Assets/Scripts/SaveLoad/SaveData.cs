@@ -151,7 +151,15 @@ public class BodyDTO
     // re-deriving it on load would capture the already-terraformed values as "natural" and freeze all
     // further progress. Zero means a save written before this existed — see the loader.
     public float nScale, nElev, nMoist, nHeat, nRidge;
+
+    /// The untouched sea level. Same negative-means-unset convention as tSea.
+    public float nSea = -1f;
     public float tScale = 1f, tElev = 1f, tMoist = 1f, tHeat = 1f, tRidge = 1f; // terrain params
+
+    /// Sea level, 0..1. NEGATIVE means "written before this existed" — zero is a legal dry world — GameStateSerializer converts such a
+    /// save by reading the water level its elevation amplitude used to encode, so old worlds keep their
+    /// oceans instead of loading bone dry.
+    public float tSea = -1f;
 
     public float orbitRadius, orbitSpeed, orbitPhase;
     public float naturalOrbitRadius;   // the generated orbit, for Dev-Mode "Reset orbit/system"

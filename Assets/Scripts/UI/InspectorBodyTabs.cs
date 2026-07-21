@@ -42,9 +42,9 @@ public partial class InspectorWindow
         // second stage would be a second copy of the same picture at twice the cost.
         const float GlobeSize = 156f;
 
-        var row = UIFactory.NewUI(p, "OverviewRow");
-        UIFactory.AddLayout(row, GlobeSize, GlobeSize);
-        var rh = row.AddComponent<HorizontalLayoutGroup>();
+        var topRow = UIFactory.NewUI(p, "OverviewRow");
+        UIFactory.AddLayout(topRow, GlobeSize, GlobeSize);
+        var rh = topRow.AddComponent<HorizontalLayoutGroup>();
         rh.spacing = 8; rh.childControlWidth = true; rh.childControlHeight = true;
         // childForceExpandWidth OFF: with it on, Unity treats every child as flexible and the globe's
         // own flexibleWidth = 0 is overridden — the holder stretches past its fixed size and the
@@ -54,8 +54,8 @@ public partial class InspectorWindow
         // Only the four IDENTITY stats sit beside the globe. The rest (surface, moons, ships, points of
         // interest) go in their own card below, because eight stat rows — two of which wrap — will not
         // fit in 156px and a HorizontalLayoutGroup answers that by crushing them.
-        var card = Card(row.transform);
-        EmbeddedGlobe.Build(row.transform, b, GlobeSize, GlobeSize);
+        var card = Card(topRow.transform);
+        EmbeddedGlobe.Build(topRow.transform, b, GlobeSize, GlobeSize);
         Stat(card, "Type", () => TerraformDiagnosis.Pretty(b.type));
         Stat(card, "Owner", () =>
         {
@@ -278,7 +278,7 @@ public partial class InspectorWindow
 
         // Describe the water actually on the surface (its Water Level), not the disconnected Water resource
         // number, and call out frozen water as frozen rather than absent.
-        float surfaceWater = PlanetTerrainGenerator.WaterLevelFromElevation(b.terrainParams.elevation);
+        float surfaceWater = PlanetTerrainGenerator.WaterLevelFromSeaLevel(b.terrainParams.SeaLevelOrNeutral);
         if (surfaceWater < 0.15f) parts.Add("There is essentially no water on the surface.");
         else if (!BiosphereRules.HasLiquidWaterClimate(b)) parts.Add("Its water is all here — but frozen solid.");
         else if (surfaceWater > 0.6f) parts.Add("Water is abundant — arguably too abundant.");

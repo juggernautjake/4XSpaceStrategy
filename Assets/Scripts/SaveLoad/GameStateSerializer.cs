@@ -111,6 +111,23 @@ public static class GameStateSerializer
         return sd;
     }
 
+    /// What sea level reproduces the map a PRE-seaLevel save used to render.
+    ///
+    /// Old generator: a cell was water when `raw * amp < 0.36`, i.e. `raw < 0.36 / amp`.
+    /// New generator: water when `0.5 + (raw - 0.5) * amp - (sea - 0.5) < 0.36`,
+    ///                i.e. `raw < 0.5 + (sea - 0.64) / amp`.
+    /// Setting the two thresholds equal and solving for sea gives `sea = 1 - 0.5 * amp`.
+    ///
+    /// This matters more than it looks. The obvious conversion — reusing WaterLevelFromElevation, which
+    /// is a straight remap of the 0.3..2 amplitude window — is systematically too wet: it turns a
+    /// typical amp-1.0 world from about an eighth water into a third, and an amp-0.6 ocean world from
+    /// 80% ocean into 99%. Only the algebraic inverse reproduces the map the player saved.
+    static float SeaLevelFromLegacyElevation(float amp)
+    {
+        if (amp <= 0f) amp = 1f;
+        return Mathf.Clamp01(1f - 0.5f * amp);
+    }
+
     static BodyDTO ToDTO(CelestialBody b)
     {
         var dto = new BodyDTO
@@ -125,8 +142,12 @@ public static class GameStateSerializer
             continentFrequency = b.continentFrequency,
             tScale = b.terrainParams.scale, tElev = b.terrainParams.elevation,
             tMoist = b.terrainParams.moisture, tHeat = b.terrainParams.heat, tRidge = b.terrainParams.ridge,
+            // The RAW value, not the neutral-substituted one: a genuinely dry world stores 0 and must
+            // load back as 0, not as the half-flooded default.
+            tSea = b.terrainParams.HasSeaLevel ? b.terrainParams.seaLevel : 0.5f,
             nScale = b.naturalParams.scale, nElev = b.naturalParams.elevation,
             nMoist = b.naturalParams.moisture, nHeat = b.naturalParams.heat, nRidge = b.naturalParams.ridge,
+            nSea = b.naturalParams.HasSeaLevel ? b.naturalParams.seaLevel : 0.5f,
             orbitRadius = b.orbitRadius, orbitSpeed = b.orbitSpeed, orbitPhase = b.orbitPhase,
             naturalOrbitRadius = b.naturalOrbitRadius,
             orbitDirection = b.orbitDirection, inclination = b.inclination, eccentricity = b.eccentricity,
@@ -401,7 +422,8 @@ public static class GameStateSerializer
             elevation = dto.tElev <= 0f ? 1f : dto.tElev,
             moisture = dto.tMoist <= 0f ? 1f : dto.tMoist,
             heat = dto.tHeat <= 0f ? 1f : dto.tHeat,
-            ridge = dto.tRidge <= 0f ? 1f : dto.tRidge
+            ridge = dto.tRidge <= 0f ? 1f : dto.tRidge,
+            seaLevel = dto.tSea >= 0f ? dto.tSea : SeaLevelFromLegacyElevation(dto.tElev)
         };
 
         // The untouched climate terraforming lerps FROM. A save written before this existed has zeros,
@@ -416,7 +438,9 @@ public static class GameStateSerializer
                 elevation = dto.nElev <= 0f ? 1f : dto.nElev,
                 moisture = dto.nMoist <= 0f ? 1f : dto.nMoist,
                 heat = dto.nHeat <= 0f ? 1f : dto.nHeat,
-                ridge = dto.nRidge <= 0f ? 1f : dto.nRidge
+                ridge = dto.nRidge <= 0f ? 1f : dto.nRidge,
+                // Same pre-seaLevel conversion as the live params above.
+                seaLevel = dto.nSea >= 0f ? dto.nSea : SeaLevelFromLegacyElevation(dto.nElev)
             }
             : b.terrainParams;
 
