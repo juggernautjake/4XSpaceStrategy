@@ -62,6 +62,10 @@ public class ResearchOrderDTO
     public string id;
     public float progress;
     public bool paused;
+
+    /// What was paid for this project up front. Needed so cancelling after a reload refunds the unspent
+    /// share rather than nothing; old saves carry 0 and are backfilled from the tech's cost on load.
+    public int pointsPaid;
 }
 
 // One numbered fleet control group (see ControlGroups): the unit ids bound to Ctrl+N.

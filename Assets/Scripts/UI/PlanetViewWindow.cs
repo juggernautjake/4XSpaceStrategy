@@ -348,6 +348,11 @@ public class PlanetViewWindow : MonoBehaviour
         overlayImage.raycastTarget = false;
         ovGO.SetActive(false);
 
+        // Points of interest sit ABOVE the terrain but BELOW the pieces: a site is GROUND, so a building
+        // put on top of it should cover it. Built before the piece layer so hierarchy order says so.
+        siteLayer = UIFactory.NewUI(mapRT, "Sites").GetComponent<RectTransform>();
+        UIFactory.Stretch(siteLayer);
+
         pieceLayer = UIFactory.NewUI(mapRT, "Pieces").GetComponent<RectTransform>();
         UIFactory.Stretch(pieceLayer);
         var plImg = pieceLayer.gameObject.AddComponent<Image>();
@@ -1196,6 +1201,7 @@ public class PlanetViewWindow : MonoBehaviour
 
         RefreshOverlay();
         DrawPieces();
+        RefreshSiteMarkers();
         if (tab != Tab.Build) ClearGhost();
     }
 
@@ -2320,8 +2326,9 @@ public class PlanetViewWindow : MonoBehaviour
                 return sb.ToString().TrimEnd();
             });
 
-            // Centre the map on it. A list entry you can't find on the map is a list entry.
-            UIFactory.Button(card, "Show on map", () => CentreOn(cap.u, cap.v), 22);
+            // Centre the map on it AND light it up. A list entry you cannot find on the map is a list
+            // entry; one that takes you there and then flashes the actual ground is a place.
+            UIFactory.Button(card, "Show on map", () => FocusSite(cap), 22);
 
             if (poi.IsResearchable)
             {
@@ -2337,6 +2344,157 @@ public class PlanetViewWindow : MonoBehaviour
                 });
             }
         }
+    }
+
+    // ============================================================================================
+    // SITES ON THE GROUND
+    //
+    // A point of interest has always had a real position (u,v) on the surface, but nothing drew it —
+    // the list said a world had ancient ruins and the map showed undifferentiated terrain. These put
+    // the site where it actually is: a marked patch of tiles you can see, hover for its report, and
+    // jump to from the list.
+    //
+    // The patch is DERIVED from (u,v) and the site's type rather than stored, so it costs nothing in
+    // the save and cannot disagree with the list. Radius by type: a settlement sprawls, an anomaly is
+    // a point.
+    // ============================================================================================
+    RectTransform siteLayer;
+    PointOfInterest focusedSite;     // the one currently pulsing, from "Show on map"
+    float sitePulseUntil;            // unscaled time the emphasis pulse ends
+
+    /// How many tiles out from its centre a site covers, by kind.
+    static int SiteRadius(PointOfInterest p)
+    {
+        switch (p.type)
+        {
+            case POIType.Settlement: return 2;        // a town has a footprint
+            case POIType.AncientRuins: return 2;      // so does a ruin field
+            case POIType.SpecialResource: return 1;   // a seam is tight
+            default: return 1;                        // an anomaly is a point
+        }
+    }
+
+    /// The cells a site covers, clamped to the grid. Longitude wraps; latitude does not.
+    List<Vector2Int> SiteCells(PointOfInterest p)
+    {
+        var cells = new List<Vector2Int>();
+        if (body?.surface == null) return cells;
+
+        int w = body.surface.width, h = body.surface.height;
+        int cx = Mathf.Clamp(Mathf.FloorToInt(p.u * w), 0, w - 1);
+        int cy = Mathf.Clamp(Mathf.FloorToInt(p.v * h), 0, h - 1);
+        int r = SiteRadius(p);
+
+        for (int dy = -r; dy <= r; dy++)
+            for (int dx = -r; dx <= r; dx++)
+            {
+                // Round patch, not square — a square reads as a building, which is the one thing a
+                // natural feature must not look like. `> r*r` and not `> r*r + r`: the looser test
+                // admits the diagonals at r=1 (1+1=2), which renders a single-tile anomaly as a full
+                // 3x3 block — exactly the shape this is avoiding.
+                if (dx * dx + dy * dy > r * r) continue;
+                int y = cy + dy;
+                if (y < 0 || y >= h) continue;
+                cells.Add(new Vector2Int(((cx + dx) % w + w) % w, y));
+            }
+        return cells;
+    }
+
+    /// Jump the map to a site and start it pulsing so the eye lands on it.
+    void FocusSite(PointOfInterest p)
+    {
+        if (p == null) return;
+        CentreOn(p.u, p.v);
+        focusedSite = p;
+        sitePulseUntil = Time.unscaledTime + SitePulseSeconds;
+        // No rebuild: the markers already exist and SitePulse reads the focus live every frame. Forcing
+        // one here would tear down and rebuild the whole side panel on every "Show on map" click.
+    }
+
+    const float SitePulseSeconds = 4f;
+
+    /// Draw every visible site's patch onto the marker layer.
+    ///
+    /// Only for a world that has been surveyed — before that the player has not been there, and a map
+    /// dotted with things they have not found would give away the survey's whole payoff.
+    void RefreshSiteMarkers()
+    {
+        if (siteLayer == null || body?.surface == null) return;
+
+        for (int i = siteLayer.childCount - 1; i >= 0; i--) Destroy(siteLayer.GetChild(i).gameObject);
+        if (!body.Surveyed && !GameMode.DevMode) return;
+        if (body.pointsOfInterest == null) return;
+
+        int w = body.surface.width, h = body.surface.height;
+
+        foreach (var poi in body.pointsOfInterest)
+        {
+            // An UNIDENTIFIED anomaly is drawn faintly — you can see something is there, not what.
+            // Keyed off `explored`, the same flag SiteTitle and SiteMark use, so the patch and the words
+            // next to it can never disagree about how much is known.
+            bool known = poi.explored || poi.type != POIType.Mystery;
+            var col = SiteColor(poi);
+
+            // ONE holder per site, carrying a CanvasGroup.
+            //
+            // The pulse is then a single alpha write per site per frame instead of one per TILE. A
+            // colour write dirties a Graphic and forces a canvas re-batch, and a couple of ruin fields
+            // is already ~40 tiles — re-tinting all of them every frame, forever, on the canvas that
+            // also carries the whole side panel, is the kind of cost that does not show up until the
+            // map is busy.
+            var holderGO = UIFactory.NewUI(siteLayer, $"Site{poi.type}");
+            var holder = holderGO.GetComponent<RectTransform>();
+            UIFactory.Stretch(holder);
+            var group = UIFactory.Ensure<CanvasGroup>(holderGO);
+
+            foreach (var c in SiteCells(poi))
+            {
+                var go = UIFactory.NewUI(holder, "c");
+                var rt = go.GetComponent<RectTransform>();
+                // NORMALISED anchors, exactly like AddCellQuad. mapRT's sizeDelta IS the zoom — it is
+                // rewritten on every scroll notch — and Signature carries no zoom term, so nothing
+                // rebuilds these on a zoom. Pixel offsets captured at build time would keep their old
+                // size and collapse toward the map's corner the moment the player scrolled.
+                rt.anchorMin = new Vector2(c.x / (float)w, c.y / (float)h);
+                rt.anchorMax = new Vector2((c.x + 1) / (float)w, (c.y + 1) / (float)h);
+                rt.offsetMin = new Vector2(0.5f, 0.5f);
+                rt.offsetMax = new Vector2(-0.5f, -0.5f);
+
+                var img = go.AddComponent<Image>();
+                img.color = new Color(col.r, col.g, col.b, known ? 0.55f : 0.35f);
+                // Raycast target ON: hovering a site's ground is how you read it, which is the whole
+                // point of putting it on the map. Clicks still reach the map's own probe — uGUI walks
+                // UP the parent chain to find a handler, which is the same mechanism the wrap mirrors
+                // already rely on.
+                img.raycastTarget = true;
+
+                go.AddComponent<SiteHover>().Init(this, poi);
+            }
+
+            holderGO.AddComponent<SitePulse>().Init(this, poi, group);
+        }
+    }
+
+    /// Is this site the one the player just asked to be shown, and still within its pulse window?
+    public bool IsSitePulsing(PointOfInterest p) =>
+        p != null && p == focusedSite && Time.unscaledTime < sitePulseUntil;
+
+    /// The hover text for a site's ground — the same information the list card carries, so the map and
+    /// the list can never say different things.
+    public string SiteTooltip(PointOfInterest p)
+    {
+        if (p == null) return "";
+        var sb = new System.Text.StringBuilder();
+        string hex = ColorUtility.ToHtmlStringRGB(SiteColor(p));
+        sb.AppendLine($"<color=#{hex}><b>{SiteTitle(p)}</b></color>");
+        sb.AppendLine(SiteBlurb(p));
+        if (!p.surveyed && p.type == POIType.Mystery)
+            sb.AppendLine("<size=10><color=#FFBF4D>Not yet identified — a research ship must deep-survey this world.</color></size>");
+        else if (p.IsResearchable)
+            sb.AppendLine($"<size=10><color=#8FD0FF>Study: {p.researchPointCost} pts · ~{p.researchDuration:F0}s</color></size>");
+        else if (p.explored)
+            sb.AppendLine("<size=10><color=#9FB4C8>Already studied.</color></size>");
+        return sb.ToString().TrimEnd();
     }
 
     /// Scroll the map so a normalized surface position sits in the middle of the viewport.
@@ -4680,4 +4838,61 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
 
         return $"{dominant} terrain — {TerrainColorMap.Describe(dominant)}";
     }
+}
+
+
+// The glow on a point of interest's ground: a slow breath at rest, and a hard fast pulse for a few
+// seconds after the player clicks "Show on map" so the eye finds it immediately.
+//
+// Drives ONE CanvasGroup covering the whole site rather than tinting each tile. A colour write dirties
+// a Graphic and forces a canvas re-batch; a couple of ruin fields is already ~40 tiles, and re-tinting
+// all of them every frame on the canvas that also carries the side panel is a cost that only shows up
+// once the map is busy. One alpha write per site does the same job.
+public class SitePulse : MonoBehaviour
+{
+    PlanetViewWindow owner;
+    PointOfInterest poi;
+    CanvasGroup group;
+
+    public void Init(PlanetViewWindow window, PointOfInterest site, CanvasGroup g)
+    {
+        owner = window; poi = site; group = g;
+    }
+
+    void Update()
+    {
+        if (group == null) return;
+
+        // Unscaled, so a site keeps breathing while the game is paused — which is exactly when someone
+        // is studying a map.
+        bool emphasised = owner != null && owner.IsSitePulsing(poi);
+        float speed = emphasised ? 7f : 1.6f;
+        float depth = emphasised ? 0.38f : 0.10f;
+        float mid = emphasised ? 0.78f : 0.62f;
+        group.alpha = Mathf.Clamp01(mid + (Mathf.Sin(Time.unscaledTime * speed) - 0.5f) * depth);
+    }
+}
+
+// Hovering a site's ground reports it, using the same text the list card carries so the map and the
+// list can never say different things about the same place.
+public class SiteHover : MonoBehaviour, UnityEngine.EventSystems.IPointerEnterHandler,
+                                        UnityEngine.EventSystems.IPointerExitHandler
+{
+    PlanetViewWindow owner;
+    PointOfInterest poi;
+
+    public void Init(PlanetViewWindow window, PointOfInterest site) { owner = window; poi = site; }
+
+    public void OnPointerEnter(UnityEngine.EventSystems.PointerEventData e)
+    {
+        if (owner == null || poi == null) return;
+        string text = owner.SiteTooltip(poi);
+        if (!string.IsNullOrEmpty(text)) TooltipManager.Instance?.ShowAtCursor(text);
+    }
+
+    public void OnPointerExit(UnityEngine.EventSystems.PointerEventData e) => TooltipManager.Instance?.Hide();
+
+    // A destroyed object never gets OnPointerExit, and these are destroyed wholesale on every rebuild —
+    // so without this the tooltip sticks on screen after a site is refreshed out from under the cursor.
+    void OnDisable() { TooltipManager.Instance?.Hide(); }
 }

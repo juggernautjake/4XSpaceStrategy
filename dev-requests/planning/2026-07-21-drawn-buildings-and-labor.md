@@ -31,29 +31,31 @@ JsonUtility-safe, and matching the existing `OreCellDTO` precedent.
 
 ## 2. Scaling: what each extra cell costs and gives
 
-One rule, applied per building type with its own coefficients. For a building of **N** cells:
+**Per BLOCK, additively — each block is priced off the DEFAULT, not off the block before it.** Block 1
+costs the default. Block 2 costs default + 5%. Block 3 costs default + 10%. Block 4, default + 15%.
+Output rises the same way at 10% a step.
 
-| Quantity | Formula | Default |
-|---|---|---|
-| Metal / Energy cost | `base * N * (1 + growth)^(N-1)` | growth = 0.05 |
-| Build time | `baseTime * N * (1 + timeGrowth)^(N-1)` | timeGrowth = 0.05 |
-| Upkeep (power draw) | `baseDraw * N * (1 + upkeepGrowth)^(N-1)` | upkeepGrowth = 0.05 |
-| Output | `baseOutput * N * (1 + outputGrowth)^(N-1)` | outputGrowth = 0.10 |
-| Labor | `laborPerCell * N` | 1.0 |
+So for a building of **N** cells, summing the blocks:
 
-Output grows *faster* per cell than cost, which is the whole point — a mega-farm is genuinely better
-per tile than four small ones. Cost, time and upkeep all compound at 5% while output compounds at 10%,
-so the brake is not efficiency but **the up-front wall**: a 20-cell farm costs `20 * 1.05^19 ≈ 50x` a
-single cell for `20 * 1.10^19 ≈ 122x` the yield. Affordable only late, and it locks up Labor for a
-long time while it builds.
+| Quantity | Per-block *i* (0-based) | Total for N | Default step |
+|---|---|---|---|
+| Metal / Energy cost | `base * (1 + 0.05i)` | `base * (N + 0.05 * N(N-1)/2)` | 5% |
+| Build time | `baseTime * (1 + 0.05i)` | `baseTime * (N + 0.05 * N(N-1)/2)` | 5% |
+| Upkeep (power draw) | `baseDraw * (1 + 0.05i)` | `baseDraw * (N + 0.05 * N(N-1)/2)` | 5% |
+| Output | `baseOut * (1 + 0.10i)` | `baseOut * (N + 0.10 * N(N-1)/2)` | 10% |
+| Labor | `laborPerCell` | `laborPerCell * N` | flat |
 
-These four coefficients live on `SurfaceBuildingInfo` so a Reactor can compound harder than a Housing
-Block. All of them must be modifiable by tech (`TechEffects` already has `BuildCostMult` /
-`BuildTimeMult` — add `LaborMult` and `UpkeepMult`).
+Worked example, a 3-cell farm at defaults: cost `1 + 1.05 + 1.10 = 3.15x` a single block; output
+`1 + 1.10 + 1.20 = 3.30x`. A 4-cell farm: cost `4.30x`, output `4.60x`.
 
-**Balance risk, stated plainly:** exponential-in-N is very sharp. At growth 0.05 a 40-cell building
-costs 280x a single cell. `maxCells` per type is what keeps this bounded, and it needs to be set
-deliberately rather than left generous.
+Output rises faster per block than cost, which is the point — a mega-farm is genuinely better per tile
+than four small ones. **Quadratic, not exponential**, so the curve stays readable at size: a 20-cell
+farm costs `29.5x` a single block and yields `39x`. The brake is the up-front wall and the Labor it
+locks up for the whole build, not a cliff.
+
+All five coefficients live on `SurfaceBuildingInfo` so a Reactor can scale harder than a Housing Block,
+and all must be modifiable by tech (`TechEffects` already has `BuildCostMult` / `BuildTimeMult` — add
+`LaborMult` and `UpkeepMult`). The numbers above are starting points, explicitly open to balance.
 
 ---
 
@@ -72,7 +74,7 @@ two read as siblings rather than two inventions.
 | Town | 0.25 | 
 | Settlement | 0.1 |
 
-**Consumed by** every build in progress: `laborPerCell * N`, held for the duration and released on
+**Consumed by** every build in progress: `laborPerCell * N` — a 3-cell farm holds 3 Labor, a 4-cell farm 4 — held for the duration and released on
 completion, cancellation or pause. This is what makes Labor a *rate* rather than a stockpile — you
 never spend it, you occupy it.
 

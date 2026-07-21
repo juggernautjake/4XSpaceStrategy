@@ -357,6 +357,17 @@ public class ResearchOrder
     public bool paused;
     public ResearchState state = ResearchState.WaitingForCapacity;
 
+    /// Research points already paid for this project, charged in full when it was queued.
+    ///
+    /// Research used to be billed CONTINUOUSLY — every project drained the shared bank a few points a
+    /// second as its bar advanced. Two consequences, both bad: N parallel projects emptied the bank N
+    /// times as fast, and the instant it hit zero every bar in the queue froze at once with no
+    /// explanation. That is the "the first one finishes and everything else stops" bug.
+    ///
+    /// Paying up front, exactly as the shipyard does (UnitManager.QueueBuild), makes each bar
+    /// independent: once a project is bought, nothing but pause, capacity or its own clock can slow it.
+    public int pointsPaid;
+
     // Fractional research waiting to become a whole point. PER PROJECT, not shared: with one shared
     // accumulator whichever project happened to tick first would swallow the points meant for the
     // others, and parallel research would crawl on every project but one.
@@ -474,6 +485,11 @@ public static class TechManager
         { reason = $"discover {OreDatabase.Get(t.reqOre).displayName} first"; return false; }
         if (t.reqSchematics > 0 && AncientLore.SchematicsFound < t.reqSchematics)
         { reason = $"recover {t.reqSchematics} ancient schematic(s) — {AncientLore.SchematicsFound}/{t.reqSchematics}"; return false; }
+        // AFFORDABILITY, checked here rather than discovered by Enqueue failing silently. A project is
+        // bought in full the moment it is queued, so "can I queue this" and "can I pay for this" are now
+        // the same question and the button must say so.
+        if (ResearchManager.ResearchPoints < t.cost)
+        { reason = $"needs {t.cost} research points (have {ResearchManager.ResearchPoints})"; return false; }
         return true;
     }
 
@@ -483,7 +499,16 @@ public static class TechManager
     {
         var t = TechDatabase.Get(id);
         if (t == null || !CanQueue(t, out _)) return false;
-        queue.Add(new ResearchOrder { id = id });
+
+        // Bought NOW, in full — see ResearchOrder.pointsPaid. Cancelling refunds the unspent share.
+        int paid = 0;
+        if (!GameMode.DevMode)
+        {
+            if (ResearchManager.ResearchPoints < t.cost) return false;
+            ResearchManager.AddPoints(-t.cost);
+            paid = t.cost;
+        }
+        queue.Add(new ResearchOrder { id = id, pointsPaid = paid });
         Schedule();
         OnChanged?.Invoke();
         return true;
@@ -499,13 +524,25 @@ public static class TechManager
         OnChanged?.Invoke();
     }
 
-    // Abandoning a project refunds the research points already sunk into it — the work isn't wasted,
-    // it just goes back into the bank (mirrors scrapping a half-built hull for its resources).
+    // Abandoning a project refunds the UNSPENT share of what it cost — the part of the work not yet
+    // done. Mirrors scrapping a half-built hull, and it is the inverse of paying up front: a project
+    // cancelled at 30% gives back 70% of its price.
+    //
+    // (It used to refund `progress`, which under the old pay-as-you-go model WAS the amount sunk in.
+    // With the cost charged at queue time that same expression would refund the part already consumed
+    // and keep the part that hadn't been — backwards, and profitable to cancel a nearly-finished
+    // project.)
+    static int UnspentRefund(ResearchOrder o)
+    {
+        if (o == null || o.pointsPaid <= 0) return 0;
+        return Mathf.Clamp(Mathf.RoundToInt(o.pointsPaid * (1f - o.Progress01)), 0, o.pointsPaid);
+    }
+
     public static void RemoveFromQueue(int index)
     {
         if (index < 0 || index >= queue.Count) return;
         var o = queue[index];
-        int refund = Mathf.FloorToInt(o.progress);
+        int refund = UnspentRefund(o);
         if (refund > 0) ResearchManager.AddPoints(refund);
         queue.RemoveAt(index);
         PruneQueue();
@@ -557,7 +594,7 @@ public static class TechManager
                 }
                 if (!ok)
                 {
-                    int refund = Mathf.FloorToInt(queue[i].progress);
+                    int refund = UnspentRefund(queue[i]);
                     if (refund > 0) ResearchManager.AddPoints(refund);
                     queue.RemoveAt(i); changed = true; break;
                 }
@@ -587,19 +624,15 @@ public static class TechManager
             var t = o.Def;
             if (t == null) continue;
 
-            // Each project accumulates its OWN fractional research, then spends whole points from the
-            // shared bank as they're earned. Running N projects really does drain N times as fast:
-            // capacity decides what you MAY study at once, income decides what you CAN afford to.
-            // Each also keeps its own progress toward its own cost, so two bars started together
-            // finish at their own separate times — a cheap tech never rides in on an expensive one.
-            o.carry += rate * dt;
-            int want = Mathf.FloorToInt(o.carry);
-            if (want <= 0) continue;
-            int spend = Mathf.Min(ResearchManager.ResearchPoints, want);
-            if (spend <= 0) continue;                      // bank is dry -> this project just waits
-            o.carry -= spend;
-            ResearchManager.AddPoints(-spend);
-            o.progress += spend;
+            // Progress is now PURELY TIME. The project was paid for in full when it was queued, so
+            // nothing here touches the shared bank — which is what makes parallel bars independent.
+            // Each keeps its own progress toward its own cost, so two started together finish at their
+            // own separate times and a cheap tech never rides in on an expensive one.
+            //
+            // Capacity is still the limit on how many may run at once (Schedule decides that); the
+            // bank is now the limit on how many you can BUY, which is a decision the player makes at
+            // the moment of queueing rather than a rug pulled out from under a bar already moving.
+            o.progress += rate * dt;
 
             if (o.progress >= t.cost) (finished ??= new List<Tech>()).Add(t);
         }
@@ -722,7 +755,7 @@ public static class TechManager
     public static List<ResearchOrderDTO> ExportQueue()
     {
         var list = new List<ResearchOrderDTO>();
-        foreach (var o in queue) list.Add(new ResearchOrderDTO { id = o.id, progress = o.progress, paused = o.paused });
+        foreach (var o in queue) list.Add(new ResearchOrderDTO { id = o.id, progress = o.progress, paused = o.paused, pointsPaid = o.pointsPaid });
         return list;
     }
 
@@ -733,7 +766,14 @@ public static class TechManager
         if (dtos != null)
             foreach (var d in dtos)
                 if (TechDatabase.Get(d.id) != null && !researched.Contains(d.id))
-                    queue.Add(new ResearchOrder { id = d.id, progress = d.progress, paused = d.paused });
+                    queue.Add(new ResearchOrder
+                    {
+                        id = d.id, progress = d.progress, paused = d.paused,
+                        // Old saves predate paying up front, so their in-flight projects were never
+                        // charged. Treat them as fully paid — the alternative is billing the player a
+                        // second time for work they already have on the bar.
+                        pointsPaid = d.pointsPaid > 0 ? d.pointsPaid : TechDatabase.Get(d.id).cost
+                    });
         Schedule();
         OnChanged?.Invoke();
     }

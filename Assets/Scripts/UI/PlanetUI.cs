@@ -100,12 +100,37 @@ public class PlanetUI : MonoBehaviour
         // very click that opened the current selection.
         bool clickAway = Input.GetMouseButtonDown(0) && !justOpened && EventSystem.current != null &&
                          !EventSystem.current.IsPointerOverGameObject();
+
+        // Did this click land on nothing at all?
+        //
+        // Infinite range on purpose: a star focused from a galaxy-scale zoom-out is thousands of units
+        // away, and a short ray would fall short of it and wrongly read "empty space" — releasing the
+        // follow on the very click that set it, since OnMouseDown runs before this Update.
+        bool ClickedEmptySpace()
+        {
+            var mainCam = Camera.main;
+            return mainCam == null ||
+                   !Physics.Raycast(mainCam.ScreenPointToRay(Input.mousePosition), out _, Mathf.Infinity);
+        }
         if (justOpened) justOpened = false;
 
         if (Selected != null)
         {
             // Esc is handled by EscapeMenu (pause menu); planet UI closes via click-outside or the X button.
-            if (clickAway) CloseAll();
+            //
+            // Closing the panel does NOT release the camera. Those are two different intentions and they
+            // used to be welded together: selecting a ship in orbit, or clicking the map to order one
+            // somewhere, closes this panel — and that was dragging the camera off the planet the player
+            // was deliberately watching. Giving a ship a command is not "I'm done with this world".
+            //
+            // The follow is released only by a click that hit genuinely EMPTY SPACE, handled below and
+            // shared with the star case, plus panning, Q/F, or focusing something else.
+            if (clickAway)
+            {
+                bool empty = ClickedEmptySpace();
+                CloseAll();
+                if (empty) CameraController.Instance?.ClearFocus();
+            }
             return;
         }
 
@@ -114,19 +139,11 @@ public class PlanetUI : MonoBehaviour
         // until you clicked another body. A genuine empty-space click (the world ray hits nothing) now lets
         // go of it. The raycast is what stops the click that FOCUSED the star from also clearing it on the
         // same frame — that click lands on the star's collider, not on empty space.
-        if (clickAway && CameraController.Instance != null && CameraController.Instance.IsFollowing)
+        if (clickAway && CameraController.Instance != null && CameraController.Instance.IsFollowing &&
+            ClickedEmptySpace())
         {
-            var mainCam = Camera.main;
-            // Infinite range: a star focused from a galaxy-scale zoom-out is thousands of units away, and a
-            // short ray would fall short of it and wrongly read "empty space" — clearing the follow the
-            // same frame the click set it (OnMouseDown runs before this Update).
-            bool hitNothing = mainCam == null ||
-                              !Physics.Raycast(mainCam.ScreenPointToRay(Input.mousePosition), out _, Mathf.Infinity);
-            if (hitNothing)
-            {
-                CameraController.Instance.ClearFocus();
-                ObjectLabelManager.Instance?.Hide();
-            }
+            CameraController.Instance.ClearFocus();
+            ObjectLabelManager.Instance?.Hide();
         }
     }
 
@@ -263,7 +280,10 @@ public class PlanetUI : MonoBehaviour
         TooltipManager.Instance.Hide();
         ObjectLabelManager.Instance?.Hide();
         BodyUnitsPanel.Instance?.ShowFor(null);
-        CameraController.Instance?.ClearFocus();
+        // Deliberately does NOT touch the camera. Closing an info panel is not a camera command — the X
+        // button, selecting a ship, or ordering one somewhere all route through here, and none of them
+        // mean "stop watching this world". Releasing the follow is handled by the empty-space click that
+        // actually expresses that intent.
         Selected = null;
         OnClosed?.Invoke();
     }
