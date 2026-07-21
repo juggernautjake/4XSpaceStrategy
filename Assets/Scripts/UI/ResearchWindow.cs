@@ -76,6 +76,9 @@ public class ResearchWindow : MonoBehaviour
     string Signature()
     {
         var sb = new System.Text.StringBuilder();
+        // Dev state is part of the SHAPE: the dev card appears and disappears with the mode, and granting
+        // the tree changes what its own toggle should read.
+        sb.Append(GameMode.DevMode ? 'D' : '-').Append(DevCheats.AllTechGranted ? 'A' : '-').Append('|');
         sb.Append(EmpireTech.Level).Append('|').Append(AncientLore.SchematicsFound).Append('|');
         sb.Append(TechManager.TotalCapacity).Append('|');
         foreach (var t in TechDatabase.All) if (TechManager.IsResearched(t.id)) sb.Append(t.id).Append(',');
@@ -99,6 +102,7 @@ public class ResearchWindow : MonoBehaviour
         dynamics.Clear();
         for (int i = list.childCount - 1; i >= 0; i--) Destroy(list.GetChild(i).gameObject);
 
+        BuildDevPanel();
         BuildEmpireCard();
         BuildResearchQueuePanel();
         BuildTechTree();
@@ -108,6 +112,32 @@ public class ResearchWindow : MonoBehaviour
             BuildCard(info);
 
         lastQueueSig = QueueSig();
+    }
+
+    // ---- Dev Mode: the whole tree, on a switch ----
+    //
+    // Only exists in Dev Mode, and deliberately sits at the very top of this window rather than on the
+    // HUD: it is a research cheat, and the place you find out what it did is the research window.
+    void BuildDevPanel()
+    {
+        if (!GameMode.DevMode) return;
+
+        var card = UIFactory.Panel(list, "DevTech", new Color(0.20f, 0.11f, 0.05f, 0.98f));
+        var vlg = card.gameObject.AddComponent<VerticalLayoutGroup>();
+        vlg.padding = new RectOffset(9, 9, 7, 7); vlg.spacing = 4;
+        vlg.childControlWidth = true; vlg.childControlHeight = true; vlg.childForceExpandWidth = true;
+        var fit = card.gameObject.AddComponent<ContentSizeFitter>(); fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        UIFactory.WrapText(card.transform, "<b>DEV MODE</b>", UITheme.SmallSize, UITheme.Warn);
+
+        UIFactory.Toggle(card.transform, "Grant every technology", DevCheats.AllTechGranted,
+                         on => { DevCheats.SetAllTech(on); lastSig = null; lastQueueSig = null; });
+
+        UIFactory.WrapText(card.transform,
+            "<size=10><color=#9FB4C8>A real grant — every building, hull and terraforming option in the " +
+            "game unlocks for as long as it is on. Switching it off puts back exactly the technologies " +
+            "and research queue you had before, and leaving Dev Mode switches it off for you.</color></size>",
+            UITheme.SmallSize, UITheme.SubText);
     }
 
     // ---- Research queue: the laboratory twin of the shipyard stocks ----

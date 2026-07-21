@@ -123,4 +123,22 @@ public static class PlayerEconomy
         stock[ResourceType.Metal] = metal; stock[ResourceType.Energy] = energy; stock[ResourceType.Water] = water;
         OnChanged?.Invoke();
     }
+
+    /// A copy of the WHOLE stockpile, every resource type, for putting back later — see DevCheats, which
+    /// takes one before Dev Mode floods the economy and restores it on the way out.
+    ///
+    /// Not Import's three floats: DevCheats.TopUp fills every value of the ResourceType enum, including
+    /// any that a normal game never stocks, so a three-float restore would leave a million of everything
+    /// else behind. This round-trips whatever is actually there, so it stays correct as the enum grows.
+    public static Dictionary<ResourceType, float> Snapshot() => new Dictionary<ResourceType, float>(stock);
+
+    /// Put a Snapshot back exactly, dropping anything acquired since — including keys that did not exist
+    /// when the snapshot was taken, which is the whole point when undoing a top-up.
+    public static void RestoreSnapshot(Dictionary<ResourceType, float> snap)
+    {
+        if (snap == null) return;
+        stock.Clear();
+        foreach (var kv in snap) stock[kv.Key] = kv.Value;
+        OnChanged?.Invoke();
+    }
 }

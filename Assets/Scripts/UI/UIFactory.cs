@@ -216,11 +216,15 @@ public static class UIFactory
         return btn;
     }
 
-    public static UnityEngine.UI.Toggle Toggle(Transform parent, string label, bool isOn, Action<bool> onChanged, float height = 24f)
+    public static UnityEngine.UI.Toggle Toggle(Transform parent, string label, bool isOn, Action<bool> onChanged, float height = 28f)
     {
         var go = NewUI(parent, "Toggle");
         var toggle = go.AddComponent<UnityEngine.UI.Toggle>();
-        AddLayout(go, height);
+        // minHeight = preferred, so a crowded VerticalLayoutGroup cannot shrink this. A toggle is a
+        // CONTROL: below about 20px it is both unclickable and too short for its own label, and a layout
+        // group with no minHeight set will squeeze it to whatever is left over. 28 rather than 24 for the
+        // same reason the buttons went up — a 24px row leaves a 24px box for a 16px font with no margin.
+        AddLayout(go, height, height);
 
         var box = Panel(go.transform, "Box", UITheme.TrackBg);
         var boxRT = box.rectTransform;

@@ -34,12 +34,24 @@ public class UnitInfoPanel : MonoBehaviour
 
     void Build(Transform parent)
     {
-        var content = UIFactory.Window(parent, "Ship", new Vector2(400, 580), out root, out titleText);
+        var win = UIFactory.Window(parent, "Ship", new Vector2(400, 580), out root, out titleText);
         var rt = root.GetComponent<RectTransform>();
         rt.anchorMin = rt.anchorMax = new Vector2(1f, 0.5f);
         rt.pivot = new Vector2(1f, 0.5f);
         rt.anchoredPosition = new Vector2(-16, -60);
-        UIFactory.VerticalLayout(content, 7);
+
+        // SCROLLED, not a plain VerticalLayoutGroup on the window.
+        //
+        // This panel stacks roughly 730px of controls — name field, seven buttons, two rows, a toggle, a
+        // progress bar and the order queue — into a 580px window that the player can then resize smaller.
+        // A layout group answers that overflow by shrinking every child toward zero, and it shrinks the
+        // things with no minHeight hardest: that is how the queue-mode toggle ended up 14px tall, too
+        // short to click and too short for its own 16px label. A ScrollView's ContentSizeFitter gives
+        // every control its full preferred height instead and puts the overflow below the fold, which is
+        // also what makes the panel survive being resized.
+        var holder = UIFactory.NewUI(win, "Holder").GetComponent<RectTransform>();
+        UIFactory.Stretch(holder);
+        UIFactory.ScrollView(holder, out RectTransform content);
 
         // Name is read-only until you press Edit Name (so a stray click can't rename a ship).
         nameInput = UIFactory.InputField(content, "Ship name…", "", 44f);

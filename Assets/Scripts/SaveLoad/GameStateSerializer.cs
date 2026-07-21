@@ -30,20 +30,29 @@ public static class GameStateSerializer
             game.bgR = bg.SolidColor.r; game.bgG = bg.SolidColor.g; game.bgB = bg.SolidColor.b;
         }
 
+        // Saving from inside Dev Mode writes the PRE-DEV numbers, not the cheated ones.
+        //
+        // Dev Mode is reversible by design — leaving it puts the real economy and research back — but a
+        // save taken while it is on would bake in a million of everything and, if the grant-all switch is
+        // up, the entire tech tree. That is permanent in a way nothing else about Dev Mode is: the player
+        // drops in to look at something, saves out of habit, and has quietly ended their own campaign.
+        // DevCheats holds exactly the snapshot needed, so the file records the game being played.
+        bool dev = DevCheats.HasBaseline;
+
         game.research = new ResearchDTO
         {
-            discovered = ResearchManager.ExportDiscovered(),
-            researched = ResearchManager.ExportResearched(),
-            points = ResearchManager.ResearchPoints,
-            empireLevel = EmpireTech.Level,
-            tech = TechManager.Export(),
+            discovered = dev ? DevCheats.BaselineOreDiscovered : ResearchManager.ExportDiscovered(),
+            researched = dev ? DevCheats.BaselineOreResearched : ResearchManager.ExportResearched(),
+            points = dev ? DevCheats.BaselinePoints : ResearchManager.ResearchPoints,
+            empireLevel = dev ? DevCheats.BaselineEmpireLevel : EmpireTech.Level,
+            tech = dev ? DevCheats.BaselineTech : TechManager.Export(),
             schematics = AncientLore.Export(),
             cluesFound = AncientClues.Export()
         };
 
-        game.ecoMetal = PlayerEconomy.Get(ResourceType.Metal);
-        game.ecoEnergy = PlayerEconomy.Get(ResourceType.Energy);
-        game.ecoWater = PlayerEconomy.Get(ResourceType.Water);
+        game.ecoMetal = dev ? DevCheats.BaselineStock(ResourceType.Metal) : PlayerEconomy.Get(ResourceType.Metal);
+        game.ecoEnergy = dev ? DevCheats.BaselineStock(ResourceType.Energy) : PlayerEconomy.Get(ResourceType.Energy);
+        game.ecoWater = dev ? DevCheats.BaselineStock(ResourceType.Water) : PlayerEconomy.Get(ResourceType.Water);
         game.units = UnitManager.Instance != null ? UnitManager.Instance.ExportUnitDTOs() : new List<UnitDTO>();
         game.buildQueue = UnitManager.Instance != null ? UnitManager.Instance.ExportBuildQueue() : new List<BuildOrderDTO>();
         game.researchQueue = TechManager.ExportQueue();
@@ -298,6 +307,11 @@ public static class GameStateSerializer
         GameConfig.SetOrganicCityGrowth(game.organicCityGrowth);
         TerraformManager.Instance?.Import(game.terraformJobs, byId);
         ControlGroups.Import(game.controlGroups);   // after the fleet exists, so members resolve
+
+        // The game underneath Dev Mode has just been swapped out. Re-baseline against what was loaded,
+        // so leaving Dev Mode restores THIS save rather than whatever was on screen before it. Last,
+        // after every Import above, because it snapshots the state they just wrote.
+        DevCheats.OnGameReplaced();
 
         var bg = SpaceBackground.Instance;
         if (bg != null)

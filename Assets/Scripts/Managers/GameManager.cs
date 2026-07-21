@@ -197,6 +197,9 @@ public class GameManager : MonoBehaviour
         PlayerEconomy.NewGame(homePlanet, SpeciesManager.Current);
         UnitManager.Instance?.NewGame(homePlanet);
         FactionAI.NewGame(Galaxy);
+        // A new galaxy replaces whatever Dev Mode was holding a baseline for — see DevCheats. After
+        // PlayerEconomy.NewGame, so the starting resources are what leaving Dev Mode restores.
+        DevCheats.OnGameReplaced();
         yield return null;
 
         // The homeworld's surface only exists once Finish has run, which is why the star held the screen
