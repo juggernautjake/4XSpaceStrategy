@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -86,6 +87,34 @@ public static class PlanetTerrainGenerator
 
     static PlanetSurface Build(CelestialBody body, NoiseParams p, int octaves)
     {
+        // Drain the stepped version. ONE implementation of the terrain build, two entry points — the same
+        // pattern GalaxyGenerator and SolarSystemGenerator already use for their own stepped twins. A
+        // second copy of this loop would be a second place for the two views of a world to drift apart.
+        PlanetSurface result = null;
+        var it = BuildStepped(body, p, octaves, s => result = s);
+        while (it.MoveNext()) { }
+        return result;
+    }
+
+    /// How long a single frame may spend building terrain before yielding, in milliseconds.
+    ///
+    /// A TIME budget rather than a row count, because grids run from 10x5 to 640x320 — any fixed number
+    /// of rows gives a moon five frames and a gas giant three hundred. Six milliseconds leaves room for
+    /// the loading screen's own work inside a 16ms frame.
+    const double StepBudgetMs = 6.0;
+
+    /// The terrain build, time-sliced.
+    ///
+    /// This is the fix for the loading screen's framerate. A world's whole surface used to be built
+    /// between two yields, so one frame lasted as long as generating an entire planet — 100ms for a
+    /// small one, several hundred for a gas giant. The dots, the bar and the star's pop-out all animate
+    /// per frame, so at three to eight frames a second they crawled. Yielding inside the loop turns one
+    /// enormous frame into dozens of ordinary ones; the same total work, spread where it can be seen.
+    ///
+    /// Hands the finished surface back through a callback because C# iterators cannot have out params.
+    public static IEnumerator BuildStepped(CelestialBody body, NoiseParams p, int octaves,
+                                           System.Action<PlanetSurface> done)
+    {
         // Dimensions come from MapMetrics, which every map renderer also reads. They used to be computed
         // here as `surfaceSize * 2` while the detail renderer independently used `surfaceSize * 2 * 6`,
         // and the two silently disagreed by a factor of six on each axis — which is exactly why a 1x1
@@ -94,7 +123,10 @@ public static class PlanetTerrainGenerator
         int height = MapMetrics.SurfH(body);
 
         PlanetSurface surface = new PlanetSurface(width, height);
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         for (int x = 0; x < width; x++)
+        {
             for (int y = 0; y < height; y++)
             {
                 float u = (x + 0.5f) / width;
@@ -103,15 +135,31 @@ public static class PlanetTerrainGenerator
                 surface.tiles[x, y] = new TerrainTile(s.terrain, s.shade);
             }
 
+            // Checked per COLUMN, not per cell: Stopwatch.Elapsed is not free, and a single column is a
+            // few hundred samples at most — fine grain enough to hold the budget without measuring it
+            // into the ground.
+            if (clock.Elapsed.TotalMilliseconds >= StepBudgetMs)
+            {
+                yield return null;
+                clock.Restart();
+            }
+        }
+
         // Neighbour-aware clean-up the per-cell noise can't do on its own: connect water bodies (a small
         // pool touching the open sea IS the sea) and ring the oceans with beaches. Runs on the GRID — the
         // surface the Planet View map and gameplay read — so those agree; the distant 3D globe (a separate
         // per-pixel render) keeps the smooth noise view, which reads the same from orbit.
         // Remove speckle BEFORE the water/shore pass, so flood-fill and beaches run on the terrain the
         // player will actually see rather than on a noisier draft of it.
+        //
+        // Each gets its own frame. They are O(w*h) too — around twenty times cheaper per cell than
+        // sampling, but on a 640-wide world that is still long enough to be a visible hitch on its own.
+        yield return null;
         DespeckleTerrain(surface);
+        yield return null;
         ApplyWaterAndShores(surface);
-        return surface;
+
+        done?.Invoke(surface);
     }
 
     // Neighbour coherence: a tile with no neighbour of its own kind becomes the local majority.
@@ -157,7 +205,15 @@ public static class PlanetTerrainGenerator
             for (int y = 0; y < h; y++)
                 src[x, y] = surf.tiles[x, y].type;
 
-        var counts = new Dictionary<TerrainType, int>();
+        // A flat array indexed by the enum, NOT a Dictionary<TerrainType,int>.
+        //
+        // On Unity's Mono runtime there is no default comparer for a user enum, so a dictionary keyed by
+        // one falls back to ObjectEqualityComparer and BOXES the key on every lookup and every write.
+        // This inner loop does up to eight of each per land cell, which on a 45,000-cell planet is a few
+        // hundred thousand throwaway allocations — enough to force a collection mid-load, and a GC pause
+        // is precisely the stutter this pass is supposed to be invisible for.
+        int typeCount = System.Enum.GetValues(typeof(TerrainType)).Length;
+        var counts = new int[typeCount];
 
         for (int x = 0; x < w; x++)
             for (int y = 0; y < h; y++)
@@ -168,15 +224,14 @@ public static class PlanetTerrainGenerator
 
                 // Longitude wraps, latitude does not — the same asymmetry the flood fill uses.
                 int xl = (x - 1 + w) % w, xr = (x + 1) % w;
-                counts.Clear();
+                System.Array.Clear(counts, 0, counts.Length);
 
                 bool anySame = false;
                 void Consider(TerrainType n)
                 {
                     if (n == t) anySame = true;
                     if (IsWater(n)) return;              // never promote a land tile to water
-                    counts.TryGetValue(n, out int c);
-                    counts[n] = c + 1;
+                    counts[(int)n]++;
                 }
 
                 Consider(src[xl, y]);
@@ -187,8 +242,8 @@ public static class PlanetTerrainGenerator
                 if (anySame) continue;                   // not isolated — leave it alone
 
                 TerrainType best = t; int bestCount = 0;
-                foreach (var kv in counts)
-                    if (kv.Value > bestCount) { bestCount = kv.Value; best = kv.Key; }
+                for (int i = 0; i < counts.Length; i++)
+                    if (counts[i] > bestCount) { bestCount = counts[i]; best = (TerrainType)i; }
 
                 // Needs a real majority: two of the four neighbours agreeing. One vote is not a consensus,
                 // and at a genuine three-way border every choice is arbitrary — better to leave the

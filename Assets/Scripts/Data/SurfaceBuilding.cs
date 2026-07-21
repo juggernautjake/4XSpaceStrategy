@@ -467,7 +467,14 @@ public static class SurfaceBuildingDatabase
         // would be no first plant you could build to escape it. A colony arrives with its core lit, and
         // reaching past that core is what the rest of this category is for.
         Reactor(SurfaceBuildingType.ColonyShipBase, 0.8f, ColonyReactorRange);
-        Reactor(SurfaceBuildingType.PlanetCapitol, 1.2f, ColonyReactorRange);
+        // THE CAPITOL LIGHTS ONLY ITS OWN DOORSTEP — one tile, not the colony-scale ring below.
+        //
+        // The founding base keeps the wide reach (a new colony has to be able to make a first move), but
+        // the permanent seat of government does not: a capitol that powered a fourteen-tile disc forever
+        // meant a developed world never had a reason to build a power plant at all, and the whole grid
+        // system was decoration on the world you cared most about. One tile makes the capitol a building
+        // that needs connecting like any other.
+        Reactor(SurfaceBuildingType.PlanetCapitol, 1.2f, 1f);
 
         // Cities carry their own generation and light their own ground, so an inhabited world grows a
         // grid whether you planned one or not — and that grid is usually the one you end up hanging

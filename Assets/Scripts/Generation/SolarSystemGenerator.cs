@@ -111,8 +111,17 @@ public class SolarSystemGenerator : MonoBehaviour
             // MUST be set before the surface below is baked, or the very first render of a qualifying
             // world would still come out sterile (the flag the classifier reads would still be false).
             body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body);
-            body.surface = PlanetTerrainGenerator.GenerateSurface(body);      // regenerate with correct heat
-            yield return null;   // a world's terrain is the expensive step — let the screen breathe after each
+            // STEPPED. A world's terrain is by far the most expensive step in the whole load, and built
+            // in one go it was a single frame lasting as long as generating an entire planet. Now it
+            // yields every few milliseconds from inside its own loop, so one enormous frame becomes
+            // dozens of ordinary ones and the loading screen animates at a normal rate throughout.
+            {
+                var surf = PlanetTerrainGenerator.BuildStepped(body, body.terrainParams,
+                                                              PlanetTerrainGenerator.Octaves,
+                                                              s => body.surface = s);
+                while (surf.MoveNext()) yield return surf.Current;
+            }
+            yield return null;
             // Ore has to be populated against THIS surface, not the provisional one MakeBody baked —
             // that one is already gone (a fresh grid, no tile carryover). Pre-existing bug, found while
             // reviewing an unrelated change: every top-level planet was generating with zero ore, because
@@ -187,7 +196,12 @@ public class SolarSystemGenerator : MonoBehaviour
                 // uncapped size and then RENDERED and reported at the capped one. Two grids that disagree,
                 // which is the exact bug MapMetrics exists to prevent.
                 moon.parentBody = body;
-                moon.surface = PlanetTerrainGenerator.GenerateSurface(moon);
+                {
+                    var msurf = PlanetTerrainGenerator.BuildStepped(moon, moon.terrainParams,
+                                                                   PlanetTerrainGenerator.Octaves,
+                                                                   s => moon.surface = s);
+                    while (msurf.MoveNext()) yield return msurf.Current;
+                }
                 yield return null;
                 OreGenerator.Populate(moon);
                 ResourceGenerator.GenerateResources(moon);
@@ -225,7 +239,7 @@ public class SolarSystemGenerator : MonoBehaviour
         }
 
         // Lean towards a living world: make sure at least one planet sits in the habitable zone.
-        EnsureHabitableWorld(system);
+        { var eh = EnsureHabitableWorld(system); while (eh.MoveNext()) yield return eh.Current; }
 
         // THE BACKSTOP. Everything above tries to lay bodies out with room to spare, but any of it can
         // be wrong — and EnsureHabitableWorld deliberately moves a planet after the fact. This pass is
@@ -257,15 +271,22 @@ public class SolarSystemGenerator : MonoBehaviour
 
     // If no life-friendly planet already sits in the (default-species) habitable zone, convert the
     // nearest planet into one and place it inside the zone.
-    void EnsureHabitableWorld(List<CelestialBody> system)
+    // An iterator, like the rest of the generation path: this bakes a WHOLE extra planet surface, and
+    // run as a plain call it was one more multi-hundred-millisecond frame tacked onto the end of a
+    // system — right where the loading screen looked most frozen.
+    // Fully qualified, matching GenerateSystemStepped: the file's usings bring in
+    // System.Collections.GENERIC, which supplies IEnumerator<T> but not the non-generic IEnumerator an
+    // iterator method needs.
+    System.Collections.IEnumerator EnsureHabitableWorld(List<CelestialBody> system)
     {
-        if (system.Count == 0 || currentStar == null || !currentStar.hasHabitableZone) return;
-        if (!Habitability.GetZone(currentStar, SpeciesManager.Current, out float inner, out float outer)) return;
+        // yield break, not return — this is an iterator block now, and a bare return is not legal in one.
+        if (system.Count == 0 || currentStar == null || !currentStar.hasHabitableZone) yield break;
+        if (!Habitability.GetZone(currentStar, SpeciesManager.Current, out float inner, out float outer)) yield break;
 
         foreach (var b in system)
             if (b.distanceFromStar >= inner && b.distanceFromStar <= outer &&
                 (b.type == CelestialBodyType.RockyPlanet || b.type == CelestialBodyType.OceanPlanet))
-                return; // already have a habitable-zone world
+                yield break; // already have a habitable-zone world
 
         float center = (inner + outer) * 0.5f;
         CelestialBody best = null; float bestD = float.MaxValue;
@@ -274,7 +295,7 @@ public class SolarSystemGenerator : MonoBehaviour
             float d = Mathf.Abs(b.distanceFromStar - center);
             if (d < bestD) { bestD = d; best = b; }
         }
-        if (best == null) return;
+        if (best == null) yield break;
 
         // Re-home it INSIDE ITS OWN LANE.
         //
@@ -322,7 +343,12 @@ public class SolarSystemGenerator : MonoBehaviour
         // fresh under its NEW type rather than left at whatever its old type produced (or the false
         // default), and before the surface below bakes so the rendered terrain agrees with the flag.
         best.biosphereActive = BiosphereRules.GeneratesWithBiosphere(best);
-        best.surface = PlanetTerrainGenerator.GenerateSurface(best);
+        {
+            var bsurf = PlanetTerrainGenerator.BuildStepped(best, best.terrainParams,
+                                                           PlanetTerrainGenerator.Octaves,
+                                                           s => best.surface = s);
+            while (bsurf.MoveNext()) yield return bsurf.Current;
+        }
         OreGenerator.Populate(best);
         best.resources = new ResourceDeposit();
         ResourceGenerator.GenerateResources(best);
@@ -333,11 +359,15 @@ public class SolarSystemGenerator : MonoBehaviour
         foreach (var m in best.moons) { m.distanceFromStar = best.distanceFromStar; ApplyHabitability(m); }
     }
 
-    // NOTE: this bake is provisional — the caller (GenerateSystem) always regenerates body.surface a
-    // second time once BiasHeat sets the world's real climate, which builds an entirely new
-    // PlanetSurface/TerrainTile grid. Populating ore against THIS surface would place it on tiles that
-    // get thrown away a moment later, so ore population deliberately happens in GenerateSystem instead,
-    // against the final surface, once — not here.
+    // NO SURFACE IS BAKED HERE — and that halves the cost of generating a galaxy.
+    //
+    // There used to be a provisional bake on this line. The caller (GenerateSystem) ALWAYS regenerates
+    // body.surface once BiasHeat has set the world's real climate, building an entirely new
+    // PlanetSurface/TerrainTile grid — so every planet in the galaxy had its terrain generated twice and
+    // the first result thrown away untouched. At 42 Perlin samples per cell and grids up to 640x320,
+    // that was the single largest cost in the load, and it bought nothing: nothing between here and the
+    // real bake reads body.surface (GenerateResources works off type and size), and the terrain
+    // generator draws no UnityEngine.Random, so removing it cannot shift the shared RNG stream either.
     CelestialBody MakeBody(CelestialBodyType type)
     {
         CelestialBody body = new(type) { id = _idCounter++ };
@@ -350,7 +380,6 @@ public class SolarSystemGenerator : MonoBehaviour
         body.atmosphereThickness = AtmosphereRules.ForBody(body.type, body.surfaceSize);
         body.hasTectonics = TectonicsRules.Roll(body.type, body.surfaceSize);
         SeedTerrain(body);
-        body.surface = PlanetTerrainGenerator.GenerateSurface(body);
         ResourceGenerator.GenerateResources(body);
         return body;
     }

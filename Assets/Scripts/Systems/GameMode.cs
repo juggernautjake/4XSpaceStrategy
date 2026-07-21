@@ -9,20 +9,18 @@ public static class GameMode
 
     public static event Action OnChanged;
 
-    // Dev Mode is reversible: what the player had before it went on is what they get back when it goes
-    // off. The ordering below is the whole trick, and both halves have to sit OUTSIDE the OnChanged
-    // event — DevCheats tops the economy up to a million from its own OnChanged handler, and which
-    // handler runs first is just subscription order.
+    // Switching modes does NOT touch the economy. Both modes share one stockpile, and anything the
+    // player granted themselves from the Dev panel is theirs to keep on the way back out — see
+    // DevCheats.
     //
-    //   - Capture while DevMode is still FALSE. The flag is what DevCheats.TopUp and
-    //     PlayerEconomy.Capacity read; once either has run, the real numbers are already gone.
-    //   - Restore once DevMode is already FALSE, so nothing refills in behind it.
+    // The granted TECH TREE is the one exception, because it is an explicit switch rather than a
+    // resource: leaving Dev Mode turns it off, restoring exactly the technologies and research queue
+    // from before it went on. Done after the flag has already cleared, so nothing re-grants behind it.
     public static void SetDev(bool on)
     {
-        if (on == DevMode) return;   // no double-capture, which would snapshot the cheated numbers
-        if (on) DevCheats.CaptureBaseline();
+        if (on == DevMode) return;
         DevMode = on;
-        if (!on) DevCheats.RestoreBaseline();
+        if (!on) DevCheats.SetAllTech(false);
         OnChanged?.Invoke();
     }
     public static void Toggle() { SetDev(!DevMode); }

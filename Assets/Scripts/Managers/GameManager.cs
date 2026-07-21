@@ -209,6 +209,8 @@ public class GameManager : MonoBehaviour
         if (homePlanet != null)
         {
             screen?.SetHomePlanet(homePlanet);
+            // The real moons, revealed after the planet finishes and then left orbiting it.
+            screen?.SetHomeMoons(homePlanet.moons);
 
             // Built once: the loop below runs for MorphDuration seconds at frame rate, and rebuilding an
             // identical string several hundred times is several hundred allocations during the one stretch
@@ -228,7 +230,15 @@ public class GameManager : MonoBehaviour
             // so the one thing the whole sequence was building toward, the completed planet, was the
             // thing the player never actually got to look at.
             screen?.Report(0.97f, homeCaption, LoadingScreen.Subject.Planet);
-            yield return new WaitForSecondsRealtime(2.2f);
+
+            // Long enough for the moons to arrive and be seen orbiting, not just to flash into place:
+            // each takes its own reveal plus a beat, and then they need a moment simply turning. Sized
+            // off the real moon count so a world with none does not sit on a still frame for six seconds.
+            int shownMoons = screen != null ? screen.StagedMoonCount : 0;
+            float moonHold = shownMoons > 0
+                ? LoadingScreen.MoonBeat + shownMoons * (LoadingScreen.MoonMorphDuration + LoadingScreen.MoonBeat) + 1.4f
+                : 2.2f;
+            yield return new WaitForSecondsRealtime(moonHold);
         }
 
         // Two closing beats rather than one. "Ready" told the player nothing they could not see from the

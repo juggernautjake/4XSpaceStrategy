@@ -80,8 +80,13 @@ public class LoadingScreen : MonoBehaviour
         var pv = UIFactory.NewUI(col, "Preview").GetComponent<RectTransform>();
         pv.anchorMin = new Vector2(0f, 0.5f); pv.anchorMax = new Vector2(0f, 0.5f);
         pv.pivot = new Vector2(1f, 0.5f);
-        pv.sizeDelta = new Vector2(120f, 120f);
-        pv.anchoredPosition = new Vector2(-28f, 0f);
+        // Roomy on purpose. The preview is a body FLOATING IN SPACE, and the thing that broke that
+        // illusion was the frame: a star's corona ran past the edge of a 120px box and got sliced off
+        // square, so the star read as sitting in a little window rather than out in the dark. The box is
+        // bigger, the render target is bigger, and the camera (BuildPreview) sits far enough back that
+        // the glow fades to nothing well inside the edges — nothing is ever cut.
+        pv.sizeDelta = new Vector2(240f, 240f);
+        pv.anchoredPosition = new Vector2(-34f, 0f);
         previewView = pv.gameObject.AddComponent<RawImage>();
         previewView.raycastTarget = false;
         BuildPreview(parent);
@@ -255,6 +260,7 @@ public class LoadingScreen : MonoBehaviour
         skyStars.Clear();
         skyPhase.Clear();
         shootTimer = 2f;
+        ClearMoons();               // last game's moons are not this game's
         ResetPlanetPlaceholder();
         SetSubject(Subject.None);
         if (previewStage != null) previewStage.gameObject.SetActive(true);
@@ -329,10 +335,25 @@ public class LoadingScreen : MonoBehaviour
     // the ALREADY-GENERATED surface once (a nearest-tile downsample, not a re-sample of the noise field)
     // and only ever repaints this tiny texture afterwards, so the reveal costs the same whether the real
     // world is a 20x10 moon or a 220x110 planet.
-    const int MorphW = 40, MorphH = 20;
+    // 96x48. Finer than it needs to be for a thumbnail, and that is the point: the reveal is the
+    // showpiece of the second half of the load, and at 40x20 the "tiles" were chunky enough to read as
+    // an effect rather than as a world being built. At this resolution the downsample below is close
+    // enough to the real grid that what appears IS the planet you are about to play on.
+    //
+    // Still fixed and small relative to the real body (which can be 640x320): this reads the
+    // ALREADY-GENERATED surface once and only ever repaints this tiny texture afterwards, so the reveal
+    // costs the same whether the world is a 20x10 moon or a 640x320 gas giant.
+    const int MorphW = 96, MorphH = 48;
     // Public so GameManager can hold the Planet subject on screen long enough to see the whole reveal —
     // see GenerateGalaxyRoutine, same reasoning as PopBeat/PopGrow above.
-    public const float MorphDuration = 7f;
+    public const float MorphDuration = 9f;
+
+    /// How long each moon takes to reveal once the planet is finished. Quicker than the planet on
+    /// purpose — the planet is the subject, the moons are the coda.
+    public const float MoonMorphDuration = 2.6f;
+
+    /// Gap between one moon finishing and the next appearing.
+    public const float MoonBeat = 0.5f;
 
     Texture2D morphTex;
     Color[] morphPixels;     // the texture's CURRENT (partially revealed) contents, mutated in place
@@ -345,14 +366,13 @@ public class LoadingScreen : MonoBehaviour
     // UnityEngine.Random), so this purely cosmetic animation can never perturb the shared gameplay RNG
     // stream that FactionAI and the generators keep drawing from while the morph plays out in the
     // background over the next couple of seconds.
-    static readonly int[] morphOrder = BuildMorphOrder();
+    static readonly int[] morphOrder = BuildOrder(MorphW * MorphH, 20260720);
 
-    static int[] BuildMorphOrder()
+    static int[] BuildOrder(int n, int seed)
     {
-        int n = MorphW * MorphH;
         var order = new int[n];
         for (int i = 0; i < n; i++) order[i] = i;
-        var rng = new System.Random(20260720);
+        var rng = new System.Random(seed);
         for (int i = n - 1; i > 0; i--)
         {
             int j = rng.Next(i + 1);
@@ -659,6 +679,203 @@ public class LoadingScreen : MonoBehaviour
         }
     }
 
+    // ---- The homeworld's MOONS ------------------------------------------------------------------
+    //
+    // They appear only once the planet's own surface has fully revealed, one at a time, each running the
+    // same tile-by-tile reveal at a quicker pace — and then orbit. A world arriving complete with its
+    // moons already in place says nothing; a world finishing and then acquiring them says "and there is
+    // more here than the one planet", which is the note the last stretch of the load wants to end on.
+    //
+    // Deliberately capped at three: past that they crowd the frame at this camera distance, and the
+    // point is legibility rather than inventory.
+    const int MaxPreviewMoons = 3;
+
+    class MoonPreview
+    {
+        public Transform body;
+        public Renderer rend;
+        public Material mat;
+        public Texture2D tex;
+        public Color[] pixels, final;
+        public int revealed;
+        public float clock;
+        public bool revealing, done;
+        public float angle, radius, speed, size;
+    }
+
+    readonly List<MoonPreview> moons = new List<MoonPreview>();
+    int moonsShown;        // how many have begun their reveal
+    float moonTimer;       // counts down to the next one appearing
+
+    /// Hand over the homeworld's real moons. Called with the same bodies the player will find in orbit,
+    /// so what reveals here is what is actually there.
+    public void SetHomeMoons(List<CelestialBody> list)
+    {
+        ClearMoons();
+        if (list == null || previewStage == null) return;
+
+        Color barren = TerrainColorMap.Get(TerrainType.Barren);
+        int n = Mathf.Min(MaxPreviewMoons, list.Count);
+
+        for (int i = 0; i < n; i++)
+        {
+            var src = list[i];
+            if (src?.surface == null) continue;
+
+            var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sphere.name = "PreviewMoon" + i;
+            var col = sphere.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+            sphere.transform.SetParent(previewStage, false);
+
+            var spin = sphere.AddComponent<SelfSpin>();
+            spin.speed = 30f;
+            spin.unscaled = true;
+
+            var m = new MoonPreview
+            {
+                body = sphere.transform,
+                rend = sphere.GetComponent<Renderer>(),
+                // Sized against the planet, not against reality: a real moon at true relative scale is a
+                // speck at this framing. Proportions between moons are preserved, so a big one still
+                // reads as the big one.
+                size = PreviewScale * Mathf.Lerp(0.16f, 0.30f, Mathf.Clamp01(src.mass / 1.5f)),
+                // Kept well inside the frame. The camera sits at 4.6x PreviewScale with a 38-degree FOV,
+                // so the visible half-extent at the stage centre is about 1.58x PreviewScale — and it is
+                // SMALLER on the near side of an orbit, where a moon is closer to the lens. Radii past
+                // ~1.45 swing off-screen for part of every lap.
+                radius = PreviewScale * (0.85f + i * 0.30f),
+                speed = 26f - i * 5f,
+                angle = i * 120f
+            };
+
+            // Its own material and its own texture — every moon reveals independently, so they cannot
+            // share the one the planet is mutating.
+            m.tex = new Texture2D(MoonMorphW, MoonMorphH, TextureFormat.RGBA32, false)
+            {
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Repeat
+            };
+            m.pixels = new Color[MoonMorphW * MoonMorphH];
+            m.final = new Color[MoonMorphW * MoonMorphH];
+
+            int sw = src.surface.width, sh = src.surface.height;
+            for (int y = 0; y < MoonMorphH; y++)
+            {
+                int sy = Mathf.Clamp(y * sh / MoonMorphH, 0, sh - 1);
+                for (int x = 0; x < MoonMorphW; x++)
+                {
+                    int sx = Mathf.Clamp(x * sw / MoonMorphW, 0, sw - 1);
+                    var tile = src.surface.tiles[sx, sy];
+                    Color c = barren;
+                    if (tile != null)
+                    {
+                        c = TerrainColorMap.Get(tile.type);
+                        float b = Mathf.Lerp(0.86f, 1.12f, tile.shade);
+                        c = new Color(c.r * b, c.g * b, c.b * b, 1f);
+                    }
+                    m.final[y * MoonMorphW + x] = c;
+                }
+            }
+
+            for (int p = 0; p < m.pixels.Length; p++) m.pixels[p] = barren;
+            m.tex.SetPixels(m.pixels);
+            m.tex.Apply();
+
+            var lit = Shader.Find("Universal Render Pipeline/Lit");
+            if (lit == null) lit = Shader.Find("Standard");
+            m.mat = LitMat(lit, Color.white);
+            m.mat.mainTexture = m.tex;
+            if (m.mat.HasProperty("_BaseMap")) m.mat.SetTexture("_BaseMap", m.tex);
+            if (m.rend != null) m.rend.sharedMaterial = m.mat;
+
+            m.body.localScale = Vector3.one * m.size;
+            sphere.SetActive(false);   // nothing until the planet has finished
+            moons.Add(m);
+        }
+
+        moonsShown = 0;
+        moonTimer = MoonBeat;
+    }
+
+    /// How many moons are actually staged — which is not the same as how many the planet HAS, since one
+    /// with no baked surface is skipped. GameManager sizes its closing hold off this, so the screen does
+    /// not sit on a still frame waiting for a moon that was never built.
+    public int StagedMoonCount => moons.Count;
+
+    const int MoonMorphW = 40, MoonMorphH = 20;
+
+    /// A fixed reveal order for the moons, same reasoning as morphOrder: built from System.Random so a
+    /// cosmetic animation can never perturb the shared gameplay RNG stream.
+    static readonly int[] moonOrder = BuildOrder(MoonMorphW * MoonMorphH, 20260721);
+
+    void StepMoons(float dt)
+    {
+        if (moons.Count == 0) return;
+
+        // Nothing until the planet itself is finished — that is the whole staging.
+        if (morphActive) return;
+
+        if (moonsShown < moons.Count)
+        {
+            moonTimer -= dt;
+            if (moonTimer <= 0f)
+            {
+                var next = moons[moonsShown];
+                next.body.gameObject.SetActive(true);
+                next.revealing = true;
+                moonsShown++;
+                moonTimer = MoonMorphDuration + MoonBeat;
+            }
+        }
+
+        for (int i = 0; i < moons.Count; i++)
+        {
+            var m = moons[i];
+            if (!m.body.gameObject.activeSelf) continue;
+
+            // Orbit. Around the stage centre, which is where the planet sits.
+            m.angle += m.speed * dt;
+            float rad = m.angle * Mathf.Deg2Rad;
+            m.body.localPosition = new Vector3(Mathf.Cos(rad) * m.radius, 0f, Mathf.Sin(rad) * m.radius);
+
+            if (!m.revealing) continue;
+
+            m.clock += dt;
+            int total = moonOrder.Length;
+            int target = Mathf.Min(total, Mathf.FloorToInt(total * Mathf.Clamp01(m.clock / MoonMorphDuration)));
+            if (target <= m.revealed)
+            {
+                if (target >= total) { m.revealing = false; m.done = true; }
+                continue;
+            }
+
+            for (int k = m.revealed; k < target; k++)
+            {
+                int idx = moonOrder[k];
+                m.pixels[idx] = m.final[idx];
+            }
+            m.revealed = target;
+            m.tex.SetPixels(m.pixels);
+            m.tex.Apply();
+
+            if (m.revealed >= total) { m.revealing = false; m.done = true; }
+        }
+    }
+
+    void ClearMoons()
+    {
+        foreach (var m in moons)
+        {
+            if (m.body != null) Destroy(m.body.gameObject);
+            if (m.mat != null) Destroy(m.mat);
+            if (m.tex != null) Destroy(m.tex);
+        }
+        moons.Clear();
+        moonsShown = 0;
+        moonTimer = MoonBeat;
+    }
+
     /// Put the Planet material back to its generic placeholder look. Called once per NEW generation
     /// (Open()), BEFORE that generation's own SetHomePlanet call — without this, a second galaxy in the
     /// same session would show the FIRST game's fully-morphed homeworld texture during its own early
@@ -774,6 +991,12 @@ public class LoadingScreen : MonoBehaviour
         // Sun 0's sphere is shared with every other subject, so its corona has to be switched off by hand
         // — otherwise the homeworld would be revealed inside a star's halo.
         if (sunGlow[0] != null) sunGlow[0].gameObject.SetActive(s == Subject.Star);
+        // Moons belong to the homeworld and to nothing else — leaving Planet puts them away, so they can
+        // never end up orbiting a star. Coming BACK to Planet restores the ones already revealed: their
+        // slots are spent (moonsShown has passed them), so without this they would be hidden for good.
+        for (int i = 0; i < moons.Count; i++)
+            if (moons[i].body != null)
+                moons[i].body.gameObject.SetActive(s == Subject.Planet && i < moonsShown);
         if (s == Subject.None)
         {
             if (leavingStar) ResetSunCluster();
@@ -837,7 +1060,13 @@ public class LoadingScreen : MonoBehaviour
 
         var camGo = new GameObject("LoadingPreviewCam");
         camGo.transform.SetParent(previewStage, false);
-        camGo.transform.localPosition = new Vector3(0f, 0f, -PreviewScale * 2.9f);
+        // Far enough back that the WHOLE corona fits with margin.
+        //
+        // At 2.9 the visible frame was about 200 units across while the outer halo is 2.6x a ~115-unit
+        // sun — some 300 units — so the glow was clipped by the render target's edge and the star looked
+        // boxed in. At 4.6 the frame is ~317 units: the halo fades out inside it, and the body sits in
+        // open black with room around it.
+        camGo.transform.localPosition = new Vector3(0f, 0f, -PreviewScale * 4.6f);
         previewCam = camGo.AddComponent<Camera>();
         previewCam.clearFlags = CameraClearFlags.SolidColor;
         previewCam.backgroundColor = new Color(0f, 0f, 0f, 0f);
@@ -846,7 +1075,7 @@ public class LoadingScreen : MonoBehaviour
         previewCam.farClipPlane = 20f * PreviewScale;
         previewCam.enabled = false;      // driven by hand, one Render per frame
 
-        previewRT = new RenderTexture(192, 192, 16) { name = "LoadingPreviewRT" };
+        previewRT = new RenderTexture(320, 320, 16) { name = "LoadingPreviewRT" };
         previewCam.targetTexture = previewRT;
 
         // A point light with a short range — a directional one would light the whole game scene behind
@@ -879,8 +1108,8 @@ public class LoadingScreen : MonoBehaviour
         holder.SetParent(sun, false);
         sunGlow[index] = holder;
 
-        sunGlowInner[index] = MakeCoronaQuad(holder, "Glow", 2.0f, 0.55f);
-        sunGlowOuter[index] = MakeCoronaQuad(holder, "Halo", 3.2f, 0.14f);
+        sunGlowInner[index] = MakeCoronaQuad(holder, "Glow", 1.8f, CoronaInnerAlpha);
+        sunGlowOuter[index] = MakeCoronaQuad(holder, "Halo", 2.6f, CoronaOuterAlpha);
     }
 
     static Renderer MakeCoronaQuad(Transform parent, string name, float mult, float alpha)
@@ -912,13 +1141,12 @@ public class LoadingScreen : MonoBehaviour
     // Authored here rather than read back off the material: Material.color maps to _Color, and the URP
     // shaders these quads use expose _BaseColor instead, so a read-back would return white and quietly
     // drive both quads to full strength.
-    // The inner quad is only 2x the sun's diameter, so the opaque sphere hides everything inside texture
-    // radius 0.5 — which is most of a soft dot's energy. What is left is the outer annulus, and it needs a
-    // high alpha to still read as a hot rim. (GalaxyLOD can use 0.85 at 3x because out there the star's
-    // disc covers barely a sixth of its glow; here it covers half.) Widening the quad instead is not an
-    // option — at 2x it already overruns this 200-unit frame.
+    // The inner quad is only 1.8x the sun's diameter, so the opaque sphere hides everything inside
+    // texture radius ~0.55 — which is most of a soft dot's energy. What is left is the outer annulus,
+    // and it needs a high alpha to still read as a hot rim. (GalaxyLOD can use 0.85 at 3x because out
+    // there the star's disc covers barely a sixth of its glow; here it covers half.)
     const float CoronaInnerAlpha = 0.9f;
-    const float CoronaOuterAlpha = 0.14f;
+    const float CoronaOuterAlpha = 0.18f;
 
     static void TintQuad(Renderer r, Color c, float alpha)
     {
@@ -1019,6 +1247,9 @@ public class LoadingScreen : MonoBehaviour
 
         if (subject == Subject.Star && homeLayout != null) StepSunCluster(dt);
         if (subject == Subject.Planet && morphActive) StepMorph(dt);
+        // After the planet, its moons: they appear one at a time, reveal quicker, and orbit. StepMoons
+        // holds off on its own until morphActive clears, so the staging lives in one place.
+        if (subject == Subject.Planet) StepMoons(dt);
 
         if (previewCam != null && previewStage != null && previewStage.gameObject.activeSelf)
             previewCam.Render();
@@ -1056,6 +1287,7 @@ public class LoadingScreen : MonoBehaviour
             if (r != null && r.sharedMaterial != null) Destroy(r.sharedMaterial);
         foreach (var r in sunGlowOuter)
             if (r != null && r.sharedMaterial != null) Destroy(r.sharedMaterial);
+        ClearMoons();
         if (morphTex != null) Destroy(morphTex);
         if (Instance == this) Instance = null;
     }

@@ -136,9 +136,39 @@ public class ResearchWindow : MonoBehaviour
         UIFactory.WrapText(card.transform,
             "<size=10><color=#9FB4C8>A real grant — every building, hull and terraforming option in the " +
             "game unlocks for as long as it is on. Switching it off puts back exactly the technologies " +
-            "and research queue you had before, and leaving Dev Mode switches it off for you.</color></size>",
+            "and research queue you had before, and leaving Dev Mode switches it off for you. Not saved: " +
+            "a save taken with this up records the technologies you actually earned.</color></size>",
+            UITheme.SmallSize, UITheme.SubText);
+
+        // ---- Manual resource grants ----
+        //
+        // Dev Mode no longer floods the economy — both modes run the same stockpile at the same costs,
+        // which is the only way Dev Mode is any use for testing something economic. These are the hand
+        // on the tap instead: take what you need, and keep it when you go back to normal play.
+        UIFactory.WrapText(card.transform, "<b>GRANT RESOURCES</b>", UITheme.SmallSize, UITheme.Warn);
+
+        foreach (float step in DevCheats.GrantSteps)
+        {
+            float amount = step;   // captured per iteration — a shared loop variable would give every
+                                   // button the last value
+            UIFactory.Button(card.transform, $"+{Short(amount)} of every resource",
+                             () => DevCheats.GrantAll(amount), 26);
+        }
+
+        UIFactory.Button(card.transform, "+100,000 research points",
+                         () => DevCheats.GrantResearchPoints(100_000), 26);
+        UIFactory.Button(card.transform, "Empty the stockpile (back to zero)",
+                         () => DevCheats.ClearStock(), 26);
+
+        UIFactory.WrapText(card.transform,
+            "<size=10><color=#9FB4C8>Granted resources ignore the storage ceiling and are then ordinary " +
+            "stock — spendable, saved, and still yours when you leave Dev Mode. Dev Mode does not change " +
+            "your balances on its own.</color></size>",
             UITheme.SmallSize, UITheme.SubText);
     }
+
+    static string Short(float v) =>
+        v >= 1_000_000f ? $"{v / 1_000_000f:0.#}M" : v >= 1_000f ? $"{v / 1_000f:0.#}k" : $"{v:0}";
 
     // ---- Research queue: the laboratory twin of the shipyard stocks ----
     // Your research centres pool their capacity; each project occupies its own share while it's being

@@ -30,29 +30,27 @@ public static class GameStateSerializer
             game.bgR = bg.SolidColor.r; game.bgG = bg.SolidColor.g; game.bgB = bg.SolidColor.b;
         }
 
-        // Saving from inside Dev Mode writes the PRE-DEV numbers, not the cheated ones.
+        // Resources save exactly as they stand, in either mode — including anything granted from the Dev
+        // panel, which the player is meant to keep.
         //
-        // Dev Mode is reversible by design — leaving it puts the real economy and research back — but a
-        // save taken while it is on would bake in a million of everything and, if the grant-all switch is
-        // up, the entire tech tree. That is permanent in a way nothing else about Dev Mode is: the player
-        // drops in to look at something, saves out of habit, and has quietly ended their own campaign.
-        // DevCheats holds exactly the snapshot needed, so the file records the game being played.
-        bool dev = DevCheats.HasBaseline;
-
+        // The GRANTED TECH TREE is different, and is deliberately not saved. It is a temporary switch,
+        // not something earned, and a save taken with it up would bake the entire tech tree into the
+        // file permanently — the player drops into Dev to look at something, saves out of habit, and has
+        // quietly ended their own campaign. BaselineTech is the set from before the grant.
         game.research = new ResearchDTO
         {
-            discovered = dev ? DevCheats.BaselineOreDiscovered : ResearchManager.ExportDiscovered(),
-            researched = dev ? DevCheats.BaselineOreResearched : ResearchManager.ExportResearched(),
-            points = dev ? DevCheats.BaselinePoints : ResearchManager.ResearchPoints,
-            empireLevel = dev ? DevCheats.BaselineEmpireLevel : EmpireTech.Level,
-            tech = dev ? DevCheats.BaselineTech : TechManager.Export(),
+            discovered = ResearchManager.ExportDiscovered(),
+            researched = ResearchManager.ExportResearched(),
+            points = ResearchManager.ResearchPoints,
+            empireLevel = EmpireTech.Level,
+            tech = DevCheats.BaselineTech,
             schematics = AncientLore.Export(),
             cluesFound = AncientClues.Export()
         };
 
-        game.ecoMetal = dev ? DevCheats.BaselineStock(ResourceType.Metal) : PlayerEconomy.Get(ResourceType.Metal);
-        game.ecoEnergy = dev ? DevCheats.BaselineStock(ResourceType.Energy) : PlayerEconomy.Get(ResourceType.Energy);
-        game.ecoWater = dev ? DevCheats.BaselineStock(ResourceType.Water) : PlayerEconomy.Get(ResourceType.Water);
+        game.ecoMetal = PlayerEconomy.Get(ResourceType.Metal);
+        game.ecoEnergy = PlayerEconomy.Get(ResourceType.Energy);
+        game.ecoWater = PlayerEconomy.Get(ResourceType.Water);
         game.units = UnitManager.Instance != null ? UnitManager.Instance.ExportUnitDTOs() : new List<UnitDTO>();
         game.buildQueue = UnitManager.Instance != null ? UnitManager.Instance.ExportBuildQueue() : new List<BuildOrderDTO>();
         game.researchQueue = TechManager.ExportQueue();
@@ -473,7 +471,12 @@ public static class GameStateSerializer
                 // rather than handing out free excavations.
                 researchPointCost = p.researchPointCost <= 0 ? 20 : p.researchPointCost,
                 researchReward = p.researchReward <= 0 ? 25 : p.researchReward,
-                yieldsSchematic = p.yieldsSchematic
+                // Old saves have no yieldsSchematic at all, and false is indistinguishable from a
+                // genuine minor ruin — so those games would permanently lose every major ruin's
+                // schematic, the only entrance to the Ancients branch. Infer it instead: POIGenerator
+                // gives major ruins a reward of 140, minor ones far less.
+                yieldsSchematic = p.yieldsSchematic ||
+                                  ((POIType)p.type == POIType.AncientRuins && p.researchReward >= 140)
             });
 
         return b;

@@ -600,11 +600,19 @@ public class UnitManager : MonoBehaviour
                 else FinishAction(u, OrderKind.Survey, b);
                 break;
             case OrderKind.Research:
-                if (b != null && u.Info.canResearch && b.Surveyed) { u.status = UnitStatus.Researching; }
+                if (b != null && u.Info.canResearch && b.Surveyed)
+                {
+                    // Fresh clock per world. researchTimer is only zeroed on COMPLETION, so a ship
+                    // pulled off a half-finished deep survey used to arrive at the next world already
+                    // 60% done — and that world's progress bar jumped to 60% on the first frame.
+                    u.researchTimer = 0f;
+                    b.researchProgress = 0f;
+                    u.status = UnitStatus.Researching;
+                }
                 else
                 {
                     if (b != null && !b.Surveyed)
-                        NotificationManager.Instance?.Push($"{u.name} can't research yet",
+                        NotificationManager.Instance?.Push($"{u.name} can't deep survey yet",
                             $"{b.name} must be surveyed first.", null, NotifKind.Info);
                     FinishAction(u, OrderKind.Research, b);
                 }
@@ -800,18 +808,17 @@ public class UnitManager : MonoBehaviour
             return;
         }
 
-        // Can't loiter on a hostile world forever (unless colonizing it).
-        if (b.habitability < 80f && u.type != UnitType.ColonyShip)
-        {
-            u.missionTimer += dt;
-            if (u.missionTimer >= HostileStaySeconds && HomePlanet != null && b != HomePlanet)
-            {
-                NotificationManager.Instance?.Push($"{u.name} must return home",
-                    $"{b.name} is too hostile ({b.habitability:F0}%) to remain.", null, NotifKind.Danger);
-                StopAll(u);
-                IssueMove(new List<Unit> { u }, HomePlanet, false);
-            }
-        }
+        // NO hostile-world recall while a survey is running.
+        //
+        // There used to be one here: after HostileStaySeconds the ship was force-sent home. It quietly
+        // undid the whole point of this rework — a large or very hostile world takes longer than the
+        // timer, so the ship was yanked at ~56% and the player had to click Survey again, which is the
+        // exact behaviour the per-pass cap was removed to eliminate. Worse, it called StopAll, so a
+        // player who had queued five worlds lost all five orders, not just this one.
+        //
+        // Hostility already has its say: it divides the survey rate above, so a hostile world simply
+        // takes longer to map. That is the same statement — "this is a nasty place to work" — expressed
+        // as a cost rather than as a failure.
     }
 
     // THE DEEP SURVEY. Research ships only, and only on a world that has already been surveyed.
@@ -825,7 +832,17 @@ public class UnitManager : MonoBehaviour
     //
     // DeepSurveyRate is a fraction of Explore's 0.05f base. A big or hostile world divides it further,
     // exactly as the surface pass does, so the worlds most worth studying are also the slowest.
-    const float DeepSurveyRate = 0.017f;
+    //
+    // Tuned WITH the quality factor below, not before it. An earlier version multiplied by
+    // (EffectiveResearch + 1) — a base research ship's 8 — which made the "slower, deeper" pass finish
+    // in a third of the time of the surface survey it is supposed to follow. A veteran Science Vessel
+    // did it in under three seconds.
+    const float DeepSurveyRate = 0.009f;
+
+    // A better research suite, and a more experienced crew, buy time back — but on a curve that keeps
+    // the deep survey a real commitment at every tier. Base research ship ~1.3x, Mk III ~1.8x, a
+    // legendary Science Vessel ~2.5x. Never the order-of-magnitude the raw stat gave.
+    static float DeepSurveyQuality(Unit u) => 1f + u.EffectiveResearch / 24f;
 
     void Research(Unit u, float dt)
     {
@@ -837,7 +854,7 @@ public class UnitManager : MonoBehaviour
         // suite is what buys the time back.
         float sizeFactor = Mathf.Max(0.5f, b.surfaceSize / 8f);
         float hostility = Mathf.Lerp(1f, 2.2f, Mathf.Clamp01((100f - b.habitability) / 100f));
-        u.researchTimer += (u.EffectiveResearch + 1) * DeepSurveyRate / (sizeFactor * hostility) * dt;
+        u.researchTimer += DeepSurveyRate * DeepSurveyQuality(u) / (sizeFactor * hostility) * dt;
         b.researchProgress = Mathf.Clamp01(u.researchTimer);
 
         if (u.researchTimer >= 1f)
@@ -895,42 +912,53 @@ public class UnitManager : MonoBehaviour
             }
 
         // Resolving a world's anomalies is the PAYOFF of exploring: it hands points back.
-        int sites = 0, points = 0, schematics = 0;
+        //
+        // ANCIENT RUINS ARE DELIBERATELY LEFT ALONE. A deep survey reads a world; it does not excavate
+        // a precursor site, which is a dig with its own cost, its own duration and its own reward
+        // (ResearchTaskManager, the "Study this site" button). Resolving them here for free was making
+        // that entire system unreachable content: one deep survey marked every ruin explored, which
+        // flipped IsResearchable false and removed the button before it could ever be pressed.
+        //
+        // So the deep survey does what a survey does — it finds things and tells you what they are —
+        // and the ruins it turns up become diggable. That is also what makes the schematic worth having.
+        int sites = 0, points = 0, ruins = 0;
+        var reports = new System.Text.StringBuilder();
+
         if (b.pointsOfInterest != null)
             foreach (var poi in b.pointsOfInterest)
             {
                 if (poi.explored) continue;
+
+                if (poi.type == POIType.AncientRuins) { ruins++; continue; }
+
                 poi.explored = true;
-                int reward = POIReward(poi);
+                // The site's OWN reward, not a flat per-type figure — POIGenerator sets these per site,
+                // and they are what the paid excavation pays out too, so both routes agree on worth.
+                int reward = poi.researchReward > 0 ? poi.researchReward : POIReward(poi);
                 ResearchManager.AddPoints(reward);
                 points += reward;
                 sites++;
 
-                // Ruins that hold a precursor schematic give it up HERE.
-                //
-                // This path used to ignore poi.yieldsSchematic entirely, so a research ship could
-                // excavate major ancient ruins and come away with nothing — and since the per-site
-                // excavation (ResearchTaskManager) was the only other route, the Ancients tech branch
-                // was effectively unreachable by the very ship class built to find it.
-                if (poi.yieldsSchematic) { AncientLore.Recover(1); schematics++; }
-
-                // The site's own field report, if the generator wrote one — that is the "what is really
-                // going on with this world" the deep survey is for.
+                // The site's own field report — this is the "what is really going on with this world"
+                // the deep survey exists for. Collected into ONE notification rather than fired
+                // separately: five popups in a frame is noise, not a discovery.
                 if (!string.IsNullOrEmpty(poi.reportText))
-                    NotificationManager.Instance?.Push($"{b.name} — {poi.title}", poi.reportText,
-                                                       FlyTo(b), NotifKind.Discovery);
+                    reports.Append($"\n\n<b>{poi.title}</b>\n{poi.reportText}");
             }
 
         // One closing report, so the payoff is legible rather than implied by a pile of separate popups.
         SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
         var summary = new System.Text.StringBuilder();
         summary.Append(studied > 0 ? $"{studied} ore(s) analysed. " : "No new ores to analyse. ");
-        if (sites > 0) summary.Append($"{sites} site(s) excavated for {points} research points. ");
-        if (schematics > 0) summary.Append($"{schematics} precursor schematic(s) recovered. ");
+        if (sites > 0) summary.Append($"{sites} site(s) resolved for {points} research points. ");
+        if (ruins > 0)
+            summary.Append($"{ruins} ancient ruin(s) located but not disturbed — excavate them from the " +
+                           "Survey tab's site list; that is where precursor schematics come from. ");
         summary.Append("Heat, Fertile and Weather indexes are now available for this world.");
 
         NotificationManager.Instance?.Push($"Deep survey complete at {b.name}", summary.ToString(),
-                                           FlyTo(b), NotifKind.Research);
+                                           FlyTo(b), NotifKind.Research,
+                                           detail: summary.ToString() + reports.ToString());
 
         if (unaffordable > 0)
             NotificationManager.Instance?.Push($"Analysis stalled at {b.name}",

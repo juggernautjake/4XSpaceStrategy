@@ -2873,6 +2873,7 @@ public class PlanetViewWindow : MonoBehaviour
         if (tab == Tab.Survey && showTectonicsOverlay && body.surface != null && body.Surveyed && TectonicsMap.Active(body))
         {
             overlayImage.gameObject.SetActive(true);
+            SetOverlayAbovePieces(false);   // ground, not grid — buildings stand on top of it
             RefreshTectonicsOverlay();
             DrawPlateArrows();
             return;
@@ -2892,9 +2893,17 @@ public class PlanetViewWindow : MonoBehaviour
         if (PowerOverlayActive && body.surface != null)
         {
             overlayImage.gameObject.SetActive(true);
+            // ABOVE the buildings. The power overlay's whole job is to show which structures the grid
+            // reaches, and underneath the piece layer the answer was hidden by the very buildings it was
+            // answering about — a mine sitting in a dead zone looked identical to a powered one. Every
+            // other overlay stays below, because those describe the GROUND and a building standing on it
+            // should occlude them.
+            SetOverlayAbovePieces(true);
             RefreshPowerOverlay();
             return;
         }
+
+        SetOverlayAbovePieces(false);
 
         var kind = SurfaceIndexKind.None;
         bool bestSites = false;
@@ -2926,6 +2935,26 @@ public class PlanetViewWindow : MonoBehaviour
         overlayTex.SetPixels(px);
         overlayTex.Apply();
         overlayImage.texture = overlayTex;
+    }
+
+    /// Move the overlay layer above or below the placed buildings.
+    ///
+    /// One RawImage serves every overlay, so which layer it belongs on depends on what it is currently
+    /// drawing. Above the pieces it sits just under the markers, so selection rings and the placement
+    /// ghost still win.
+    void SetOverlayAbovePieces(bool above)
+    {
+        if (overlayImage == null || pieceLayer == null || markerLayer == null) return;
+
+        var rt = overlayImage.rectTransform;
+        int target = above ? markerLayer.GetSiblingIndex() : pieceLayer.GetSiblingIndex();
+
+        // SetSiblingIndex removes first and re-inserts, so everything after the overlay's CURRENT slot
+        // shifts down by one. Moving downward in the list therefore has to aim one lower than the index
+        // read off the anchor, or the overlay lands one place past it.
+        if (rt.GetSiblingIndex() < target) target -= 1;
+        if (target < 0) target = 0;
+        if (rt.GetSiblingIndex() != target) rt.SetSiblingIndex(target);
     }
 
     // THE MINERAL INDEX — the prospecting map, and the only place named ore deposits are ever drawn.

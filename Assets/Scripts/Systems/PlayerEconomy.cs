@@ -22,11 +22,9 @@ public static class PlayerEconomy
 
     public static float Capacity(ResourceType t)
     {
-        // Dev Mode has no warehouse. Storage exists to make banking a decision, and in Dev Mode there
-        // are no decisions — DevCheats tops the stockpile back to a million every few seconds, and a
-        // 3,000 ceiling would silently swallow the top-up and hand back 3,000.
-        if (GameMode.DevMode) return DevCheats.Stock;
-
+        // No Dev Mode exception. The two modes share one economy now — same stockpile, same ceiling,
+        // same costs — which is what makes Dev Mode usable for testing anything economic at all. Dev
+        // Mode's grant controls bypass this ceiling directly via SetStock rather than removing it.
         if (capFrame == Time.frameCount && capCache >= 0f) return capCache;
         float cap = BaseCapacity;
         if (SystemContext.Galaxy != null)
@@ -124,21 +122,15 @@ public static class PlayerEconomy
         OnChanged?.Invoke();
     }
 
-    /// A copy of the WHOLE stockpile, every resource type, for putting back later — see DevCheats, which
-    /// takes one before Dev Mode floods the economy and restores it on the way out.
+    /// Set one resource outright, ignoring the storage ceiling.
     ///
-    /// Not Import's three floats: DevCheats.TopUp fills every value of the ResourceType enum, including
-    /// any that a normal game never stocks, so a three-float restore would leave a million of everything
-    /// else behind. This round-trips whatever is actually there, so it stays correct as the enum grows.
-    public static Dictionary<ResourceType, float> Snapshot() => new Dictionary<ResourceType, float>(stock);
-
-    /// Put a Snapshot back exactly, dropping anything acquired since — including keys that did not exist
-    /// when the snapshot was taken, which is the whole point when undoing a top-up.
-    public static void RestoreSnapshot(Dictionary<ResourceType, float> snap)
+    /// Add() exists for INCOME and caps at Capacity, which is the rule that makes warehousing a real
+    /// decision. This is the deliberate exception for the Dev Mode grant controls: a grant that silently
+    /// clipped to the 3,000 ceiling would read as the button being broken. Everything granted is
+    /// ordinary stock afterwards — spendable, saved, and kept when Dev Mode is switched back off.
+    public static void SetStock(ResourceType t, float value)
     {
-        if (snap == null) return;
-        stock.Clear();
-        foreach (var kv in snap) stock[kv.Key] = kv.Value;
+        stock[t] = Mathf.Max(0f, value);
         OnChanged?.Invoke();
     }
 }
