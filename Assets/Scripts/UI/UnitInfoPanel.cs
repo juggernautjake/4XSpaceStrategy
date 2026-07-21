@@ -14,6 +14,7 @@ public class UnitInfoPanel : MonoBehaviour
     TMP_InputField nameInput;
     Image progressFill;
     Button surveyBtn, researchBtn, colonizeBtn, terraformBtn, returnBtn, scrapBtn, pauseBtn;
+    TMP_Text researchLabel;
     TMP_Text pauseLabel, colonizeLabel, terraformLabel;
     Toggle queueModeToggle;
     RectTransform queueList;
@@ -89,7 +90,10 @@ public class UnitInfoPanel : MonoBehaviour
         queueModeToggle = UIFactory.Toggle(content, "Queue mode (add to end instead of doing now)", false, null);
 
         surveyBtn = UIFactory.Button(content, "Survey / Collect Samples", DoSurvey, 28);
-        researchBtn = UIFactory.Button(content, "Research Here", DoResearch, 28);
+        // "Deep Survey", not "Research Here": it is the second half of the survey ladder — the surface
+        // pass any explorer can fly, then the long landing a research ship makes on top of it.
+        researchBtn = UIFactory.Button(content, "Deep Survey", DoResearch, 28);
+        researchLabel = researchBtn.GetComponentInChildren<TMP_Text>();
         colonizeBtn = UIFactory.Button(content, "Found Colony", DoColonize, 28);
         colonizeLabel = colonizeBtn.GetComponentInChildren<TMP_Text>();
         terraformBtn = UIFactory.Button(content, "Terraform", DoTerraform, 28);
@@ -233,7 +237,7 @@ public class UnitInfoPanel : MonoBehaviour
                 break;
             case UnitStatus.Researching:
                 prog = u.location != null ? u.location.researchProgress : 0f;
-                task = $"Researching {(u.location != null ? u.location.name : "?")}";
+                task = $"Deep surveying {(u.location != null ? u.location.name : "?")}";
                 break;
             case UnitStatus.Returning: task = "Returning home"; break;
             default: task = u.location != null ? $"Idle at {u.location.name}" : "Idle"; break;
@@ -280,6 +284,10 @@ public class UnitInfoPanel : MonoBehaviour
         bool q = QueueMode;
         surveyBtn.interactable = t != null && u.Info.canExplore && (q || !t.Surveyed);
         researchBtn.interactable = t != null && u.Info.canResearch && (q || t.Surveyed);
+        // A world can be studied again — leftover ores that could not be afforded last time, and any
+        // sites excavated since — so the label says which run this is rather than greying out.
+        if (researchLabel != null)
+            researchLabel.text = (t != null && t.deepSurveyed) ? "Deep Survey (again)" : "Deep Survey";
         returnBtn.interactable = u.location != null && u.location != UnitManager.Instance?.HomePlanet;
         scrapBtn.interactable = UnitManager.Instance != null && UnitManager.Instance.CanScrap(u);
         if (pauseLabel != null) pauseLabel.text = u.queuePaused ? "Resume Queue" : "Pause Queue";

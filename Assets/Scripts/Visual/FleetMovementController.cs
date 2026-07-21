@@ -252,7 +252,7 @@ public class FleetMovementController : MonoBehaviour
             bool canTerraform = reach && body.type != CelestialBodyType.GasGiant && !body.terraforming &&
                                 Any(group, u => u.Info.canTerraform);
             if (canSurvey) options.Add(new ContextMenu.Option($"{verb}: survey {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Survey, body, queue)));
-            if (canResearch) options.Add(new ContextMenu.Option($"{verb}: research {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Research, body, queue)));
+            if (canResearch) options.Add(new ContextMenu.Option($"{verb}: deep survey {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Research, body, queue)));
             if (canColonize) options.Add(new ContextMenu.Option($"{verb}: colonize {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Colonize, body, queue)));
             if (canTerraform) options.Add(new ContextMenu.Option($"{verb}: terraform {body.name} on arrival", () => mgr?.IssueAction(group, OrderKind.Terraform, body, queue)));
             options.Add(new ContextMenu.Option("Cancel", () => TargetIndicator.Instance?.Hide()));

@@ -220,6 +220,14 @@ public class POIDTO
     public string kind;
     public float researchDuration;
     public string reportText;
+
+    // These three were missing, and their absence was silently destructive: every save/load reset a
+    // site's cost and reward to the class defaults and, worse, cleared yieldsSchematic — so the major
+    // ancient ruins that are the ONLY source of precursor schematics permanently lost the ability to
+    // yield one the first time a game was reloaded, closing off the Ancients tech branch.
+    public int researchPointCost = 20;
+    public int researchReward = 25;
+    public bool yieldsSchematic;
 }
 
 [System.Serializable]

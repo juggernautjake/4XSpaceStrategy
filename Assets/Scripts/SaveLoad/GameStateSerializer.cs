@@ -166,7 +166,9 @@ public static class GameStateSerializer
                 type = (int)p.type, u = p.u, v = p.v, title = p.title, description = p.description,
                 explored = p.explored, relatedOre = (int)p.relatedOre,
                 revealTitle = p.revealTitle, revealText = p.revealText,
-                kind = p.kind, researchDuration = p.researchDuration, reportText = p.reportText
+                kind = p.kind, researchDuration = p.researchDuration, reportText = p.reportText,
+                researchPointCost = p.researchPointCost, researchReward = p.researchReward,
+                yieldsSchematic = p.yieldsSchematic
             });
 
         return dto;
@@ -466,7 +468,12 @@ public static class GameStateSerializer
                 explored = p.explored, relatedOre = (OreType)p.relatedOre,
                 revealTitle = p.revealTitle, revealText = p.revealText,
                 kind = p.kind, researchDuration = p.researchDuration <= 0f ? 12f : p.researchDuration,
-                reportText = p.reportText
+                reportText = p.reportText,
+                // Old saves have 0 here (the field did not exist); fall back to the class defaults
+                // rather than handing out free excavations.
+                researchPointCost = p.researchPointCost <= 0 ? 20 : p.researchPointCost,
+                researchReward = p.researchReward <= 0 ? 25 : p.researchReward,
+                yieldsSchematic = p.yieldsSchematic
             });
 
         return b;

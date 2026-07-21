@@ -631,7 +631,8 @@ public class LoadingScreen : MonoBehaviour
                     c = TerrainColorMap.Get(tile.type);
                     float b = Mathf.Lerp(0.86f, 1.12f, tile.shade);
                     c = new Color(c.r * b, c.g * b, c.b * b, 1f);
-                    if (tile.HasOre) c = Color.Lerp(c, OreDatabase.Get(tile.ore).color, 0.35f);
+                    // No ore tint: deposits live on the Mineral Index overlay now, and this preview has
+                    // no overlay. It matches what SurfaceTextureRenderer draws for the real map.
                 }
                 morphFinal[y * MorphW + x] = c;
             }

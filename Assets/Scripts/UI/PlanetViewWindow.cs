@@ -201,6 +201,27 @@ public class PlanetViewWindow : MonoBehaviour
     /// power piece is in hand on the Build tab.
     bool PowerOverlayActive =>
         (tab == Tab.Survey && showPowerOverlay) || (tab == Tab.Build && CarryingPowerPiece);
+
+    /// True while the player is carrying a piece whose siting is a question of ORE — a mine, a refinery,
+    /// a combustion plant. Exactly the same bargain the power overlay makes: the one map that answers
+    /// "where does this go?" comes up on its own while the piece is in hand.
+    ///
+    /// Tested by index rather than by category, because the buildings that care about ore are spread
+    /// across three categories (Harvesting, Industry, Electrical) and the index is the actual statement
+    /// of what a building is sited against.
+    bool CarryingMiningPiece =>
+        selected.HasValue &&
+        SurfaceBuildingDatabase.Get(selected.Value).index == SurfaceIndexKind.Mineral;
+
+    /// The Mineral Index is up — chosen in the Survey tab, or automatically with a mining piece in hand.
+    ///
+    /// This is now the ONLY circumstance under which named ore deposits are drawn anywhere. They used to
+    /// be baked into the terrain texture and so were visible in every view, at every zoom, forever; the
+    /// deposits still generate exactly as they did, but reading them is now something you do on purpose.
+    bool MineralOverlayActive =>
+        body != null && body.surface != null && SurfaceIndex.Unlocked(body, SurfaceIndexKind.Mineral) &&
+        ((tab == Tab.Survey && !showPowerOverlay && !showTectonicsOverlay && activeIndex == SurfaceIndexKind.Mineral) ||
+         (tab == Tab.Build && CarryingMiningPiece));
     int rotation;
     Vector2Int hoverCell = new Vector2Int(-1, -1);
     bool hoverValid;
@@ -2857,6 +2878,17 @@ public class PlanetViewWindow : MonoBehaviour
             return;
         }
 
+        // The mineral branch is tested BEFORE power, and the order matters for exactly one building: the
+        // Combustion Plant is Electrical (so it raises the power overlay) but it also burns ore, so its
+        // index is Mineral. It is picked up to be sited on a SEAM — where the fuel is — which the power
+        // map cannot tell you. Mineral wins for anything whose index is Mineral.
+        if (MineralOverlayActive && body.surface != null)
+        {
+            overlayImage.gameObject.SetActive(true);
+            RefreshMineralOverlay();
+            return;
+        }
+
         if (PowerOverlayActive && body.surface != null)
         {
             overlayImage.gameObject.SetActive(true);
@@ -2891,6 +2923,45 @@ public class PlanetViewWindow : MonoBehaviour
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
                 px[y * w + x] = SurfaceIndex.Ramp(kind, SurfaceIndex.Get(body, kind, x, y));
+        overlayTex.SetPixels(px);
+        overlayTex.Apply();
+        overlayImage.texture = overlayTex;
+    }
+
+    // THE MINERAL INDEX — the prospecting map, and the only place named ore deposits are ever drawn.
+    //
+    // Two things stacked on one texture, because they answer two halves of the same question:
+    //   * the index RAMP underneath — how mineral-bearing the ground is generally (ridges, elevation,
+    //     metallic crust), which is what tells you where it is worth looking at all;
+    //   * the named DEPOSITS on top — Ferralite, Cuprion, Aurelium and the rest, drawn in each ore's own
+    //     colour at full strength so a seam reads as a distinct find rather than a slightly warmer patch.
+    //
+    // Richness drives the deposit's alpha, so a thin showing looks like one and a mother lode is
+    // unmistakable. That is the informed decision the overlay exists to support: not just "is there ore
+    // here" but "is there enough of it, and which one is it".
+    void RefreshMineralOverlay()
+    {
+        int w = body.surface.width, h = body.surface.height;
+        EnsureOverlayTex(w, h);
+
+        var px = new Color[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                Color c = SurfaceIndex.Ramp(SurfaceIndexKind.Mineral,
+                                            SurfaceIndex.Get(body, SurfaceIndexKind.Mineral, x, y));
+
+                var tile = body.surface.tiles[x, y];
+                if (tile != null && tile.HasOre)
+                {
+                    var oc = OreDatabase.Get(tile.ore).color;
+                    // Floor of 0.55 so even a poor seam is legible; a rich one reaches near-opaque.
+                    c = new Color(oc.r, oc.g, oc.b, Mathf.Lerp(0.55f, 0.95f, tile.oreRichness));
+                }
+
+                px[y * w + x] = c;
+            }
+
         overlayTex.SetPixels(px);
         overlayTex.Apply();
         overlayImage.texture = overlayTex;

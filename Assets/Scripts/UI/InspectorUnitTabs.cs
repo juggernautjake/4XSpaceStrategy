@@ -84,10 +84,12 @@ public partial class InspectorWindow
         }, 26);
         live.Button(researchBtn, () =>
         {
-            if (!u.Info.canResearch) return (false, "Research — this class can't research");
-            if (u.location == null) return (false, "Research — travel to a world first");
-            if (!u.location.Surveyed) return (false, $"Research — survey {u.location.name} first");
-            return (true, $"Research {u.location.name}");
+            if (!u.Info.canResearch) return (false, "Deep Survey — needs a research ship");
+            if (u.location == null) return (false, "Deep Survey — travel to a world first");
+            if (!u.location.Surveyed) return (false, $"Deep Survey — survey {u.location.name} first");
+            return (true, u.location.deepSurveyed
+                ? $"Deep Survey {u.location.name} again"
+                : $"Deep Survey {u.location.name}");
         });
 
         var colonizeBtn = UIFactory.Button(p, "", () =>

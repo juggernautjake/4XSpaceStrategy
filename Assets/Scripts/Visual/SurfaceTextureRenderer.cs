@@ -64,9 +64,14 @@ public static class SurfaceTextureRenderer
                 float b = Mathf.Lerp(0.86f, 1.12f, tile.shade);
                 c = new Color(c.r * b, c.g * b, c.b * b, 1f);
 
-                if (tile.HasOre)
-                    c = Color.Lerp(c, OreDatabase.Get(tile.ore).color, 0.35f);
-
+                // NO ore tint here — deliberately.
+                //
+                // This texture is the TERRAIN, and it is used by the planet map, the moon panes, the moon
+                // thumbnails, the 3D globe and the loading screen alike. Tinting ore into it meant named
+                // deposits speckled across every one of those views at all times, which both muddied the
+                // terrain read and gave away a world's mineral wealth at a glance from anywhere.
+                // Deposits are drawn on the OVERLAY layer instead, under the Mineral Index — see
+                // PlanetViewWindow.RefreshOverlay. One place, one rule, and the globe gets it for free.
                 pixels[y * w + x] = new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
             }
 
@@ -110,19 +115,8 @@ public static class SurfaceTextureRenderer
                 if (s.water && s.elevation > 0.30f)
                     c *= 0.85f;
 
-                // Tint mineral-rich regions from the low-res ore map.
-                if (body.surface != null)
-                {
-                    int lx = Mathf.Clamp((int)(u * body.surface.width), 0, body.surface.width - 1);
-                    int ly = Mathf.Clamp((int)(v * body.surface.height), 0, body.surface.height - 1);
-                    var tile = body.surface.tiles[lx, ly];
-                    if (tile != null && tile.HasOre)
-                    {
-                        Color oc = OreDatabase.Get(tile.ore).color;
-                        c = Color.Lerp(c, oc, 0.4f);
-                    }
-                }
-
+                // No ore tint — same rule as BuildGrid above. Deposits belong to the Mineral Index
+                // overlay, not to the terrain.
                 pixels[y * w + x] = new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
             }
         }

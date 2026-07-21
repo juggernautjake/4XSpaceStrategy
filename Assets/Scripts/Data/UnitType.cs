@@ -41,12 +41,14 @@ public class UnitInfo
 
     public bool canExplore, canResearch, canColonize, canTerraform;
 
-    // How much of a world this class can survey in ONE PASS, as a fraction of the whole.
-    // A basic Scout's sensors only see so much before it has run out of things it knows how to look at:
-    // it maps a slice, finishes its pass, and must be sent round again for another. Better sensor suites
-    // raise the cap, and the best hulls (Mk III, Science Vessel) map a world completely in a single pass.
-    // Points of interest only surface at a FULL survey, so a low-tier ship reveals them by repetition.
-    public float surveyDepth = 1f;
+    // How FAST this class surveys, as a multiplier on the base rate. One order always maps a whole
+    // world — a better sensor suite finishes sooner, it does not unlock more of the map.
+    //
+    // This used to be surveyDepth: a cap on how much of a world one pass could map, so a Scout stopped
+    // at 55% and had to be re-issued the same order two or three times to finish. That reads as the
+    // button not working. Ship quality still matters, but it buys TIME rather than repeated clicks —
+    // the same distinction the shipyard and research ladders already make.
+    public float surveyRate = 1f;
 
     public int minShipyardLevel = 1;   // shipyard tier required to build this class (1-3)
 
@@ -284,21 +286,21 @@ public static class UnitDatabase
         hyper.isStation = true; hyper.stationRole = StationRole.Relay; hyper.deepSpace = true; hyper.minEmpireLevel = 5; hyper.relayBoost = 0.45f;
         _all[(int)UnitType.HyperRelay] = hyper;
 
-        // ---- Survey depth per pass (see UnitInfo.surveyDepth) ----
-        // The progression that makes exploration a tech ladder rather than a formality: a starting Scout
-        // maps just over half a world per pass and has to come back round for the rest, while a Mk III or
-        // a Science Vessel maps the whole thing — and so reveals its points of interest — in one go.
-        Depth(UnitType.Scout, 0.55f);
-        Depth(UnitType.ScoutII, 0.80f);
-        Depth(UnitType.ScoutIII, 1.00f);
-        Depth(UnitType.Explorer, 0.90f);
-        Depth(UnitType.ResearchShip, 0.60f);
-        Depth(UnitType.ResearchShipII, 0.85f);
-        Depth(UnitType.ResearchShipIII, 1.00f);
-        Depth(UnitType.ScienceVessel, 1.00f);
-        Depth(UnitType.ColonyShip, 0.40f);      // it can look, but it isn't a survey ship
-        Depth(UnitType.Terraformer, 0.50f);
+        // ---- Survey speed (see UnitInfo.surveyRate) ----
+        // The progression that keeps exploration a tech ladder: every hull finishes a world in one order,
+        // but a purpose-built scout does it in a fraction of the time a colony ship takes squinting at it
+        // on the way past. Scouts lead, because that is their whole job.
+        Rate(UnitType.Scout, 1.60f);
+        Rate(UnitType.ScoutII, 2.10f);
+        Rate(UnitType.ScoutIII, 2.80f);
+        Rate(UnitType.Explorer, 2.40f);
+        Rate(UnitType.ResearchShip, 1.10f);
+        Rate(UnitType.ResearchShipII, 1.45f);
+        Rate(UnitType.ResearchShipIII, 1.90f);
+        Rate(UnitType.ScienceVessel, 2.20f);
+        Rate(UnitType.ColonyShip, 0.55f);      // it can look, but it isn't a survey ship
+        Rate(UnitType.Terraformer, 0.70f);
     }
 
-    static void Depth(UnitType t, float d) { if (_all[(int)t] != null) _all[(int)t].surveyDepth = d; }
+    static void Rate(UnitType t, float r) { if (_all[(int)t] != null) _all[(int)t].surveyRate = r; }
 }

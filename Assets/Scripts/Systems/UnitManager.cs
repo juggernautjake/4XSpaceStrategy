@@ -742,12 +742,16 @@ public class UnitManager : MonoBehaviour
         return true;
     }
 
-    // Survey: reveals the world, one PASS at a time.
+    // Survey: ONE order maps the whole world.
     //
-    // A ship can only map so much of a world before it has exhausted what its sensors know how to look
-    // at (UnitInfo.surveyDepth). A basic Scout maps just over half of a world and then its pass is
-    // done — send it round again for the next slice. A Mk III or a Science Vessel maps the whole thing
-    // in one go, which is what reveals the points of interest.
+    // It used to stop at a per-hull cap (surveyDepth) — a Scout reached 55% and the order popped itself,
+    // so finishing a world meant clicking Survey two or three times. That reads as a broken button, not
+    // as a ship limitation. Hull quality now buys SPEED instead (UnitInfo.surveyRate): a scout finishes
+    // in a fraction of the time a colony ship takes, and both finish.
+    //
+    // This is the SURFACE pass — the map, the terrain, the mineral seams you can see from orbit, and the
+    // points of interest: ruins, wrecks, anomalies, somebody else's settlements. What it cannot tell you
+    // is what any of it MEANS. That takes a research ship on the ground — see DeepSurvey.
     //
     // Surveying only DISCOVERS ores (and collects a sample to carry); it never researches them. That
     // happens at a research ship, station or centre, and it costs research points.
@@ -757,14 +761,11 @@ public class UnitManager : MonoBehaviour
         if (b == null) { u.status = UnitStatus.Idle; return; }
         if (b.Surveyed) { FinishAction(u, OrderKind.Survey, b); return; }   // already done
 
-        // A pass begins the first frame this ship starts surveying this world.
-        if (u.surveyPassBody != b) { u.surveyPassBody = b; u.surveyPassStart = b.explorationProgress; }
-
         float before = b.explorationProgress;
         float sizeFactor = Mathf.Max(0.5f, b.surfaceSize / 8f);                                   // bigger = slower
         float hostility = Mathf.Lerp(1f, 2.2f, Mathf.Clamp01((100f - b.habitability) / 100f));    // less habitable = slower
-        float bonus = u.type == UnitType.Scout ? 1.7f : 1f;                                       // scouts survey faster
-        b.explorationProgress = Mathf.Clamp01(b.explorationProgress + 0.05f * bonus / (sizeFactor * hostility) * dt);
+        b.explorationProgress = Mathf.Clamp01(
+            b.explorationProgress + 0.05f * u.Info.surveyRate / (sizeFactor * hostility) * dt);
 
         // Collect an ore SAMPLE at each survey milestone (discovered + carried; not researched here).
         if (Crossed(before, b.explorationProgress, 0.25f) || Crossed(before, b.explorationProgress, 0.5f) ||
@@ -776,33 +777,25 @@ public class UnitManager : MonoBehaviour
             }
         }
 
-        // Pass exhausted before the world is finished: stop here and say so. The ship keeps what it
-        // mapped — another pass (or a better hull) picks up exactly where this one left off.
-        float mapped = b.explorationProgress - u.surveyPassStart;
-        if (b.explorationProgress < 1f && mapped >= u.Info.surveyDepth)
-        {
-            u.AddExperience(XpSample);
-            u.surveyPassBody = null;
-            SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
-            NotificationManager.Instance?.Push($"{b.name} — survey pass complete",
-                $"{u.name} mapped {mapped * 100f:F0}% this pass ({b.explorationProgress * 100f:F0}% total). " +
-                $"A {u.Info.name} can only map {u.Info.surveyDepth * 100f:F0}% at a time — send it round again, or bring a better sensor suite, to finish the map and reveal this world's points of interest.",
-                FlyTo(b), NotifKind.Info);
-            FinishAction(u, OrderKind.Survey, b);
-            return;
-        }
-
         if (b.explorationProgress >= 1f)
         {
-            u.surveyPassBody = null;
             u.AddExperience(XpSurvey);
             SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
+
+            int sites = b.pointsOfInterest != null ? b.pointsOfInterest.Count : 0;
+            string found = sites > 0
+                ? $" {sites} point(s) of interest charted — see the Survey tab."
+                : " Nothing of note on the surface.";
+            string deeper = u.Info.canResearch
+                ? " This ship can also run a DEEP SURVEY here, which takes considerably longer but reads what the surface map can only point at."
+                : " A research ship could run a deep survey here for far more than the surface shows.";
+
             NotificationManager.Instance?.Push($"{b.name} surveyed", "Survey complete — map revealed.",
                 FlyTo(b), NotifKind.Research,
-                detail: $"{u.name} finished surveying {b.name}. Its detailed map and points of interest are now available." +
+                detail: $"{u.name} finished surveying {b.name}. Its detailed map and points of interest are now available.{found}{deeper}" +
                 (u.samples.Count > 0 ? $" {u.name} is carrying {u.samples.Count} ore sample(s) — take them to a research ship or a world with a research centre to research them." : ""));
             RevealBodyVisual(b);
-            AncientLore.SurveyBody(b);   // recover any ancient schematics the ruins here hold
+            AncientLore.SurveyBody(b);   // announce any ancient ruins the surface pass turned up
             FinishAction(u, OrderKind.Survey, b);
             return;
         }
@@ -821,16 +814,30 @@ public class UnitManager : MonoBehaviour
         }
     }
 
-    // Deep research (research ships / a world with a research centre). Requires the world be surveyed.
-    // Researches this world's discovered ores + any samples carried by co-located ships, plus its POIs.
+    // THE DEEP SURVEY. Research ships only, and only on a world that has already been surveyed.
+    //
+    // The surface pass tells you a world HAS ruins. This is landing on them. It runs at roughly a third
+    // the speed of a surface survey on purpose — it is the long, expensive, second look — and it pays
+    // out accordingly: every ore on the world analysed rather than the handful the orbital pass sampled,
+    // every point of interest excavated, precursor schematics recovered from the ruins, any Vael
+    // fragment the world was hiding, and the Heat / Fertile / Weather indexes that make siting buildings
+    // possible at all.
+    //
+    // DeepSurveyRate is a fraction of Explore's 0.05f base. A big or hostile world divides it further,
+    // exactly as the surface pass does, so the worlds most worth studying are also the slowest.
+    const float DeepSurveyRate = 0.017f;
+
     void Research(Unit u, float dt)
     {
         var b = u.location;
         if (b == null || !u.Info.canResearch) { u.status = UnitStatus.Idle; return; }
         if (!b.Surveyed) { FinishAction(u, OrderKind.Research, b); return; }
 
+        // Same shape as the surface pass: bigger worlds and hostile ones take longer. A better research
+        // suite is what buys the time back.
         float sizeFactor = Mathf.Max(0.5f, b.surfaceSize / 8f);
-        u.researchTimer += (u.EffectiveResearch + 1) * 0.02f / sizeFactor * dt;
+        float hostility = Mathf.Lerp(1f, 2.2f, Mathf.Clamp01((100f - b.habitability) / 100f));
+        u.researchTimer += (u.EffectiveResearch + 1) * DeepSurveyRate / (sizeFactor * hostility) * dt;
         b.researchProgress = Mathf.Clamp01(u.researchTimer);
 
         if (u.researchTimer >= 1f)
@@ -839,9 +846,6 @@ public class UnitManager : MonoBehaviour
             DoDeepResearch(u, b);
             u.researchTimer = 0f;
             b.researchProgress = 1f;
-            SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
-            NotificationManager.Instance?.Push($"Research complete at {b.name}",
-                "Ores and anomalies here have been fully researched.", FlyTo(b), NotifKind.Research);
             FinishAction(u, OrderKind.Research, b);
         }
     }
@@ -861,11 +865,9 @@ public class UnitManager : MonoBehaviour
         if (!b.deepSurveyed)
         {
             b.deepSurveyed = true;
-            // A world both surveyed and now studied on the ground is where a Vael fragment, if any, surfaces.
+            // A world both surveyed and now studied on the ground is where a Vael fragment, if any,
+            // surfaces. AncientClues.Reveal pushes its own (much louder) notification when it finds one.
             AncientClues.Reveal(b);
-            NotificationManager.Instance?.Push($"Deep survey complete on {b.name}",
-                "Heat, Fertile and Weather index overlays are now available for this world — use them in the Planet View's Survey tab to site geothermal plants, farms and solar arrays where they'll actually pay.",
-                FlyTo(b), NotifKind.Research);
         }
 
         foreach (var ore in OreGenerator.OresOnBody(b))
@@ -893,17 +895,46 @@ public class UnitManager : MonoBehaviour
             }
 
         // Resolving a world's anomalies is the PAYOFF of exploring: it hands points back.
+        int sites = 0, points = 0, schematics = 0;
         if (b.pointsOfInterest != null)
             foreach (var poi in b.pointsOfInterest)
             {
                 if (poi.explored) continue;
                 poi.explored = true;
-                ResearchManager.AddPoints(POIReward(poi));
+                int reward = POIReward(poi);
+                ResearchManager.AddPoints(reward);
+                points += reward;
+                sites++;
+
+                // Ruins that hold a precursor schematic give it up HERE.
+                //
+                // This path used to ignore poi.yieldsSchematic entirely, so a research ship could
+                // excavate major ancient ruins and come away with nothing — and since the per-site
+                // excavation (ResearchTaskManager) was the only other route, the Ancients tech branch
+                // was effectively unreachable by the very ship class built to find it.
+                if (poi.yieldsSchematic) { AncientLore.Recover(1); schematics++; }
+
+                // The site's own field report, if the generator wrote one — that is the "what is really
+                // going on with this world" the deep survey is for.
+                if (!string.IsNullOrEmpty(poi.reportText))
+                    NotificationManager.Instance?.Push($"{b.name} — {poi.title}", poi.reportText,
+                                                       FlyTo(b), NotifKind.Discovery);
             }
 
+        // One closing report, so the payoff is legible rather than implied by a pile of separate popups.
+        SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
+        var summary = new System.Text.StringBuilder();
+        summary.Append(studied > 0 ? $"{studied} ore(s) analysed. " : "No new ores to analyse. ");
+        if (sites > 0) summary.Append($"{sites} site(s) excavated for {points} research points. ");
+        if (schematics > 0) summary.Append($"{schematics} precursor schematic(s) recovered. ");
+        summary.Append("Heat, Fertile and Weather indexes are now available for this world.");
+
+        NotificationManager.Instance?.Push($"Deep survey complete at {b.name}", summary.ToString(),
+                                           FlyTo(b), NotifKind.Research);
+
         if (unaffordable > 0)
-            NotificationManager.Instance?.Push($"Research stalled at {b.name}",
-                $"{studied} sample(s) analysed. {unaffordable} could not be afforded — the samples are being held until you have the research points.",
+            NotificationManager.Instance?.Push($"Analysis stalled at {b.name}",
+                $"{unaffordable} sample(s) could not be afforded — they are being held until you have the research points.",
                 null, NotifKind.Info);
     }
 
