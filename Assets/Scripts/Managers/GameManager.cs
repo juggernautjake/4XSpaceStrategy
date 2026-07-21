@@ -241,18 +241,37 @@ public class GameManager : MonoBehaviour
             yield return new WaitForSecondsRealtime(moonHold);
         }
 
-        // Two closing beats rather than one. "Ready" told the player nothing they could not see from the
-        // full bar; naming what finished and then what happens next turns the last second from dead air
-        // into a hand-off.
+        // THE HANDOFF. The load does not end by switching the panel off — the bar collapses into itself
+        // and blinks out, the homeworld and its moons travel to where it was, and the real game is
+        // revealed underneath them already framing that same planet.
+        //
+        // The camera move happens in the onReady callback, which the finale fires while the panel is
+        // still covering the screen. So by the time anything dissolves, what is behind it matches.
         screen?.Report(1f, "Generation complete", LoadingScreen.Subject.Planet);
-        yield return new WaitForSecondsRealtime(1.1f);
-        screen?.Report(1f, "Entering solar system", LoadingScreen.Subject.Planet);
-        // Hold the full bar for a beat. Reaching 100% and vanishing in the same frame reads as a glitch
-        // rather than as completion.
-        yield return new WaitForSecondsRealtime(0.35f);
-        screen?.Close();
+
+        if (screen != null)
+        {
+            string welcome = homePlanet != null ? homePlanet.name : "your homeworld";
+            // The apparent size the real planet has to match, solved from the preview's own framing.
+            float frac = screen.HandoffScreenFraction();
+            var fin = screen.Finale(welcome, () => SnapCameraToHome(homePlanet, frac));
+            while (fin.MoveNext()) yield return fin.Current;
+        }
+        else
+        {
+            SnapCameraToHome(homePlanet, 0f);
+        }
+
         generating = false;
         onDone?.Invoke();
+    }
+
+    /// Put the camera on the real homeworld at PLANETARY zoom, instantly, so the player begins where
+    /// the loading screen left them — and can immediately zoom out through the system to the galaxy.
+    static void SnapCameraToHome(CelestialBody home, float screenFraction)
+    {
+        if (home?.visualObject == null) return;
+        CameraController.Instance?.SnapFocus(home.visualObject.transform, true, screenFraction);
     }
 
     public void GenerateGalaxy(int systemCount, int avgPlanets)

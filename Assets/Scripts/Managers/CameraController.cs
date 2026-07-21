@@ -428,6 +428,46 @@ public class CameraController : MonoBehaviour
         if (!follow) AnchorOnCentre(target.position, targetHeight);
     }
 
+    /// Frame a body IMMEDIATELY — no ease, no travel, already there on the next frame.
+    ///
+    /// For the loading screen's handoff, where the camera has to be sitting on the real homeworld
+    /// before the panel covering it dissolves. Anything that eased would be halfway to the planet at
+    /// the moment it became visible, which is precisely the cut the handoff exists to avoid.
+    public void SnapFocus(Transform target, bool follow, float screenFraction = 0f)
+    {
+        if (target == null) return;
+
+        FocusAndZoom(target, 0f, follow);
+
+        // Optional TIGHT framing, for the handoff: make the planet occupy a given fraction of the
+        // viewport height, so it lands at the same apparent size as the image being cross-faded out.
+        //
+        // FocusAndZoom's normal answer for a planet is to frame its whole neighbourhood — the world plus
+        // its moons' orbits — which is right when the player clicks Focus and wrong here, where the
+        // target is a specific on-screen size. The solve: a body of radius R fills fraction f of a
+        // viewport of vertical FOV V at distance d = R / tan(f * V / 2); the rig's height relates to
+        // that distance by h = d * sin(Pitch).
+        if (screenFraction > 0.001f)
+        {
+            float r = WorldRadius(target, 0f);
+            var cam = GetComponent<Camera>();
+            float vfov = cam != null ? cam.fieldOfView : 60f;
+            float half = Mathf.Max(0.01f, Mathf.Clamp01(screenFraction) * vfov * 0.5f * Mathf.Deg2Rad);
+            float d = r / Mathf.Tan(half);
+            targetHeight = Mathf.Clamp(d * Mathf.Sin(Pitch * Mathf.Deg2Rad), minHeight, maxHeight);
+        }
+
+        // FocusAndZoom sets targetHeight and lets Update ease the camera to it. Complete that ease by
+        // hand: put the camera at the final height first, THEN centre — FocusOn solves the look-at from
+        // whatever height the camera is at, so centring before the height is right aims it somewhere
+        // else entirely.
+        var p = transform.position;
+        p.y = targetHeight;
+        transform.position = p;
+        haveAnchor = false;          // no pending anchor to drag the view off centre afterwards
+        FocusOn(target.position);
+    }
+
     /// Point the ease at `worldPos` being centred once the camera reaches `atHeight`.
     void AnchorOnCentre(Vector3 worldPos, float atHeight)
     {

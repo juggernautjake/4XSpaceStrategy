@@ -89,6 +89,10 @@ public class LoadingScreen : MonoBehaviour
         pv.anchoredPosition = new Vector2(-34f, 0f);
         previewView = pv.gameObject.AddComponent<RawImage>();
         previewView.raycastTarget = false;
+        // Remembered at BUILD time, so both Open and the finale's own cleanup can put the preview back
+        // without either having to have observed where it started.
+        previewHomePos = pv.anchoredPosition;
+        previewHomeSize = pv.sizeDelta;
         BuildPreview(parent);
         if (previewRT != null) previewView.texture = previewRT;
 
@@ -261,6 +265,31 @@ public class LoadingScreen : MonoBehaviour
         skyPhase.Clear();
         shootTimer = 2f;
         ClearMoons();               // last game's moons are not this game's
+
+        // Defensive: the finale's own cleanup runs at the end of its coroutine, so anything that killed
+        // that coroutine part-way (a scene load, StopAllCoroutines) would leave the singleton stuck in
+        // the finale state — translucent panel, invisible sky, frozen bar — for every load afterwards.
+        // Opening is the one moment it is unambiguously safe to assert the normal state.
+        finaleRunning = false;
+        var panelImg0 = root.GetComponent<Image>();
+        if (panelImg0 != null) panelImg0.color = new Color(0.02f, 0.03f, 0.06f, 1f);
+        if (skyLayer != null)
+        {
+            var cg0 = skyLayer.GetComponent<CanvasGroup>();
+            if (cg0 != null) cg0.alpha = 1f;
+        }
+        if (previewView != null)
+        {
+            previewView.color = Color.white;
+            previewView.rectTransform.anchoredPosition = previewHomePos;
+            previewView.rectTransform.sizeDelta = previewHomeSize;
+        }
+        if (barTrack != null) { barTrack.gameObject.SetActive(true); barTrack.localScale = Vector3.one; }
+        if (headline != null) headline.gameObject.SetActive(true);
+        if (stageLabel != null) stageLabel.gameObject.SetActive(true);
+        if (percentLabel != null) percentLabel.gameObject.SetActive(true);
+        if (welcomeLabel != null) welcomeLabel.gameObject.SetActive(false);
+
         ResetPlanetPlaceholder();
         SetSubject(Subject.None);
         if (previewStage != null) previewStage.gameObject.SetActive(true);
@@ -275,6 +304,223 @@ public class LoadingScreen : MonoBehaviour
     {
         if (root != null) root.SetActive(false);
         if (previewStage != null) previewStage.gameObject.SetActive(false);
+    }
+
+    // ============================================================================================
+    // THE FINALE — handing the screen over to the game without a cut
+    //
+    // The load does not end by switching a panel off. The bar collapses into itself and blinks out,
+    // the homeworld and its moons travel to the middle of the screen where the bar used to be, and
+    // the game is revealed underneath them already framing that same planet.
+    //
+    // The whole point is continuity: the planet the player watches generate IS the planet they are
+    // about to play on, and nothing in between should suggest otherwise — no cut, no fade to black,
+    // no loading screen "closing". What ends the load is the planet arriving where it belongs.
+    // ============================================================================================
+    const float SettleBeat = 1.4f;    // the finished world simply turning
+    const float CollapseBeat = 0.45f; // the bar closing in on itself
+    const float BlinkBeat = 0.18f;    // the flash as it goes
+    const float TravelBeat = 0.9f;    // planet + moons moving to centre
+    const float WelcomeBeat = 1.6f;   // "Welcome to <world>"
+    const float HandoffBeat = 0.5f;   // cross-fade into the real scene
+
+    RectTransform welcomeRT;
+    TMP_Text welcomeLabel;
+    Image blinkFlash;
+    Vector2 previewHomePos, previewHomeSize;
+
+    /// Run the closing sequence. `onReady` fires at the moment the real game should take over — after
+    /// the planet has landed at centre and before the panel dissolves — so the caller can put the
+    /// camera on the real homeworld while the screen still covers it.
+    public System.Collections.IEnumerator Finale(string homeName, System.Action onReady)
+    {
+        if (root == null) yield break;
+
+        // --- 1. SETTLE. The reveal is done; let the world turn for a moment before anything moves. ---
+        //
+        // Land the bar on a true 100% FIRST. `shown` is exponentially smoothed and so is always a little
+        // short of its goal; the moment finaleRunning goes up, Update stops calling Apply, and whatever
+        // fraction it had reached would be frozen there. The bar would sit at 97% for the whole settle
+        // beat and then collapse — which is the one number a loading bar has to get right.
+        target = goal = shown = creepCeiling = 1f;
+        Apply(1f);
+
+        finaleRunning = true;
+        for (float e = 0f; e < SettleBeat; e += Time.unscaledDeltaTime) yield return null;
+
+        // --- 2. COLLAPSE. The bar closes horizontally into its own midpoint. ---
+        // Scale rather than width: the track, the fill and the percentage all shrink together toward the
+        // centre without any of them having to know about the others' layout.
+        if (percentLabel != null) percentLabel.gameObject.SetActive(false);
+        var barGroup = barTrack;
+        Vector3 startScale = barGroup != null ? barGroup.localScale : Vector3.one;
+        for (float e = 0f; e < CollapseBeat; e += Time.unscaledDeltaTime)
+        {
+            float t = Mathf.Clamp01(e / CollapseBeat);
+            // Eased IN — slow to leave, then quick. A linear collapse reads as the bar being deleted;
+            // this reads as it being drawn shut.
+            float k = t * t * t;
+            if (barGroup != null) barGroup.localScale = new Vector3(Mathf.Lerp(startScale.x, 0f, k), startScale.y, 1f);
+            yield return null;
+        }
+        if (barGroup != null) barGroup.localScale = new Vector3(0f, startScale.y, 1f);
+
+        // --- 3. BLINK. A bright point where the bar was, then gone. ---
+        EnsureBlink();
+        if (blinkFlash != null)
+        {
+            blinkFlash.gameObject.SetActive(true);
+            for (float e = 0f; e < BlinkBeat; e += Time.unscaledDeltaTime)
+            {
+                float t = Mathf.Clamp01(e / BlinkBeat);
+                var c = blinkFlash.color;
+                // Up fast, out slow: a spark, not a pulse.
+                c.a = t < 0.3f ? Mathf.Lerp(0f, 1f, t / 0.3f) : Mathf.Lerp(1f, 0f, (t - 0.3f) / 0.7f);
+                blinkFlash.color = c;
+                yield return null;
+            }
+            blinkFlash.gameObject.SetActive(false);
+        }
+        if (barTrack != null) barTrack.gameObject.SetActive(false);
+        if (headline != null) headline.gameObject.SetActive(false);
+        if (stageLabel != null) stageLabel.gameObject.SetActive(false);
+
+        // --- 4. TRAVEL. The planet moves from its slot to where the bar's midpoint was. ---
+        var pv = previewView != null ? previewView.rectTransform : null;
+        Vector2 from = pv != null ? pv.anchoredPosition : Vector2.zero;
+        Vector2 fromSize = pv != null ? pv.sizeDelta : Vector2.zero;
+        Vector2 toSize = fromSize * 1.35f;
+        // Where the bar's midpoint was, in the preview's own coordinates.
+        //
+        // Two corrections live in this one line. The preview is anchored to the column's LEFT EDGE
+        // (anchorMin/Max 0, 0.5) — not its centre — so reaching the column's midpoint needs an explicit
+        // half-column offset; and its pivot is its RIGHT edge, so landing the planet's CENTRE there
+        // needs another half-width, measured at the size it will BE on arrival rather than the size it
+        // started at. Without both, the planet stops about 300px short and the cross-fade that the whole
+        // finale exists to make seamless is the exact frame it jumps sideways.
+        Vector2 to = new Vector2(BarWidth * 0.5f + toSize.x * 0.5f, 0f);
+
+        for (float e = 0f; e < TravelBeat; e += Time.unscaledDeltaTime)
+        {
+            float t = Mathf.Clamp01(e / TravelBeat);
+            float k = 1f - Mathf.Pow(1f - t, 3f);   // eased out — arrives gently
+            if (pv != null)
+            {
+                pv.anchoredPosition = Vector2.Lerp(from, to, k);
+                pv.sizeDelta = Vector2.Lerp(fromSize, toSize, k);
+            }
+            yield return null;
+        }
+
+        // --- 5. WELCOME. ---
+        EnsureWelcome();
+        if (welcomeLabel != null)
+        {
+            welcomeLabel.text = $"Welcome to {homeName}";
+            welcomeLabel.gameObject.SetActive(true);
+            for (float e = 0f; e < WelcomeBeat; e += Time.unscaledDeltaTime)
+            {
+                float t = Mathf.Clamp01(e / WelcomeBeat);
+                // In over the first third, hold, then start leaving — the fade out finishes during the
+                // handoff below, so the text is never simply switched off.
+                float a = t < 0.33f ? t / 0.33f : t > 0.8f ? 1f - (t - 0.8f) / 0.2f : 1f;
+                var c = welcomeLabel.color; c.a = a; welcomeLabel.color = c;
+                yield return null;
+            }
+        }
+
+        // The real game takes the wheel HERE — camera onto the real homeworld — while this panel is
+        // still covering the screen. By the time it dissolves, what is underneath already matches.
+        onReady?.Invoke();
+        yield return null;
+
+        // --- 6. HANDOFF. Dissolve the panel; the preview goes last so the planet is the final thing
+        //     standing, overlapping the real one already drawn beneath it. ---
+        var panelImg = root.GetComponent<Image>();
+        Color panelStart = panelImg != null ? panelImg.color : Color.clear;
+        for (float e = 0f; e < HandoffBeat; e += Time.unscaledDeltaTime)
+        {
+            float t = Mathf.Clamp01(e / HandoffBeat);
+            if (panelImg != null) { var c = panelStart; c.a = panelStart.a * (1f - t); panelImg.color = c; }
+            if (skyLayer != null)
+            {
+                var cg = skyLayer.GetComponent<CanvasGroup>() ?? skyLayer.gameObject.AddComponent<CanvasGroup>();
+                cg.alpha = 1f - t;
+            }
+            if (welcomeLabel != null) { var c = welcomeLabel.color; c.a = Mathf.Min(c.a, 1f - t); welcomeLabel.color = c; }
+            // The preview holds full opacity until the last third, then goes — the real planet is
+            // already there behind it, in the same place at the same size.
+            if (previewView != null)
+            {
+                var c = previewView.color;
+                c.a = t < 0.66f ? 1f : 1f - (t - 0.66f) / 0.34f;
+                previewView.color = c;
+            }
+            yield return null;
+        }
+
+        finaleRunning = false;
+        Close();
+        RestoreAfterFinale(panelStart, from, fromSize);
+    }
+
+    bool finaleRunning;
+
+    /// Put everything the finale moved or hid back, so a SECOND generation in the same session opens on
+    /// a clean screen rather than on the wreckage of the last one's ending.
+    void RestoreAfterFinale(Color panelColor, Vector2 previewPos, Vector2 previewSize)
+    {
+        var panelImg = root != null ? root.GetComponent<Image>() : null;
+        if (panelImg != null) panelImg.color = panelColor;
+        if (skyLayer != null)
+        {
+            var cg = skyLayer.GetComponent<CanvasGroup>();
+            if (cg != null) cg.alpha = 1f;
+        }
+        if (previewView != null)
+        {
+            previewView.color = Color.white;
+            previewView.rectTransform.anchoredPosition = previewPos;
+            previewView.rectTransform.sizeDelta = previewSize;
+        }
+        if (barTrack != null) { barTrack.gameObject.SetActive(true); barTrack.localScale = Vector3.one; }
+        if (headline != null) headline.gameObject.SetActive(true);
+        if (stageLabel != null) stageLabel.gameObject.SetActive(true);
+        if (percentLabel != null) percentLabel.gameObject.SetActive(true);
+        if (welcomeLabel != null) welcomeLabel.gameObject.SetActive(false);
+    }
+
+    void EnsureBlink()
+    {
+        if (blinkFlash != null || barTrack == null) return;
+        var go = UIFactory.NewUI(barTrack.parent, "Blink");
+        var rt = go.GetComponent<RectTransform>();
+        // (0.5, 1), not barTrack's anchorMin. The track is horizontally STRETCHED — anchorMin (0,1) to
+        // anchorMax (1,1) — so its anchoredPosition.x of 0 means "centred across the span". Copying only
+        // the min would give the flash a point anchor at the column's top-LEFT corner and put the spark
+        // 260px away from where the bar actually closed.
+        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 1f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(46f, 46f);
+        rt.anchoredPosition = barTrack.anchoredPosition;
+        blinkFlash = go.AddComponent<Image>();
+        blinkFlash.sprite = null;
+        blinkFlash.raycastTarget = false;
+        blinkFlash.color = new Color(1f, 1f, 1f, 0f);
+        go.SetActive(false);
+    }
+
+    void EnsureWelcome()
+    {
+        if (welcomeLabel != null || barTrack == null) return;
+        welcomeLabel = UIFactory.Text(barTrack.parent, "", 34, UITheme.Accent, TextAlignmentOptions.Center);
+        welcomeRT = welcomeLabel.rectTransform;
+        welcomeRT.anchorMin = new Vector2(0, 1); welcomeRT.anchorMax = new Vector2(1, 1);
+        welcomeRT.pivot = new Vector2(0.5f, 1);
+        welcomeRT.sizeDelta = new Vector2(0, 46);
+        // Below the planet, which has just arrived at the column's centre.
+        welcomeRT.anchoredPosition = new Vector2(0, -150f);
+        welcomeLabel.gameObject.SetActive(false);
     }
 
     /// What the generator is working on, so the screen can show it.
@@ -798,6 +1044,38 @@ public class LoadingScreen : MonoBehaviour
         moonTimer = MoonBeat;
     }
 
+    // The preview camera's framing, as constants so the handoff can do arithmetic with them rather than
+    // guessing. Kept next to the values BuildPreview actually uses.
+    const float PreviewCamDistance = PreviewScale * 4.6f;
+    const float PreviewFov = 38f;
+
+    /// What fraction of the viewport's HEIGHT the planet occupies at the end of the finale's travel.
+    ///
+    /// This is the number that makes the cross-fade seamless: the real camera is framed so the actual
+    /// homeworld covers exactly this much of the screen, so the image being faded out and the scene
+    /// being faded in are the same size as well as in the same place.
+    ///
+    /// Two factors multiplied. Inside the render target, the planet (diameter = PreviewScale) sits in a
+    /// visible extent of 2 * distance * tan(fov/2). That target is then drawn into a box of
+    /// previewHomeSize * 1.35 within a full-screen panel — so the second factor is that box's height
+    /// against the panel's.
+    ///
+    /// Height, not width, deliberately: the render target is square and the screen is not, so a
+    /// width-based solve would drift with aspect ratio.
+    public float HandoffScreenFraction()
+    {
+        float visible = 2f * PreviewCamDistance * Mathf.Tan(PreviewFov * 0.5f * Mathf.Deg2Rad);
+        if (visible <= 0.01f) return 0f;
+        float shareOfTarget = PreviewScale / visible;
+
+        var rootRT = root != null ? root.GetComponent<RectTransform>() : null;
+        float panelH = rootRT != null ? rootRT.rect.height : 0f;
+        if (panelH <= 1f) return 0f;                    // unmeasured canvas — let the caller fall back
+
+        float boxH = previewHomeSize.y * 1.35f;
+        return shareOfTarget * (boxH / panelH);
+    }
+
     /// How many moons are actually staged — which is not the same as how many the planet HAS, since one
     /// with no baked surface is skipped. GameManager sizes its closing hold off this, so the screen does
     /// not sit on a still frame waiting for a moon that was never built.
@@ -1215,7 +1493,9 @@ public class LoadingScreen : MonoBehaviour
         //
         // Driven purely by unscaled TIME, so its pace is completely independent of how fast the bar is
         // moving, of timeScale, and of whether any progress has been reported at all.
-        if (headline != null)
+        // Silent during the finale: the bar is collapsing and the headline is already gone, and both
+        // would otherwise be rewritten every frame underneath the closing animation.
+        if (headline != null && !finaleRunning)
         {
             var sb = new System.Text.StringBuilder(headlineBase.Length + 40);
             sb.Append(headlineBase);
@@ -1261,7 +1541,9 @@ public class LoadingScreen : MonoBehaviour
         // the screen closes — the one number a loading bar must get right.
         if (goal - shown < 0.004f) shown = goal;
 
-        Apply(shown);
+        // Not while the finale is collapsing the bar — Apply rewrites the fill's width every frame, and
+        // the closing animation is the only thing that should be touching it by then.
+        if (!finaleRunning) Apply(shown);
     }
 
     void Apply(float t)
