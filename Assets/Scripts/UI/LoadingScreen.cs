@@ -831,7 +831,11 @@ public class LoadingScreen : MonoBehaviour
     static Material BuildStarMaterial(StarData star)
     {
         var c = star.color;
-        float k = Mathf.Clamp(StarDatabase.EmissionStrength(star) * 0.55f, 0.35f, 1f);
+        // 0.28, not 0.55, because EmissionStrength's floor moved above 1.0 (see StarData). At the old
+        // factor every class from G upward clamped to 1 and the preview lost all variety between a red
+        // dwarf and a blue giant. This keeps a G star at the same ~0.54 it always had and lets the
+        // hotter classes climb from there.
+        float k = Mathf.Clamp(StarDatabase.EmissionStrength(star) * 0.28f, 0.30f, 1f);
         return SpaceMaterials.Unlit(new Color(Mathf.Min(1f, c.r + k * 0.4f), Mathf.Min(1f, c.g + k * 0.3f),
                                                Mathf.Min(1f, c.b + k * 0.2f)));
     }
