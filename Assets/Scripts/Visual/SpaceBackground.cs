@@ -192,7 +192,7 @@ public class SpaceBackground : MonoBehaviour
         for (int i = 0; i < twinkleCount; i++)
         {
             float s = FovSize(dNear) * (0.0016f + (float)rng.NextDouble() * 0.0026f); // small
-            var dot = MakeQuad(rootNear, "Twinkle", dNear, s, _dot, StarTint(rng));
+            var dot = MakeQuad(rootNear, "Twinkle", dNear, s, _dot, StarTint(rng, out _));
             Scatter(dot, rng, FovSize(dNear) * 0.46f);
             var tw = dot.AddComponent<TwinkleStar>();
             tw.Init((float)(rng.NextDouble() * 6.28), 1.0f + (float)rng.NextDouble() * 2.4f, dot.transform.localScale);
@@ -372,12 +372,42 @@ public class SpaceBackground : MonoBehaviour
         ss.Init(new Vector3(1f, Random.Range(-0.4f, -0.1f), 0f).normalized * span * 2.2f, 1.0f);
     }
 
-    static Color StarTint(System.Random rng)
+    // ============================================================================================
+    // THE SKY IS MADE OF THE SAME STARS THE GAME IS
+    //
+    // This was three hardcoded tints — 60% pure white, 20% blue-ish, 20% warm — which reads as
+    // "coloured dots" rather than as a star field. The game already owns a real blackbody ramp
+    // (StarDatabase.ColorFromTemperature, 2600K red through 44000K blue-white), and it is what every
+    // sun in every system is coloured from. Drawing the backdrop from the same ramp is what makes the
+    // sky read as a place full of stars like the ones you can fly to, rather than as wallpaper behind
+    // them.
+    //
+    // WEIGHTED FOR A NAKED-EYE SKY, NOT FOR A CENSUS. By population the galaxy is overwhelmingly M-class
+    // red dwarfs (~76%), but almost none of them are visible to the eye — they are far too dim. The
+    // stars you actually SEE are the hot, bright, rare ones, which is why the real night sky reads
+    // blue-white with a scattering of orange rather than uniformly red. So this skews hot: a sky
+    // sampled from the true class distribution would be a wall of dim red and look nothing like a sky.
+    //
+    // `lumBias` comes back with the colour because in a real sky the two are not independent — hotter
+    // stars are the brighter ones, and rolling brightness separately is what makes a procedural star
+    // field look like static.
+    static Color StarTint(System.Random rng, out float lumBias)
     {
         float r = (float)rng.NextDouble();
-        if (r < 0.6f) return Color.white;
-        if (r < 0.8f) return new Color(0.7f, 0.8f, 1f);
-        return new Color(1f, 0.85f, 0.7f);
+
+        float kelvin;
+        if (r < 0.04f)      { kelvin = Mathf.Lerp(16000f, 30000f, (float)rng.NextDouble()); lumBias = 1.00f; }  // O/B — rare and brilliant
+        else if (r < 0.16f) { kelvin = Mathf.Lerp(9000f, 16000f, (float)rng.NextDouble());  lumBias = 0.92f; }  // A
+        else if (r < 0.36f) { kelvin = Mathf.Lerp(6600f, 9000f, (float)rng.NextDouble());   lumBias = 0.84f; }  // F
+        else if (r < 0.64f) { kelvin = Mathf.Lerp(5300f, 6600f, (float)rng.NextDouble());   lumBias = 0.76f; }  // G — sun-like
+        else if (r < 0.88f) { kelvin = Mathf.Lerp(4000f, 5300f, (float)rng.NextDouble());   lumBias = 0.68f; }  // K
+        else                { kelvin = Mathf.Lerp(2900f, 4000f, (float)rng.NextDouble());   lumBias = 0.58f; }  // M — the visible few
+
+        // Pulled only PART of the way to white — much less than StarDatabase.SubtleTint takes a sun.
+        // A sun's tint is halved because the coloured light it throws on its worlds has to stay
+        // believable; a backdrop star throws no light on anything, and at one pixel across it needs to
+        // keep most of its hue to read as coloured at all.
+        return Color.Lerp(StarDatabase.ColorFromTemperature(kelvin), Color.white, 0.22f);
     }
 
     // ---- Texture generation ----
@@ -434,8 +464,11 @@ public class SpaceBackground : MonoBehaviour
         for (int i = 0; i < 420; i++)
         {
             int x = rng.Next(w), y = rng.Next(h);
-            float b = brightness * (0.4f + (float)rng.NextDouble() * 0.5f);
-            var tint = StarTint(rng);
+            var tint = StarTint(rng, out float lumBias);
+            // Brightness is now PART random, part a function of the star's class — a hot blue star is
+            // reliably one of the bright ones. Rolling the two independently is what made the old field
+            // read as noise: every colour appeared at every brightness, which no real sky does.
+            float b = brightness * lumBias * (0.55f + (float)rng.NextDouble() * 0.55f);
             px[y * w + x] = new Color(tint.r * b, tint.g * b, tint.b * b, 1f);
         }
         tex.SetPixels(px); tex.Apply();

@@ -294,10 +294,27 @@ nothing ticks it, and the save no longer carries it.
 - **`Apply(body, go)`** — textures the sphere with its surface map, sets material params, adds a
   per-type **atmosphere** shell (airless bodies get none), and layers optional CC0 detail maps.
 
+### PlanetTemperature.cs  *(°C, derived from heat — and the inverse)*
+- **`BaseCelsius(heat, atmosphere, type)`** — `288.15·√heat − 273.15 + typeNudge + atmosphere·45`. The
+  greenhouse term is the one that catches people out: it adds up to **45 °C** on top of what `heat`
+  alone says, so `heat` and "how warm is this world" are not interchangeable.
+- **`HeatForCelsius(targetC, atmosphere, type)`** — the algebraic inverse. Anything choosing a world's
+  climate by TEMPERATURE must solve through this rather than assigning `heat` directly.
+  `GalaxyGenerator.CradleHeat` is why it exists: the home world's heat was set from the species'
+  `idealTemp` by a blind lerp, the greenhouse term pushed the result past the 50 °C liquid-water
+  ceiling, and `BiosphereRules` then correctly refused — so two Terran homeworlds in three, and every
+  Sylvan one, generated sterile. Bigger cradles now get a lower heat to offset their thicker air.
+
 ### SpaceBackground.cs  *(procedural sky)*
 - **`Create()`**, **`Rebuild()`**, **`Regenerate()`**, `SetEnabled/SetSolidMode/SetSolidColor/SetSeed`.
 - `LateUpdate` — parallax drift + shooting-star timer.
 - Texture gen: `GenerateNebula, GenerateStars, GenerateGalaxy, GenerateDot`.
+- **`StarTint`** draws from `StarDatabase.ColorFromTemperature` — the same blackbody ramp every sun in
+  the game is coloured from — rather than from three hardcoded tints, so the sky is made of the same
+  stars the galaxy is. Weighted for a NAKED-EYE sky rather than a census: by population the galaxy is
+  ~76% M-class red dwarfs, but almost none are visible, which is why a real night sky reads blue-white
+  with a scattering of orange. Brightness comes back with the colour (`lumBias`) because rolling the
+  two independently is what makes a procedural star field look like static.
 - Helper classes **`TwinkleStar`** (brightness pulse) and **`ShootingStar`** (streak + fade).
 
 ### PostFxController.cs

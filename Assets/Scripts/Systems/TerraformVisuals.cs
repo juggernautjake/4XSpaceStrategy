@@ -33,6 +33,9 @@ public static class TerraformVisuals
     /// as their kind of place, and terraforming is the act of making somewhere ELSE read that way. Two
     /// different curves for "what this species considers pleasant" would drift apart, and the tell would
     /// be a fully terraformed world that looked nothing like the homeworld.
+    ///
+    /// USE THE BODY-AWARE OVERLOAD BELOW WHERE A BODY IS IN HAND. This one cannot account for the
+    /// greenhouse term, because that depends on the world's own atmosphere — see the overload.
     public static PlanetTerrainGenerator.NoiseParams Ideal(Species s)
     {
         var p = PlanetTerrainGenerator.NoiseParams.Default;

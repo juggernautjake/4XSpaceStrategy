@@ -716,30 +716,167 @@ public class LoadingScreen : MonoBehaviour
     /// Gap between one moon finishing and the next appearing.
     public const float MoonBeat = 0.5f;
 
+    // ============================================================================================
+    // A TRANSFORMATION, NOT A REVEAL
+    //
+    // This used to uncover the finished world one tile at a time in a shuffled order. It read as a
+    // picture being wiped in, because that is what it was: every tile that appeared was already in its
+    // final state, and nothing ever CHANGED once it was on screen.
+    //
+    // Now the world is generated at a series of intermediate states and stepped through them. A wet
+    // world starts drowned — one flat global ocean — and its continents rise out of it; a dry one starts
+    // as bare, featureless rock and grows its relief, its mountains and its ice. Each tile passes
+    // through several biomes on the way to what it ends up as, which is the difference between watching
+    // a world be built and watching a photograph load.
+    //
+    // The mechanism is the one the request guessed at: it IS the terrain sliders being driven, just with
+    // the panel hidden. Each stage is the SAME noise field (same seed, same continent frequency) sampled
+    // with terrainParams lerped from a primordial state toward the world's real ones — so the continents
+    // that grow are the continents that will be there, in the places they will be.
+    //
+    // Cost: (MorphStages - 1) x MorphW x MorphH samples, once, when the homeworld is handed over. About
+    // 40k noise samples — a few tens of milliseconds on the frame the reveal is set up, inside a loading
+    // screen that is about to spend nine seconds playing it. The per-frame cost afterwards is one array
+    // write per texel, which is what it always was.
+    // ============================================================================================
+    const int MorphStages = 10;
+
+    // Fewer octaves than the real grid (which uses six). These are intermediate frames at 96x48 shown
+    // for under a second each; the fine coastline detail six octaves buys is invisible at this size and
+    // costs a third more time per sample. The FINAL frame does not go through this path at all — it is
+    // the real surface, so what the world settles into is exact.
+    const int MorphOctaves = 4;
+
     Texture2D morphTex;
-    Color[] morphPixels;     // the texture's CURRENT (partially revealed) contents, mutated in place
-    Color[] morphFinal;      // the finished surface, sampled once — never touched again after that
-    int morphRevealed;       // how many of morphOrder's tiles have already been swapped to morphFinal
+    Color[] morphPixels;     // the texture's CURRENT contents, mutated in place
+    Color[] morphFinal;      // the REAL finished surface, downsampled once — the last stage, exactly
+    Color[][] morphStages;   // [stage][texel] — the world at each point along its development
+    float[] morphJitter;     // per-texel offset, so tiles change one by one rather than the map flipping
     float morphClock;
     bool morphActive;
 
-    // A FIXED reveal order, shared by every planet this session — built once from System.Random (never
-    // UnityEngine.Random), so this purely cosmetic animation can never perturb the shared gameplay RNG
-    // stream that FactionAI and the generators keep drawing from while the morph plays out in the
-    // background over the next couple of seconds.
-    static readonly int[] morphOrder = BuildOrder(MorphW * MorphH, 20260720);
+    // ---- Building a world's development, shared by the planet and its moons ---------------------
 
-    static int[] BuildOrder(int n, int seed)
+    /// What a world looks like before it is a world.
+    ///
+    /// Two primordial states, and which one a body gets is decided by where it ENDS up: a world that
+    /// finishes with real seas starts drowned under one flat global ocean and grows its continents out
+    /// of it; a dry one starts as bare, featureless rock. Both are the "primordial orb with no features"
+    /// the request describes, and both are reached by the same means — the world's own noise field with
+    /// its relief flattened and its sea slid to one extreme.
+    static PlanetTerrainGenerator.NoiseParams Primordial(PlanetTerrainGenerator.NoiseParams f)
     {
-        var order = new int[n];
-        for (int i = 0; i < n; i++) order[i] = i;
-        var rng = new System.Random(seed);
-        for (int i = n - 1; i > 0; i--)
+        bool wet = f.SeaLevelOrNeutral >= 0.30f;
+        return new PlanetTerrainGenerator.NoiseParams
         {
-            int j = rng.Next(i + 1);
-            (order[i], order[j]) = (order[j], order[i]);
+            scale = f.scale,          // the SAME feature size, so the continents that grow are the real ones
+            elevation = 0.12f,        // almost no relief — an orb, not a landscape
+            moisture = wet ? f.moisture : 0.10f,
+            heat = f.heat,            // where it orbits is a fact about the world, not something it develops
+            ridge = 0.05f,            // no mountains yet
+            seaLevel = wet ? 1f : 0f  // drowned, or bone dry
+        };
+    }
+
+    static PlanetTerrainGenerator.NoiseParams LerpParams(
+        PlanetTerrainGenerator.NoiseParams a, PlanetTerrainGenerator.NoiseParams b, float t)
+        => new PlanetTerrainGenerator.NoiseParams
+        {
+            scale = Mathf.Lerp(a.scale, b.scale, t),
+            elevation = Mathf.Lerp(a.elevation, b.elevation, t),
+            moisture = Mathf.Lerp(a.moisture, b.moisture, t),
+            heat = Mathf.Lerp(a.heat, b.heat, t),
+            ridge = Mathf.Lerp(a.ridge, b.ridge, t),
+            seaLevel = Mathf.Lerp(a.SeaLevelOrNeutral, b.SeaLevelOrNeutral, t)
+        };
+
+    /// The world at each point along its development, ending on the REAL finished surface.
+    ///
+    /// The last stage is `finalFrame` — the downsample of the actual generated grid — rather than
+    /// another sample of the noise field. The surface is gameplay data (buildings get placed on it), so
+    /// what the world settles into has to be exactly what the player then plays on, not a close match
+    /// drawn with fewer octaves.
+    /// One frame of a world's development. Stage `MorphStages - 1` is not built here — it is the real
+    /// generated surface, supplied by the caller.
+    static Color[] BuildStage(CelestialBody body, int w, int h, int stage)
+    {
+        var final = body.terrainParams;
+        var p = LerpParams(Primordial(final), final, stage / (float)(MorphStages - 1));
+
+        var frame = new Color[w * h];
+        for (int y = 0; y < h; y++)
+        {
+            float v = (y + 0.5f) / h;
+            for (int x = 0; x < w; x++)
+            {
+                var smp = PlanetTerrainGenerator.SampleNormalized(body, (x + 0.5f) / w, v, p, MorphOctaves);
+                Color c = TerrainColorMap.Get(smp.terrain);
+                float b = Mathf.Lerp(0.86f, 1.12f, smp.shade);
+                frame[y * w + x] = new Color(c.r * b, c.g * b, c.b * b, 1f);
+            }
         }
-        return order;
+        return frame;
+    }
+
+    /// The array a world's development will be built into, with only its first and last frames filled.
+    ///
+    /// BUILT ONE FRAME PER UPDATE, not all at once. Nine stages x 96x48 is ~41,000 noise samples, which
+    /// is on the order of a tenth of a second on the main thread — and the frame it would land on is the
+    /// exact moment the homeworld is handed over and the reveal begins. That is the one moment in the
+    /// whole load where a stutter is guaranteed to be seen, and the surrounding code already goes out of
+    /// its way to keep it clean (see the string built once outside the reveal loop in GameManager).
+    ///
+    /// Spreading it costs nothing in practice: a stage is on screen for MorphDuration/9 ≈ one second,
+    /// and one is built per frame, so the builder runs about sixty times ahead of what is being shown.
+    static Color[][] NewStages(CelestialBody body, int w, int h, Color[] finalFrame)
+    {
+        var stages = new Color[MorphStages][];
+        stages[0] = BuildStage(body, w, h, 0);        // needed on the very first frame
+        stages[MorphStages - 1] = finalFrame;         // the real surface, already known
+        return stages;
+    }
+
+    /// Fill in the next unbuilt stage, if there is one. Cheap no-op once they all exist.
+    static void BuildNextStage(CelestialBody body, int w, int h, Color[][] stages)
+    {
+        if (stages == null) return;
+        for (int s = 1; s < MorphStages - 1; s++)
+            if (stages[s] == null) { stages[s] = BuildStage(body, w, h, s); return; }
+    }
+
+    /// Per-texel offsets in stage units, so the map does not flip over all at once — each tile crosses
+    /// into its next state at its own moment and the change reads as tiles forming rather than as a
+    /// slideshow. From System.Random and never UnityEngine.Random, for the reason the old shuffled
+    /// reveal order was: this is cosmetic, and it must not perturb the shared gameplay RNG stream that
+    /// the generators and FactionAI keep drawing from while it plays.
+    static float[] BuildJitter(int n, int seed)
+    {
+        var j = new float[n];
+        var rng = new System.Random(seed);
+        for (int i = 0; i < n; i++) j[i] = (float)rng.NextDouble();
+        return j;
+    }
+
+    /// Write the frame for a body partway through its development. `t` is 0..1 across the whole morph.
+    static void PaintStage(Color[][] stages, float[] jitter, Color[] into, float t)
+    {
+        float g = Mathf.Clamp01(t) * (MorphStages - 1);
+        for (int i = 0; i < into.Length; i++)
+        {
+            // Hard switch rather than a colour blend between stages. Blending would smear two biomes
+            // into a colour that is neither, which reads as a dissolve; switching keeps every texel a
+            // real terrain colour at every instant, which is what makes it read as TILES.
+            int s = Mathf.Clamp(Mathf.FloorToInt(g + jitter[i]), 0, MorphStages - 1);
+
+            // Stages are built one per frame (see NewStages), so in principle one can be reached before
+            // it exists. Walking back to the newest built frame keeps the world a beat behind rather
+            // than throwing — and in practice the builder runs about sixty stages ahead, so this never
+            // fires. It is here because "in practice" is not a guarantee on a stalled frame.
+            while (s > 0 && stages[s] == null) s--;
+            if (stages[s] == null) continue;
+
+            into[i] = stages[s][i];
+        }
     }
 
     // Far past the main camera's far plane, for the same reason PlanetGlobeWindow's stage is: it needs
@@ -995,7 +1132,6 @@ public class LoadingScreen : MonoBehaviour
         EnsureMorphTexture();
 
         Color barren = TerrainColorMap.Get(TerrainType.Barren);
-        for (int i = 0; i < morphPixels.Length; i++) morphPixels[i] = barren;
 
         // A nearest-tile downsample of the FINISHED grid — never a re-sample of the noise field, and
         // never at the real body's own resolution — so this costs the same fixed, tiny amount whether
@@ -1021,7 +1157,11 @@ public class LoadingScreen : MonoBehaviour
             }
         }
 
-        morphRevealed = 0;
+        // Only the first frame and the last are built here; the rest fill in one per Update, so the
+        // handover to the homeworld does not stutter. See NewStages.
+        morphStages = NewStages(planet, MorphW, MorphH, morphFinal);
+        PaintStage(morphStages, morphJitter, morphPixels, 0f);
+
         morphClock = 0f;
         morphActive = true;
 
@@ -1063,7 +1203,7 @@ public class LoadingScreen : MonoBehaviour
         public Material mat;
         public Texture2D tex;
         public Color[] pixels, final;
-        public int revealed;
+        public Color[][] stages;   // this moon's own development, ending on `final`
         public float clock;
         public bool revealing, done;
         public float angle, radius, speed, size;
@@ -1145,7 +1285,10 @@ public class LoadingScreen : MonoBehaviour
                 }
             }
 
-            for (int p = 0; p < m.pixels.Length; p++) m.pixels[p] = barren;
+            // The same development the planet gets, at the moons' own resolution — the request asks for
+            // the identical transformation, and it is the identical code.
+            m.stages = NewStages(src, MoonMorphW, MoonMorphH, m.final);
+            PaintStage(m.stages, moonJitter, m.pixels, 0f);
             m.tex.SetPixels(m.pixels);
             m.tex.Apply();
 
@@ -1368,14 +1511,29 @@ public class LoadingScreen : MonoBehaviour
 
     const int MoonMorphW = 40, MoonMorphH = 20;
 
-    /// A fixed reveal order for the moons, same reasoning as morphOrder: built from System.Random so a
-    /// cosmetic animation can never perturb the shared gameplay RNG stream.
-    static readonly int[] moonOrder = BuildOrder(MoonMorphW * MoonMorphH, 20260721);
+    /// Per-texel stage offsets for the moons — see BuildJitter. A different seed from the planet's so
+    /// three bodies developing in the same frame do not change in lockstep with each other.
+    static readonly float[] moonJitter = BuildJitter(MoonMorphW * MoonMorphH, 20260721);
 
     void StepMoons(float dt)
     {
         // Nothing until the planet itself is finished — that is the whole staging.
         if (morphActive) return;
+
+        // AND NOTHING ONCE THE HANDOFF HAS STARTED.
+        //
+        // `aligning` means AlignToReal has taken over: it re-textures the preview bodies from the REAL
+        // world (PlanetAppearance.RefreshTexture), and that call destroys whatever Texture2D was on the
+        // material before assigning its own — which for these preview moons is the very morph texture
+        // this method paints every frame. Carrying on afterwards throws
+        // MissingReferenceException on SetPixels, once per moon per frame, for the rest of the finale.
+        //
+        // Stopping is also correct rather than merely safe. The moons have finished developing by the
+        // time alignment begins, so there is nothing left to paint — and AlignToReal takes over their
+        // POSITIONS too, driving them from where the real moons actually are relative to the real
+        // planet. Stepping the cosmetic orbit here as well would have two writers fighting over
+        // localPosition every frame, and which one won would depend on Update ordering.
+        if (aligning) return;
 
         // The world gains its sky at exactly the moment the moons begin forming, so the two happen
         // together: the planet stops being bare rock as its moons arrive.
@@ -1400,37 +1558,49 @@ public class LoadingScreen : MonoBehaviour
             }
         }
 
+        StepMoonOrbits(dt);
+
         for (int i = 0; i < moons.Count; i++)
         {
             var m = moons[i];
             if (!m.body.gameObject.activeSelf) continue;
-
-            // Orbit. Around the stage centre, which is where the planet sits.
-            m.angle += m.speed * dt;
-            float rad = m.angle * Mathf.Deg2Rad;
-            m.body.localPosition = new Vector3(Mathf.Cos(rad) * m.radius, 0f, Mathf.Sin(rad) * m.radius);
-
             if (!m.revealing) continue;
 
-            m.clock += dt;
-            int total = moonOrder.Length;
-            int target = Mathf.Min(total, Mathf.FloorToInt(total * Mathf.Clamp01(m.clock / MoonMorphDuration)));
-            if (target <= m.revealed)
-            {
-                if (target >= total) { m.revealing = false; m.done = true; }
-                continue;
-            }
+            if (m.stages == null) { m.revealing = false; m.done = true; continue; }
 
-            for (int k = m.revealed; k < target; k++)
-            {
-                int idx = moonOrder[k];
-                m.pixels[idx] = m.final[idx];
-            }
-            m.revealed = target;
+            // The texture can be destroyed out from under us — see the `aligning` note at the top. That
+            // early-out is the real fix; this is the belt to its braces, because the ONE thing this
+            // method must never do is throw every frame for the rest of the load.
+            if (m.tex == null) { m.revealing = false; m.done = true; continue; }
+
+            // Same one-per-frame build as the planet. A moon's grid is 40x20, so its whole development
+            // is under a fifth of the planet's cost — but it is built while the planet is still on
+            // screen finishing, and a hitch there would land on the reveal it is meant to follow.
+            BuildNextStage(m.source, MoonMorphW, MoonMorphH, m.stages);
+
+            m.clock += dt;
+            float mt = Mathf.Clamp01(m.clock / MoonMorphDuration);
+
+            PaintStage(m.stages, moonJitter, m.pixels, mt);
             m.tex.SetPixels(m.pixels);
             m.tex.Apply();
 
-            if (m.revealed >= total) { m.revealing = false; m.done = true; }
+            if (mt >= 1f) { m.revealing = false; m.done = true; }
+        }
+    }
+
+    /// Just the orbits — the one part of a moon's per-frame work that must keep running after the
+    /// handoff has taken its textures away. A moon frozen in place during the dissolve is the tell that
+    /// the preview was ever a separate thing.
+    void StepMoonOrbits(float dt)
+    {
+        for (int i = 0; i < moons.Count; i++)
+        {
+            var m = moons[i];
+            if (m.body == null || !m.body.gameObject.activeSelf) continue;
+            m.angle += m.speed * dt;
+            float rad = m.angle * Mathf.Deg2Rad;
+            m.body.localPosition = new Vector3(Mathf.Cos(rad) * m.radius, 0f, Mathf.Sin(rad) * m.radius);
         }
     }
 
@@ -1455,6 +1625,10 @@ public class LoadingScreen : MonoBehaviour
     void ResetPlanetPlaceholder()
     {
         morphActive = false;
+        // Dropped with the texture, for the same reason: this screen is a singleton that outlives any one
+        // game, and holding the PREVIOUS galaxy's development frames would both leak them and risk a
+        // second generation painting the last game's homeworld before its own stages are built.
+        morphStages = null;
         if (subjectMats == null) return;
         var mat = subjectMats[(int)Subject.Planet];
         if (mat == null) return;
@@ -1474,32 +1648,28 @@ public class LoadingScreen : MonoBehaviour
         };
         morphPixels = new Color[MorphW * MorphH];
         morphFinal = new Color[MorphW * MorphH];
+        morphJitter = BuildJitter(MorphW * MorphH, 20260720);
     }
 
-    /// Advance the reveal: how many tiles SHOULD be shown by now is derived from elapsed time, so a
-    /// slow frame reveals a batch at once rather than the animation falling behind real time.
+    /// Advance the world's development. Driven from elapsed time rather than from a per-frame step, so a
+    /// slow frame skips ahead rather than letting the animation fall behind real time.
     void StepMorph(float dt)
     {
+        if (morphStages == null) { morphActive = false; return; }
+
+        // One stage per frame, well ahead of what is being shown.
+        BuildNextStage(homeBody, MorphW, MorphH, morphStages);
+
         morphClock += dt;
-        int total = morphOrder.Length;
-        int target = Mathf.Min(total, Mathf.FloorToInt(total * Mathf.Clamp01(morphClock / MorphDuration)));
-        if (target <= morphRevealed)
-        {
-            if (target >= total) morphActive = false;
-            return;
-        }
+        float t = Mathf.Clamp01(morphClock / MorphDuration);
 
-        for (int i = morphRevealed; i < target; i++)
-        {
-            int idx = morphOrder[i];
-            morphPixels[idx] = morphFinal[idx];
-        }
-        morphRevealed = target;
-
+        PaintStage(morphStages, morphJitter, morphPixels, t);
         morphTex.SetPixels(morphPixels);
         morphTex.Apply();
 
-        if (morphRevealed >= total) morphActive = false;
+        // At t == 1 every texel has been clamped to the last stage, which IS the real surface — so the
+        // world the player is handed is exactly the one that was generated, not an approximation of it.
+        if (t >= 1f) morphActive = false;
     }
 
     StarData homeStar;

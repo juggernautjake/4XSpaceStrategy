@@ -274,7 +274,7 @@ public static class GalaxyGenerator
         // The home world's climate matches the species' preferred temperature, so a Pyrothian home
         // reads hot and a Cryithn home reads frozen — the race's biology visibly shapes its cradle.
         var htp = planet.terrainParams;
-        htp.heat = Mathf.Lerp(0.55f, 1.7f, Mathf.Clamp01(species.idealTemp));
+        htp.heat = CradleHeat(species, planet);
         planet.terrainParams = htp;
         // Re-capture AFTER the override: this is the home world's natural climate, not what SeedTerrain
         // rolled a moment ago. It's already the species' ideal — a cradle needs no terraforming — and
@@ -390,6 +390,50 @@ public static class GalaxyGenerator
 
         if (!OrbitSafety.Validate(home.bodies, out string problem))
             Debug.LogWarning($"[OrbitSafety] home system {home.name}: {problem}");
+    }
+
+    // ============================================================================================
+    // THE CRADLE'S CLIMATE — SOLVED FOR, NOT ASSIGNED
+    //
+    // This used to be `heat = Lerp(0.55, 1.7, idealTemp)`, and that produced home worlds that were too
+    // hot to be alive. `heat` is calibrated so heat = 1 reads as Earth's ~15°C, but the temperature the
+    // rest of the game reads (PlanetTemperature.BaseCelsius) then adds GREENHOUSE WARMING on top —
+    // atmosphereThickness x 45°C — and the lerp never knew about it.
+    //
+    // A home world's atmosphere comes from its size (AtmosphereRules), and its size is rolled from
+    // mass 2-4, so the greenhouse term is +15°C, +19°C or +23°C depending on the roll. For a Terran
+    // cradle that put the average at 47°C, 51°C or 55°C against a 50°C liquid-water ceiling — so two
+    // rolls out of three generated a homeworld too hot for a biosphere, and the third cleared it by
+    // less than 3°C. A Sylvan cradle (idealTemp 0.55) never cleared it at all, which is a strange fate
+    // for the photosynthetic species. BiosphereRules.GeneratesWithBiosphere then correctly refused,
+    // and the world generated sterile.
+    //
+    // The other three gates were never the problem: sea level generates in 0.36-0.62 against a 0.15
+    // floor, atmosphere is 0.33-0.51 against a 0.12 floor, and the type is Rocky or Ocean by
+    // construction. Only temperature failed, and it failed silently.
+    //
+    // So: pick the temperature the cradle should HAVE and solve for the heat that produces it on this
+    // particular world, through the same law everything else reads. Bigger home worlds now get a lower
+    // heat to offset their thicker air, and all three sizes land on the same comfortable climate.
+    // ============================================================================================
+    static float CradleHeat(Species species, CelestialBody planet)
+    {
+        float ideal = Mathf.Clamp01(species.idealTemp);
+
+        // Only the cradles that are MEANT to be alive are pinned to the liquid-water band. A Pyrothian
+        // furnace and a Cryithn ice world never generate with a biosphere whatever their temperature
+        // (GeneratesWithBiosphere gates on type), so forcing them into a temperate band would only strip
+        // the character out of their worlds for no gain — they keep the original curve.
+        bool wantsLife = planet.type == CelestialBodyType.RockyPlanet
+                      || planet.type == CelestialBodyType.OceanPlanet;
+
+        if (!wantsLife) return Mathf.Lerp(0.55f, 1.7f, ideal);
+
+        // Inside the band with real margin at both ends, because heat is not frozen after generation:
+        // terraforming moves it, and the Dev sandbox moves it further. A cradle that started 1°C inside
+        // the ceiling would fall out of it the first time anything nudged the world.
+        float targetC = Mathf.Lerp(BiosphereRules.MinLiquidC + 5f, BiosphereRules.MaxLiquidC - 8f, ideal);
+        return PlanetTemperature.HeatForCelsius(targetC, planet.atmosphereThickness, planet.type);
     }
 
     // The body type the species is happiest on (highest affinity).
