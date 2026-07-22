@@ -296,6 +296,15 @@ public class CameraController : MonoBehaviour
 
     private void Update()
     {
+        // THE GENESIS SEQUENCE OWNS THE CAMERA WHILE IT RUNS.
+        //
+        // Exclusive, not cooperative. Two systems easing the same transform toward different targets is
+        // a fight neither wins: the sequence composes a shot, this rig's zoom easing pulls toward its own
+        // targetHeight on the same frame, and the result is a camera that judders and never settles. So
+        // input, zoom smoothing, follow and the clip-plane update all stand down for the duration, and
+        // GenesisCamera.Release hands back a synced rig.
+        if (GenesisCamera.Active) return;
+
         bool menuOpen = (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen)
                      || (StartMenu.Instance != null && StartMenu.Instance.IsOpen);
         bool planetViewOpen = PlanetViewWindow.Instance != null && PlanetViewWindow.Instance.IsOpen;
@@ -381,6 +390,9 @@ public class CameraController : MonoBehaviour
 
     private void LateUpdate()
     {
+        // See Update: the sequence owns the camera outright while it runs.
+        if (GenesisCamera.Active) return;
+
         // A followed SHIP's transform is re-resolved every frame — see followUnit. Done before the
         // follow test below so a ship whose token was rebuilt this frame is picked straight back up
         // rather than dropping the follow for a frame (which reads as a stutter).
@@ -614,6 +626,21 @@ public class CameraController : MonoBehaviour
     }
 
     public float Height => transform.position.y;
+
+    /// Adopt whatever pose the camera is in right now as the rig's own resting state.
+    ///
+    /// Called when the genesis sequence hands the camera back without naming a subject. `targetHeight`
+    /// is the zoom, and it is what Update eases toward — so if it still held the value it had before the
+    /// sequence, the very first frame of player control would glide the camera away from the shot the
+    /// intro just spent thirty seconds composing.
+    public void SyncToCurrentPose()
+    {
+        targetHeight = Mathf.Clamp(transform.position.y, minHeight, maxHeight);
+        following = false;
+        followTarget = null;
+        followUnit = null;
+        haveAnchor = false;
+    }
 
     /// Same rebase as ClearFocus when it turns following OFF — the reference plane the zoom is measured
     /// from is changing, so the height has to be re-expressed in the new one or the camera jumps.

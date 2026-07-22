@@ -625,6 +625,66 @@ public class LoadingScreen : MonoBehaviour
         go.SetActive(false);
     }
 
+    // ============================================================================================
+    // THE TITLES, FOR THE LIVE SEQUENCE
+    //
+    // GenesisSequence films the real world with the real camera, so it needs the two lines of text and
+    // nothing else this screen does — no preview, no bar collapse, no cross-fade. This is that: hide
+    // the loading furniture, show the message over the live galaxy, and get out of the way.
+    //
+    // The panel's own background goes fully transparent rather than the panel being switched off,
+    // because the text lives inside it — turning it off would take the titles with it.
+    // ============================================================================================
+    public void ShowGenesisTitles(string homeName)
+    {
+        if (root == null) return;
+
+        if (barTrack != null) barTrack.gameObject.SetActive(false);
+        if (headline != null) headline.gameObject.SetActive(false);
+        if (stageLabel != null) stageLabel.gameObject.SetActive(false);
+        if (percentLabel != null) percentLabel.gameObject.SetActive(false);
+        if (previewView != null) previewView.gameObject.SetActive(false);
+        { var sg = SkyGroup; if (sg != null) sg.alpha = 0f; }
+
+        var panel = root.GetComponent<Image>();
+        if (panel != null) panel.color = new Color(0f, 0f, 0f, 0f);
+
+        // Raycasts stop being blocked at the same moment the panel stops being visible, or the player
+        // would be left clicking through a pane of glass they cannot see.
+        if (panel != null) panel.raycastTarget = false;
+
+        EnsureWelcome();
+        if (welcomeLabel == null) return;
+
+        welcomeLabel.text = string.IsNullOrWhiteSpace(homeName)
+            ? "Your universe awaits..."
+            : $"Welcome to your homeworld, <color=#FFD24D>{homeName}</color>";
+        welcomeLabel.gameObject.SetActive(true);
+        StartCoroutine(FadeTitles());
+    }
+
+    IEnumerator FadeTitles()
+    {
+        if (welcomeLabel == null) yield break;
+
+        for (float e = 0f; e < WelcomeFadeIn; e += Time.unscaledDeltaTime)
+        {
+            var c = welcomeLabel.color; c.a = Mathf.Clamp01(e / WelcomeFadeIn); welcomeLabel.color = c;
+            yield return null;
+        }
+        var full = welcomeLabel.color; full.a = 1f; welcomeLabel.color = full;
+
+        for (float e = 0f; e < WelcomeHold; e += Time.unscaledDeltaTime) yield return null;
+
+        for (float e = 0f; e < WelcomeFadeOut; e += Time.unscaledDeltaTime)
+        {
+            var c = welcomeLabel.color; c.a = 1f - Mathf.Clamp01(e / WelcomeFadeOut); welcomeLabel.color = c;
+            yield return null;
+        }
+        welcomeLabel.gameObject.SetActive(false);   // gone, not merely transparent
+        Close();
+    }
+
     void EnsureWelcome()
     {
         if (welcomeLabel != null || barTrack == null) return;

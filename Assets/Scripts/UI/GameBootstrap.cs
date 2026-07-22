@@ -30,6 +30,7 @@ public static class GameBootstrap
         TargetIndicator.Create();           // pulsing lock-on ring for right-click sends
         UnitTokenRenderer.Create();
         UnitModelRenderer.Create();         // 3D meshes for stations + colony ships (falls back to tokens)
+        GenesisCamera.Create();             // the intro films the real world with the real camera
         SpaceBackground.Create();
         PostFxController.Create();
 
