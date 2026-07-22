@@ -47,6 +47,20 @@ public class GenesisCamera : MonoBehaviour
     /// owns the middle, so the subject sits left of it.
     public const float SubjectAnchorX = 0.35f;
 
+    /// THE ANGLE IS FIXED FOR THE WHOLE SEQUENCE, AND IT IS THE GAME'S OWN ANGLE.
+    ///
+    /// Pitch comes from CameraController.Pitch — the same 55° the world camera uses in play — so nothing
+    /// tilts when control is handed over. Yaw is pinned to one value for the duration rather than read
+    /// from wherever the camera happened to be pointing, because the sequence starts from an arbitrary
+    /// pose: whatever the main menu, a previous game, or the player's last session left behind. Read
+    /// live, the star would be framed from one bearing, the planet from another, and the "same world,
+    /// different moment" illusion would break on the first cut.
+    ///
+    /// Zero is deliberate and not arbitrary: it is the bearing CameraController.ResetRotation returns to,
+    /// so the intro ends looking the way the game's own "reset view" looks. Every beat therefore shares
+    /// one angle, and the handover is a continuation rather than a correction.
+    public const float SequenceYaw = 0f;
+
     /// Everything keeps its TRUE relative size within one framing — a bigger homeworld really does look
     /// bigger. But the true ratios are unusable: a real star is ~100x a planet and a real moon is a
     /// fraction of a percent of its world. So the ladder is compressed ONCE, here, and everything
@@ -85,9 +99,17 @@ public class GenesisCamera : MonoBehaviour
         if (cam == null) return;
 
         Active = true;
+        aliveClock = 0f;
         // Drop any follow the player had — otherwise CameraController's LateUpdate keeps re-centring on
         // whatever they were watching and drags the shot off its mark every frame.
         rig?.ClearFocus();
+
+        // Put the rig on the sequence's bearing before the first shot is composed. The rig keeps its own
+        // yaw (KeepCameraAngle rebuilds the rotation from it every frame in play), so handing control
+        // back on a different bearing than the rig believes it has would snap the view the instant the
+        // player moves. Setting it here means the angle is consistent through the sequence AND across
+        // the handover.
+        if (rig != null) rig.Yaw = SequenceYaw;
     }
 
     /// Hand the camera back, leaving the player exactly where the sequence left them.
@@ -98,9 +120,14 @@ public class GenesisCamera : MonoBehaviour
     public void Release(Transform focusOn)
     {
         Active = false;
+        aliveClock = 0f;
         if (rig == null || cam == null) return;
 
-        if (focusOn != null) rig.SnapFocus(focusOn, true);
+        // The FRACTION matters. Without it SnapFocus defaults to 0 and falls through to its
+        // "frame the whole neighbourhood" branch — which for a homeworld means its moons' orbits too, so
+        // the planet would jump to a different size and slide to centre in a single frame, at exactly
+        // the moment this is supposed to leave the player where the sequence left them.
+        if (focusOn != null) rig.SnapFocus(focusOn, true, subjectFraction);
         else rig.SyncToCurrentPose();
     }
 
@@ -110,9 +137,12 @@ public class GenesisCamera : MonoBehaviour
     /// width. Snaps immediately — use for the first shot of the sequence.
     public void Frame(Transform t, float screenFraction, float anchor)
     {
+        // `cam` too, not just `t` — Begin() early-returns when Camera.main is missing, and ApplyPose
+        // dereferences cam.transform. Without this the very first shot of the intro throws.
+        if (t == null || cam == null) return;
         subject = t; subjectFraction = screenFraction; anchorX = anchor;
         easeSeconds = 0f;
-        if (t != null) ApplyPose(SolvePose(t, screenFraction, anchor));
+        ApplyPose(SolvePose(t, screenFraction, anchor));
     }
 
     /// Ease to a new subject / framing over `seconds`. This is Beat 4 — the camera sliding off the star
@@ -150,7 +180,40 @@ public class GenesisCamera : MonoBehaviour
             cam.transform.rotation = Quaternion.Slerp(fromRot, target.rot, k);
         }
         else ApplyPose(target);
+
+        // THE VIEW VOLUME HAS TO FOLLOW THE CAMERA.
+        //
+        // CameraController.Update normally does this every frame, and it is standing down for us — so
+        // without this the near and far planes stay wherever the player last left them. A player who
+        // pressed Home before starting a new game leaves a near plane of ~10 units; the intro then films
+        // a homeworld from ~10 units away, entirely inside it, and renders nothing at all. The far plane
+        // fails the same way in reverse on the closing pull-back, clipping the galaxy away during the
+        // exact beat it is meant to arrive.
+        //
+        // The rig derives the planes from max(position.y, targetHeight), so targetHeight is kept in step
+        // with where the sequence has actually put the camera — a stale high value would re-introduce
+        // the near-plane failure it is there to prevent.
+        if (rig != null)
+        {
+            rig.SyncToCurrentPose();
+            rig.UpdateClipPlanes();
+        }
+
+        // WATCHDOG. `Active` disables the player's camera outright, and it is a process-wide static: if
+        // the driving coroutine is stopped or throws between Begin and Release — and StopAllCoroutines
+        // is a real thing that happens to the loading singleton — the camera would stay frozen for the
+        // rest of the session with no way back. An intro that overruns this has failed anyway.
+        aliveClock += Time.unscaledDeltaTime;
+        if (aliveClock > MaxSequenceSeconds)
+        {
+            Debug.LogWarning("[GenesisCamera] Sequence overran its watchdog; returning control.");
+            Release(subject);
+        }
     }
+
+    /// Longest the sequence may hold the camera before control is handed back regardless.
+    const float MaxSequenceSeconds = 180f;
+    float aliveClock;
 
     void ApplyPose((Vector3 pos, Quaternion rot) p)
     {
@@ -180,14 +243,13 @@ public class GenesisCamera : MonoBehaviour
     {
         float vfov = cam.fieldOfView * Mathf.Deg2Rad;
         float r = WorldRadius(t);
-
-        float half = Mathf.Max(0.01f, Mathf.Clamp01(screenFraction) * vfov * 0.5f);
-        float d = r / Mathf.Tan(half);
+        float d = DistanceForFraction(r, vfov, screenFraction);
 
         // The sequence keeps the world camera's authored pitch so that when control is handed over
         // nothing tilts. Only the distance and the lateral offset are ours.
-        float pitch = CameraController.Pitch;
-        Quaternion rot = Quaternion.Euler(pitch, cam.transform.eulerAngles.y, 0f);
+        // One fixed angle for every beat — see SequenceYaw. NOT the camera's live yaw: reading that
+        // would let the shot's bearing depend on wherever the previous session left the camera.
+        Quaternion rot = Quaternion.Euler(CameraController.Pitch, SequenceYaw, 0f);
         Vector3 forward = rot * Vector3.forward;
 
         float halfHeightWorld = d * Mathf.Tan(vfov * 0.5f);
@@ -197,6 +259,37 @@ public class GenesisCamera : MonoBehaviour
 
         Vector3 pos = t.position - forward * d + right * lateral;
         return (pos, rot);
+    }
+
+    // ============================================================================================
+    // HOW FAR AWAY A BODY MUST BE TO FILL A GIVEN FRACTION OF THE SCREEN
+    //
+    // PERSPECTIVE IS LINEAR IN tan, NOT IN THE ANGLE. That is the whole subtlety, and getting it wrong
+    // is invisible in code and obvious on screen.
+    //
+    // The tempting version — "the body should subtend fraction f of the FOV, so d = r / tan(f·V/2)" —
+    // treats screen height as proportional to angle. It is not. A point at camera-space (y, z) lands at
+    // NDC y' = (y/z) / tan(V/2), so the viewport's world half-height at depth d is d·tan(V/2), and a
+    // sphere of radius r covers
+    //
+    //     f = r / (√(d² − r²) · tan(V/2))
+    //
+    // Solving for d, with u = f·tan(V/2):
+    //
+    //     d = r·√(1 + u²) / u
+    //
+    // The naive form is short by a factor of (V/2)/tan(V/2) — 0.907 at a 60° FOV, so the subject renders
+    // about 9% smaller than asked for, and worse as the FOV widens (0.79 at 90°). It is exact only at
+    // f = 1, which is why it survives casual testing.
+    //
+    // CameraController.SnapFocus carries the identical solve, and the two MUST agree: the loading
+    // handoff matches an on-screen size across a cut, so a 9% disagreement is a visible pop.
+    // ============================================================================================
+    public static float DistanceForFraction(float radius, float vfovRadians, float screenFraction)
+    {
+        float t2 = Mathf.Tan(Mathf.Max(0.01f, vfovRadians) * 0.5f);
+        float u = Mathf.Max(1e-4f, Mathf.Clamp01(screenFraction)) * t2;
+        return radius * Mathf.Sqrt(1f + u * u) / u;
     }
 
     /// The body's real drawn radius. Renderer bounds first — that is what the player is looking at —

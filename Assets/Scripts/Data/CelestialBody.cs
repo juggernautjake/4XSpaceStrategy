@@ -8,10 +8,14 @@ public class CelestialBody
     public CelestialBodyType type;
     public ResourceDeposit resources;
 
-    // MASS VALUE — the player-facing measure of how big this world is (Earth-like ~2, gas giants 7-13,
-    // moons/asteroids below 1 in first-decimal steps). Set at generation from MassRules; surfaceSize below
-    // is DERIVED from it (MassRules.SurfaceSize). This is what the info windows show as the world's size.
-    public float mass = 2f;
+    // MASS VALUE — the player-facing measure of how big this world is (gas giants 7-13, moons/asteroids
+    // below 1 in first-decimal steps). Set at generation from MassRules; surfaceSize below is DERIVED
+    // from it (MassRules.SurfaceSize = mass x 3). This is what the info windows show as the world's size.
+    //
+    // The DEFAULT only applies to a body nothing has rolled a mass for — a hand-constructed one, or an
+    // older save. 3 rather than 2, so such a body lands on a 9-cell grid with room to build on rather
+    // than the 6-cell minimum.
+    public float mass = 3f;
 
     // Grid/visual size — still the number the whole engine sizes maps, orbits and atmosphere from, but now
     // a function of `mass` (MassRules.SurfaceSize) rather than an independent roll. Kept as its own field so

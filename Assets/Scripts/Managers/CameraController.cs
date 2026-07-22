@@ -207,7 +207,11 @@ public class CameraController : MonoBehaviour
 
     // Keep the view volume big enough for whatever height we're at. Without this the far plane silently
     // eats the galaxy; with it, zooming out simply works.
-    private void UpdateClipPlanes()
+    /// Public because the genesis sequence flies the camera itself and must keep the view volume in step.
+    /// Frozen clip planes are not cosmetic: a near plane left at 10.24 (what framing a whole galaxy
+    /// produces) sits IN FRONT of a homeworld filmed from ~10 units away, and the entire intro renders
+    /// empty. The far plane has the mirror problem on the closing pull-back.
+    public void UpdateClipPlanes()
     {
         if (cam == null) cam = GetComponent<Camera>();
         if (cam == null) return;
@@ -518,8 +522,12 @@ public class CameraController : MonoBehaviour
             float r = WorldRadius(target, 0f);
             var cam = GetComponent<Camera>();
             float vfov = cam != null ? cam.fieldOfView : 60f;
-            float half = Mathf.Max(0.01f, Mathf.Clamp01(screenFraction) * vfov * 0.5f * Mathf.Deg2Rad);
-            float d = r / Mathf.Tan(half);
+            // ONE solve, shared with the genesis sequence — see GenesisCamera.DistanceForFraction for
+            // the derivation. This used to be `r / tan(f·V/2)`, which treats screen height as
+            // proportional to ANGLE; perspective is linear in tan, so that came out ~9% short at a 60°
+            // FOV. It matters here more than anywhere: this framing exists to match an apparent size
+            // across a cut, and both sides have to compute it the same way or the cut pops.
+            float d = GenesisCamera.DistanceForFraction(r, vfov * Mathf.Deg2Rad, screenFraction);
             targetHeight = Mathf.Clamp(d * Mathf.Sin(Pitch * Mathf.Deg2Rad), minHeight, maxHeight);
         }
 
