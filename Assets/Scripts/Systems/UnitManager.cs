@@ -364,7 +364,13 @@ public class UnitManager : MonoBehaviour
         OnUnitsChanged?.Invoke();
     }
 
-    Vector3 WorldPos(CelestialBody b)
+    /// Where a body IS in the world right now.
+    ///
+    /// Public because callers outside this class legitimately need it: the Send-to list measures how far
+    /// each destination is, and GalaxyTrash reads a world's last position to park its ships when it is
+    /// deleted. Both want the same answer this class already computes, and a second copy of "where is
+    /// that body" would drift from this one the first time the fallback chain changed.
+    public Vector3 WorldPos(CelestialBody b)
     {
         if (b == null) return Vector3.zero;
         if (b.visualObject != null) return b.visualObject.transform.position;
