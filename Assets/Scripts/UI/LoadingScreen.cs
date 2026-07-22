@@ -1737,6 +1737,10 @@ public class LoadingScreen : MonoBehaviour
         previewLight.type = LightType.Point;
         previewLight.range = PreviewScale * 8f;
         previewLight.intensity = 1.5f;
+        // No shadows on the preview stage either — the star subject would shadow itself, and a moon
+        // passing the planet would drop a hard black disc across it mid-reveal. Matches the real system
+        // (SystemVisualizer.CreateStarVisual), which is the point: these are the same objects.
+        previewLight.shadows = LightShadows.None;
 
         BuildSubjectMaterials();
         previewBody.gameObject.SetActive(false);   // nothing on screen until a subject is reported

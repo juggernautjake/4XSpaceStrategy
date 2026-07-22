@@ -203,6 +203,20 @@ public class SystemVisualizer : MonoBehaviour
             rend.material.color = s.color;
             rend.material.EnableKeyword("_EMISSION");
             rend.material.SetColor("_EmissionColor", s.color * emK);
+
+            // A STAR IS A LIGHT SOURCE, NOT A LIT SURFACE.
+            //
+            // Left at the renderer defaults, the star's own sphere both CAST and RECEIVED shadows. Both
+            // are wrong for the same reason: the sphere is the surface of the thing emitting the light.
+            // Receiving meant the star could be shaded — by a planet passing in front of it, or by its
+            // own companion in a binary — so a sun would visibly go dark down one side. Casting meant a
+            // star threw a shadow of itself across its own system.
+            //
+            // The point light below sits at the sphere's centre, so every outward-facing normal on it
+            // points AWAY from that light. The star reads as bright from every angle because of its
+            // emission, which is view-independent — not because anything is lighting it.
+            rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            rend.receiveShadows = false;
         }
         EnsureClickCollider(star, 1.8f);
 
@@ -220,10 +234,19 @@ public class SystemVisualizer : MonoBehaviour
         var lightGo = new GameObject("StarLight");
         lightGo.transform.SetParent(star.transform, false);
         var light = lightGo.AddComponent<Light>();
+        // POINT, so it throws light equally in every direction — a star has no facing. (A Spot would
+        // light one cone of the system and leave the worlds behind it in permanent night.)
         light.type = LightType.Point;
         light.color = s.color;
         light.intensity = s.lightIntensity / Mathf.Max(1, combined.starCount);
         light.range = 160f;   // local to its own system so the whole galaxy isn't over-lit
+
+        // NO SHADOWS FROM A SUN. Set explicitly rather than trusting the component default: a star
+        // shadow-casting would mean every world in the system carving a hard black cone across its
+        // neighbours, and in a binary the two suns would shadow each other. Worlds still get their own
+        // day/night terminator, which is the shading that matters — that comes from the surface facing
+        // toward or away from this light, not from shadow maps.
+        light.shadows = LightShadows.None;
 
         return star;
     }
