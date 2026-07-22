@@ -149,6 +149,52 @@ public class PlacedBuilding
     // two grids join, their banks join too, with nothing to reconcile.
     public float stored = 0f;
 
+    // ============================================================================================
+    // THE FOOTPRINT THE PLAYER DREW
+    //
+    // Buildings are no longer fixed tetrominoes: you pick a type and paint the tiles it occupies, and
+    // everything about the building — cost, build time, upkeep, output, the Labor it ties up — scales
+    // with how many you painted (see BuildScaling).
+    //
+    // So the shape has to live on the BUILDING rather than on its type. Stored as two flat int lists
+    // rather than a List<Vector2Int>: BodyDTO holds PlacedBuilding directly and JsonUtility walks the
+    // TYPE graph, so nested container types are exactly the shape that tripped the serialization depth
+    // limit on moons (see BodyDTO.parentId). Flat lists have no such graph.
+    //
+    // EMPTY MEANS "USE THE AUTHORED SHAPE". That is what makes every world built before drawing existed
+    // load unchanged, and what lets CityGrowth keep placing settlements programmatically without
+    // inventing a footprint for them.
+    public List<int> cellsX = new List<int>();
+    public List<int> cellsY = new List<int>();
+
+    public bool HasDrawnShape => cellsX != null && cellsY != null
+                              && cellsX.Count > 0 && cellsX.Count == cellsY.Count;
+
+    /// How many tiles this building occupies — the number every scaled figure is derived from.
+    public int TileCount => HasDrawnShape ? cellsX.Count
+                          : (SurfaceBuildingDatabase.Get(Type)?.shape?.Length ?? 1);
+
+    /// Output multiplier from SIZE, on top of efficiency, condition and level.
+    ///
+    /// This is what makes a big building worth drawing. Without it a ten-tile farm cost twelve times as
+    /// much, took twelve times as long, tied up ten Labor — and grew exactly as much food as a one-tile
+    /// farm. Strictly worse in every dimension, which would have made the whole drawing mechanic a way
+    /// to waste resources.
+    ///
+    /// 1 for anything not drawn, so every authored footprint and every settlement CityGrowth places
+    /// behaves exactly as it always did.
+    public float SizeMult => HasDrawnShape ? BuildScaling.OutputMultiplier(TileCount) : 1f;
+
+    public void SetDrawnShape(List<Vector2Int> cells)
+    {
+        cellsX.Clear(); cellsY.Clear();
+        if (cells == null) return;
+        foreach (var c in cells) { cellsX.Add(c.x); cellsY.Add(c.y); }
+        // The origin stays meaningful — overlays, hover and the power grid all ask "where is this
+        // building" — so it is the first painted cell rather than something invented.
+        if (cells.Count > 0) { x = cells[0].x; y = cells[0].y; }
+    }
+
     public const int MaxLevel = 3;
 
     public SurfaceBuildingType Type => (SurfaceBuildingType)type;
@@ -163,7 +209,11 @@ public class PlacedBuilding
 
     /// Everything that scales a building's production: where you sited it, how good it is, and its
     /// condition — earthquake-damaged structures produce proportionally less until repaired/rebuilt.
-    public float OutputMult => Mathf.Clamp01(efficiency) * LevelMult * Mathf.Clamp01(health);
+    /// SizeMult folded in HERE rather than at each consumer, because there are six of them —
+    /// TickOutput, ResearchPerSec, PopGrowthPerSec, PowerGrid's generation and draw, and storage — and
+    /// one missed call site is a building that scales its cost but not its yield. Unchanged (x1) for
+    /// anything that was not drawn.
+    public float OutputMult => Mathf.Clamp01(efficiency) * LevelMult * Mathf.Clamp01(health) * SizeMult;
 
     /// Repair the record after a load. JsonUtility fills MISSING fields with 0, so a save written
     /// before levels/health existed comes back as level 0 / health 0 — a dead, non-existent tier.
@@ -589,5 +639,22 @@ public static class SurfaceBuildingDatabase
         return list;
     }
 
-    public static List<Vector2Int> Footprint(PlacedBuilding p) => Footprint(p.Type, p.x, p.y, p.rotation);
+    /// The cells a PLACED building actually occupies.
+    ///
+    /// A drawn building carries its OWN footprint — the player painted it — so it is read back rather
+    /// than re-derived from its type's authored shape. Anything without stored cells falls back to that
+    /// shape, which is what keeps every world built before drawing existed standing exactly as it was,
+    /// and what lets the grown settlements (placed programmatically by CityGrowth, never drawn) keep
+    /// working unchanged.
+    public static List<Vector2Int> Footprint(PlacedBuilding p)
+    {
+        if (p != null && p.HasDrawnShape)
+        {
+            var drawn = new List<Vector2Int>(p.cellsX.Count);
+            for (int i = 0; i < p.cellsX.Count && i < p.cellsY.Count; i++)
+                drawn.Add(new Vector2Int(p.cellsX[i], p.cellsY[i]));
+            return drawn;
+        }
+        return Footprint(p.Type, p.x, p.y, p.rotation);
+    }
 }

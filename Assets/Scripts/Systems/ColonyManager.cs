@@ -453,6 +453,12 @@ public class ColonyManager : MonoBehaviour
         // buildings, each scaled by how well it was SITED (see SurfaceBuildManager.EfficiencyAt) —
         // a mine on a rich seam earns its keep, one on dead rock never will.
         SurfaceBuildManager.TickOutput(b, dt);
+
+        // Construction advances on the same colony step, so build time runs on the GAME clock — a paused
+        // game builds nothing and a game at 5x builds five times as fast, matching every other timed
+        // thing here. Ticked after output, so a building that completes this step starts producing on
+        // the next one rather than retroactively.
+        SurfaceBuildQueue.Tick(b, dt);
         researchAccum += SurfaceBuildManager.ResearchPerSec(b) * TechEffects.ResearchRateMult * dt;
         growth += SurfaceBuildManager.PopGrowthPerSec(b);
 

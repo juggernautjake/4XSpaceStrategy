@@ -270,6 +270,12 @@ public class GameManager : MonoBehaviour
         // ...and whatever was in the object bin belonged to the PREVIOUS galaxy. Restoring one of those
         // would splice a system out of a dead galaxy into this one.
         GalaxyTrash.OnGameReplaced();
+        // ...and every build job belonged to a world in the galaxy that just went away.
+        // Refund first — the queue is not persisted yet, so dropping it would take the materials too.
+
+        SurfaceBuildQueue.RefundAll();
+
+        SurfaceBuildQueue.Clear();
         yield return null;
 
         // ============================================================================================

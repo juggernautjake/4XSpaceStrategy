@@ -64,6 +64,53 @@ public static class SurfaceBuildManager
     }
 
     /// Can the whole footprint go down here?
+    /// Everything about "may this KIND of thing be built on this world at all" — ownership, settlement,
+    /// tech, uniqueness, and the classes that are grown or upgraded into rather than placed.
+    ///
+    /// Split out of CanPlace so the DRAWN path can ask the same questions. Without it a painted
+    /// footprint bypassed every one of these: a fusion reactor before researching fusion, a second
+    /// shipyard, a capitol built from scratch, a factory on a world you do not own. Geometry is not
+    /// included, because a drawn building has no authored footprint to test.
+    public static bool CanPlaceType(CelestialBody b, SurfaceBuildingType t, out string why)
+    {
+        why = null;
+        var info = SurfaceBuildingDatabase.Get(t);
+
+        if (b == null) { why = "no world"; return false; }
+        if (info == null) { why = "unknown structure"; return false; }
+        if (b.owner != FactionManager.Player) { why = "this world isn't yours — claim it first"; return false; }
+        if (!b.Surveyed) { why = "survey this world first"; return false; }
+
+        if (!b.settled && !GameMode.DevMode)
+        {
+            why = b.habitability >= Colony.FoundThreshold
+                ? "nobody lives here yet — settle it with a colony ship"
+                : $"nobody lives here — terraform to {Colony.FoundThreshold:F0}% (now {b.habitability:F0}%), then settle it";
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(info.requiredTech) && !GameMode.DevMode && !TechManager.IsResearched(info.requiredTech))
+        {
+            var tech = TechDatabase.Get(info.requiredTech);
+            why = $"research {(tech != null ? tech.name : info.requiredTech)} first";
+            return false;
+        }
+
+        if ((info.uniquePerWorld || (OneOfEachPerWorld && !info.allowMultiple)) && CountOf(b, t) > 0)
+        { why = $"this world already has a {info.name.ToLower()}"; return false; }
+
+        if (t == SurfaceBuildingType.PlanetCapitol)
+        { why = "upgrade this world's Colony Ship Base into a capitol instead"; return false; }
+        if (t == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode)
+        { why = "a colony ship becomes this when it settles a world"; return false; }
+        if (CityGrowth.IsSettlement(t) && !GameMode.DevMode)
+        { why = "settlements grow on their own as the colony's population rises"; return false; }
+        if (t == SurfaceBuildingType.SurfaceShipyard && b.shipyardLevel >= 1)
+        { why = "this world already has a shipyard — upgrade its tier from the Production tab"; return false; }
+
+        return true;
+    }
+
     public static bool CanPlace(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation, out string why)
     {
         why = null;
@@ -235,6 +282,70 @@ public static class SurfaceBuildManager
 
         SimpleAudio.Instance?.PlayClick();
         return true;
+    }
+
+    // ============================================================================================
+    // PLACE A DRAWN FOOTPRINT
+    //
+    // The completion half of a build job: the cells were painted by the player, validated and paid for
+    // when the job was queued, and the building goes up now that the work is done. So no cost is taken
+    // here — charging again at completion would charge twice for one building.
+    //
+    // Efficiency is averaged over the cells ACTUALLY drawn and locked in, exactly as it always was for
+    // an authored footprint: a mine drawn across a rich seam pays forever, and one drawn across dead
+    // rock is a permanent mistake. Drawing does not change that rule, it just lets the player choose
+    // which ground the rule applies to.
+    // ============================================================================================
+    public static PlacedBuilding PlaceDrawn(CelestialBody b, SurfaceBuildingType t, List<Vector2Int> cells)
+    {
+        if (b?.surface == null || cells == null || cells.Count == 0) return null;
+
+        var info = SurfaceBuildingDatabase.Get(t);
+        if (info == null) return null;
+
+        // Re-checked at COMPLETION, not just at queue time. A build takes real time, and the ground can
+        // change underneath it — another building finishing on the same tiles, an earthquake, a
+        // terraforming project flooding the site. Refusing here is better than two buildings on one cell.
+        var occupied = Occupied(b);
+        foreach (var c in cells)
+        {
+            if (!InBounds(b, c.x, c.y)) return null;
+            if (!CellBuildable(b, info, c.x, c.y, out _)) return null;
+            if (occupied.Contains(c)) return null;
+        }
+
+        if (b.placedBuildings == null) b.placedBuildings = new List<PlacedBuilding>();
+
+        // A building that does not CARE about terrain is fully efficient anywhere — the same guard
+        // EfficiencyAt carries. Without it every index-agnostic class (habitat, factory, spaceport,
+        // storage, shipyard, and every reactor) would be born at efficiency 0 and produce nothing
+        // forever, because efficiency is locked in at placement. A fusion reactor lighting a grid with
+        // zero generation is the kind of bug that reads as "the power system is broken".
+        float eff = 1f;
+        if (info.index != SurfaceIndexKind.None)
+        {
+            float sum = 0f;
+            foreach (var c in cells) sum += SurfaceIndex.Get(b, info.index, c.x, c.y);
+            eff = Mathf.Clamp01(cells.Count > 0 ? sum / cells.Count : 0f);
+        }
+
+        var p = new PlacedBuilding { type = (int)t, rotation = 0, efficiency = eff };
+        p.SetDrawnShape(cells);
+        b.placedBuildings.Add(p);
+
+        PowerGrid.Invalidate();      // this may have just joined two grids into one
+        SurfaceLabor.Invalidate();   // ...and it may have just added to the workforce
+
+        foreach (var c in cells)
+            if (InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = true;
+
+        if (t == SurfaceBuildingType.SurfaceShipyard)
+        {
+            b.shipyardLevel = Mathf.Max(1, b.shipyardLevel);
+            UnitManager.Instance?.NotifyBuildChanged();
+        }
+
+        return p;
     }
 
     /// Place a structure with no cost and no checks. Used when the game itself puts something down —

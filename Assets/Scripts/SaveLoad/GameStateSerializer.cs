@@ -376,6 +376,12 @@ public static class GameStateSerializer
         // Same reason: the deleted systems sitting in the object bin came out of the galaxy this save
         // just replaced.
         GalaxyTrash.OnGameReplaced();
+        // ...and every build job belonged to a world in the galaxy that just went away.
+        // Refund first — the queue is not persisted yet, so dropping it would take the materials too.
+
+        SurfaceBuildQueue.RefundAll();
+
+        SurfaceBuildQueue.Clear();
 
         var bg = SpaceBackground.Instance;
         if (bg != null)
