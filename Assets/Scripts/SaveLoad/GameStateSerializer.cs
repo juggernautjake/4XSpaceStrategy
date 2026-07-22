@@ -189,7 +189,8 @@ public static class GameStateSerializer
             hasTectonics = b.hasTectonics,
             terraformProjects = b.terraformProjects != null ? new List<int>(b.terraformProjects) : new List<int>(),
             placedBuildings = b.placedBuildings != null ? new List<PlacedBuilding>(b.placedBuildings) : new List<PlacedBuilding>(),
-            deepSurveyed = b.deepSurveyed, clueIndex = b.clueIndex, cityGrowthTimer = b.cityGrowthTimer,
+            deepSurveyed = b.deepSurveyed, researchLevel = b.researchLevel,
+            clueIndex = b.clueIndex, cityGrowthTimer = b.cityGrowthTimer,
             birthrightClaim = b.birthrightClaim, settled = b.settled,
             visited = b.visited, explorationProgress = b.explorationProgress,
             hideReason = Persist(b.hideReason), ringHideReason = Persist(b.ringHideReason)
@@ -434,7 +435,12 @@ public static class GameStateSerializer
             b.settled = true;
         if (dto.buildings != null) b.buildings = new List<int>(dto.buildings);
         if (dto.terraformProjects != null) b.terraformProjects = new List<int>(dto.terraformProjects);
-        b.deepSurveyed = dto.deepSurveyed;
+        // researchLevel is the truth; `deepSurveyed` is the legacy flag. A save written before the ladder
+        // existed carries researchLevel = 0 (JsonUtility's default for an absent field) and the boolean,
+        // so falling back to it means a world studied under the old system keeps the overlays it had.
+        b.researchLevel = Mathf.Clamp(
+            dto.researchLevel > 0 ? dto.researchLevel : (dto.deepSurveyed ? 1 : 0),
+            0, CelestialBody.MaxResearchLevel);
         b.clueIndex = dto.clueIndex;
         b.cityGrowthTimer = dto.cityGrowthTimer;
         if (dto.placedBuildings != null) b.placedBuildings = new List<PlacedBuilding>(dto.placedBuildings);

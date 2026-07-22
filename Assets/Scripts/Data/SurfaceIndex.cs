@@ -383,20 +383,50 @@ public static class SurfaceIndex
     }
 
     // Minerals you can see from orbit; everything else needs someone on the ground.
+    // ============================================================================================
+    // WHICH TIER EACH OVERLAY BELONGS TO
+    //
+    // The six indexes are the backbone of the research ladder, split 1 - 2 - 2 - 1. The pairing is not
+    // alphabetical, it follows the DECISION each tier lets you make:
+    //
+    //   Survey (0)          Mineral            — should I claim this? You can see seams from orbit.
+    //   Deep Research I     Heat + Fertile     — where do things GO? These two decide where a geothermal
+    //                                            plant and a farm belong, so they arrive together.
+    //   Deep Research II    Wind + Solar       — how do I POWER it? The power-siting pair.
+    //   Deep Research III   Water              — the last one, with the late-game secrets.
+    // ============================================================================================
+    public static int RequiredLevel(SurfaceIndexKind k)
+    {
+        switch (k)
+        {
+            case SurfaceIndexKind.Mineral: return 0;
+            case SurfaceIndexKind.Heat:
+            case SurfaceIndexKind.Fertile: return 1;
+            case SurfaceIndexKind.Wind:
+            case SurfaceIndexKind.Solar: return 2;
+            case SurfaceIndexKind.Water: return 3;
+            default: return 0;
+        }
+    }
+
     public static bool Unlocked(CelestialBody b, SurfaceIndexKind k)
     {
         if (b == null) return false;
         if (GameMode.DevMode) return true;
         if (!b.Surveyed) return false;
-        return k == SurfaceIndexKind.Mineral || b.deepSurveyed;
+        return b.researchLevel >= RequiredLevel(k);
     }
 
+    /// Why an overlay is locked — and it names the TIER, because "needs a deep survey" was useless once
+    /// there was more than one of them. A greyed control that will not say what is missing is a dead end.
     public static string LockReason(CelestialBody b, SurfaceIndexKind k)
     {
         if (b == null) return "no world selected";
         if (!b.Surveyed) return "survey this world first";
-        if (k != SurfaceIndexKind.Mineral && !b.deepSurveyed)
-            return "needs a deep survey — send a research ship to study this world";
-        return null;
+
+        int need = RequiredLevel(k);
+        if (b.researchLevel >= need) return null;
+
+        return $"needs {DeepResearch.Name(need)} — send a research ship to study this world";
     }
 }

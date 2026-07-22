@@ -84,12 +84,15 @@ public partial class InspectorWindow
         }, 26);
         live.Button(researchBtn, () =>
         {
-            if (!u.Info.canResearch) return (false, "Deep Survey — needs a research ship");
-            if (u.location == null) return (false, "Deep Survey — travel to a world first");
-            if (!u.location.Surveyed) return (false, $"Deep Survey — survey {u.location.name} first");
-            return (true, u.location.deepSurveyed
-                ? $"Deep Survey {u.location.name} again"
-                : $"Deep Survey {u.location.name}");
+            if (!u.Info.canResearch) return (false, "Deep Research — needs a research ship");
+            if (u.location == null) return (false, "Deep Research — travel to a world first");
+
+            // DeepResearch owns the rules and answers in words, so the button says exactly what is
+            // missing — the tier, the empire level, or that the world has nothing left to give.
+            if (!DeepResearch.CanAdvance(u.location, out string why))
+                return (false, $"Deep Research — {why}");
+
+            return (true, $"{DeepResearch.Name(u.location.NextResearchLevel)} — {u.location.name}");
         });
 
         var colonizeBtn = UIFactory.Button(p, "", () =>

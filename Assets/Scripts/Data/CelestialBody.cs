@@ -162,7 +162,37 @@ public class CelestialBody
     // A DEEP survey (a research ship actually studying the world, not just mapping it from orbit) is
     // what unlocks the Heat, Fertile and Weather indexes. Minerals you can see from orbit; knowing
     // where the geothermal vents are takes someone on the ground.
-    public bool deepSurveyed = false;
+    // ============================================================================================
+    // HOW WELL THIS WORLD IS KNOWN — 0 surveyed only, up to 3
+    //
+    // A basic survey maps a world from orbit. Beyond that come three tiers of DEEP RESEARCH, each run
+    // once, each unlocking a different set of answers:
+    //
+    //   0  Surveyed        Mineral index. You can see the seams from orbit.
+    //   1  Deep Research I  Heat + Fertile — where the geothermal plant and the farm go.
+    //   2  Deep Research II Wind + Solar — how you power it. Plus exact ore richness, what the ruins
+    //                       hold, the terraform ceiling, the fault lines.
+    //   3  Deep Research III Water. Plus Vael fragments, anomalies, post-terraform projections.
+    //
+    // WHY IT IS A LADDER AND NOT A BOOLEAN. There are six survey indexes and the old single
+    // `deepSurveyed` flag unlocked five of them at once — so one ship order gave away everything a world
+    // had to tell you and there was nothing left to earn. Spreading them 1-2-2-1 across tiers is most of
+    // what makes a research ship worth building late rather than a formality early.
+    public int researchLevel = 0;
+
+    /// Back-compatible view of the ladder's first rung. Kept because "has this world been studied on the
+    /// ground at all" is still a fair question and fifteen call sites ask it; the SETTER exists so the
+    /// save loader can restore an old file that only knew the boolean.
+    public bool deepSurveyed
+    {
+        get => researchLevel >= 1;
+        set { if (value) researchLevel = Mathf.Max(researchLevel, 1); else researchLevel = 0; }
+    }
+
+    /// The next tier this world could reach, or 0 if it is fully studied.
+    public int NextResearchLevel => researchLevel >= MaxResearchLevel ? 0 : researchLevel + 1;
+
+    public const int MaxResearchLevel = 3;
 
     // Which fragment of the Vael's message this world hides (0..9), or -1 for none. Exactly ten worlds carry
     // one (AncientClues.SeedGalaxy); it's revealed when the world is surveyed AND deeply studied.

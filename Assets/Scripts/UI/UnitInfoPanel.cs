@@ -296,11 +296,21 @@ public class UnitInfoPanel : MonoBehaviour
         var t = ActionTarget();
         bool q = QueueMode;
         surveyBtn.interactable = t != null && u.Info.canExplore && (q || !t.Surveyed);
-        researchBtn.interactable = t != null && u.Info.canResearch && (q || t.Surveyed);
-        // A world can be studied again — leftover ores that could not be afforded last time, and any
-        // sites excavated since — so the label says which run this is rather than greying out.
+        // Gated on whether a tier is ACTUALLY available, not merely on the world being surveyed. A world
+        // that is fully studied, or whose next tier the empire has not reached, has nothing to offer —
+        // and a live button that does nothing is worse than a dead one that says why.
+        researchBtn.interactable = t != null && u.Info.canResearch
+                                && (q || DeepResearch.CanAdvance(t, out _));
+        // Names the TIER this world could reach, or why it cannot. "Deep Survey (again)" was the old
+        // label, and it was the tell that the action had no shape — a step you can repeat forever is not
+        // a decision. Each tier is now taken once, so the button says which one is next.
         if (researchLabel != null)
-            researchLabel.text = (t != null && t.deepSurveyed) ? "Deep Survey (again)" : "Deep Survey";
+        {
+            if (t == null) researchLabel.text = "Deep Research";
+            else if (DeepResearch.CanAdvance(t, out _)) researchLabel.text = DeepResearch.Name(t.NextResearchLevel);
+            else if (t.NextResearchLevel == 0) researchLabel.text = "Fully studied";
+            else researchLabel.text = $"{DeepResearch.Name(t.NextResearchLevel)} (locked)";
+        }
         returnBtn.interactable = u.location != null && u.location != UnitManager.Instance?.HomePlanet;
         scrapBtn.interactable = UnitManager.Instance != null && UnitManager.Instance.CanScrap(u);
         if (pauseLabel != null) pauseLabel.text = u.queuePaused ? "Resume Queue" : "Pause Queue";

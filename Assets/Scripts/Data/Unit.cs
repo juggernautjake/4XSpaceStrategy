@@ -21,7 +21,7 @@ public class ShipOrder
         if (kind == OrderKind.Move) return isPoint ? "Move to deep space" : $"Move to {TargetName}";
         // OrderKind.Research is the DEEP SURVEY — the second, slower pass a research ship makes over a
         // world that has already been surveyed. The enum name is kept because its ordinal is serialized.
-        if (kind == OrderKind.Research) return $"Deep Survey {TargetName}";
+        if (kind == OrderKind.Research) return $"Deep Research {TargetName}";
         return $"{kind} {TargetName}";
     }
     string TargetName => target != null ? target.name : "?";

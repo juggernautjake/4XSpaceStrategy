@@ -625,7 +625,7 @@ public class UnitManager : MonoBehaviour
                 else
                 {
                     if (b != null && !b.Surveyed)
-                        NotificationManager.Instance?.Push($"{u.name} can't deep survey yet",
+                        NotificationManager.Instance?.Push($"{u.name} can't start Deep Research yet",
                             $"{b.name} must be surveyed first.", null, NotifKind.Info);
                     FinishAction(u, OrderKind.Research, b);
                 }
@@ -808,8 +808,8 @@ public class UnitManager : MonoBehaviour
                 ? $" {sites} point(s) of interest charted — see the Survey tab."
                 : " Nothing of note on the surface.";
             string deeper = u.Info.canResearch
-                ? " This ship can also run a DEEP SURVEY here, which takes considerably longer but reads what the surface map can only point at."
-                : " A research ship could run a deep survey here for far more than the surface shows.";
+                ? " This ship can also run DEEP RESEARCH here — the first of three studies, each reading what the surface map can only point at."
+                : " A research ship could run Deep Research here for far more than the surface shows.";
 
             NotificationManager.Instance?.Push($"{b.name} surveyed", "Survey complete — map revealed.",
                 FlyTo(b), NotifKind.Research,
@@ -896,16 +896,14 @@ public class UnitManager : MonoBehaviour
     {
         int studied = 0;
 
-        // A deep study is what puts people on the ground long enough to chart the geothermal vents, the
-        // soil and the weather — it unlocks the Heat, Fertile and Weather survey overlays used when
-        // siting surface buildings. Mapping a world from orbit only ever shows you its mineral seams.
-        if (!b.deepSurveyed)
-        {
-            b.deepSurveyed = true;
-            // A world both surveyed and now studied on the ground is where a Vael fragment, if any,
-            // surfaces. AncientClues.Reveal pushes its own (much louder) notification when it finds one.
-            AncientClues.Reveal(b);
-        }
+        // ONE TIER, and only if this world and this empire can take it. Deep Research is a ladder of
+        // three steps now rather than a single flag that could be re-run forever — see DeepResearch,
+        // which owns which tier unlocks what and refuses in words when it cannot.
+        int reached = DeepResearch.Advance(b);
+        if (reached > 0)
+            NotificationManager.Instance?.Push(
+                $"{DeepResearch.Name(reached)} — {b.name}",
+                DeepResearch.Describe(reached), null);
 
         // ORES ARE DISCOVERED, NOT RESEARCHED.
         //

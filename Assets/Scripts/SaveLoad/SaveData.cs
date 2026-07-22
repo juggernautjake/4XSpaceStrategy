@@ -197,7 +197,12 @@ public class BodyDTO
     public float terraformability;
     public List<int> terraformProjects = new List<int>();   // completed TerraformProjectType ids
     public List<PlacedBuilding> placedBuildings = new List<PlacedBuilding>();   // surface-grid structures
-    public bool deepSurveyed;                               // unlocks the Heat/Fertile/Wind/Solar/Water indexes
+    public bool deepSurveyed;                               // LEGACY: "has tier I been done". Kept so an
+                                                            // older save still loads; researchLevel is the truth.
+    /// How far Deep Research has gone on this world, 0-3. Absent in an older save, where JsonUtility
+    /// leaves it 0 and the loader falls back to `deepSurveyed` — so a world studied under the old single
+    /// flag comes back at tier I rather than losing its overlays.
+    public int researchLevel;
     public int clueIndex = -1;                              // which Vael fragment this world hides, -1 = none
     public float cityGrowthTimer;                           // progress toward this world's next settlement
     public bool birthrightClaim;

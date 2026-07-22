@@ -349,6 +349,9 @@ public static class GalaxyGenerator
             moon.birthrightClaim = true;
             moon.visited = true;
             moon.explorationProgress = 1f;
+            // Birthright moons are yours from turn one and surveyed with the cradle. They are also where
+            // the player learns what the survey overlays even ARE, so they arrive fully studied too.
+            moon.researchLevel = CelestialBody.MaxResearchLevel;
             planet.moons.Add(moon);
             moonR += 0.6f + Random.Range(1.6f, 2.6f);   // clear both moons' discs, not just "some gap"
         }
@@ -366,6 +369,10 @@ public static class GalaxyGenerator
         planet.shipyardLevel = 1;          // the capital always has a working (level-1) shipyard
         planet.researchCenterLevel = 1;    // ...and its founding laboratory, so research can start at all
         planet.explorationProgress = 1f;   // home world is fully known from the start
+        // ...and fully STUDIED. "Fully known" has to mean every overlay, or the capital opens missing
+        // the Heat, Fertile, Wind, Solar and Water surveys it has always had — on the one world the
+        // player has lived on since before the game began.
+        planet.researchLevel = CelestialBody.MaxResearchLevel;
         // ...and its capitol, which is a real structure on the surface grid rather than an abstraction.
         // It carries the colony's founding reactor, so this is also what lights the home world's power
         // grid — without it the capital would open with every mine and factory unpowered. Every OTHER
