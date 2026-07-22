@@ -14,6 +14,12 @@ public static class StarOverview
     {
         if (sys == null) return;
 
+        // ...and only a system this galaxy still holds. A window can outlive its subject now that systems
+        // can be deleted (GalaxyTrash), and the Retarget below would otherwise build the habitable-zone
+        // band around `sys.pivot` — which is null, because the delete cleared it.
+        var g = SystemContext.Galaxy;
+        if (g != null && !g.systems.Contains(sys)) return;
+
         // Focus first: the Overview reads from the focused system for its zone and body lists, so opening
         // the window before the focus moves would show the previous system's worlds for a frame.
         GameManager.Instance?.SetFocus(sys);

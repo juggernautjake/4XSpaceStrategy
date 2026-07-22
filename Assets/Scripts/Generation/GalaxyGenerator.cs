@@ -116,10 +116,54 @@ public static class GalaxyGenerator
             foreach (var b in sys.AllBodies())
                 b.naturalOrbitRadius = b.orbitRadius;
 
+        // A very occasional world nobody has found yet.
+        SeedUndiscoveredWorlds(galaxy);
+
         // Hide ancient derelict stations at odd orbits, THEN scatter the ten Vael fragments across worlds
         // AND those derelicts (so some fragments drift out at a black hole or in dead space, not just on a moon).
         DerelictGen.Populate(galaxy);
         AncientClues.SeedGalaxy(galaxy);
+    }
+
+    // How often a generated world starts UNDISCOVERED — out there, orbiting, ticking, and not drawn.
+    //
+    // Deliberately tiny. The point of a hidden world is that finding one is a surprise, and at anything
+    // above a percent or two every game has three of them and the surprise is a chore instead. On a
+    // twelve-system galaxy of ~50 planets this is roughly a one-in-two chance of a single hidden world
+    // existing at all, which is about the rate the request asked for ("very rarely").
+    const float UndiscoveredChance = 0.012f;
+
+    // Concealed at generation, with the reason recorded as Undiscovered rather than Dev — so a later
+    // exploration event can reveal exactly these and nothing a developer hid by hand, and a cloak-breaking
+    // tech can leave them alone. Today all three reasons render identically; the distinction is the whole
+    // reason the enum exists.
+    //
+    // Uses UnityEngine.Random like the rest of generation does, on purpose: this draw sits INSIDE the
+    // shared generation stream, and pulling it out to a private System.Random would shift every draw made
+    // after it and change every galaxy the same seed used to produce.
+    static void SeedUndiscoveredWorlds(Galaxy galaxy)
+    {
+        foreach (var sys in galaxy.systems)
+        {
+            // Never the cradle. A home system with an invisible planet in it is not a mystery, it is a
+            // bug report — and ForceHomeWorld has already promised the player a legible starting system.
+            if (sys.isHome) continue;
+
+            foreach (var b in sys.bodies)
+            {
+                // Planets only, and only unclaimed ones. A world somebody already lives on is not
+                // undiscovered by definition, and a hidden moon reads as a rendering fault rather than as
+                // something to find, because its planet is right there next to it.
+                if (b.owner != null) continue;
+                if (Random.value >= UndiscoveredChance) continue;
+
+                b.hideReason = HideReason.Undiscovered;
+                // Its orbit line goes too — a ring drawn around empty space is a signpost, which is the
+                // opposite of undiscovered. (VisibilityService couples these anyway; set explicitly so
+                // revealing the world later doesn't leave the line behind.)
+                b.ringHideReason = HideReason.Undiscovered;
+            }
+        }
     }
 
     // Golden-angle spiral so systems spread out and don't overlap.

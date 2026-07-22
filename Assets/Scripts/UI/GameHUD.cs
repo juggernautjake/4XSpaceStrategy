@@ -9,7 +9,7 @@ public class GameHUD : MonoBehaviour
 {
     TMP_Text statusText;
     TMP_Text speedReadout;
-    Button orbitBtn, terrainBtn, detailedBtn, followBtn, devBtn;
+    Button orbitBtn, terrainBtn, detailedBtn, followBtn, devBtn, objectsBtn;
     Slider timeSlider;
     bool suppress;
 
@@ -52,6 +52,15 @@ public class GameHUD : MonoBehaviour
         // Free-look 3D globe of the selected body — spin it to any angle, including the poles and the far
         // side, which the fixed-pitch world camera can never reach.
         BarButton(bar.transform, "Globe", 60, () => PlanetGlobeWindow.Instance?.Toggle());
+        // Every object in the galaxy, with a hide switch and a bin. Dev Mode only — it deletes things.
+        //
+        // SHOWN rather than greyed, unlike the other Dev-gated buttons, because the bar is nearly full at
+        // the 1920 reference width: the fixed-width children plus the time controls and a minimum status
+        // readout leave only ~100px of slack, and a permanently visible button spends a third of it to
+        // display something that cannot be clicked. Dev Mode gets the width; normal play keeps the bar
+        // exactly as it was.
+        objectsBtn = BarButton(bar.transform, "Objects", 72, () => ObjectVisibilityWindow.Instance?.Toggle());
+        objectsBtn.gameObject.SetActive(false);
         devBtn = BarButton(bar.transform, "Dev: OFF", 78, () => GameMode.Toggle());
 
         Spacer(bar.transform, 10);
@@ -136,6 +145,9 @@ public class GameHUD : MonoBehaviour
         // Orbit / terrain editors are Dev-Mode sandbox tools.
         if (orbitBtn != null) orbitBtn.interactable = has && dev;
         if (terrainBtn != null) terrainBtn.interactable = has && dev;
+        // Needs no selection — it lists the whole galaxy — but it does need Dev Mode, because it deletes.
+        // Appears and disappears rather than greying; see the note where it is built.
+        if (objectsBtn != null && objectsBtn.gameObject.activeSelf != dev) objectsBtn.gameObject.SetActive(dev);
         if (devBtn != null)
         {
             var lbl = devBtn.GetComponentInChildren<TMP_Text>();

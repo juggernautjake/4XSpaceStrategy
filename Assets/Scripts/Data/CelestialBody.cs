@@ -75,6 +75,22 @@ public class CelestialBody
     public bool isHabitable = false;    // true if physically inside the Goldilocks zone
     public bool habitabilityLocked = false; // home world's difficulty-set rating won't be recomputed
 
+    // --- Concealment (see Visibility.cs) ---
+    // WHY the world is not drawn, not merely THAT it isn't. Dev / Cloaked / Undiscovered render
+    // identically today; they exist apart so a cloaking tech and an exploration discovery can each undo
+    // only their own concealment later without also un-hiding what a developer tucked away.
+    //
+    // Concealed is not absent: the world keeps orbiting, keeps being ticked, keeps its colony and its
+    // units. Only its renderers, colliders and lights are switched off. Never drive this field directly
+    // — VisibilityService owns it, because it also has to reach the orbit ring, which lives on a
+    // different GameObject.
+    public HideReason hideReason = HideReason.None;
+
+    /// The orbit LINE, concealed on its own. Independent of the world so a dev can strip the rings out
+    /// of a busy system without hiding anything in it; hiding the world conceals its line as well
+    /// (VisibilityService.ReasonForOrbitLine), since a ring drawn around nothing announces what is there.
+    public HideReason ringHideReason = HideReason.None;
+
     // --- Ownership ---
     // TWO STAGES, and they are genuinely different things. See Claim.cs.
     //

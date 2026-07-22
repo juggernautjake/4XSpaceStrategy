@@ -75,7 +75,16 @@ public class EscapeMenu : MonoBehaviour
         bl.lights = dots;
     }
 
+    // NOT DURING GENERATION.
+    //
+    // `Galaxy` is assigned and the start menu is closed roughly HALFWAY through the load, so without the
+    // third clause Escape opens the pause menu over the loading screen — on top of it, since Open() calls
+    // SetAsLastSibling — with Save, Load and New Game all live. Saving there captured the galaxy mid-
+    // cinematic, with every system flagged as concealed by the genesis sequence; loading or starting
+    // another game there ran a second generation into the middle of the first one. The loading screen is
+    // not a state the player is meant to be able to act from.
     static bool GameRunning => GameManager.Instance != null && GameManager.Instance.Galaxy != null
+                               && !GameManager.Instance.IsGenerating
                                && !(StartMenu.Instance != null && StartMenu.Instance.IsOpen);
 
     void Update()

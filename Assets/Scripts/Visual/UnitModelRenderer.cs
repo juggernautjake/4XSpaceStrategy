@@ -161,6 +161,10 @@ public class UnitModelRenderer : MonoBehaviour
         foreach (var u in stale) { if (models[u]?.go != null) Destroy(models[u].go); models.Remove(u); }
 
         foreach (var u in live) if (!models.ContainsKey(u)) models[u] = Build(u);
+
+        // Re-assert concealment on the freshly built meshes — see the matching note in
+        // UnitTokenRenderer.Rebuild.
+        foreach (var kv in models) VisibilityService.Apply(kv.Key);
     }
 
     Model Build(Unit u)

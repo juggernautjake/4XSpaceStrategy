@@ -26,6 +26,14 @@ public class CometManager : MonoBehaviour
 
     void Awake() { Instance = this; }
 
+    /// The comet root was destroyed underneath us — re-establish it on the next frame.
+    /// See DerelictRenderer.RebuildNow for the full reason; without this, Spawn's `root == null` guard
+    /// would silently stop every comet in the session after the first in-place galaxy rebuild.
+    public static void RebuildNow()
+    {
+        if (Instance != null) Instance.builtFor = null;
+    }
+
     void Update()
     {
         var g = SystemContext.Galaxy;

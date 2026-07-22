@@ -148,6 +148,26 @@ public class TerraformManager : MonoBehaviour
     }
 
     // Abandoning an unfinished project returns everything that was poured into it.
+    /// Drop any job whose world is no longer in the galaxy.
+    ///
+    /// A job holds a CelestialBody reference, and a deleted world (GalaxyTrash) keeps a perfectly valid
+    /// one — so the project goes on ticking, charging upkeep and, for an orbit migration, driving an
+    /// OrbitController on a visual that was destroyed. Dropped rather than cancelled: a refund for a
+    /// world that no longer exists is not a refund, it is free resources.
+    public void DropJobsForMissingBodies()
+    {
+        var g = SystemContext.Galaxy;
+        if (g == null) return;
+
+        var live = new HashSet<CelestialBody>();
+        foreach (var sys in g.systems)
+            foreach (var b in sys.AllBodies()) live.Add(b);
+
+        for (int i = jobs.Count - 1; i >= 0; i--)
+            if (jobs[i] == null || jobs[i].body == null || !live.Contains(jobs[i].body))
+                jobs.RemoveAt(i);
+    }
+
     public void Cancel(TerraformJob j)
     {
         if (j == null || !jobs.Remove(j)) return;

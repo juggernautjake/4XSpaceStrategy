@@ -79,6 +79,22 @@ public class TerraformWindow : MonoBehaviour
         if (show) { lastSig = null; root.GetComponent<RectTransform>().SetAsLastSibling(); }
     }
 
+    /// Close if the world it is offering projects for is no longer in the galaxy.
+    ///
+    /// It subscribes to PlanetUI.OnBodySelected but not to OnClosed, so clearing the selection leaves it
+    /// up — still holding the deleted world and still offering to start terraforming it.
+    public void HideIfGone()
+    {
+        if (body == null) return;
+        var g = SystemContext.Galaxy;
+        if (g == null) return;
+        foreach (var sys in g.systems)
+            foreach (var b in sys.AllBodies())
+                if (b == body) return;
+        body = null;
+        if (root != null) root.SetActive(false);
+    }
+
     public void ShowFor(CelestialBody b)
     {
         body = b; lastSig = null;

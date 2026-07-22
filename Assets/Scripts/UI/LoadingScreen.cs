@@ -374,6 +374,7 @@ public class LoadingScreen : MonoBehaviour
     const float WelcomeFadeOut = 0.6f; // and then completely gone, before anything else happens
     const float RingRevealGap = 0.25f; // a beat of empty sky, so the cue reads as its own event
     const float RingRevealBeat = 1.2f; // the orbits drawing in — the "you have control" cue
+    const float GalaxyArrivalGap = 0.45f; // ...then the rest of the galaxy, a beat behind the rings
 
     /// How much bigger the preview gets as it travels to the centre.
     ///
@@ -567,6 +568,15 @@ public class LoadingScreen : MonoBehaviour
             yield return null;
         }
         OrbitController.SetRevealAlpha(1f);
+
+        // --- 8. AND THE REST OF THE GALAXY ARRIVES. ---
+        //
+        // Every other system has been concealed since generation finished (GenesisReveal.Begin) —
+        // running the whole time, simply not drawn. A beat after the orbit lines, so the two reveals read
+        // as a sequence rather than as one event: your system draws itself, and then the galaxy it sits
+        // in turns up around it.
+        for (float e = 0f; e < GalaxyArrivalGap; e += Time.unscaledDeltaTime) yield return null;
+        GenesisReveal.Finish();
 
         finaleRunning = false;
         Close();

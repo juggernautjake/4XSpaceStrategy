@@ -18,6 +18,12 @@ public class StarSystemData
     public Faction owner;      // null == unclaimed
     public bool isHome;
 
+    // Conceal the WHOLE system in one flag — its sun(s), its worlds, their moons, every orbit line, and
+    // the enlarged star that stands in for it at galaxy zoom. Held here rather than stamped onto each
+    // part, so revealing the system gives every object back exactly the concealment it had of its own.
+    // See Visibility.cs.
+    public HideReason hideReason = HideReason.None;
+
     [System.NonSerialized] public Transform pivot;       // runtime render root at galaxyPosition
 
     public IEnumerable<CelestialBody> AllBodies()

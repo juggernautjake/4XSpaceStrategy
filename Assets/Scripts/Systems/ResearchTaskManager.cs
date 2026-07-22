@@ -28,6 +28,21 @@ public class ResearchTaskManager : MonoBehaviour
 
     void Awake() { Instance = this; }
 
+    /// Drop any study whose world is no longer in the galaxy — see TerraformManager's twin for why.
+    public void DropTasksForMissingBodies()
+    {
+        var g = SystemContext.Galaxy;
+        if (g == null) return;
+
+        var live = new HashSet<CelestialBody>();
+        foreach (var sys in g.systems)
+            foreach (var b in sys.AllBodies()) live.Add(b);
+
+        for (int i = active.Count - 1; i >= 0; i--)
+            if (active[i] == null || active[i].body == null || !live.Contains(active[i].body))
+                active.RemoveAt(i);
+    }
+
     public bool IsResearching(PointOfInterest poi)
     {
         foreach (var t in active) if (t.poi == poi) return true;

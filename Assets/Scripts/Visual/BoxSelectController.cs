@@ -115,6 +115,10 @@ public class BoxSelectController : MonoBehaviour
             foreach (var u in UnitManager.Instance.Units)
             {
                 if (u.owner != FactionManager.Player) continue;   // you can only command your own ships
+                // A box drag projects positions rather than raycasting, so disabling a concealed ship's
+                // collider does not protect it here — a drag across apparently empty space would select
+                // the cloaked ships sitting in it.
+                if (VisibilityService.IsHidden(u)) continue;
                 Vector3 sp = cam.WorldToScreenPoint(UnitManager.Instance.UnitPos(u));
                 if (sp.z <= 0f) continue;
                 if (sp.x >= min.x && sp.x <= max.x && sp.y >= min.y && sp.y <= max.y) picked.Add(u);
