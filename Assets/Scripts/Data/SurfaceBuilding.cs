@@ -289,7 +289,7 @@ public static class SurfaceBuildingDatabase
 
         // 2x3 block — farms want a lot of contiguous ground.
         _all[(int)SurfaceBuildingType.Farm] = new SurfaceBuildingInfo(SurfaceBuildingType.Farm, SurfaceBuildingCategory.Harvesting, "Farmland",
-            "Feeds the colony and grows its population. Wants the greenest ground you can find — check the Fertile Index.",
+            "Feeds the colony and grows its population. Wants the greenest ground you can find — check the Fertile Index. Irrigation and processing need a modest amount of power, so keep it in reach of the grid.",
             S(0, 0, 1, 0, 0, 1, 1, 1, 0, 2, 1, 2), SurfaceIndexKind.Fertile, 45, 25, 14f, new Color(0.35f, 0.80f, 0.30f))
         { waterPerSec = 0.3f, popGrowthPerSec = 1.8f };
 
@@ -520,20 +520,26 @@ public static class SurfaceBuildingDatabase
         Project(SurfaceBuildingType.City, 1.5f);
         Project(SurfaceBuildingType.Spaceport, 1.5f);
 
-        // ---- CONSUMERS: industry, and only industry ----
+        // ---- CONSUMERS: industry, and farmland ----
         //
-        // Housing, farmland and the grown settlements draw NOTHING, which is a decision rather than an
-        // oversight. Power is a new axis on a game that already has colonies in it; hanging it on
-        // POPULATION would mean every world that existed before this system did — and every world whose
-        // people live somewhere other than next to a reactor — quietly loses most of its growth, with
-        // the cause invisible and the fix unavailable. It would also feed back on itself, since it's
-        // population that builds the plants that would fix it. The spec's own line is that city blocks
-        // still work as housing without power; they just don't do the extra.
+        // HOUSING and the grown settlements draw NOTHING, which is a decision rather than an oversight.
+        // Power is a new axis on a game that already has colonies in it; hanging it on POPULATION would
+        // mean every world that existed before this system did — and every world whose people live
+        // somewhere other than next to a reactor — quietly loses most of its growth, with the cause
+        // invisible and the fix unavailable. It would also feed back on itself, since it's population
+        // that builds the plants that would fix it. The spec's own line is that city blocks still work
+        // as housing without power; they just don't do the extra.
         //
-        // So the grid throttles what you BUILD, not who lives there. What that costs is a world where
-        // farms don't care about electricity, which is a small lie next to a colony that strangles
-        // itself. If housing should draw later, it wants a grace period and a notification, not a line
-        // added here.
+        // FARMLAND now draws, which this note previously called out as the one thing the rule got wrong
+        // ("a world where farms don't care about electricity"). Irrigation, lighting and processing are
+        // exactly the sort of thing a farm spends power on, and a farm is a DELIBERATE PLACEMENT with a
+        // grid overlay in front of the player while they site it — so the cost is visible at the moment
+        // the decision is made, which is the thing an invisible population tax could never be.
+        //
+        // It is set deliberately LOW — below a Mine, the cheapest industrial draw — and PowerFactor
+        // floors a starved building rather than zeroing it, so an off-grid farm is a poor farm and never
+        // a dead one. That keeps the feedback loop the paragraph above worries about from closing: a
+        // colony whose grid collapses grows slowly, and can still grow its way back out.
         //
         // StorageDepot is left out for a different reason: its only output is storageCapacity, which
         // PlayerEconomy sums straight off the building and PowerFactor never touches. Giving it a draw
@@ -545,6 +551,7 @@ public static class SurfaceBuildingDatabase
         Draw(SurfaceBuildingType.Refinery, 1.4f);
         Draw(SurfaceBuildingType.ResearchOutpost, 1.2f);
         Draw(SurfaceBuildingType.Mine, 0.8f);
+        Draw(SurfaceBuildingType.Farm, 0.4f);
 
         // ---- Siting requirements ----
         // The floor below which a site is not merely poor but POINTLESS. Absolute, not graded on a

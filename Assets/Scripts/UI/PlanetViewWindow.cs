@@ -119,6 +119,11 @@ public class PlanetViewWindow : MonoBehaviour
         public RawImage terrain;
         public RawImage overlay;
         public RectTransform pieces;
+
+        /// The power grid, mirrored ABOVE the pieces exactly as it sits on the real map. Its own field
+        /// rather than a second use of `overlay`, because the two layers straddle the pieces: the ground
+        /// index below, the grid above. One image cannot be on both sides of them.
+        public RawImage power;
     }
 
     readonly List<WrapMirror> mirrors = new List<WrapMirror>();
@@ -193,9 +198,24 @@ public class PlanetViewWindow : MonoBehaviour
     /// across the whole run and clears when you actually put the piece down (Esc, or leaving the Build
     /// tab). Clearing it on the first placement would flash the overlay off and on for every node in a
     /// chain, which is the case where it is most wanted.
-    bool CarryingPowerPiece =>
-        selected.HasValue &&
-        SurfaceBuildingDatabase.Get(selected.Value).category == SurfaceBuildingCategory.Electrical;
+    /// Carrying something the GRID is relevant to — which is not only the things that make power.
+    ///
+    /// Anything that DRAWS power needs to know where the grid reaches, or it will be sited somewhere
+    /// pretty and brown out (PowerGrid.UnpoweredFactor). A farm, a mine, a factory, a lab: all of them
+    /// want to see the grid while they are being placed, alongside whatever index decides how well they
+    /// will actually perform there.
+    bool CarryingPowerPiece
+    {
+        get
+        {
+            if (!selected.HasValue) return false;
+            var info = SurfaceBuildingDatabase.Get(selected.Value);
+            return info != null
+                && (info.category == SurfaceBuildingCategory.Electrical
+                    || info.powerDraw > 0f
+                    || info.powerRange > 0f);
+        }
+    }
 
     /// The power overlay is up — either switched on from the Survey tab, or automatically because a
     /// power piece is in hand on the Build tab.
@@ -220,7 +240,11 @@ public class PlanetViewWindow : MonoBehaviour
     /// deposits still generate exactly as they did, but reading them is now something you do on purpose.
     bool MineralOverlayActive =>
         body != null && body.surface != null && SurfaceIndex.Unlocked(body, SurfaceIndexKind.Mineral) &&
-        ((tab == Tab.Survey && !showPowerOverlay && !showTectonicsOverlay && activeIndex == SurfaceIndexKind.Mineral) ||
+        // No `!showPowerOverlay` here any more. Leaving it in meant switching the grid on quietly
+        // downgraded the Mineral view: it still looked mineral-coloured, but fell through to the plain
+        // ramp and lost the NAMED ORE DEPOSITS, which this is the only place that draws. A map that
+        // looks the same and silently stops answering the question is the worst kind of regression.
+        ((tab == Tab.Survey && !showTectonicsOverlay && activeIndex == SurfaceIndexKind.Mineral) ||
          (tab == Tab.Build && CarryingMiningPiece));
     int rotation;
     Vector2Int hoverCell = new Vector2Int(-1, -1);
@@ -229,7 +253,8 @@ public class PlanetViewWindow : MonoBehaviour
     // Survey-mode state.
     SurfaceIndexKind activeIndex = SurfaceIndexKind.None;
     // The Power grid is now a Survey overlay rather than its own tab: this flag is the "showing the power
-    // grid" option, mutually exclusive with the index ramps (picking one clears the other).
+    // grid" option. NOT exclusive with the index ramps any more — the grid has its own layer above the
+    // buildings while an index ramp sits below them, so both can be read at once.
     bool showPowerOverlay;
     // The plate-tectonics overlay — another bespoke Survey overlay (not an index ramp): it washes the map
     // white, paints the fault lines red, and draws a push-direction arrow per plate. Mutually exclusive
@@ -239,6 +264,10 @@ public class PlanetViewWindow : MonoBehaviour
     readonly LiveSet live = new LiveSet();
     string lastSig = null;
     Texture2D overlayTex;
+    // The power grid's own layer and texture — see the note where it is built. Separate from
+    // overlayTex because the two are drawn at once now, at different depths.
+    RawImage powerOverlayImage;
+    Texture2D powerTex;
     float powerRepaintIn;   // see Update: the power overlay repaints on a timer, not every frame
     Color[] powerPx;        // reused scratch for that repaint — see RefreshPowerOverlay
 
@@ -365,6 +394,30 @@ public class PlanetViewWindow : MonoBehaviour
         BuildWrapMirror(-1);
         BuildWrapMirror(+1);
 
+        // ============================================================================================
+        // THE POWER GRID GETS ITS OWN LAYER, ABOVE THE PIECES
+        //
+        // Overlays used to share one image, which forced them to be mutually exclusive — and the loser
+        // was always the one the player most needed. A Combustion Plant is Electrical (so it wants the
+        // power map) but is sited on ORE (so it wants the Mineral map), and one of those had to be
+        // thrown away. Same for a Farm, which needs fertile ground AND a grid connection, and for wind
+        // and solar arrays, which need their own index AND somewhere to plug in.
+        //
+        // They cannot simply be composited into one texture either, because they belong at DIFFERENT
+        // DEPTHS. A ground index describes the ground, so a building standing on it should cover it. The
+        // power overlay describes which structures the grid reaches, so hiding it behind those same
+        // structures answers the question by obscuring it — a mine in a dead zone looked identical to a
+        // powered one.
+        //
+        // So: two layers. The ground index stays below the pieces; the power grid sits above them, right
+        // under the markers. Both can be on at once, each at the depth that makes it readable.
+        // ============================================================================================
+        var pwGO = UIFactory.NewUI(mapRT, "PowerOverlay");
+        powerOverlayImage = pwGO.AddComponent<RawImage>();
+        UIFactory.Stretch(powerOverlayImage.rectTransform);
+        powerOverlayImage.raycastTarget = false;
+        pwGO.SetActive(false);
+
         // Above the pieces so the ring/arrow are never hidden behind a structure's own tiles.
         markerLayer = UIFactory.NewUI(mapRT, "Markers").GetComponent<RectTransform>();
         UIFactory.Stretch(markerLayer);
@@ -452,6 +505,9 @@ public class PlanetViewWindow : MonoBehaviour
         ClearMoonPanes();
         foreach (var tx in moonTabThumbTextures) if (tx != null) Destroy(tx);
         moonTabThumbTextures.Clear();
+        // Both overlay textures are ours alone — nothing else references them, so nothing else frees them.
+        if (overlayTex != null) Destroy(overlayTex);
+        if (powerTex != null) Destroy(powerTex);
         if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
     }
 
@@ -862,6 +918,14 @@ public class PlanetViewWindow : MonoBehaviour
         m.pieces = UIFactory.NewUI(m.root, "Pieces").GetComponent<RectTransform>();
         UIFactory.Stretch(m.pieces);
 
+        // Built AFTER pieces, so it draws over them — matching the real map's stacking. A grid whose job
+        // is showing which structures it reaches cannot be hidden behind those structures.
+        var p = UIFactory.NewUI(m.root, "PowerOverlay");
+        m.power = p.AddComponent<RawImage>();
+        UIFactory.Stretch(m.power.rectTransform);
+        m.power.raycastTarget = false;
+        p.SetActive(false);
+
         m.root.gameObject.SetActive(false);
         mirrors.Add(m);
     }
@@ -901,6 +965,17 @@ public class PlanetViewWindow : MonoBehaviour
                 if (m.overlay.gameObject.activeSelf != ov) m.overlay.gameObject.SetActive(ov);
                 m.overlay.texture = overlayImage.texture;
                 m.overlay.color = overlayImage.color;
+            }
+
+            // Mirrored on its own now that it has its own layer. Miss this and a node chain crossing
+            // longitude 0 reads as BROKEN: the mirrored half shows the terrain, the index and the
+            // buildings, and the grid simply stops at the seam.
+            if (m.power != null && powerOverlayImage != null)
+            {
+                bool pv = powerOverlayImage.gameObject.activeSelf && powerOverlayImage.texture != null;
+                if (m.power.gameObject.activeSelf != pv) m.power.gameObject.SetActive(pv);
+                m.power.texture = powerOverlayImage.texture;
+                m.power.color = powerOverlayImage.color;
             }
         }
     }
@@ -1135,37 +1210,49 @@ public class PlanetViewWindow : MonoBehaviour
                 }
                 break;
             case Tab.Survey:
-                // When the power overlay is on, the status line explains the POWER map (legend + balance);
-                // otherwise it describes the selected index overlay.
-                if (showPowerOverlay)
+                // BOTH overlays can be up at once now, so the status line ACCUMULATES rather than
+                // branching. The old `if power / else index` meant switching the grid on left the index
+                // ramp on screen with no legend and no description — a coloured map and nothing saying
+                // what the colours were.
                 {
-                    var nets = PowerGrid.Nets(body);
-                    if (nets.Count == 0)
+                    var sur = new System.Text.StringBuilder();
+
+                    if (activeIndex != SurfaceIndexKind.None)
+                        sur.Append($"<b>{SurfaceIndex.Name(activeIndex)}</b> — {SurfaceIndex.Describe(activeIndex)}");
+
+                    if (showPowerOverlay)
                     {
-                        statusText.text = "<color=#FFBF4D>No power on this world.</color> <size=10><color=#9FB4C8>" +
-                                          "The map is dark because there is no grid on it — build a plant from the Build tab.</color></size>";
-                        break;
+                        if (sur.Length > 0) sur.Append('\n');
+
+                        var nets = PowerGrid.Nets(body);
+                        if (nets.Count == 0)
+                        {
+                            sur.Append("<color=#FFBF4D>No power on this world.</color> <size=10><color=#9FB4C8>" +
+                                       "The map is dark because there is no grid on it — build a plant from the Build tab.</color></size>");
+                        }
+                        else
+                        {
+                            float gen = PowerGrid.TotalGeneration(body), draw = PowerGrid.TotalDraw(body);
+                            string hex = ColorUtility.ToHtmlStringRGB(gen >= draw ? UITheme.Good : UITheme.Bad);
+                            sur.Append("<color=#F5F58C>■</color> grid   <color=#4DC8FF>■</color> plants & relays");
+                            sur.Append($"   ·   <b>{gen:0.0}</b> made, <b>{draw:0.0}</b> drawn, ");
+                            sur.Append($"<color=#{hex}><b>{(gen - draw >= 0f ? "+" : "")}{gen - draw:0.0}/s</b></color>");
+                            if (hoverCell.x >= 0)
+                            {
+                                var n = PowerGrid.NetAt(body, hoverCell.x, hoverCell.y);
+                                sur.Append($"\n<color=#9FB4C8>({hoverCell.x},{hoverCell.y})</color> ");
+                                sur.Append(n == null
+                                    ? "<color=#FF6659>dark — no grid reaches this tile</color>"
+                                    : $"<color=#F5F58C>on Grid {n.index}</color> <size=10><color=#9FB4C8>· {PowerGrid.SupplyLabel(n)}</color></size>");
+                            }
+                        }
                     }
-                    float gen = PowerGrid.TotalGeneration(body), draw = PowerGrid.TotalDraw(body);
-                    string hex = ColorUtility.ToHtmlStringRGB(gen >= draw ? UITheme.Good : UITheme.Bad);
-                    var sb = new System.Text.StringBuilder();
-                    sb.Append("<color=#F5F58C>■</color> grid   <color=#4DC8FF>■</color> plants & relays");
-                    sb.Append($"   ·   <b>{gen:0.0}</b> made, <b>{draw:0.0}</b> drawn, ");
-                    sb.Append($"<color=#{hex}><b>{(gen - draw >= 0f ? "+" : "")}{gen - draw:0.0}/s</b></color>");
-                    if (hoverCell.x >= 0)
-                    {
-                        var n = PowerGrid.NetAt(body, hoverCell.x, hoverCell.y);
-                        sb.Append($"\n<color=#9FB4C8>({hoverCell.x},{hoverCell.y})</color> ");
-                        sb.Append(n == null
-                            ? "<color=#FF6659>dark — no grid reaches this tile</color>"
-                            : $"<color=#F5F58C>on Grid {n.index}</color> <size=10><color=#9FB4C8>· {PowerGrid.SupplyLabel(n)}</color></size>");
-                    }
-                    statusText.text = sb.ToString();
+
+                    if (sur.Length == 0)
+                        sur.Append("<color=#9FB4C8>Pick an index and/or the power grid on the right to overlay them on the map.</color>");
+
+                    statusText.text = sur.ToString();
                 }
-                else
-                    statusText.text = activeIndex == SurfaceIndexKind.None
-                        ? "<color=#9FB4C8>Pick an index (or the power grid) on the right to overlay it on the map.</color>"
-                        : $"<b>{SurfaceIndex.Name(activeIndex)}</b> — {SurfaceIndex.Describe(activeIndex)}";
                 break;
             default:
                 statusText.text = body.Surveyed
@@ -2754,10 +2841,13 @@ public class PlanetViewWindow : MonoBehaviour
             Note(card, SurfaceIndex.Describe(k));
         }
 
-        var btn = UIFactory.Button(card, "", () => { activeIndex = k; showPowerOverlay = false; showTectonicsOverlay = false; lastSig = null; }, 24);
+        // Picking an index no longer switches the grid off — they draw on separate layers now, and the
+        // exclusivity was asymmetric anyway: index-then-power worked, power-then-index killed the grid
+        // with nothing on screen to explain why.
+        var btn = UIFactory.Button(card, "", () => { activeIndex = k; showTectonicsOverlay = false; lastSig = null; }, 24);
         live.Button(btn, () =>
         {
-            bool on = activeIndex == k && !showPowerOverlay && !showTectonicsOverlay;
+            bool on = activeIndex == k && !showTectonicsOverlay;   // an index and the grid can both be up
             string nm = labelOverride ?? SurfaceIndex.Name(k);
             if (k == SurfaceIndexKind.None) return (true, on ? $"• {nm}" : nm);
             if (!SurfaceIndex.Unlocked(body, k)) return (false, $"{nm} — {SurfaceIndex.LockReason(body, k)}");
@@ -2776,7 +2866,9 @@ public class PlanetViewWindow : MonoBehaviour
         var btn = UIFactory.Button(card, "", () =>
         {
             showPowerOverlay = !showPowerOverlay;
-            if (showPowerOverlay) { activeIndex = SurfaceIndexKind.None; showTectonicsOverlay = false; }
+            // The power grid no longer clears the chosen index — it has its own layer above the pieces
+            // and the two are legible together. Tectonics still takes the whole map, so it still yields.
+            if (showPowerOverlay) showTectonicsOverlay = false;
             lastSig = null;
         }, 24);
         live.Button(btn, () =>
@@ -3029,6 +3121,17 @@ public class PlanetViewWindow : MonoBehaviour
         // (index ramp, power, build, nothing) leaves none behind; the tectonics branch redraws them.
         ClearPlateArrows();
 
+        // The power layer is resolved FIRST, before any branch can early-return, because it is now
+        // independent of whatever the ground layer is doing. Left to the branches, a path that returned
+        // early — tectonics, or an unsurveyed world — would strand the grid on screen from the last
+        // repaint.
+        bool wantPower = PowerOverlayActive && body != null && body.surface != null;
+        if (powerOverlayImage != null)
+        {
+            powerOverlayImage.gameObject.SetActive(wantPower);
+            if (wantPower) RefreshPowerOverlay();
+        }
+
         // Two different overlays share one texture:
         //  BUILD  — holding a structure highlights the best 10% of sites for it on this world.
         //  SURVEY — the raw index ramp.
@@ -3039,37 +3142,36 @@ public class PlanetViewWindow : MonoBehaviour
         if (tab == Tab.Survey && showTectonicsOverlay && body.surface != null && body.Surveyed && TectonicsMap.Active(body))
         {
             overlayImage.gameObject.SetActive(true);
-            SetOverlayAbovePieces(false);   // ground, not grid — buildings stand on top of it
+            SetOverlayBelowPieces();   // ground, not grid — buildings stand on top of it
             RefreshTectonicsOverlay();
             DrawPlateArrows();
             return;
         }
 
-        // The mineral branch is tested BEFORE power, and the order matters for exactly one building: the
-        // Combustion Plant is Electrical (so it raises the power overlay) but it also burns ore, so its
-        // index is Mineral. It is picked up to be sited on a SEAM — where the fuel is — which the power
-        // map cannot tell you. Mineral wins for anything whose index is Mineral.
+        // ============================================================================================
+        // POWER IS NO LONGER EXCLUSIVE WITH THE GROUND MAPS
+        //
+        // These used to be an if/else chain, and the comment here explained which building lost: the
+        // Combustion Plant is Electrical (so it raised the power overlay) but is sited on a SEAM (so its
+        // index is Mineral), and only one could win. The same bind caught every building that needs both
+        // a good site and a grid connection — a farm on fertile ground, a wind or solar array where the
+        // weather is right AND within reach of something to plug into.
+        //
+        // Now the power grid draws on its own layer, so it is answered INDEPENDENTLY of whatever ground
+        // map is up. Both questions are live at once, which is what siting one of these actually is.
+        // ============================================================================================
+        // (The power layer was already resolved at the top of this method — see the note there.)
+
+        // The ground overlay always sits below the pieces now — the power layer is the only thing that
+        // ever needed to be above them, and it has its own.
+        SetOverlayBelowPieces();
+
         if (MineralOverlayActive && body.surface != null)
         {
             overlayImage.gameObject.SetActive(true);
             RefreshMineralOverlay();
             return;
         }
-
-        if (PowerOverlayActive && body.surface != null)
-        {
-            overlayImage.gameObject.SetActive(true);
-            // ABOVE the buildings. The power overlay's whole job is to show which structures the grid
-            // reaches, and underneath the piece layer the answer was hidden by the very buildings it was
-            // answering about — a mine sitting in a dead zone looked identical to a powered one. Every
-            // other overlay stays below, because those describe the GROUND and a building standing on it
-            // should occlude them.
-            SetOverlayAbovePieces(true);
-            RefreshPowerOverlay();
-            return;
-        }
-
-        SetOverlayAbovePieces(false);
 
         var kind = SurfaceIndexKind.None;
         bool bestSites = false;
@@ -3080,7 +3182,7 @@ public class PlanetViewWindow : MonoBehaviour
             if (info.index != SurfaceIndexKind.None && SurfaceIndex.Unlocked(body, info.index))
             { kind = info.index; bestSites = true; }
         }
-        else if (tab == Tab.Survey && !showPowerOverlay && SurfaceIndex.Unlocked(body, activeIndex))
+        else if (tab == Tab.Survey && SurfaceIndex.Unlocked(body, activeIndex))   // power no longer excludes it — separate layer
         {
             kind = activeIndex;
         }
@@ -3103,24 +3205,21 @@ public class PlanetViewWindow : MonoBehaviour
         overlayImage.texture = overlayTex;
     }
 
-    /// Move the overlay layer above or below the placed buildings.
+    /// Park the ground overlay at the very bottom of the map stack.
     ///
-    /// One RawImage serves every overlay, so which layer it belongs on depends on what it is currently
-    /// drawing. Above the pieces it sits just under the markers, so selection rings and the placement
-    /// ghost still win.
-    void SetOverlayAbovePieces(bool above)
+    /// This used to take an `above` flag, back when ONE RawImage served every overlay and the grid had to
+    /// climb over the buildings while the ground indexes stayed under them. The grid has its own layer
+    /// now (`powerOverlayImage`), so this one is always ground and always belongs at the bottom — and the
+    /// flag had become a landmine: with the power layer inserted, the old `above` arithmetic would have
+    /// landed the ground map ON TOP of the grid, the exact inversion the second layer exists to prevent.
+    ///
+    /// Index 0 rather than "just below the pieces": the site markers live between the two, and aiming at
+    /// the piece layer used to leave the overlay tinting over them.
+    void SetOverlayBelowPieces()
     {
-        if (overlayImage == null || pieceLayer == null || markerLayer == null) return;
-
+        if (overlayImage == null) return;
         var rt = overlayImage.rectTransform;
-        int target = above ? markerLayer.GetSiblingIndex() : pieceLayer.GetSiblingIndex();
-
-        // SetSiblingIndex removes first and re-inserts, so everything after the overlay's CURRENT slot
-        // shifts down by one. Moving downward in the list therefore has to aim one lower than the index
-        // read off the anchor, or the overlay lands one place past it.
-        if (rt.GetSiblingIndex() < target) target -= 1;
-        if (target < 0) target = 0;
-        if (rt.GetSiblingIndex() != target) rt.SetSiblingIndex(target);
+        if (rt.GetSiblingIndex() != 0) rt.SetSiblingIndex(0);
     }
 
     // THE MINERAL INDEX — the prospecting map, and the only place named ore deposits are ever drawn.
@@ -3225,7 +3324,9 @@ public class PlanetViewWindow : MonoBehaviour
     void RefreshPowerOverlay()
     {
         int w = body.surface.width, h = body.surface.height;
-        EnsureOverlayTex(w, h);
+        // Deliberately NOT EnsureOverlayTex: that texture belongs to the ground layer, which is very
+        // likely showing an index at the same time now. This writes its own (see the tail of this
+        // method), or the two would fight over one image every repaint.
 
         // Reused across repaints. This runs several times a second for as long as the tab is open, and a
         // big world is 384x192 — a fresh Color[73728] each time is ~1.2 MB of garbage per repaint.
@@ -3271,9 +3372,18 @@ public class PlanetViewWindow : MonoBehaviour
             }
         }
 
-        overlayTex.SetPixels(px);
-        overlayTex.Apply();
-        overlayImage.texture = overlayTex;
+        // Its OWN texture and its OWN image — the ground index is very likely using the other one at the
+        // same time now.
+        if (powerTex == null || powerTex.width != w || powerTex.height != h)
+        {
+            if (powerTex != null) Destroy(powerTex);
+            powerTex = new Texture2D(w, h, TextureFormat.RGBA32, false)
+            { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+        }
+
+        powerTex.SetPixels(px);
+        powerTex.Apply();
+        if (powerOverlayImage != null) powerOverlayImage.texture = powerTex;
     }
 
     void EnsureOverlayTex(int w, int h)
