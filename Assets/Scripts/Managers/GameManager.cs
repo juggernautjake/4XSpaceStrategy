@@ -88,9 +88,22 @@ public class GameManager : MonoBehaviour
         }
         finally
         {
-            // Idempotent: Finish() early-returns once it has run, and the finale already called it on its
-            // last beat. This is only here for the paths where it did not.
+            // EVERY WAY OUT ENDS WITH A PLAYABLE GAME.
+            //
+            // The sequence is driven inline on this stack, so anything it throws propagates here — and
+            // three of the things it owns are things the player cannot recover from on their own: a
+            // loading panel that never closes, a galaxy with no orbit lines, and a camera the sequence
+            // is still holding. Add a homeworld that somehow does not exist, or a home visual that was
+            // never built, and none of those get undone by the happy path.
+            //
+            // All idempotent, all cheap, and each one is the difference between a bug in a cinematic and
+            // a game that cannot be played.
             GenesisReveal.Finish();
+            OrbitController.SetRevealAlpha(1f);
+            if (GenesisCamera.Active) GenesisCamera.Instance?.Release(null);
+            LoadingScreen.Instance?.Close();
+            // The world must be running. The sequence starts the clock itself, but not if it never ran.
+            if (TimeControl.IsPaused) TimeControl.Set(1f);
             generating = false;
         }
     }
@@ -259,74 +272,63 @@ public class GameManager : MonoBehaviour
         GalaxyTrash.OnGameReplaced();
         yield return null;
 
-        // The homeworld's surface only exists once Finish has run, which is why the star held the screen
-        // until now. Hand the real world over — barren rock morphing tile by tile toward its finished
-        // terrain — and walk the bar across the second half at the reveal's own pace, so the progress
-        // the player sees IS the world appearing rather than a number racing ahead of it.
-        if (homePlanet != null)
-        {
-            screen?.SetHomePlanet(homePlanet);
-            // The real moons, revealed after the planet finishes and then left orbiting it.
-            screen?.SetHomeMoons(homePlanet.moons);
-
-            // Built once: the loop below runs for MorphDuration seconds at frame rate, and rebuilding an
-            // identical string several hundred times is several hundred allocations during the one stretch
-            // of the load where a GC hitch would show as a stutter in the reveal.
-            string homeCaption = $"{homePlanet.name} — your homeworld";
-            // Reads correctly now that ForceHomeWorld no longer renames the world to the literal
-            // "Homeworld" — that was producing "Homeworld — your homeworld" for the whole reveal.
-
-            float reveal = LoadingScreen.MorphDuration;
-            for (float e = 0f; e < reveal; e += Time.unscaledDeltaTime)
-            {
-                screen?.Report(Mathf.Lerp(0.52f, 0.94f, e / reveal), homeCaption, LoadingScreen.Subject.Planet);
-                yield return null;
-            }
-
-            // Let the finished world simply turn for a moment before anything else happens.
-            //
-            // The reveal ends on its last tile and the screen used to close almost immediately after —
-            // so the one thing the whole sequence was building toward, the completed planet, was the
-            // thing the player never actually got to look at.
-            screen?.Report(0.97f, homeCaption, LoadingScreen.Subject.Planet);
-
-            // Long enough for the moons to arrive and be seen orbiting, not just to flash into place:
-            // each takes its own reveal plus a beat, and then they need a moment simply turning. Sized
-            // off the real moon count so a world with none does not sit on a still frame for six seconds.
-            int shownMoons = screen != null ? screen.StagedMoonCount : 0;
-            float moonHold = shownMoons > 0
-                ? LoadingScreen.MoonBeat + shownMoons * (LoadingScreen.MoonMorphDuration + LoadingScreen.MoonBeat) + 1.4f
-                : 2.2f;
-            yield return new WaitForSecondsRealtime(moonHold);
-        }
-
-        // THE HANDOFF. The load does not end by switching the panel off — the bar collapses into itself
-        // and blinks out, the homeworld and its moons travel to where it was, and the real game is
-        // revealed underneath them already framing that same planet.
+        // ============================================================================================
+        // THE SCREEN BECOMES THE GAME'S OWN CAMERA
         //
-        // The camera move happens in the onReady callback, which the finale fires while the panel is
-        // still covering the screen. So by the time anything dissolves, what is behind it matches.
-        screen?.Report(1f, "Generation complete", LoadingScreen.Subject.Planet);
+        // Everything from here is filmed live. The preview stage — a sphere on a private stage rendered
+        // to a texture — has done its job: until Visualize ran a moment ago there was no real galaxy to
+        // point a camera at, and now there is.
+        //
+        // What this buys, and it is the whole reason for the change: the planet that forms IS the
+        // homeworld, not a stand-in matched to it afterwards. The moons ARE the moons, on the radii,
+        // speeds and phases they will still be on when the player takes control — so they are in the
+        // orbital arrangement the game hands over, by construction rather than by a last-second snap.
+        // And the world is lit by its own star, so it has a real TERMINATOR sweeping across it, which is
+        // the only honest cue that a planet the camera is tracking is moving at all.
+        //
+        // The bar stays up over the live view and goes on reporting real work.
+        // ============================================================================================
+        if (homePlanet != null && GenesisSequence.Instance != null && GenesisCamera.Instance != null)
+        {
+            screen?.SwitchToLiveView();
+            GenesisSequence.Instance.FrameHomeStar(Galaxy.Home);
 
-        if (screen != null)
-        {
-            // The world's REAL generated name. The fallback exists only for the impossible case of a
-            // galaxy with no home planet at all — if it ever shows up on screen, that is the bug.
-            string welcome = homePlanet != null && !string.IsNullOrWhiteSpace(homePlanet.name)
-                ? homePlanet.name
-                : "an unnamed world";
-            // The apparent size the real planet has to match, solved from the preview's own framing.
-            float frac = screen.HandoffScreenFraction();
-            var fin = screen.Finale(welcome, () => SnapCameraToHome(homePlanet, frac));
-            while (fin.MoveNext()) yield return fin.Current;
+            string homeCaption = $"{homePlanet.name} — your homeworld";
+            screen?.Report(0.62f, homeCaption, LoadingScreen.Subject.None);
+
+            // The bar is walked across the remaining span by the sequence's own clock, so what the
+            // player watches fill IS the world being built rather than a number racing ahead of it.
+            var play = GenesisSequence.Instance.Play(homePlanet, () => screen?.Report(1f, "", LoadingScreen.Subject.None));
+
+            float total = GenesisSequence.TotalSeconds(homePlanet);
+            float elapsed = 0f;
+            while (play.MoveNext())
+            {
+                elapsed += Time.unscaledDeltaTime;
+                // Once the bar is full the caption stops being reported too — otherwise the next
+                // iteration writes it straight back over the blank the completion just set, and the
+                // world's name sits under a finished bar for the whole travel-to-centre beat.
+                if (elapsed < total)
+                    screen?.Report(Mathf.Lerp(0.62f, 0.99f, total > 0f ? elapsed / total : 1f),
+                                   homeCaption, LoadingScreen.Subject.None);
+                yield return play.Current;
+            }
         }
-        else
+        else if (homePlanet != null)
         {
-            // No screen, so no finale to restore the rings — put them back by hand rather than leaving
-            // the galaxy permanently without orbit lines.
-            SnapCameraToHome(homePlanet, 0f);
+            // No sequence available (an unusual scene, or the bootstrap did not run). Hand the player a
+            // finished, visible galaxy rather than a half-built cinematic.
+            GenesisReveal.Finish();
             OrbitController.SetRevealAlpha(1f);
+            SnapCameraToHome(homePlanet, 0f);
+            screen?.Close();
         }
+
+        // (There is no separate handoff step any more. The old one existed to cross-fade a preview image
+        // into the real game — two pictures of two different objects, matched as closely as possible and
+        // dissolved between. GenesisSequence films the real world throughout, so there is nothing to
+        // cross-fade FROM: it simply stops holding the camera and gives it back. See
+        // GenesisCamera.Release, which hands over at the same framing the last beat composed.)
 
         // (The reveal backstop and the `generating` reset both live in GenerateGalaxyRoutine's finally —
         // see the note there for why they cannot live here.)

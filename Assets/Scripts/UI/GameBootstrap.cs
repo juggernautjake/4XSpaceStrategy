@@ -31,6 +31,7 @@ public static class GameBootstrap
         UnitTokenRenderer.Create();
         UnitModelRenderer.Create();         // 3D meshes for stations + colony ships (falls back to tokens)
         GenesisCamera.Create();             // the intro films the real world with the real camera
+        GenesisSequence.Create();           // ...and this is the story it films
         SpaceBackground.Create();
         PostFxController.Create();
 

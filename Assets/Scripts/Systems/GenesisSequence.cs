@@ -51,6 +51,29 @@ public class GenesisSequence : MonoBehaviour
     public const int PlanetMorphW = 96, PlanetMorphH = 48;
     public const int MoonMorphW = 40, MoonMorphH = 20;
 
+    /// How long Play will take for this world, so the loading bar can walk across it honestly.
+    ///
+    /// Derived from the same constants Play uses rather than guessed, and it takes the BODY because the
+    /// moon beats depend on how many it has — a world with three moons runs ten seconds longer than one
+    /// with none, and a bar sized for the average would visibly stall or race on both.
+    public static float TotalSeconds(CelestialBody home)
+    {
+        int moons = home?.moons != null ? home.moons.Count : 0;
+
+        // Measured to the moment the BAR COMPLETES, not to the end of the sequence — the bar is done
+        // when the world is built, and the beats after that (travel to centre, titles, pull-back) are
+        // the coda. Counting them in would leave the bar at ~92% when it is forced to 100%, an
+        // eight-point snap at exactly the beat that is supposed to read as completion.
+        //
+        // The camera push before the moons is deliberately NOT counted: EaseTo does not block, so Play
+        // never waits for it.
+        return StarHold
+             + DriftToWorld
+             + WorldForms + 0.2f
+             + moons * (MoonBeat + MoonForms)
+             + SettleHold;
+    }
+
     public static void Create()
     {
         if (Instance != null) return;
@@ -89,11 +112,43 @@ public class GenesisSequence : MonoBehaviour
 
         Running = true;
 
+        // ============================================================================================
+        // START THE CLOCK. THE WORLD HAS TO BE MOVING.
+        //
+        // Generation runs with Time.timeScale at 0 (StartMenu pauses on open), and OrbitController
+        // advances on SCALED time. So without this every planet and moon sits perfectly still for the
+        // whole sequence — and three of the things this intro is for would silently not happen:
+        //
+        //   * the moons would not be orbiting, so the arrangement the player watches would not be the
+        //     arrangement they are handed a moment later;
+        //   * the homeworld would not travel along its own orbit, so there would be no TERMINATOR
+        //     sweeping across it — the one cue that a planet the camera is tracking is moving at all;
+        //   * the star cluster of a binary home would hang motionless instead of turning about its
+        //     barycentre.
+        //
+        // The player still has no control: the camera belongs to GenesisCamera, CameraController is
+        // standing down, and the click handlers refuse while Running. What starts here is the WORLD, not
+        // the player's turn. Set(1f) rather than Resume(), because TimeControl.last is a process-wide
+        // static — Resume would restore whatever speed the LAST session ended on, and a new galaxy
+        // opening at 5x would run twenty seconds of economy under the cinematic.
+        // ============================================================================================
+        TimeControl.Set(1f);
+
         // --- The star, alone ---
         yield return Wait(StarHold);
 
         // --- Drift to the homeworld -------------------------------------------------------------
         //
+        // PRIME FIRST, REVEAL SECOND. The homeworld and its moons are player-owned, so their visuals
+        // were built wearing their REAL finished surfaces. Revealing them and starting the morph later
+        // would show the player a completed world that then visibly reverts to a featureless orb — and
+        // each moon popping back to primordial one at a time as its beat arrived. Priming installs the
+        // stage-0 texture without starting the clock, so what appears is already the beginning of itself.
+        TerrainMorph.Prime(home, PlanetMorphW, PlanetMorphH, 20260720);
+        if (home.moons != null)
+            for (int i = 0; i < home.moons.Count; i++)
+                TerrainMorph.Prime(home.moons[i], MoonMorphW, MoonMorphH, 20260721 + i);
+
         // The world is revealed BEFORE the camera arrives, not after: the move takes seconds, and a
         // planet that popped into being at the end of it would undo the whole point of travelling there.
         GenesisReveal.RevealHomeworld(home);

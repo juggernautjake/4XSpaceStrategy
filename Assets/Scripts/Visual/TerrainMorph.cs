@@ -43,9 +43,39 @@ public class TerrainMorph : MonoBehaviour
 
         var m = b.visualObject.GetComponent<TerrainMorph>();
         if (m == null) m = b.visualObject.AddComponent<TerrainMorph>();
+
+        // Already primed for this body? Just start its clock — re-initialising would rebuild the stages
+        // and throw away the texture the world is currently wearing, which is a visible flash.
+        if (m.primed && m.body == b) { m.duration = Mathf.Max(0.1f, seconds); m.clock = 0f; m.running = true; return m; }
+
         m.Init(b, seconds, width, height, jitterSeed);
         return m;
     }
+
+    /// Put the world into its PRIMORDIAL state without starting it developing.
+    ///
+    /// THE REASON THIS EXISTS. A body's visual is built wearing its REAL finished surface — the
+    /// homeworld and its moons are player-owned and therefore Surveyed, so SystemVisualizer applies the
+    /// full appearance immediately. Reveal one and then start its morph a few seconds later, and the
+    /// player watches a completed world sit there and then VISIBLY REVERT to a featureless orb before
+    /// re-forming. The moons were worse: revealed finished, then popping back to primordial one at a
+    /// time, up to thirteen seconds later.
+    ///
+    /// So a world is primed before it is revealed, and revealed already looking like the beginning of
+    /// itself.
+    public static TerrainMorph Prime(CelestialBody b, int width, int height, int jitterSeed)
+    {
+        if (b?.visualObject == null || b.surface == null) return null;
+
+        var m = b.visualObject.GetComponent<TerrainMorph>();
+        if (m == null) m = b.visualObject.AddComponent<TerrainMorph>();
+        m.Init(b, 1f, width, height, jitterSeed);
+        m.running = false;      // stage 0 is on the material; the clock does not start until Begin
+        m.primed = true;
+        return m;
+    }
+
+    bool primed;
 
     void Init(CelestialBody b, float seconds, int width, int height, int jitterSeed)
     {

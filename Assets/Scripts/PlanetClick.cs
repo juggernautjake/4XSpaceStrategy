@@ -26,6 +26,11 @@ public class PlanetClick : MonoBehaviour
         if (UnityEngine.EventSystems.EventSystem.current != null &&
             UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
 
+        // The intro is a performance, not a turn. The world is moving and the camera is composing shots;
+        // a click that opened a planet panel over the top of it would end the illusion and hand the
+        // player a window they cannot act through anyway.
+        if (GenesisSequence.Running) return;
+
         // If a fleet is currently being aimed, this click is the destination confirmation — let the
         // FleetMovementController handle it instead of opening the info panel.
         if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;

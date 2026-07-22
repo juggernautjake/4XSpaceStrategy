@@ -1,3 +1,4 @@
+using System.Collections;          // the non-generic IEnumerator — coroutines here return it bare
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -322,10 +323,22 @@ public class LoadingScreen : MonoBehaviour
         // sets this straight back to 0 a moment later, so asserting it here costs nothing.
         OrbitController.SetRevealAlpha(1f);
         var panelImg0 = root.GetComponent<Image>();
-        if (panelImg0 != null) panelImg0.color = new Color(0.02f, 0.03f, 0.06f, 1f);
+        if (panelImg0 != null)
+        {
+            panelImg0.color = new Color(0.02f, 0.03f, 0.06f, 1f);
+            // SwitchToLiveView clears this when the screen hands over to the real camera. Restoring it
+            // matters: without it the second load of a session runs behind a panel that no longer blocks
+            // anything, so the live scene underneath is clickable while the bar is still filling.
+            panelImg0.raycastTarget = true;
+        }
         { var sg = SkyGroup; if (sg != null) sg.alpha = 1f; }
         if (previewView != null)
         {
+            // ACTIVE, not merely restyled. SwitchToLiveView and ShowGenesisTitles switch the preview OFF
+            // — it has done its job once the real camera takes over — and nothing turned it back on. So
+            // the second New Game of a session played its entire star phase against a black rectangle:
+            // no home star, no binary pop-out, no named sun, just a bar.
+            previewView.gameObject.SetActive(true);
             previewView.color = Color.white;
             previewView.rectTransform.anchoredPosition = previewHomePos;
             previewView.rectTransform.sizeDelta = previewHomeSize;
@@ -623,6 +636,44 @@ public class LoadingScreen : MonoBehaviour
         blinkFlash.raycastTarget = false;
         blinkFlash.color = new Color(1f, 1f, 1f, 0f);
         go.SetActive(false);
+    }
+
+    // ============================================================================================
+    // HAND THE SCREEN OVER TO THE LIVE GALAXY
+    //
+    // Up to this point the screen has been showing a PREVIEW — a private stage rendered to a texture,
+    // because until the galaxy is visualized there is nothing real to point a camera at. From here on
+    // there is, so the preview goes and the real camera shows through.
+    //
+    // The bar STAYS. That is the whole idea the request is built on: the loading screen stops being a
+    // picture with a bar over it and becomes the game's own camera with a bar over it. Generation is
+    // still running underneath — the remaining systems, the economy, the faction seeding — and the bar
+    // goes on reporting real progress against real work while the player watches their world form.
+    //
+    // The panel's BACKGROUND is what gets cleared, not the panel itself: the bar and the captions live
+    // inside it, so switching the panel off would take them with it.
+    // ============================================================================================
+    public void SwitchToLiveView()
+    {
+        if (root == null) return;
+
+        // The preview stage, gone. Its camera would otherwise keep rendering a sphere nobody can see.
+        if (previewView != null) previewView.gameObject.SetActive(false);
+        if (previewStage != null) previewStage.gameObject.SetActive(false);
+
+        // The screen's own procedural sky goes too — the real backdrop is behind the real camera now,
+        // and two starfields at different parallaxes on top of each other reads as a smear.
+        { var sg = SkyGroup; if (sg != null) sg.alpha = 0f; }
+
+        var panel = root.GetComponent<Image>();
+        if (panel != null)
+        {
+            panel.color = new Color(0f, 0f, 0f, 0f);
+            // Stop eating clicks at the same moment it stops being visible. The player still has no
+            // control (the sequence owns the camera and TimeControl is stopped), but leaving an
+            // invisible pane of glass over a live game is the kind of thing that outlives its reason.
+            panel.raycastTarget = false;
+        }
     }
 
     // ============================================================================================

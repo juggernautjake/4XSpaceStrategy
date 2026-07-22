@@ -63,6 +63,9 @@ public class StarInteraction : MonoBehaviour
             UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
             return;
 
+        // Nothing is clickable while the intro plays — see PlanetClick for why.
+        if (GenesisSequence.Running) return;
+
         // While a fleet is being aimed, this click is the destination confirmation — FleetMovementController
         // owns it. PlanetClick has always guarded this; stars never did, and it started to matter once
         // ClickPriority could forward a click here.
