@@ -101,7 +101,7 @@ public static class DevReset
         if (b == null || star == null || s == null) return;
         if (!b.habitabilityLocked)
         {
-            b.habitability = Habitability.Rate(star, s, b.type, b.distanceFromStar);
+            b.habitability = Habitability.Rate(star, s, b);
             b.isHabitable = Habitability.IsHabitable(star, s, b.type, b.distanceFromStar);
         }
         b.terraformability = Habitability.Terraformability(star, s, b);

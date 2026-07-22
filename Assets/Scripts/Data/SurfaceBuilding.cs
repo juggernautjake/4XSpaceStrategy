@@ -301,13 +301,13 @@ public static class SurfaceBuildingDatabase
 
         // I-tetromino — a long array of panels.
         _all[(int)SurfaceBuildingType.SolarArray] = new SurfaceBuildingInfo(SurfaceBuildingType.SolarArray, SurfaceBuildingCategory.Harvesting, "Solar Array",
-            "A run of panels. Wants dry, cloudless, open ground — savanna and desert are ideal. Check the Weather Index.",
+            "A run of panels. Thin air and long polar days beat equatorial noon, and dry ground is cloudless ground. Output falls a quarter for every atmosphere above Earth-normal and reaches nothing at five, so a thick-skied world cannot use them at all. Check the Solar Index.",
             S(0, 0, 1, 0, 2, 0, 3, 0), SurfaceIndexKind.Solar, 55, 20, 12f, new Color(0.95f, 0.90f, 0.45f))
         { energyPerSec = 1.5f };
 
         // T-tetromino.
         _all[(int)SurfaceBuildingType.WindFarm] = new SurfaceBuildingInfo(SurfaceBuildingType.WindFarm, SurfaceBuildingCategory.Harvesting, "Wind Farm",
-            "Turbines. Wants exposure — ridgelines, coasts and open steppe. Check the Weather Index.",
+            "Turbines, which need AIR to turn: an airless world has no weather at all and a thick-aired one is a gale everywhere. Within that, wants exposure — ridgelines, coasts and open steppe. Check the Weather Index.",
             S(0, 0, 1, 0, 2, 0, 1, 1), SurfaceIndexKind.Wind, 50, 25, 12f, new Color(0.70f, 0.90f, 1.00f))
         { energyPerSec = 1.3f };
 

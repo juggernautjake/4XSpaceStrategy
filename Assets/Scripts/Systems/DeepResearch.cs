@@ -105,7 +105,7 @@ public static class DeepResearch
     {
         1 => "Heat and Fertile surveys, atmosphere, biosphere, tectonics, and what would have to be " +
              "fixed to make this world liveable.",
-        2 => "Wind and Solar surveys, exact ore richness, what this world's sites actually hold, how " +
+        2 => "Weather and Solar surveys, exact ore richness, what this world's sites actually hold, how " +
              "good it could ever become, and where its faults run.",
         3 => "The Water survey, anomalies, anything ancient buried here, and what this world would " +
              "look like after each project you could run on it.",

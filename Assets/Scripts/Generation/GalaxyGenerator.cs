@@ -262,12 +262,41 @@ public static class GalaxyGenerator
         }
 
         planet.type = BestTypeFor(species);
-        // The home world is a comfortable Earth-to-super-Earth (Mass 2-4, Earth being 2); its grid size
-        // derives from that (MassRules.SurfaceSize → ~6-12 cells-per-side unit).
-        planet.mass = Random.Range(2, 5);
+
+        // THE CRADLE'S MASS COMES FROM THE SPECIES' LUNGS.
+        //
+        // It used to be a flat Mass 2-4 for everyone. Now that atmosphere is one atmosphere per unit of
+        // mass, that would hand every species a 2-4 atmosphere world — fine for Terrans, and a
+        // suffocating near-vacuum for the Pyrothians, who need 5-9. A species' homeworld is the one
+        // world in the galaxy guaranteed to suit it, so the mass is solved backwards from the pressure
+        // its biology wants. The visible consequence is good: Pyrothians come from a heavy world and
+        // Cryithn from a light one, and you can read that off the Overview.
+        //
+        // Rolled across the whole SPAN of masses that land inside the species' band rather than pinned to
+        // its midpoint, or every Terran game would open on an identical mass-2 cradle. A whole-number
+        // mass is a whole atmosphere, so the band's own bounds are the roll's bounds; the floor of 2
+        // keeps a homeworld a real planet rather than something moon-sized.
+        int massLo = Mathf.Max(2, Mathf.CeilToInt(species.minAtmospheres));
+        int massHi = Mathf.Clamp(Mathf.FloorToInt(species.maxAtmospheres), massLo, 9);
+        planet.mass = Random.Range(massLo, massHi + 1);
         planet.surfaceSize = MassRules.SurfaceSize(planet.mass);
-        planet.atmosphereThickness = AtmosphereRules.ForBody(planet.type, planet.surfaceSize);
+
+        // A cradle has a working dynamo. This is not a convenience: without a field the ceiling halves,
+        // and the world could not hold the air its own species evolved to breathe. Life needs the shield
+        // for the same reason it needs the air.
+        planet.hasMagneticField = true;
         planet.hasTectonics = TectonicsRules.Roll(planet.type, planet.surfaceSize);
+
+        // The full ceiling, taken as a definition rather than rolled: one atmosphere per unit of mass,
+        // with the field intact and none of the 0.85-1.0 variance every other world gets. A cradle is the
+        // one world in the galaxy that is exactly what its inhabitants need.
+        //
+        // Runs BEFORE CradleHeat below, which reads atmosphereThickness for its greenhouse term. The two
+        // are circular — air warms the world, heat boils off air — and the cradle breaks the loop on the
+        // AIR side, because a homeworld's pressure is the fixed point and its orbit is what gets chosen
+        // to suit it.
+        planet.atmospheres = AtmosphereRules.Quantize(
+            Mathf.Clamp(planet.mass, species.minAtmospheres, species.maxAtmospheres));
         planet.orbitPhase = Random.Range(0f, 360f);
         planet.spinSpeed = OrbitalMechanics.Spin(planet, Random.Range(0.7f, 1.3f));
         SeedTerrain(planet);
@@ -324,9 +353,16 @@ public static class GalaxyGenerator
             };
             moon.mass = MassRules.ForMoon(planet.mass);
             moon.surfaceSize = MassRules.SurfaceSize(moon.mass);
-            moon.atmosphereThickness = AtmosphereRules.ForBody(moon.type, moon.surfaceSize);
+            moon.hasMagneticField = AtmosphereRules.RollMagneticField(moon.type, moon.mass);
             moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.surfaceSize);
             SeedTerrain(moon);
+            // AFTER SeedTerrain, which is what sets terrainParams.heat — and heat is what decides how
+            // much of the ceiling boils off. Rolling the air first would have been rolling it against a
+            // temperature that did not exist yet.
+            moon.atmospheres = AtmosphereRules.RollAtmospheres(
+                moon.type, moon.mass, moon.hasMagneticField,
+                AtmosphereRules.TectonicBonus(moon), moon.terrainParams.heat);
+            AtmosphereRules.ApplyWaterLoss(moon);
             // BEFORE GenerateSurface. The grid size is capped at half the host's (MapMetrics.SurfW), and
             // that cap reads parentBody — so setting it afterwards meant the moon was BUILT at its
             // uncapped size and then RENDERED and reported at the capped one. Two grids that disagree,
@@ -496,7 +532,7 @@ public static class GalaxyGenerator
             {
                 if (b.habitabilityLocked) { b.terraformability = Habitability.Terraformability(b.hostStar, species, b); continue; }
                 b.isHabitable = Habitability.IsHabitable(b.hostStar, species, b.type, b.distanceFromStar);
-                b.habitability = Habitability.Rate(b.hostStar, species, b.type, b.distanceFromStar);
+                b.habitability = Habitability.Rate(b.hostStar, species, b);
                 b.terraformability = Habitability.Terraformability(b.hostStar, species, b);
 
                 // Home moons are "easier to terraform": guarantee their ceiling reaches livability so

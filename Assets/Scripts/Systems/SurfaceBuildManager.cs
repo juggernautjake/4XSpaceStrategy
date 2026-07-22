@@ -99,6 +99,24 @@ public static class SurfaceBuildManager
         if ((info.uniquePerWorld || (OneOfEachPerWorld && !info.allowMultiple)) && CountOf(b, t) > 0)
         { why = $"this world already has a {info.name.ToLower()}"; return false; }
 
+        // SOLAR IS OFF THE MENU UNDER A THICK SKY.
+        //
+        // Each atmosphere above Earth-normal costs 20% of a panel's output, so at 5 the number is zero —
+        // not "poor", zero. Offering a building that cannot produce anything is worse than hiding it: the
+        // player pays, waits out the build, and gets a structure that does nothing, with no explanation.
+        //
+        // Phrased with the threshold in it because this is REVERSIBLE for NEW builds: thinning the air
+        // back under the line puts solar on the menu again, which is the sort of consequence that makes
+        // an atmosphere project worth running. Deliberately NOT promising it improves arrays already
+        // standing — PlacedBuilding.efficiency is frozen at placement, so it does not, and saying so
+        // would be a lie the player could check.
+        if (t == SurfaceBuildingType.SolarArray && !SurfaceIndex.SolarViable(b) && !GameMode.DevMode)
+        {
+            why = $"the sky is too thick — at {b.atmospheres:0.#} atmospheres no sunlight reaches the ground. " +
+                  $"Thin it below {SurfaceIndex.SolarDeadAtmospheres:0.#} and panels can be built here again";
+            return false;
+        }
+
         if (t == SurfaceBuildingType.PlanetCapitol)
         { why = "upgrade this world's Colony Ship Base into a capitol instead"; return false; }
         if (t == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode)

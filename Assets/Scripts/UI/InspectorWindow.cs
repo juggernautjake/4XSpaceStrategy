@@ -437,7 +437,7 @@ public partial class InspectorWindow : MonoBehaviour
         {
             case InspectorKind.Body:
                 return t.body == null ? "" :
-                    $"{TerraformDiagnosis.Pretty(t.body.type)} · {FactionManager.OwnerLabel(t.body.owner)}" +
+                    $"{TerraformDiagnosis.Pretty(t.body)} · {FactionManager.OwnerLabel(t.body.owner)}" +
                     (t.body.parentBody != null ? $" · moon of {t.body.parentBody.name}" : "");
             case InspectorKind.Unit:
                 return t.unit == null ? "" : $"{t.unit.Info.name} · {t.unit.RankName} · {FactionManager.OwnerName(t.unit.owner)}";

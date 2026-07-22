@@ -530,7 +530,10 @@ public static class PlanetTerrainGenerator
             volcanicHotspot = tec.boundary * tec.convergence > 0.72f;
         }
 
-        TerrainType t = Classify(classifyType, elevation, moisture, temperature, ridge, lat);
+        // `body.biosphereActive` is threaded in because CORAL IS ALIVE. A reef on a sterile world is the
+        // same category error as a forest on one — it was being drawn purely from "shallow and warm",
+        // so a dead ocean world grew coral shallows with nothing in the galaxy to have built them.
+        TerrainType t = Classify(classifyType, elevation, moisture, temperature, ridge, lat, body.biosphereActive);
 
         // A raised, actively-converging tile can be a volcano rather than a plain peak. Deterministic
         // (heatNoise is a stable field), so it's a sparse scatter along the belt, and only on Rocky worlds
@@ -711,7 +714,8 @@ public static class PlanetTerrainGenerator
     }
 
     // ---- Biome classification (deterministic; identical logic at any resolution) ----
-    static TerrainType Classify(CelestialBodyType planet, float elev, float moist, float temp, float ridge, float lat)
+    static TerrainType Classify(CelestialBodyType planet, float elev, float moist, float temp, float ridge, float lat,
+                                bool living)
     {
         switch (planet)
         {
@@ -720,7 +724,7 @@ public static class PlanetTerrainGenerator
             case CelestialBodyType.IcePlanet:      return Ice(elev, moist, temp, ridge, lat);
             // `moist` is the jitter field: independent of latitude, so it can actually break up a
             // latitude threshold. See PolarIceEdge.
-            case CelestialBodyType.OceanPlanet:    return OceanWorld(elev, temp, lat, moist);
+            case CelestialBodyType.OceanPlanet:    return OceanWorld(elev, temp, lat, moist, living);
             case CelestialBodyType.BarrenPlanet:   return Barren(elev, ridge);
             case CelestialBodyType.Moon:
             case CelestialBodyType.Asteroid:       return Airless(elev, temp, ridge);
@@ -812,7 +816,7 @@ public static class PlanetTerrainGenerator
     /// reads as the coldest part of an already-frozen world rather than as its own separate band.
     static float PolarSnowEdge(float noise) => Belt(0.62f, noise);
 
-    static TerrainType OceanWorld(float elev, float temp, float lat, float noise)
+    static TerrainType OceanWorld(float elev, float temp, float lat, float noise, bool living)
     {
         if (elev > 0.80f) return TerrainType.Mountains;
         if (elev > 0.70f) return TerrainType.Island;
@@ -830,7 +834,19 @@ public static class PlanetTerrainGenerator
         // toward the equator, a warmer one holds open water closer to the pole.
         if (lat > PolarIceEdge(noise)) return TerrainType.FrozenSea;
         if (temp < 0.25f) return TerrainType.FrozenSea;   // a cooled ocean world freezes over, pole to pole
-        if (elev < 0.40f && temp > 0.6f) return TerrainType.Reef;
+        // REEFS ARE A BIOSPHERE FEATURE, not a depth feature.
+        //
+        // Coral is a colony of animals and the algae living in it — a dead world's warm shallows are just
+        // warm shallows. This used to draw from elevation and temperature alone, so a sterile ocean world
+        // came out ringed with "coral shallows" that nothing had ever grown. Gated on the same
+        // biosphereActive flag that decides whether the LAND grows anything, so the sea and the land now
+        // tell the player the same story about whether the world is alive.
+        //
+        // Shallow AND warm, both: coral needs sunlight to reach it and will not survive cold water. That
+        // is also why an ocean world is where they cluster — a drowned world is nearly all shallows near
+        // its islands, which is the spec's "very high water levels ... can spawn algae in its oceans or
+        // coral reefs".
+        if (living && elev < 0.40f && temp > 0.6f) return TerrainType.Reef;
         return TerrainType.Ocean;
     }
 

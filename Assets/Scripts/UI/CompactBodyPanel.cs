@@ -96,7 +96,7 @@ public class CompactBodyPanel : MonoBehaviour
         float water  = b.resources != null ? b.resources.Get(ResourceType.Water) : 0f;
 
         return
-            $"<color=#{sub}>Type</color>  {TerraformDiagnosis.Pretty(b.type)}\n" +
+            $"<color=#{sub}>Type</color>  {TerraformDiagnosis.Pretty(b)}\n" +
             $"<color=#{sub}>Owner</color>  {owner}\n" +
             $"<color=#{sub}>Habitability</color>  {b.habitability:F0}%\n" +
             $"<color=#{sub}>Resources</color>  {metal:F0} metal · {energy:F0} energy · {water:F0} water\n\n" +

@@ -219,10 +219,26 @@ public class CelestialBody
     // Seeding) to actually take the first step, same as in reality. See BiosphereRules.
     public bool biosphereActive = false;
 
-    // 0 (vacuum) .. 1 (crushingly thick, gas-giant grade). Set once at generation from Size and Type
-    // (see AtmosphereRules) — asteroids never hold one, small moons hold none-to-thin, larger bodies
-    // hold thicker air. Feeds the Solar/Wind survey indexes and the BioSphere atmosphere gate.
-    public float atmosphereThickness = 0f;
+    // How much air this world has, IN ATMOSPHERES — 1 is Earth-normal, a gas giant runs to ~10. Driven
+    // by Mass, halved without a magnetic field, raised by tectonic outgassing and cut by heat; see
+    // AtmosphereRules. This is the stored truth and the number shown to the player next to Mass.
+    public float atmospheres = 0f;
+
+    // Does this world have a magnetic field? Rolled once at generation from Mass (bodies at 2+ mass
+    // usually do, below that rarely), and granted permanently by the Core Ignition and Magnetospheric
+    // Shield terraforming projects. Without one, stellar wind strips the upper atmosphere and the
+    // world's ceiling is HALVED — which is the whole reason those two projects exist.
+    public bool hasMagneticField = false;
+
+    /// 0 (vacuum) .. 1 (saturated) — the normalized form the greenhouse term, the biome classifier and
+    /// the survey indexes were all written against.
+    ///
+    /// DERIVED, not stored. Atmosphere became a real quantity measured in atmospheres, but ~30 call
+    /// sites read it as a 0..1 fraction; converting here rather than at each of them keeps one
+    /// definition of the conversion. AtmosphereRules.ThicknessReference is calibrated so a default
+    /// mass-3 world lands on 0.43, which is where the old size-driven formula put it — so nothing tuned
+    /// against the old numbers shifts underneath.
+    public float atmosphereThickness => Mathf.Clamp01(atmospheres / AtmosphereRules.ThicknessReference);
 
     // Does this world have active plate tectonics? Rolled once at generation (see TectonicsRules) —
     // ~1/3 of terrestrial planets, weighted toward larger ones; gas giants/asteroids never; moons only

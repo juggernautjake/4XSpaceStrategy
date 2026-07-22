@@ -395,6 +395,29 @@ public class TerraformManager : MonoBehaviour
                 b.biosphereActive = true;
                 break;
 
+            // ---- Magnetosphere: the ceiling doubles ----
+            //
+            // These two projects existed long before anything tracked a magnetic field, so their whole
+            // description ("every atmosphere you build is eventually stripped away") was a promise
+            // nothing enforced and nothing delivered. Now the flag is real: setting it removes the
+            // NoFieldPenalty, which DOUBLES this world's maximum atmosphere. A mass-6 world capped at 3
+            // becomes a mass-6 world capped at 6.
+            //
+            // It does not add air by itself — it raises the roof, and the atmosphere projects fill the
+            // room. That ordering is the point: a shield on a world you have not thickened yet changes
+            // nothing you can see today, and everything you can do tomorrow.
+            case TerraformProjectType.CoreIgnition:
+            case TerraformProjectType.MagneticShield:
+                b.hasMagneticField = true;
+                // Core Ignition restarts the world's core, which is also what drives plate tectonics. A
+                // dead world that gets its dynamo back gets its geology back with it — and the tectonic
+                // bonus lifts the ceiling a little further still.
+                if (t == TerraformProjectType.CoreIgnition && b.type != CelestialBodyType.GasGiant
+                    && b.type != CelestialBodyType.Asteroid)
+                    b.hasTectonics = true;
+                RescoreType(b);
+                break;
+
             // WorldRemodelling is handled in Complete (dithered over the project's duration and finalized
             // there — see the remodel block), so it intentionally does nothing here.
         }
@@ -406,11 +429,16 @@ public class TerraformManager : MonoBehaviour
     {
         if (b == null || b.type == to) { RescoreType(b); return; }
         b.type = to;
-        // Atmosphere thickness depends on Type as well as Size (AtmosphereRules) — a world that just
-        // changed type needs it recomputed, or a remodelled world keeps whatever air its OLD type had
-        // forever (wrong greenhouse warmth, wrong Solar/Wind indexes, and a former small moon reshaped
-        // into a Rocky planet would stay stuck failing BiosphereRules' atmosphere gate).
-        b.atmosphereThickness = AtmosphereRules.ForBody(b.type, b.surfaceSize);
+        // ATMOSPHERE IS NO LONGER RECOMPUTED HERE, and that is the point.
+        //
+        // It used to be derived from Type + Size, so remodelling a world implicitly rewrote its air. Air
+        // now comes from MASS, a magnetic field and tectonic outgassing — none of which a remodelling
+        // project changes. Reshaping a barren rock into a Rocky planet rearranges its surface; it does
+        // not conjure four atmospheres out of nothing. Getting air onto a thin world is what the
+        // atmosphere projects are FOR, and having Reshape silently hand it over would make them
+        // pointless. Tectonics is re-rolled below and legitimately shifts the ceiling, which is the one
+        // channel by which a remodel can still move a world's air at all.
+        //
         // Same reasoning for Tectonics — Roll() is keyed on type (GasGiant/Asteroid always false), so a
         // remodelled world needs a fresh roll under its NEW type rather than carrying over a flag that
         // its old type earned. Note this does NOT re-apply TectonicsRules.BoostRidge's terrain effect —
@@ -442,7 +470,7 @@ public class TerraformManager : MonoBehaviour
         if (b == null || star == null || s == null) return;
         if (!b.habitabilityLocked)
         {
-            b.habitability = Habitability.Rate(star, s, b.type, b.distanceFromStar);
+            b.habitability = Habitability.Rate(star, s, b);
             b.isHabitable = Habitability.IsHabitable(star, s, b.type, b.distanceFromStar);
         }
         b.terraformability = Habitability.Terraformability(star, s, b);
@@ -536,7 +564,7 @@ public class TerraformManager : MonoBehaviour
         if (star == null || s == null) return;
         if (!b.habitabilityLocked)
         {
-            b.habitability = Habitability.Rate(star, s, b.type, b.distanceFromStar);
+            b.habitability = Habitability.Rate(star, s, b);
             b.isHabitable = Habitability.IsHabitable(star, s, b.type, b.distanceFromStar);
         }
         b.terraformability = Habitability.Terraformability(star, s, b);

@@ -56,7 +56,8 @@ public partial class InspectorWindow
         // fit in 156px and a HorizontalLayoutGroup answers that by crushing them.
         var card = Card(topRow.transform);
         EmbeddedGlobe.Build(topRow.transform, b, GlobeSize, GlobeSize);
-        Stat(card, "Type", () => TerraformDiagnosis.Pretty(b.type));
+        Stat(card, "Type", () => TerraformDiagnosis.Pretty(b));
+        Stat(card, "Atmospheres", () => $"{b.atmospheres:0.#} <size=10><color=#9FB4C8>({AtmosphereRules.Describe(b)})</color></size>");
         Stat(card, "Owner", () =>
         {
             string hex = "#" + ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(b.owner));
@@ -244,6 +245,9 @@ public partial class InspectorWindow
         Header(p, "HOW YOUR SPECIES SEES IT");
         var spec = Card(p);
         Note(spec, $"{s.name}: {s.habitat}");
+        // Their LUNGS, next to their habitat — the two together are what makes a world livable or not,
+        // and the atmosphere half was invisible until now.
+        Note(spec, $"<color=#9FB4C8>{s.AtmosphereLine()}. This world has <b>{b.atmospheres:0.#}</b>.</color>");
         Stat(spec, "Affinity for this world type", () =>
         {
             float a = s.Affinity(b.type);
@@ -584,7 +588,7 @@ public partial class InspectorWindow
                 var captured = m;
                 var card = Card(p);
                 var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
-                live.Text(t, () => $"<b>{captured.name}</b>  <size=10><color=#9FB4C8>{TerraformDiagnosis.Pretty(captured.type)} · " +
+                live.Text(t, () => $"<b>{captured.name}</b>  <size=10><color=#9FB4C8>{TerraformDiagnosis.Pretty(captured)} · " +
                                    $"hab {captured.habitability:F0}% · {(captured.units != null ? captured.units.Count : 0)} ship(s)</color></size>");
                 UIFactory.Button(card, "Inspect »", () => { PlanetUI.Instance?.Show(captured); }, 22);
             }

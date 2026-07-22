@@ -1218,7 +1218,26 @@ public class PlanetViewWindow : MonoBehaviour
                     var sur = new System.Text.StringBuilder();
 
                     if (activeIndex != SurfaceIndexKind.None)
+                    {
                         sur.Append($"<b>{SurfaceIndex.Name(activeIndex)}</b> — {SurfaceIndex.Describe(activeIndex)}");
+
+                        // The Weather index is the one whose ceiling is a fact about the WHOLE WORLD
+                        // rather than about any tile — an airless world's map is uniformly black, and
+                        // without this the player is left to guess whether that means "nowhere is windy"
+                        // or "this world has no air". Say which.
+                        if (activeIndex == SurfaceIndexKind.Wind)
+                            sur.Append($"  <color=#9FB4C8>·</color> <b>{SurfaceIndex.WeatherLabel(body)}</b> " +
+                                       $"<size=10><color=#9FB4C8>at {body.atmospheres:0.#} atmospheres</color></size>");
+
+                        // Same for Solar, where pressure sets a hard ceiling on the best tile.
+                        if (activeIndex == SurfaceIndexKind.Solar)
+                        {
+                            float f = SurfaceIndex.SolarPressureFactor(body.atmospheres);
+                            string hex = ColorUtility.ToHtmlStringRGB(f >= 1f ? UITheme.Good : f > 0f ? UITheme.Accent : UITheme.Bad);
+                            sur.Append($"  <color=#9FB4C8>·</color> <color=#{hex}><b>{f * 100f:F0}% panel output</b></color> " +
+                                       $"<size=10><color=#9FB4C8>at {body.atmospheres:0.#} atmospheres</color></size>");
+                        }
+                    }
 
                     if (showPowerOverlay)
                     {
@@ -1347,11 +1366,31 @@ public class PlanetViewWindow : MonoBehaviour
         Header("THIS WORLD");
         var card = Card();
         Stat(card, "Name", () => body.name);
-        Stat(card, "Type", () => TerraformDiagnosis.Pretty(body.type));
+        Stat(card, "Type", () => TerraformDiagnosis.Pretty(body));
         // The conditionals MUST be parenthesised: inside an interpolation hole a bare ':' is parsed as
         // the start of a format specifier, not as part of a ternary.
         Stat(card, "Surface", () => $"{(body.surface != null ? body.surface.width : 0)} × {(body.surface != null ? body.surface.height : 0)} tiles");
         Stat(card, "Mass", () => MassWord(body.mass));
+        // Beside Mass, because Mass is what SETS it — one atmosphere per unit of mass, halved without a
+        // magnetic field. Putting them next to each other is what makes that relationship legible
+        // without a tooltip explaining it.
+        Stat(card, "Atmospheres", () =>
+        {
+            string suit = "";
+            var sp = SpeciesManager.Current;
+            if (sp != null && body.atmospheres > 0.01f)
+            {
+                float fit = sp.AtmosphereSuitability(body.atmospheres);
+                if (fit < 0.999f)
+                    suit = body.atmospheres < sp.minAtmospheres
+                        ? $" <color=#FFBF4D>· too thin for {sp.name}</color>"
+                        : $" <color=#FFBF4D>· too dense for {sp.name}</color>";
+            }
+            return $"{body.atmospheres:0.#} <size=10><color=#9FB4C8>({AtmosphereRules.Describe(body)})</color></size>{suit}";
+        });
+        Stat(card, "Magnetic field", () => body.hasMagneticField
+            ? "<color=#4DFF6E>Yes</color>"
+            : $"<color=#FF8F5C>No</color> <size=10><color=#9FB4C8>— ceiling halved to {AtmosphereRules.Ceiling(body):0.#}</color></size>");
         Stat(card, "Owner", () =>
         {
             string hex = "#" + ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(body.owner));
@@ -2651,6 +2690,11 @@ public class PlanetViewWindow : MonoBehaviour
     // that's actively terraforming — only on one that isn't.
     const float TempMin = 0.05f, TempMax = 2.2f;
 
+    // The BioSphere slider drives terrainParams.moisture, whose barren floor is 0.3 and whose lush
+    // maximum is 2.0. Named because the 0..1 BioSphere ceiling has to be mapped onto that range in three
+    // separate places, and three copies of `Lerp(0.3f, 2f, …)` is three chances to disagree.
+    const float BioFloor = 0.3f, BioMax = 2f;
+
     void BuildTerrainPanel()
     {
         Header("TERRAIN SANDBOX");
@@ -2671,20 +2715,56 @@ public class PlanetViewWindow : MonoBehaviour
         // Dev Mode lets you paint plant life on ANY world (the whole Terrain tab is a Dev sandbox), so the
         // slider is freed there — otherwise it stays gated on a genuinely habitable, biosphere-active world.
         // Without this the range collapses to 0.3..0.3 on a barren world and the handle can't move at all.
-        bool canGrow = GameMode.DevMode || BiosphereRules.CanSustainBiosphere(body);
-        float bioCeiling = canGrow ? 2f : 0.3f;
+        // THE BIOSPHERE CEILING IS REAL EVEN IN DEV MODE.
+        //
+        // The sandbox used to hand Dev Mode a free 0.3..2.0 range on any world, so you could paint a
+        // jungle onto an airless rock. That is now the one slider that is NOT free, because the whole
+        // point of the ceiling is that plant life is downstream of water, temperature and air — and a
+        // sandbox that ignores its own rule cannot be used to explore the rule.
+        //
+        // Nothing is actually lost: the Water Level, Temperature and Atmosphere sliders are all right
+        // here, and raising them raises this. The ceiling moves when you fix the world, which is the
+        // behaviour the spec is describing.
+        float bioCeiling01 = BiosphereRules.Ceiling(body);
+        float bioCeiling = Mathf.Lerp(BioFloor, BioMax, bioCeiling01);
+        bool canGrow = bioCeiling > BioFloor + 0.01f;
+
         // Open at the world's real state: its moisture if it has a living biosphere, otherwise the barren
         // floor — so the handle position matches what the map is actually showing.
-        float bioValue = body.biosphereActive ? Mathf.Min(p.moisture, bioCeiling) : 0.3f;
-        SliderRow("BioSphere", canGrow ? "sparse <-> lush plant life" : "capped — see note below",
-            0.3f, bioCeiling, bioValue, v => SetTerrain(2, v));
-        if (!canGrow)
-        {
-            string why = BiosphereRules.WhyCapped(body) ?? "conditions aren't met";
-            Note($"<color=#FF8F5C>BioSphere capped:</color> {why}.");
-        }
+        float bioValue = body.biosphereActive ? Mathf.Min(p.moisture, bioCeiling) : BioFloor;
+        SliderRow("BioSphere",
+            canGrow ? $"sparse <-> lush plant life  ·  capped at {bioCeiling01 * 100f:F0}%" : "capped — see note below",
+            BioFloor, Mathf.Max(bioCeiling, BioFloor + 0.001f), bioValue, v => SetTerrain(2, v));
+
+        if (bioCeiling01 < 0.999f)
+            Note($"<color=#FF8F5C>BioSphere capped at {bioCeiling01 * 100f:F0}%:</color> {BiosphereRules.LimitingFactor(body)}. " +
+                 $"<size=10><color=#9FB4C8>The ceiling is the average of Water Level ({PlanetTerrainGenerator.WaterLevelFromSeaLevel(p.SeaLevelOrNeutral) * 100f:F0}%) " +
+                 $"and how close Temperature is to 1.0 ({BiosphereRules.TemperatureTerm(p.heat) * 100f:F0}%).</color></size>");
 
         SliderRow("Temperature", "extreme cold <-> extreme heat", TempMin, TempMax, p.heat, v => SetTerrain(3, v));
+
+        // ---- Atmosphere ----
+        Header("ATMOSPHERE");
+        var air = Card();
+        Stat(air, "Atmospheres", () => $"{body.atmospheres:0.#} ({AtmosphereRules.Describe(body)})");
+        Stat(air, "Ceiling", () => $"{AtmosphereRules.Ceiling(body):0.#} — mass {body.mass:0.#}" +
+                                   (body.hasMagneticField ? "" : ", halved with no magnetic field") +
+                                   (body.hasTectonics ? $", +{AtmosphereRules.TectonicBonus(body):0.#} from tectonics" : ""));
+
+        SliderRow("Atmosphere", "vacuum <-> gas-giant deep", 0f, 12f, body.atmospheres, v =>
+        {
+            body.atmospheres = AtmosphereRules.Quantize(v);
+            SetAtmosphere();
+        });
+
+        UIFactory.Button(air, body.hasMagneticField ? "Magnetic field: ON — remove it" : "Magnetic field: OFF — give it one", () =>
+        {
+            body.hasMagneticField = !body.hasMagneticField;
+            // Losing the field halves the ceiling, so anything above the new ceiling has to go with it —
+            // otherwise the sandbox would show a world holding more air than its own ceiling allows.
+            body.atmospheres = Mathf.Min(body.atmospheres, AtmosphereRules.Ceiling(body));
+            SetAtmosphere();
+        }, 24);
 
         // Relief. SetTerrain already had a ridge case (index 4) and nothing had ever been wired to it, so
         // the one axis that decides how mountainous a world is was the one axis the sandbox could not
@@ -2737,16 +2817,74 @@ public class PlanetViewWindow : MonoBehaviour
             // floor. Re-checked here (not just at the slider's max bound) so a value set before conditions
             // changed can't linger above the ceiling once something else moves it.
             case 2:
-                if (GameMode.DevMode) body.biosphereActive = v > 0.31f;
-                p.moisture = Mathf.Min(v, (GameMode.DevMode || BiosphereRules.CanSustainBiosphere(body)) ? 2f : 0.3f);
+            {
+                // Clamped to the LIVE ceiling, recomputed here rather than trusting the slider's bound —
+                // a value set while the world was wet and temperate must not survive dragging the
+                // temperature to 2.0 afterwards. This is the one place that guarantee can be made, since
+                // every other slider routes through this same method.
+                float ceiling = Mathf.Lerp(BioFloor, BioMax, BiosphereRules.Ceiling(body));
+                p.moisture = Mathf.Clamp(v, BioFloor, Mathf.Max(BioFloor, ceiling));
+                if (GameMode.DevMode) body.biosphereActive = p.moisture > BioFloor + 0.01f;
                 break;
+            }
             case 3: p.heat = v; break;
             case 4: p.ridge = v; break;
             // Sea level — the height the water sits at, independent of how tall the land is.
             case 5: p.seaLevel = Mathf.Clamp01(v); break;
         }
         body.terrainParams = p;
+
+        // ONLY THE SLIDERS THAT FEED THE CEILING RE-CLAMP IT.
+        //
+        // The ceiling is a function of water level and temperature, so dragging the world hotter or drier
+        // has to take the plant life down with it. Ruggedness and Feature scale are NOT inputs to it, and
+        // running the clamp for them was actively harmful: no world's generated moisture had ever been
+        // checked against a ceiling that did not exist until now, so nudging Ruggedness by one pixel
+        // could silently strip a world's vegetation on an axis the player never touched — irreversibly,
+        // since dragging it back does not restore the old moisture.
+        //
+        // Case 2 does its own clamp against the same value, so it is not listed here.
+        if (which == 3 || which == 5) ClampBiosphereToCeiling();
+
         RegenerateTerrain();
+    }
+
+    /// Everything that has to happen after the sandbox changes a world's AIR.
+    ///
+    /// The atmosphere controls sit outside SetTerrain, so they were bypassing all of its consequences.
+    /// Air is not a cosmetic number: it multiplies the biosphere ceiling, and below 0.6 atmospheres it
+    /// takes the surface water with it. Dragging Atmosphere to zero used to leave a jungle standing on a
+    /// drowned world in a hard vacuum, with the BioSphere slider's own "capped at N%" note still
+    /// reporting the old figure, because nothing rebuilt the panel either.
+    void SetAtmosphere()
+    {
+        AtmosphereRules.ApplyWaterLoss(body);   // thin air boils the oceans off first
+        ClampBiosphereToCeiling();              // then whatever was living in them
+        RegenerateTerrain();
+        Rebuild();                              // the cap note and the slider bounds both moved
+    }
+
+    /// Pull plant life back down to whatever the world can currently support.
+    ///
+    /// Shared because three different things move the ceiling — temperature, water level, and atmosphere
+    /// — and the atmosphere controls live in a different method entirely. When this only existed inline
+    /// in SetTerrain, dragging Atmosphere from 3 to 0 left a jungle standing in a hard vacuum: the exact
+    /// thing the ceiling was added to prevent, reachable from the slider directly above it.
+    void ClampBiosphereToCeiling()
+    {
+        if (body == null) return;
+
+        float cap = Mathf.Lerp(BioFloor, BioMax, BiosphereRules.Ceiling(body));
+        var p = body.terrainParams;
+        if (p.moisture <= cap) return;
+
+        p.moisture = Mathf.Max(BioFloor, cap);
+        body.terrainParams = p;
+
+        // Cleared regardless of Dev Mode. The old guard only touched the flag inside the Dev arm, so a
+        // world could end up sitting at the barren moisture floor with biosphereActive still true —
+        // reported as living, rendered as dead.
+        if (p.moisture <= BioFloor + 0.01f) body.biosphereActive = false;
     }
 
     void RegenerateTerrain()
@@ -4860,7 +4998,7 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
     {
         if (m == null) return "An uncharted world.";
         var sb = new System.Text.StringBuilder();
-        sb.Append($"<b>{m.name}</b>  <color=#7E93A8>{TerraformDiagnosis.Pretty(m.type)}</color>");
+        sb.Append($"<b>{m.name}</b>  <color=#7E93A8>{TerraformDiagnosis.Pretty(m)}</color>");
 
         if (!m.Surveyed)
         {

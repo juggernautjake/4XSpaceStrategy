@@ -185,7 +185,12 @@ public static class GameStateSerializer
             shipyardLevel = b.shipyardLevel, researchCenterLevel = b.researchCenterLevel,
             population = b.population, cities = b.cities,
             terraforming = b.terraforming, terraformability = b.terraformability,
-            biosphereActive = b.biosphereActive, atmosphereThickness = b.atmosphereThickness,
+            biosphereActive = b.biosphereActive,
+            // Both written: `atmospheres` is the truth, `atmosphereThickness` is the derived 0..1 kept
+            // in the save purely so a NEWER save stays readable by an older build rather than reloading
+            // every world as an airless rock.
+            atmospheres = b.atmospheres, atmosphereThickness = b.atmosphereThickness,
+            hasMagneticField = b.hasMagneticField,
             hasTectonics = b.hasTectonics,
             terraformProjects = b.terraformProjects != null ? new List<int>(b.terraformProjects) : new List<int>(),
             placedBuildings = b.placedBuildings != null ? new List<PlacedBuilding>(b.placedBuildings) : new List<PlacedBuilding>(),
@@ -413,26 +418,13 @@ public static class GameStateSerializer
             shipyardLevel = dto.shipyardLevel, researchCenterLevel = dto.researchCenterLevel,
             population = dto.population, cities = dto.cities,
             terraforming = dto.terraforming, terraformability = dto.terraformability,
-            biosphereActive = dto.biosphereActive, atmosphereThickness = dto.atmosphereThickness,
+            biosphereActive = dto.biosphereActive,
+            atmospheres = dto.atmospheres, hasMagneticField = dto.hasMagneticField,
             hasTectonics = dto.hasTectonics,
             birthrightClaim = dto.birthrightClaim, settled = dto.settled,
             visited = dto.visited, explorationProgress = dto.explorationProgress,
             hideReason = Restore(dto.hideReason), ringHideReason = Restore(dto.ringHideReason)
         };
-        // A save written before atmosphereThickness existed has it defaulted to 0 by JsonUtility, same
-        // as a genuine asteroid/small-moon would read — so backfilling from Type+Size whenever it comes
-        // back non-positive is safe either way: a real zero recomputes to the same zero, an old save
-        // recomputes to what generation would have given it.
-        // A MOON is backfilled through the moon-mass gate (ForMoon), not ForBody: a moon now carries a
-        // real planet-type (Ocean/Ice/Volcanic via RollMoonType) but its air is still capped by its small
-        // mass, and ForMoon legitimately returns 0 for a small one — whereas ForBody would read that type
-        // and hand it a full planet-sized atmosphere it never had, so a small icy/volcanic moon would
-        // sprout an atmosphere shell on every reload. dto.parentId (>=0 for a moon) is the signal, because
-        // b.parentBody isn't linked yet at this point in the load (Apply re-links moons afterward).
-        if (b.atmosphereThickness <= 0f)
-            b.atmosphereThickness = dto.parentId >= 0
-                ? AtmosphereRules.ForMoon(b.type, b.surfaceSize)
-                : AtmosphereRules.ForBody(b.type, b.surfaceSize);
         // Saves written before `settled` existed have it false everywhere, which would silently
         // un-colonise every world in an old save. A world with a City on it was settled by definition —
         // that inference is exactly what Claim.cs replaces, and this is the one place it's still correct
@@ -506,6 +498,52 @@ public static class GameStateSerializer
         // Mass Value. A save from before it existed reads 0 — recover it from the saved surfaceSize (the
         // world's size is known; MassRules.FromSurfaceSize is the inverse of how size is now derived).
         b.mass = dto.mass > 0f ? dto.mass : MassRules.FromSurfaceSize(dto.surfaceSize);
+
+        // ---- ATMOSPHERE MIGRATION ----
+        //
+        // DELIBERATELY DOWN HERE, not up with the other field restores. It reads `b.mass` and
+        // `b.terrainParams.heat`, and both are assigned late — mass on the line above, terrainParams a
+        // few dozen lines up. Run any earlier and it reads the FIELD INITIALIZERS instead: mass would be
+        // the default 3 and heat the default 1, so every body in the galaxy — a 0.1-mass moon, a gas
+        // giant, a barren rock — would migrate to exactly 3.0 atmospheres with a magnetic field, on
+        // every load, and then persist that on the next save.
+        //
+        // Three generations of save to handle:
+        //
+        //   1. Written by this build: `atmospheres` and `hasMagneticField` are both present and correct.
+        //      Detected by the DTO carrying either a positive atmosphere OR a positive thickness — see
+        //      the sentinel note below.
+        //   2. Written when atmosphere was a 0..1 THICKNESS: invert the conversion to recover pressure,
+        //      and derive the field from mass, since it was never stored.
+        //   3. Older than atmosphere entirely: rebuild from Mass the way generation now would.
+        //
+        // THE SENTINEL PROBLEM. `atmospheres == 0` is a LEGAL generated value — a small airless moon
+        // really does store 0.0 — so "is it zero?" cannot distinguish a real vacuum from a missing
+        // field. `savedAir` below tests whether the DTO carried EITHER atmosphere field, which a
+        // pre-atmosphere save cannot have done. Without this, every airless moon in a current save would
+        // be "migrated" into a 3-atmosphere world on its first reload.
+        bool savedAir = dto.atmospheres > 0f || dto.atmosphereThickness > 0f;
+
+        if (!savedAir)
+        {
+            // Case 3. Re-DERIVED from mass rather than re-rolled: a roll here would mean the same save
+            // loading differently every time, with half the galaxy's air changing on each load.
+            b.hasMagneticField = b.type != CelestialBodyType.Asteroid && b.mass >= AtmosphereRules.FieldMassThreshold;
+            b.atmospheres = AtmosphereRules.Quantize(
+                AtmosphereRules.Ceiling(b.type, b.mass, b.hasMagneticField, AtmosphereRules.TectonicBonus(b))
+                * AtmosphereRules.HeatRetention(b.mass, b.terrainParams.heat));
+        }
+        else if (dto.atmospheres <= 0f && dto.atmosphereThickness > 0f)
+        {
+            // Case 2. The field was never written in this generation of save, so it has to be derived
+            // here too — otherwise every world in an existing game loads fieldless, which would show a
+            // homeworld holding more air than its own stated ceiling and put a "no magnetosphere" fault
+            // on every body in the galaxy at once.
+            b.atmospheres = AtmosphereRules.Quantize(dto.atmosphereThickness * AtmosphereRules.ThicknessReference);
+            b.hasMagneticField = b.type == CelestialBodyType.GasGiant
+                || (b.type != CelestialBodyType.Asteroid && b.mass >= AtmosphereRules.FieldMassThreshold);
+        }
+        // Case 1 falls through untouched: the object initializer already took both values from the DTO.
         // The orbit "Reset" restores this. A save from before it existed reads 0; the only honest answer is
         // the orbit the world is at now — there's no earlier one recorded.
         b.naturalOrbitRadius = dto.naturalOrbitRadius > 0f ? dto.naturalOrbitRadius : b.orbitRadius;

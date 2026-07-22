@@ -192,7 +192,11 @@ public class BodyDTO
     public int cities;
     public bool terraforming;
     public bool biosphereActive;    // did this world generate with (or get Microbial-Seeded into) plant life
-    public float atmosphereThickness;   // 0 (vacuum) .. 1 (crushingly thick) — see AtmosphereRules
+    public float atmospheres;           // ATMOSPHERES, 1 = Earth-normal — the stored truth
+    public bool hasMagneticField;       // halves the atmosphere ceiling when absent — see AtmosphereRules
+    // The derived 0..1 form. Still written so a save from this build stays loadable by an older one, and
+    // still READ on load to migrate saves written before `atmospheres` existed.
+    public float atmosphereThickness;
     public bool hasTectonics;       // active plate tectonics — see TectonicsRules
     public float terraformability;
     public List<int> terraformProjects = new List<int>();   // completed TerraformProjectType ids

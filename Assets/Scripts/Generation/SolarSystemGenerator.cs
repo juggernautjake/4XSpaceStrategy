@@ -105,6 +105,17 @@ public class SolarSystemGenerator : MonoBehaviour
             body.distanceFromStar = currentRadius;
             body.orbitRadius = currentRadius;
             BiasHeat(body, currentRadius, currentStar);                       // climate follows distance
+
+            // Air is rolled HERE, not in MakeBody, because BiasHeat above is what finally decides how
+            // hot this world is — and heat is what boils atmosphere off. A close-in world now genuinely
+            // loses the air its mass alone would have held. Water loss follows immediately, and both run
+            // BEFORE the biosphere check and the terrain bake below, which read them: GeneratesWithBiosphere
+            // tests the 0.6-atmosphere floor, and the biome classifier reads the greenhouse warmth.
+            body.atmospheres = AtmosphereRules.RollAtmospheres(
+                body.type, body.mass, body.hasMagneticField,
+                AtmosphereRules.TectonicBonus(body), body.terrainParams.heat);
+            AtmosphereRules.ApplyWaterLoss(body);
+
             TerraformVisuals.CaptureNatural(body);   // re-capture: BiasHeat is the world's real natural climate, not the pre-bias variance SeedTerrain rolled
             // Only worlds that start out warm and wet enough get a living biosphere for free; everything
             // else stays sterile until something like Microbial Seeding starts one (see BiosphereRules).
@@ -166,12 +177,12 @@ public class SolarSystemGenerator : MonoBehaviour
                 float moonRel = moon.distanceFromStar / Mathf.Max(0.5f, TempReference(currentStar));
                 moon.type = RollMoonType(moonRel, moon.surfaceSize, out float moonWaterLevel);
 
-                // Atmosphere uses the MOON mass gate (ForMoon, not ForBody) so its air is capped by its
-                // small mass whatever surface it rolled — a large ocean moon holds thin real air (enough to
-                // pass the biosphere gate below), a small ice/volcanic one holds essentially none, matching
-                // the request's "most moons ... no or thin atmosphere unless they are large moons". Tectonics
-                // keys on the chosen type + size exactly like a planet's, so only a sizeable moon folds plates.
-                moon.atmosphereThickness = AtmosphereRules.ForMoon(moon.type, moon.surfaceSize);
+                // A moon's air is decided by MASS on exactly the same terms as a planet's — there is no
+                // separate moon rule any more. That is what lets a big moon of a gas giant come out with
+                // thicker air than Earth, which the spec asks for and our own solar system supports
+                // (Titan). A small moon still ends up with essentially nothing, but because it is light,
+                // not because it is filed under "moon". Tectonics keys on type + size like a planet's.
+                moon.hasMagneticField = AtmosphereRules.RollMagneticField(moon.type, moon.mass);
                 moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.surfaceSize);
 
                 SeedTerrain(moon);
@@ -186,6 +197,16 @@ public class SolarSystemGenerator : MonoBehaviour
                     moon.terrainParams = wp;
                 }
                 BiasHeat(moon, moon.distanceFromStar, currentStar);           // same climate band as its planet
+
+                // Rolled here, after BiasHeat, because the moon's FINAL heat is what decides how much of
+                // its ceiling boils off — and BiasHeat is the last thing to move it. Water loss follows,
+                // so a moon whose air is under the 0.6 floor loses the ocean the Water Level draw just
+                // gave it rather than keeping an impossible one.
+                moon.atmospheres = AtmosphereRules.RollAtmospheres(
+                    moon.type, moon.mass, moon.hasMagneticField,
+                    AtmosphereRules.TectonicBonus(moon), moon.terrainParams.heat);
+                AtmosphereRules.ApplyWaterLoss(moon);
+
                 TerraformVisuals.CaptureNatural(moon);   // re-capture the post-bias climate as this moon's natural state
                 // A large, warm, wet moon with an atmosphere starts out living, just like a qualifying
                 // planet; GeneratesWithBiosphere still returns false for barren/airless/ice/volcanic moons,
@@ -335,9 +356,32 @@ public class SolarSystemGenerator : MonoBehaviour
         // biosphere check below reads it. Tectonics is re-rolled too — "best" may originally have been
         // whatever type happened to orbit near the zone centre (even a GasGiant/Asteroid, which never
         // roll tectonics), so its old roll doesn't carry over to a freshly-retyped Rocky/Ocean world.
-        best.atmosphereThickness = AtmosphereRules.ForBody(best.type, best.surfaceSize);
         best.hasTectonics = TectonicsRules.Roll(best.type, best.surfaceSize);
         SeedTerrain(best);
+
+        // RE-BIAS THE CLIMATE. SeedTerrain calls TerrainVariance, which rebuilds terrainParams from
+        // scratch — including heat — so the distance-based climate BiasHeat applied to this world during
+        // the main loop was just thrown away. That was already wrong (the one world guaranteed to be
+        // habitable was the one world whose temperature ignored its orbit); it matters more now, because
+        // heat is what decides how much atmosphere boils off, and rolling air against the pre-orbit
+        // variance would judge this world at a temperature it does not have.
+        BiasHeat(best, best.distanceFromStar, currentStar);
+
+        // THE GUARANTEED HABITABLE WORLD GETS A GUARANTEED MAGNETIC FIELD.
+        //
+        // This body was force-retyped to Rocky/Ocean precisely so the system has somewhere livable. A
+        // failed field roll would halve its ceiling, dry it out under the 0.6 floor and sterilise it —
+        // defeating the entire purpose of the retype, intermittently, in maybe a third of systems. The
+        // one world we promise is habitable does not get to lose that promise on a coin flip.
+        best.hasMagneticField = true;
+        best.atmospheres = AtmosphereRules.RollAtmospheres(
+            best.type, best.mass, true,
+            AtmosphereRules.TectonicBonus(best), best.terrainParams.heat);
+        AtmosphereRules.ApplyWaterLoss(best);
+        // Re-captured because everything above — the retype, the re-seed, the re-bias — changed what this
+        // world's NATURAL state is. Without this, terraforming would measure it against the climate it
+        // had before it was rebuilt, and "restoring" it would mean undoing the world it actually is.
+        TerraformVisuals.CaptureNatural(best);
         // This world was just force-retyped to a habitable Rocky/Ocean type specifically to guarantee the
         // system has one — it deserves the same biosphere check as any other qualifying world, computed
         // fresh under its NEW type rather than left at whatever its old type produced (or the false
@@ -377,9 +421,14 @@ public class SolarSystemGenerator : MonoBehaviour
         // (heavy -> gas giant -> big) without a separate size roll.
         body.mass = MassRules.ForType(type);
         body.surfaceSize = MassRules.SurfaceSize(body.mass);
-        body.atmosphereThickness = AtmosphereRules.ForBody(body.type, body.surfaceSize);
+        body.hasMagneticField = AtmosphereRules.RollMagneticField(body.type, body.mass);
         body.hasTectonics = TectonicsRules.Roll(body.type, body.surfaceSize);
         SeedTerrain(body);
+        // ATMOSPHERE IS DELIBERATELY *NOT* ROLLED HERE. It depends on heat (boil-off), and the heat
+        // SeedTerrain leaves behind is only the pre-orbit variance — BiasHeat has not run yet, because
+        // this body does not have a distance from its star until the caller places it. Rolling here
+        // would judge a world's air against a temperature it does not have, so an inner furnace would
+        // keep the thick atmosphere it should have lost. The caller does it, right after BiasHeat.
         ResourceGenerator.GenerateResources(body);
         return body;
     }
@@ -401,7 +450,7 @@ public class SolarSystemGenerator : MonoBehaviour
     {
         var species = SpeciesManager.Current;
         body.isHabitable = Habitability.IsHabitable(currentStar, species, body.type, body.distanceFromStar);
-        body.habitability = Habitability.Rate(currentStar, species, body.type, body.distanceFromStar);
+        body.habitability = Habitability.Rate(currentStar, species, body);
         body.terraformability = Habitability.Terraformability(currentStar, species, body);
     }
 

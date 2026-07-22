@@ -25,7 +25,7 @@ public partial class InspectorWindow
 
         Header(p, "THE CITY");
         var card = Card(p);
-        Stat(card, "World", () => $"{b.name} ({TerraformDiagnosis.Pretty(b.type)})");
+        Stat(card, "World", () => $"{b.name} ({TerraformDiagnosis.Pretty(b)})");
         Stat(card, "Population", () => $"{b.population} / {Colony.PopTarget(b)}");
         Stat(card, "Habitability", () => $"<color={Habitability.ScoreColorHex(b.habitability)}>{b.habitability:F0}%</color>");
         Stat(card, "Development", () => $"{Colony.ClaimProgress(b) * 100f:F0}%" +

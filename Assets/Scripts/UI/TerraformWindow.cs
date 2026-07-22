@@ -150,7 +150,7 @@ public class TerraformWindow : MonoBehaviour
 
         titleText.text = $"Terraforming — {body.name}";
         summary.text =
-            $"<b>{body.name}</b> · {TerraformDiagnosis.Pretty(body.type)} · viewed as <b>{s.name}</b>\n" +
+            $"<b>{body.name}</b> · {TerraformDiagnosis.Pretty(body)} · viewed as <b>{s.name}</b>\n" +
             $"Habitable now <color={Habitability.ScoreColorHex(now)}><b>{now:F0}%</b></color>   " +
             $"-> ceiling today <color={Habitability.ScoreColorHex(ceiling)}><b>{ceiling:F0}%</b></color>   " +
             $"-> with every project you've researched <color={Habitability.ScoreColorHex(reachable)}><b>{reachable:F0}%</b></color>   " +

@@ -241,7 +241,7 @@ public class FactionAI : MonoBehaviour
     static float HabFor(CelestialBody b, Species species)
     {
         var star = b.hostStar;
-        return star != null ? Habitability.Rate(star, species, b.type, b.distanceFromStar) : b.habitability;
+        return star != null ? Habitability.Rate(star, species, b) : b.habitability;
     }
 
     static bool SystemHasOwner(CelestialBody b, Faction f)

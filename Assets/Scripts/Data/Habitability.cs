@@ -64,6 +64,31 @@ public static class Habitability
         return Mathf.Clamp(positional * species.Affinity(type), 0f, 100f);
     }
 
+    /// The same rating, with the world's AIR PRESSURE taken into account.
+    ///
+    /// A body-aware overload rather than a new parameter on the one above, because several callers
+    /// (the orbit sandbox, which is asking "what if this world were HERE") legitimately have a distance
+    /// but no world to read atmosphere off.
+    ///
+    /// Applied as a multiplier on the finished score, and floored rather than allowed to reach zero: a
+    /// world with the wrong pressure is a bad world, not a nonexistent one — you can still put a domed
+    /// city on it, which is exactly what the spec says happens past 4 atmospheres for Terrans. Driving
+    /// it to 0 would also hide worlds from the AI's target list entirely, which is a bigger change than
+    /// this is meant to be.
+    public static float Rate(StarData star, Species species, CelestialBody b)
+    {
+        if (b == null) return 0f;
+        float baseScore = Rate(star, species, b.type, b.distanceFromStar);
+        if (species == null) return baseScore;
+
+        // Gas giants have no surface to stand on, so surface pressure is not the relevant objection —
+        // NoSurface already handles them, and scoring them on air as well would double-count it.
+        if (b.type == CelestialBodyType.GasGiant) return baseScore;
+
+        float fit = species.AtmosphereSuitability(b.atmospheres);
+        return baseScore * Mathf.Lerp(0.35f, 1f, fit);
+    }
+
     // How feasible it is to TERRAFORM a body to livability for a species (0..100), separate from its
     // current habitability. A world can be uninhabitable now yet very terraformable: what matters is
     // whether it sits near the species' orbital band (right amount of starlight), whether its body

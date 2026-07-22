@@ -22,6 +22,36 @@ public class Species
     // Environmental preference.
     public float idealTemp;       // 0 = frigid, 0.5 = temperate, 1 = scorching
     public float tolerance;       // habitable-zone width multiplier (durable/adaptable = wider)
+
+    // The band of atmospheric pressure this species can live in unaided, in ATMOSPHERES (1 = Earth).
+    // Terrans want 1..4; the silicate Pyrothians want the crushing 5..9 that would kill a Terran.
+    //
+    // Deliberately OVERLAPPING between species: a 3-atmosphere world is comfortable for Terrans and
+    // Aquarii both, so worlds are contested rather than neatly partitioned. Outside the band a world is
+    // not off-limits, just uninhabitable without technology — domes, pressure suits, sealed cities.
+    public float minAtmospheres = 1f, maxAtmospheres = 4f;
+
+    /// How well this world's air suits this species: 1 inside the band, falling off outside it.
+    ///
+    /// The falloff is scaled by `tolerance`, so the adaptable Sylvans and the armoured Pyrothians are
+    /// punished far less by being off-band than a Terran is — the same number that already widens their
+    /// temperature range widens this one, rather than inventing a second adaptability stat.
+    public float AtmosphereSuitability(float atmospheres)
+    {
+        if (atmospheres >= minAtmospheres && atmospheres <= maxAtmospheres) return 1f;
+
+        float slack = Mathf.Max(0.35f, tolerance) * 1.5f;
+        float distance = atmospheres < minAtmospheres
+            ? minAtmospheres - atmospheres
+            : atmospheres - maxAtmospheres;
+
+        return Mathf.Clamp01(1f - distance / slack);
+    }
+
+    /// A one-line statement of what this species needs to breathe, for the species panel.
+    public string AtmosphereLine()
+        => $"Breathes {minAtmospheres:0.#}–{maxAtmospheres:0.#} atmospheres" +
+           (maxAtmospheres < 1f ? " — thinner than Earth" : minAtmospheres > 1.5f ? " — far heavier than Earth" : "");
     float[] typeAffinity = new float[8]; // indexed by (int)CelestialBodyType, 0..1 ceiling
 
     public float Affinity(CelestialBodyType t)
@@ -83,7 +113,9 @@ public static class SpeciesDatabase
             weaknesses = "Fragile bodies and unremarkable lifespans; poorly suited to extreme heat, cold or vacuum.",
             color = new Color(0.4f, 0.7f, 1f),
             iq = 9, longevity = 5, fertility = 5, durability = 5, adaptability = 6,
-            idealTemp = 0.50f, tolerance = 1.0f
+            idealTemp = 0.50f, tolerance = 1.0f,
+            // Oxygen-nitrogen breathers: Earth-normal, and domes beyond 4.
+            minAtmospheres = 1f, maxAtmospheres = 4f
         };
         SetAff(terrans, rocky: 1.0f, ocean: 0.9f, ice: 0.4f, volcanic: 0.25f, barren: 0.35f, gas: 0.15f, moon: 0.5f, ast: 0.2f);
 
@@ -97,7 +129,10 @@ public static class SpeciesDatabase
             weaknesses = "Desiccate quickly on arid or scorching worlds; physically frail and short-lived.",
             color = new Color(0.3f, 0.85f, 0.8f),
             iq = 6, longevity = 5, fertility = 9, durability = 4, adaptability = 5,
-            idealTemp = 0.42f, tolerance = 1.15f
+            idealTemp = 0.42f, tolerance = 1.15f,
+            // Gilled and permeable-skinned — thin air dries them out, and deep pressure is fine but
+            // they are shallow-water dwellers rather than deep-ocean ones.
+            minAtmospheres = 1f, maxAtmospheres = 3f
         };
         SetAff(aquarii, rocky: 0.6f, ocean: 1.0f, ice: 0.7f, volcanic: 0.2f, barren: 0.2f, gas: 0.1f, moon: 0.4f, ast: 0.15f);
 
@@ -111,7 +146,9 @@ public static class SpeciesDatabase
             weaknesses = "Sluggish breeders that struggle in cold or wet climates; slow to expand.",
             color = new Color(1f, 0.5f, 0.25f),
             iq = 5, longevity = 7, fertility = 3, durability = 10, adaptability = 7,
-            idealTemp = 0.85f, tolerance = 1.5f
+            idealTemp = 0.85f, tolerance = 1.5f,
+            // Silicate crystal under real pressure: a Terran-normal world is a near-vacuum to them.
+            minAtmospheres = 5f, maxAtmospheres = 9f
         };
         SetAff(pyrothians, rocky: 0.5f, ocean: 0.15f, ice: 0.1f, volcanic: 1.0f, barren: 0.8f, gas: 0.2f, moon: 0.55f, ast: 0.45f);
 
@@ -125,7 +162,10 @@ public static class SpeciesDatabase
             weaknesses = "Barely reproduce and abhor heat; warm worlds are lethal to them.",
             color = new Color(0.6f, 0.85f, 1f),
             iq = 8, longevity = 10, fertility = 3, durability = 6, adaptability = 6,
-            idealTemp = 0.16f, tolerance = 1.35f
+            idealTemp = 0.16f, tolerance = 1.35f,
+            // Subsurface burrowers, so surface pressure matters less; ammonia needs some air to stay
+            // liquid, but they are the only species comfortable below Earth-normal.
+            minAtmospheres = 0.8f, maxAtmospheres = 3.5f
         };
         SetAff(cryithn, rocky: 0.5f, ocean: 0.4f, ice: 1.0f, volcanic: 0.1f, barren: 0.7f, gas: 0.2f, moon: 0.6f, ast: 0.4f);
 
@@ -139,7 +179,9 @@ public static class SpeciesDatabase
             weaknesses = "Physically delicate and dependent on adequate sunlight; wither in the dark outer system.",
             color = new Color(0.5f, 0.9f, 0.4f),
             iq = 5, longevity = 6, fertility = 8, durability = 4, adaptability = 9,
-            idealTemp = 0.55f, tolerance = 1.6f
+            idealTemp = 0.55f, tolerance = 1.6f,
+            // Photosynthetic and famously adaptable — the widest band of anyone.
+            minAtmospheres = 0.9f, maxAtmospheres = 5f
         };
         SetAff(sylvans, rocky: 0.9f, ocean: 0.9f, ice: 0.5f, volcanic: 0.4f, barren: 0.5f, gas: 0.3f, moon: 0.55f, ast: 0.3f);
 
@@ -186,7 +228,7 @@ public static class SpeciesManager
             var star = b.hostStar != null ? b.hostStar : fallback;
             if (star == null) continue;
             b.isHabitable = Habitability.IsHabitable(star, Current, b.type, b.distanceFromStar);
-            b.habitability = Habitability.Rate(star, Current, b.type, b.distanceFromStar);
+            b.habitability = Habitability.Rate(star, Current, b);
             b.terraformability = Habitability.Terraformability(star, Current, b);
         }
 

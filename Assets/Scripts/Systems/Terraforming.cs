@@ -103,10 +103,69 @@ public static class BiosphereRules
     public const float MinLiquidC = 0f, MaxLiquidC = 50f;
     public const float MinWaterLevel = 0.15f;   // needs real coverage, not a token puddle
 
-    // Below this, CelestialBody.atmosphereThickness reads as "too thin to hold onto anything living"
-    // (a vacuum world, or a small moon that never got one — see AtmosphereRules). Slice 3 originally left
-    // this gate out because no atmosphere attribute existed yet; it does now.
-    public const float MinAtmosphere = 0.12f;
+    // The hard floor, in ATMOSPHERES: below 0.6 there is no liquid surface water and nothing living,
+    // whatever the other sliders say. Same constant the water-loss rule uses, so the two can never
+    // disagree about where the line is.
+    public const float MinAtmosphere = AtmosphereRules.LifeFloor;
+
+    // ---- The BioSphere ceiling ---------------------------------------------------------------
+    //
+    // How lush a world is ALLOWED to get, from the two things plant life actually needs: water to drink
+    // and a temperature that keeps it liquid. Cranking the slider cannot exceed this, which is the
+    // point — a world that is bone dry or frozen solid does not get a jungle because someone asked.
+
+    /// The temperature term, 0..1. Peaks at 1.0 on the slider and falls off SYMMETRICALLY in both
+    /// directions: too cold and the water is ice, too hot and it is steam. Life wants the middle.
+    ///
+    /// The spec's own worked example — a slider at 1.8 is 0.8 away from ideal, so the term is 0.2.
+    public static float TemperatureTerm(float heat) => Mathf.Clamp01(1f - Mathf.Abs(heat - 1f));
+
+    /// The most BioSphere this world can support: the average of its water level and its temperature
+    /// term, gated on having enough air to hold either.
+    ///
+    /// Worked through with the spec's example: water level 0.7, temperature slider 1.8 -> temperature
+    /// term 0.2 -> (0.7 + 0.2) / 2 = 0.45. A world with those settings caps at 0.45 however far the
+    /// BioSphere slider is dragged.
+    ///
+    /// AVERAGED rather than multiplied, deliberately. A product would zero the whole ceiling the instant
+    /// either term hit zero, so a world at exactly 1.0 water and 2.0 heat would be as dead as bare rock;
+    /// an average lets one strong term partly carry a weak one, which is why deserts have life in them.
+    public static float Ceiling(CelestialBody b)
+    {
+        if (b == null) return 0f;
+
+        // THE 0.6 FLOOR IS ABSOLUTE HERE, not a fade.
+        //
+        // WaterRetention tapers between 0 and 0.6 atmospheres, which is right for WATER — the spec says
+        // oceans "start to disappear" as the air thins, and a world just under the line should read as
+        // drying rather than abruptly bone dry. It is wrong for LIFE. Gating this on `air > 0` instead
+        // meant a 0.3-atmosphere world got a legal 38% biosphere while HasAtmosphere and LimitingFactor,
+        // one screen away and reading the same constant, both said "too thin to hold water or life".
+        // The sandbox showed the contradiction directly: a cap note saying life was impossible, above a
+        // slider that let you paint it anyway.
+        if (b.atmospheres < MinAtmosphere) return 0f;
+
+        float water = PlanetTerrainGenerator.WaterLevelFromSeaLevel(b.terrainParams.SeaLevelOrNeutral);
+        float temperature = TemperatureTerm(b.terrainParams.heat);
+
+        return Mathf.Clamp01((water + temperature) * 0.5f);
+    }
+
+    /// Which of the three terms is holding this world back, for the sandbox note. Named rather than
+    /// scored, because "capped at 0.45" is only useful with "because it is too hot" next to it.
+    public static string LimitingFactor(CelestialBody b)
+    {
+        if (b == null) return "no world selected";
+        if (b.atmospheres < MinAtmosphere) return "the air is too thin to hold water or life";
+
+        float water = PlanetTerrainGenerator.WaterLevelFromSeaLevel(b.terrainParams.SeaLevelOrNeutral);
+        float temperature = TemperatureTerm(b.terrainParams.heat);
+
+        if (water <= temperature)
+            return water < 0.35f ? "there is not enough water" : "water level is the limit";
+
+        return b.terrainParams.heat > 1f ? "it is too hot for liquid water" : "it is too cold for liquid water";
+    }
 
     public static bool HasLiquidWaterClimate(CelestialBody b)
     {
@@ -118,7 +177,7 @@ public static class BiosphereRules
     public static bool HasEnoughWaterLevel(CelestialBody b) =>
         b != null && PlanetTerrainGenerator.WaterLevelFromSeaLevel(b.terrainParams.SeaLevelOrNeutral) >= MinWaterLevel;
 
-    public static bool HasAtmosphere(CelestialBody b) => b != null && b.atmosphereThickness >= MinAtmosphere;
+    public static bool HasAtmosphere(CelestialBody b) => b != null && b.atmospheres >= MinAtmosphere;
 
     // What a world generates WITH. Being in the liquid-water band isn't enough on its own — Rocky/Ocean
     // worlds that roll into it start alive, everything else (barren/ice/volcanic/gas/moons/asteroids)
@@ -309,13 +368,19 @@ public static class TerraformDiagnosis
                 detail = "A gas giant: there is no ground to stand on. Only a shellworld could change that."
             });
 
-        // ---- Magnetosphere: small dead worlds get their air stripped away again ----
-        if (b.type == CelestialBodyType.BarrenPlanet || b.type == CelestialBodyType.Asteroid || b.type == CelestialBodyType.Moon)
+        // ---- Magnetosphere ----
+        //
+        // Reads the WORLD'S OWN FLAG now, rather than guessing from its type. The old test named barren
+        // planets, asteroids and moons — which both lied in each direction (a large barren world may well
+        // have a dynamo; a small rocky one often does not) and made the fix invisible: completing Core
+        // Ignition left the diagnosis reporting the same fault forever, because the type never changed.
+        if (!b.hasMagneticField && b.type != CelestialBodyType.GasGiant)
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.NoMagnetosphere,
                 severity = 0.7f,
-                detail = "A dead core and no magnetic field — stellar wind will strip any atmosphere you make."
+                detail = $"A dead core and no magnetic field — stellar wind strips the upper air away, holding {b.name} " +
+                         $"to {AtmosphereRules.Ceiling(b):0.#} atmospheres against the {Mathf.Max(0f, b.mass):0.#} its mass could support."
             });
 
         // ---- Rotation ----
@@ -401,6 +466,39 @@ public static class TerraformDiagnosis
             case CelestialBodyType.GasGiant: return "gas giant";
             case CelestialBodyType.Moon: return "moon";
             default: return t.ToString();
+        }
+    }
+
+    /// A body's kind, named for WHAT ITS SURFACE ACTUALLY IS — with "Moon" as a suffix when it orbits a
+    /// planet rather than a star.
+    ///
+    /// Moons have rolled real surface types (Ocean, Ice, Volcanic, Rocky — see RollMoonType) for a while
+    /// now, and every readout in the game threw that away and printed "moon". A world with oceans on it
+    /// was described identically to a dead grey rock. So: *Ocean Moon*, *Volcanic Moon*, *Barren Moon*,
+    /// *Rocky Temperate Moon*.
+    ///
+    /// Suffix rather than prefix ("ocean moon", not "moon, ocean-type") because it reads as a noun
+    /// phrase in every place it is already used — a list row, a tooltip, mid-sentence.
+    ///
+    /// LOWERCASE, matching the planet forms above. Title Case would have been the nicer label in
+    /// isolation, but this string is dropped into running prose — "They would rather be on a temperate
+    /// rocky world" sits three lines from the Type row — and mixing the two produced sentences that
+    /// capitalised moons and not planets. One casing, chosen by where the text actually appears.
+    public static string Pretty(CelestialBody b)
+    {
+        if (b == null) return "unknown";
+        if (b.parentBody == null) return Pretty(b.type);
+
+        switch (b.type)
+        {
+            case CelestialBodyType.RockyPlanet: return "rocky temperate moon";
+            case CelestialBodyType.OceanPlanet: return "ocean moon";
+            case CelestialBodyType.IcePlanet: return "ice moon";
+            case CelestialBodyType.VolcanicPlanet: return "volcanic moon";
+            case CelestialBodyType.BarrenPlanet: return "barren moon";
+            // The bare Moon type is the airless grey default that never rolled a surface of its own.
+            case CelestialBodyType.Moon: return "barren moon";
+            default: return $"{b.type} moon";
         }
     }
 

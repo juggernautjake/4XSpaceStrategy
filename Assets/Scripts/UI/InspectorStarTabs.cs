@@ -558,7 +558,7 @@ public partial class InspectorWindow
             {
                 bool inZone = Habitability.InZone(s, SpeciesManager.Current, cap.distanceFromStar);
                 string mark = inZone ? "<color=#4DFF6E>• in band</color>" : "<color=#9FB4C8>· outside</color>";
-                return $"{mark}  <b>{cap.name}</b>  <size=10><color=#9FB4C8>{TerraformDiagnosis.Pretty(cap.type)} · " +
+                return $"{mark}  <b>{cap.name}</b>  <size=10><color=#9FB4C8>{TerraformDiagnosis.Pretty(cap)} · " +
                        $"distance {cap.distanceFromStar:F1} · hab <color={Habitability.ScoreColorHex(cap.habitability)}>{cap.habitability:F0}%</color></color></size>";
             });
         }
@@ -587,7 +587,7 @@ public partial class InspectorWindow
                 int moons = cap.moons != null ? cap.moons.Count : 0;
                 int ships = cap.units != null ? cap.units.Count : 0;
                 return $"<b>{cap.name}</b>{surveyed}\n" +
-                       $"<size=10><color=#9FB4C8>{TerraformDiagnosis.Pretty(cap.type)} · {owner} · " +
+                       $"<size=10><color=#9FB4C8>{TerraformDiagnosis.Pretty(cap)} · {owner} · " +
                        $"hab <color={Habitability.ScoreColorHex(cap.habitability)}>{cap.habitability:F0}%</color> · " +
                        $"{moons} moon(s) · {ships} ship(s)</color></size>";
             });

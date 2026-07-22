@@ -172,13 +172,20 @@ public static class SurfaceIndex
         }
     }
 
-    // ---- WIND: where turbines pay ----
-    // Exposure. High, open ground and coastlines get the wind; forests and valleys are sheltered.
-    // Big temperature swings drive weather, so poles and coasts (land next to sea) are gusty.
-    // Wind needs AIR to move at all — a thin-to-no atmosphere body (most moons, all asteroids) can't
-    // generate any real weather regardless of how exposed its terrain looks.
+    // ---- WEATHER: where turbines pay, and how violent the sky is ----
+    //
+    // Formerly the Wind Index. Renamed because atmosphere now drives it properly, and what it measures
+    // is no longer just "is it breezy here" but how much weather this world HAS — which is a fact about
+    // the whole planet before it is a fact about any tile.
+    //
+    // Weather is impossible without air, and its severity scales with how much air there is. A world
+    // with a trace atmosphere is dead calm everywhere; a thick one is violently stormy, which is why a
+    // gas giant (and a heavy moon like Titan) is the stormiest thing in the game.
     static float Wind(CelestialBody b, PlanetTerrainGenerator.Sample f)
     {
+        float severity = WeatherSeverity(b);
+        if (severity <= 0f) return 0f;
+
         float exposure = f.elevation * 0.5f + f.ridge * 0.18f;
         float open = 1f - Shelter(f.terrain);
         float thermal = Mathf.Abs(f.temperature - 0.5f) * 0.5f;   // hot/cold extremes stir the air
@@ -186,7 +193,33 @@ public static class SurfaceIndex
 
         float v = exposure * 0.42f + open * 0.24f + thermal * 0.2f + polar * 0.24f;
         if (f.water) v += 0.18f;                                   // nothing to break the wind at sea
-        return Mathf.Clamp01(v * 1.25f) * Mathf.Clamp01(b.atmosphereThickness);
+        return Mathf.Clamp01(v * 1.25f) * severity;
+    }
+
+    /// How much weather this world has AT ALL, 0..1 — the planet-wide multiplier under every tile of the
+    /// Weather index, and what the overlay's opacity now carries.
+    ///
+    /// Below a trace atmosphere there is nothing to move and the index is flat zero. From there it
+    /// climbs with pressure and saturates around 6 atmospheres, past which more air does not make the
+    /// storms meaningfully worse — it is already as bad as a turbine can survive.
+    public static float WeatherSeverity(CelestialBody b)
+    {
+        if (b == null) return 0f;
+        const float TraceAir = 0.15f;
+        if (b.atmospheres <= TraceAir) return 0f;
+        return Mathf.Clamp01(Mathf.InverseLerp(TraceAir, 6f, b.atmospheres));
+    }
+
+    /// Plain-language severity, for the Survey status line.
+    public static string WeatherLabel(CelestialBody b)
+    {
+        float s = WeatherSeverity(b);
+        if (s <= 0f) return "airless — no weather at all";
+        if (s < 0.2f) return "near-calm";
+        if (s < 0.45f) return "mild";
+        if (s < 0.7f) return "stormy";
+        if (s < 0.9f) return "violent";
+        return "catastrophic";
     }
 
     static float Shelter(TerrainType t)
@@ -202,11 +235,18 @@ public static class SurfaceIndex
     }
 
     // ---- SOLAR: where panels pay ----
-    // Cloudless, sunlit, near the equator. Moisture means cloud, so dry ground is bright ground — which
-    // is exactly why deserts and savanna win. Altitude helps (thinner air above you).
+    //
+    // Cloudless, high, and — now — POLAR. Moisture means cloud, so dry ground is bright ground, and
+    // altitude helps because there is less air above you.
+    //
+    // The polar preference is a deliberate reversal of the old equatorial one. A panel at the pole of a
+    // world with any axial tilt sees continuous summer daylight for months and never suffers the
+    // overhead-noon-then-nothing cycle the equator gets; the equator's advantage in peak angle is worth
+    // less than the pole's advantage in HOURS. It also makes the Solar and Weather maps disagree, which
+    // is what makes siting a decision instead of a formality.
     static float Solar(CelestialBody b, PlanetTerrainGenerator.Sample f)
     {
-        float sunAngle = 1f - f.latitude * 0.75f;                  // the sun is low at the poles
+        float polar = 0.35f + f.latitude * 0.65f;                  // long polar days beat high equatorial noon
         float clear = Mathf.Clamp01(1f - f.moisture * 1.15f);      // moisture = cloud
         float altitude = f.elevation * 0.2f;
 
@@ -214,14 +254,46 @@ public static class SurfaceIndex
         // star, so a far, cold world's sunniest desert still can't match a close one's.
         float insolation = Mathf.Clamp01(b.terrainParams.heat / 1.4f);
 
-        // A thick atmosphere blocks/reflects sunlight before it reaches the panels (Venus, not Mercury);
-        // a thin-to-no atmosphere world loses nothing on the way down.
-        float atmBlock = Mathf.Lerp(1f, 0.1f, Mathf.Clamp01(b.atmosphereThickness));
-
-        float v = (sunAngle * 0.45f + clear * 0.4f + altitude) * Mathf.Lerp(0.45f, 1.15f, insolation) * atmBlock;
+        float v = (polar * 0.45f + clear * 0.4f + altitude) * Mathf.Lerp(0.45f, 1.15f, insolation)
+                  * SolarPressureFactor(b.atmospheres);
         if (f.terrain == TerrainType.Storm) v *= 0.25f;            // permanent cloud
         return Mathf.Clamp01(v);
     }
+
+    /// What a world's air pressure does to solar output, as a multiplier on a 1.0 baseline.
+    ///
+    /// Above Earth-normal, output falls linearly and reaches EXACTLY ZERO at the dead line.
+    ///
+    /// THE SPEC'S OWN NUMBERS DO NOT CLOSE, so this picks the reading that stays self-consistent. It
+    /// asks for "every Atmosphere added will remove 20%", then gives 2 atm -> 80% (which is 20 a step)
+    /// and 4 atm -> 20% (which is 26.7 a step), then says 5 is worthless (which a 20-a-step slope only
+    /// reaches at 6). Taking the 5-atmosphere cutoff as the fixed point and solving back gives 25 a
+    /// step: 2 atm -> 75%, 3 -> 50%, 4 -> 25%, 5 -> 0. That lands within five points of both worked
+    /// examples AND makes the build-menu cutoff true rather than approximate — which matters more,
+    /// because a gate that fires while output is still 20% is a gate the player will read as a bug.
+    ///
+    /// Below Earth pressure it runs the other way, gaining 10 points per 0.1 atmosphere under: a 0.5-atm
+    /// world runs at 150%, an airless one at 200% with nothing between the panel and the star.
+    ///
+    /// Returned UNCLAMPED above 1 on purpose. The bonus is real and the caller decides what to do with
+    /// it — the index map clamps for display, but the build-menu gate and the efficiency readout want
+    /// to know a thin world genuinely beats Earth.
+    public static float SolarPressureFactor(float atmospheres)
+    {
+        if (atmospheres >= 1f)
+            return Mathf.Max(0f, 1f - (atmospheres - 1f) / (SolarDeadAtmospheres - 1f));
+        return 1f + (1f - atmospheres) * 1.0f;
+    }
+
+    /// Atmospheres at which solar output reaches zero, and so the point past which panels are not
+    /// offered at all. SolarPressureFactor is solved against this, so the two can never drift apart.
+    public const float SolarDeadAtmospheres = 5f;
+
+    /// Is solar worth building on this world? False above the dead line — and true again the moment
+    /// terraforming brings the air back down to 4, which is what makes thinning an atmosphere a
+    /// strategic move rather than a cosmetic one.
+    public static bool SolarViable(CelestialBody b) =>
+        b != null && b.atmospheres < SolarDeadAtmospheres;
 
     // ---- WATER: where hydro pays ----
     // Hydro needs flowing water, which means water AND a height gradient — a river down a mountain, not
@@ -330,7 +402,7 @@ public static class SurfaceIndex
             case SurfaceIndexKind.Mineral: return "Mineral Index";
             case SurfaceIndexKind.Heat: return "Heat Index";
             case SurfaceIndexKind.Fertile: return "Fertile Index";
-            case SurfaceIndexKind.Wind: return "Wind Index";
+            case SurfaceIndexKind.Wind: return "Weather Index";
             case SurfaceIndexKind.Solar: return "Solar Index";
             case SurfaceIndexKind.Water: return "Hydro Index";
             default: return "None";
@@ -344,8 +416,8 @@ public static class SurfaceIndex
             case SurfaceIndexKind.Mineral: return "Broken, raised crust — mountains, canyons and exposed seams. Mines want the highest they can get.";
             case SurfaceIndexKind.Heat: return "Heat in the CRUST, not the air: volcanoes and geyser fields. A volcano on an ice world is still that world's best geothermal site.";
             case SurfaceIndexKind.Fertile: return "Warm AND wet AND flat — farmland needs all three at once, not any one of them.";
-            case SurfaceIndexKind.Wind: return "Exposure: high open ground, coasts and polar latitudes. Forests and canyons are sheltered.";
-            case SurfaceIndexKind.Solar: return "Cloudless equatorial sun. Dry ground is bright ground, which is why deserts win — and a world far from its star is dim everywhere.";
+            case SurfaceIndexKind.Wind: return "Weather, which needs AIR: an airless world has none at all, and a thick-aired one is violently stormy. Within that, exposure — high open ground, coasts and polar latitudes; forests and canyons are sheltered.";
+            case SurfaceIndexKind.Solar: return "Thin air and long polar days. Output falls a quarter for every atmosphere above Earth-normal and hits zero at five, while a near-airless world beats Earth outright. Dry ground is bright ground, and a world far from its star is dim everywhere.";
             case SurfaceIndexKind.Water: return "Flowing water: rivers and coasts WITH relief to drop through. A flat open sea has no head to work with.";
             default: return "";
         }
