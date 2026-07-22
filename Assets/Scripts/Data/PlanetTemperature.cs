@@ -51,6 +51,24 @@ public static class PlanetTemperature
         return kelvin - 273.15f + TypeModifierC(type) + greenhouseC;
     }
 
+    /// The `heat` value that would give a world of this type and atmosphere the requested average
+    /// temperature. The exact algebraic inverse of BaseCelsius above.
+    ///
+    /// WHY THIS IS NEEDED. `heat` is calibrated so that heat = 1 reads as Earth's ~15°C — but that is
+    /// BEFORE the greenhouse term, which adds up to 45°C on top depending on how much air the world
+    /// holds. So "set heat from the species' ideal temperature" does not produce the temperature the
+    /// species wants: a thicker-atmosphere world of the same heat runs up to 23°C hotter, which is
+    /// enough to carry a cradle straight past the liquid-water ceiling (see BiosphereRules). Anything
+    /// choosing a world's climate by TEMPERATURE has to solve for heat rather than assign it.
+    public static float HeatForCelsius(float targetC, float atmosphereThickness, CelestialBodyType type)
+    {
+        float greenhouseC = Mathf.Clamp01(atmosphereThickness) * GreenhouseMaxC;
+        float kelvin = targetC + 273.15f - TypeModifierC(type) - greenhouseC;
+        float root = Mathf.Max(0f, kelvin) / ReferenceKelvin;
+        // Floored at the same 0.01 BaseCelsius clamps to, so the round trip is stable at the cold end.
+        return Mathf.Max(0.01f, root * root);
+    }
+
     // Hot planet TYPES run hot everywhere (a furnace world's own internal heat), cold types run cold
     // everywhere (high albedo, no greenhouse) — independent of where they happen to orbit. This is what
     // makes "a volcanic world will likely never read white/blue, an ice world will likely never read

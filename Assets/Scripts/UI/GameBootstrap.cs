@@ -54,6 +54,7 @@ public static class GameBootstrap
         SaveLoadMenu.Create(canvas.transform);
         SpeciesWindow.Create(canvas.transform);
         UnitInfoPanel.Create(canvas.transform);
+        SendToWindow.Create(canvas.transform);      // pick a destination from a list of known places
         FleetWindow.Create(canvas.transform);
         ShipyardWindow.Create(canvas.transform);
         TerraformWindow.Create(canvas.transform);

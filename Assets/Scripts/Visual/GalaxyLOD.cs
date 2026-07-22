@@ -561,6 +561,22 @@ public class CoreProxyHover : MonoBehaviour
     {
         if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
     }
+
+    // The core is READ at galaxy zoom and only clickable in system view — which is backwards, since
+    // galaxy zoom is the one place it is actually on screen as the thing the whole map turns around.
+    // Opens the same Galaxy panel its event horizon does (see StarInteraction.isGalacticCore).
+    void OnMouseDown()
+    {
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
+        if (galaxy == null) return;
+        // A fleet mid-order owns the click, same guard every other map object carries.
+        if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;
+
+        SimpleAudio.Instance?.PlaySelect();
+        if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
+        InspectorWindow.Instance?.Inspect(
+            InspectorTarget.GalaxyTarget(galaxy, galaxy.center), resetTrail: true);
+    }
 }
 
 // One enlarged 3D star (or cluster, or black hole) standing in for a whole system in the galaxy overview.

@@ -105,8 +105,11 @@ public partial class InspectorWindow
 
         // Actions.
         Header(p, "ACTIONS");
-        var row = UIFactory.NewUI(p, "Actions"); UIFactory.AddLayout(row, 28);
-        var h = row.AddComponent<HorizontalLayoutGroup>();
+        // Named for what it is rather than `row`. This method is long and builds several cards, and a
+        // bare `row` is exactly the name the next block added here will also want — which is how it
+        // collided (CS0128) once already.
+        var actionRow = UIFactory.NewUI(p, "Actions"); UIFactory.AddLayout(actionRow, 28);
+        var h = actionRow.AddComponent<HorizontalLayoutGroup>();
         h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true;
 
         // ONE map. The Planet View is the world: info, sites, the build grid, and the survey overlays,
@@ -117,9 +120,9 @@ public partial class InspectorWindow
         // world is two things to keep in step and one of them is always slightly wrong — the sites are a
         // TAB now, not a window. It opens unsurveyed too: there's nothing to hide about a world's name
         // and orbit, and the tabs that need a survey say so themselves.
-        UIFactory.Button(row.transform, "Planet View", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
+        UIFactory.Button(actionRow.transform, "Planet View", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
 
-        UIFactory.Button(row.transform, "Focus Camera", () =>
+        UIFactory.Button(actionRow.transform, "Focus Camera", () =>
         {
             if (b.visualObject != null)
                 CameraController.Instance?.FocusAndZoom(b.visualObject.transform, b.surfaceSize, true);

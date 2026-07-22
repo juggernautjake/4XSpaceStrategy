@@ -245,6 +245,10 @@ public class SystemVisualizer : MonoBehaviour
         var si = horizon.gameObject.AddComponent<StarInteraction>();
         si.star = combined;
         si.system = sys;
+        // sys == null is only ever the GALACTIC CORE — VisualizeGalaxy is the one caller that passes it,
+        // and every black-hole SYSTEM passes its own. Recorded as a flag so the click handler never has
+        // to re-derive it from a missing field. See StarInteraction.isGalacticCore.
+        si.isGalacticCore = sys == null;
     }
 
     // Ensures a body has exactly one sphere collider sized for an easy click. The collider's WORLD

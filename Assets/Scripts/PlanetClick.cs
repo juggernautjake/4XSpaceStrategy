@@ -30,6 +30,18 @@ public class PlanetClick : MonoBehaviour
         // FleetMovementController handle it instead of opening the info panel.
         if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;
 
+        // A DOCKED SHIP WINS.
+        //
+        // This world's pick sphere is deliberately oversized (EnsureClickCollider floors it at 1.5 world
+        // units, ClickColliderScaler adds up to twelve more as you zoom out), and a docked ship parks
+        // only a couple of units off the surface — so the ship ends up INSIDE the sphere and the sphere's
+        // near face wins Unity's nearest-hit test. The ship's own OnMouseDown never fires, which is why
+        // clicking a docked ship selected the planet instead.
+        //
+        // Handing the click over rather than just declining it: declining would select nothing, because
+        // nothing else is going to fire for that ship.
+        if (ClickPriority.TryClickUnitUnderCursor()) return;
+
         // Left-clicking a world INSPECTS it. Worlds are never "commandable", so this also drops any
         // ship selection — to send ships you select the ships, then right-click a destination.
         UnitSelection.Clear();

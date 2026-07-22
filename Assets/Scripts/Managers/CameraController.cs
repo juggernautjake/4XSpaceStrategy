@@ -352,8 +352,56 @@ public class CameraController : MonoBehaviour
         UpdateClipPlanes();       // the view volume has to keep up with the zoom, or the galaxy vanishes
     }
 
+    // ---- Following a SHIP -----------------------------------------------------------------------
+    //
+    // A ship cannot be followed by Transform the way a world can. A world's visualObject lives for as
+    // long as the galaxy is drawn; a ship's token or hull is destroyed and rebuilt by
+    // UnitTokenRenderer/UnitModelRenderer every time the fleet changes — a ship built, a ship lost, a
+    // ship graduating from a billboard to a real mesh. A camera holding the old Transform would go
+    // fake-null and silently stop tracking, usually seconds after the player asked it to.
+    //
+    // So a ship is followed by IDENTITY, and its transform is re-resolved each frame through
+    // UnitVisuals, which is the one place that knows which renderer currently owns it.
+    public Unit followUnit;
+
+    /// Lock the camera onto a ship and keep it there.
+    public void FocusUnit(Unit u, bool follow = true)
+    {
+        if (u == null) return;
+        var t = UnitVisuals.TransformOf(u);
+        if (t == null) return;
+
+        followUnit = follow ? u : null;
+        FocusAndZoom(t, ShipFrameHint, follow);
+    }
+
+    /// How much room to leave around a followed ship. Ships are tiny next to a world, and framing one
+    /// by its own bounds would put the camera close enough that its own drive flare fills the screen.
+    const float ShipFrameHint = 3f;
+
     private void LateUpdate()
     {
+        // A followed SHIP's transform is re-resolved every frame — see followUnit. Done before the
+        // follow test below so a ship whose token was rebuilt this frame is picked straight back up
+        // rather than dropping the follow for a frame (which reads as a stutter).
+        if (followUnit != null)
+        {
+            var live = UnitVisuals.TransformOf(followUnit);
+            if (live != null) followTarget = live;
+            else
+            {
+                // No transform this frame. That is normal for one frame while a renderer rebuilds, so
+                // the camera only lets go once the ship is genuinely gone from the fleet — destroyed,
+                // or scrapped. Walked by hand rather than with Contains: Units is an IReadOnlyList,
+                // which has no Contains without pulling in LINQ.
+                bool alive = false;
+                var um = UnitManager.Instance;
+                if (um != null)
+                    foreach (var u in um.Units) if (u == followUnit) { alive = true; break; }
+                if (!alive) ClearFocus();   // clears followUnit too
+            }
+        }
+
         // Recenter on the followed body after orbits move it (zoom is already smoothed in Update).
         if (following && followTarget != null)
         {
@@ -384,6 +432,12 @@ public class CameraController : MonoBehaviour
         // the framing height from the body's current reach and eased there, so the view jumped even though
         // nothing about the subject had changed. Re-centring is always wanted; re-zooming almost never is.
         bool reFocus = following && followTarget == target && target != null;
+
+        // Rebase the zoom if this call is what STOPS the follow (ViewPlanet does exactly that, with
+        // follow:false on the body already being followed). `targetHeight` is body-relative while
+        // following, so releasing without re-expressing it in world terms lurches the camera by the
+        // body's whole Y offset. Same reasoning as ClearFocus.
+        if (following && !follow) targetHeight = Mathf.Clamp(transform.position.y, minHeight, maxHeight);
 
         followTarget = target;
         following = follow;
@@ -462,7 +516,11 @@ public class CameraController : MonoBehaviour
         // whatever height the camera is at, so centring before the height is right aims it somewhere
         // else entirely.
         var p = transform.position;
-        p.y = targetHeight;
+        // Body-relative, matching SmoothHeightMovement — see the note there. Snapping to the absolute
+        // height here and letting the ease correct it afterwards would land the handoff a fraction of
+        // the body's Y offset away from the framing that was just solved for, which is precisely the
+        // one moment (the loading finale's cross-fade) that has to match exactly.
+        p.y = targetHeight + FollowPlaneY;
         transform.position = p;
         haveAnchor = false;          // no pending anchor to drag the view off centre afterwards
         FocusOn(target.position);
@@ -557,9 +615,31 @@ public class CameraController : MonoBehaviour
 
     public float Height => transform.position.y;
 
-    public void SetFollow(bool on) { following = on; }
+    /// Same rebase as ClearFocus when it turns following OFF — the reference plane the zoom is measured
+    /// from is changing, so the height has to be re-expressed in the new one or the camera jumps.
+    public void SetFollow(bool on)
+    {
+        if (!on && following) targetHeight = Mathf.Clamp(transform.position.y, minHeight, maxHeight);
+        following = on;
+    }
     public bool IsFollowing => following;
-    public void ClearFocus() { following = false; followTarget = null; }
+    /// Stop following, and REBASE the zoom on the way out.
+    ///
+    /// While following, `targetHeight` is measured from the body's own plane (see FollowPlaneY). Drop
+    /// `following` without rebasing and that reference plane collapses to world zero in a single frame,
+    /// so the smoothing target jumps by the body's entire Y offset — up to ±5 units for an inner world
+    /// and ±18 for an outer one. Zoomed right in, where the ground distance is well under a unit, that
+    /// reads as the camera violently lurching away the instant you press Unfollow or click empty space.
+    ///
+    /// Taking the CURRENT height as the new absolute target means the camera stays exactly where it is
+    /// and simply stops tracking, which is what "unfollow" should look like.
+    public void ClearFocus()
+    {
+        if (following) targetHeight = Mathf.Clamp(transform.position.y, minHeight, maxHeight);
+        following = false;
+        followTarget = null;
+        followUnit = null;   // or the next LateUpdate would re-acquire the ship we just released
+    }
 
     private void HandlePanning()
     {
@@ -782,12 +862,36 @@ public class CameraController : MonoBehaviour
     // The easing is also genuinely frame-rate independent now: 1 - exp(-rate*dt) is the real form. The
     // old `rate * dt` was linear in dt and only approximates it for small dt, so the effective smoothing
     // changed with framerate — the comment claimed "time-independent" while the code wasn't.
+    // ============================================================================================
+    // A FOLLOWED BODY MUST NOT CHANGE SIZE AS IT ORBITS
+    //
+    // `targetHeight` is the zoom, and it used to be an ABSOLUTE world height. FocusOn then holds that
+    // height and slides x/z until the view ray meets the body:
+    //
+    //     d = (body.y - camera.y) / forward.y
+    //
+    // A planet's orbit is INCLINED (OrbitController tilts the orbit plane by `inclination`), so its
+    // world Y swings up and down once per lap. With the camera pinned to a fixed absolute height, that
+    // swing lands entirely in `d` — the distance from the camera to the planet — and apparent size goes
+    // as 1/d. The planet visibly swelled and shrank as it went round, which is what it looked like:
+    // the camera drifting toward and away from it.
+    //
+    // Measuring the zoom from the BODY'S OWN PLANE instead makes `d` constant: camera.y is now
+    // body.y + targetHeight, so d = -targetHeight / forward.y, which does not depend on where in the
+    // orbit the body is. The planet holds exactly the size the zoom asked for, all the way round.
+    //
+    // Only the smoothing TARGET moves. `targetHeight` itself stays the one thing the scroll wheel owns
+    // (HandleHeightChange multiplies it and never reads position.y back), so the zoom ladder, the LOD
+    // boundaries and the floor/ceiling are all untouched — and a planet's Y offset is a couple of units
+    // against boundaries measured in hundreds.
+    float FollowPlaneY => (following && followTarget != null) ? followTarget.position.y : 0f;
+
     private void SmoothHeightMovement()
     {
         float k = 1f - Mathf.Exp(-ZoomEaseRate * Time.unscaledDeltaTime);
         Vector3 pos = transform.position;
 
-        pos.y = Mathf.Lerp(pos.y, targetHeight, k);
+        pos.y = Mathf.Lerp(pos.y, targetHeight + FollowPlaneY, k);
 
         // Following pins X/Z to the body (LateUpdate re-centres every frame), so an anchor would only
         // fight it.
