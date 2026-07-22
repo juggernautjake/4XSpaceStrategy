@@ -33,6 +33,8 @@ public static class TerraformVisuals
     /// as their kind of place, and terraforming is the act of making somewhere ELSE read that way. Two
     /// different curves for "what this species considers pleasant" would drift apart, and the tell would
     /// be a fully terraformed world that looked nothing like the homeworld.
+    /// USE THE BODY-AWARE OVERLOAD BELOW WHERE A BODY IS IN HAND — this one cannot account for the
+    /// greenhouse term, which depends on the world's own atmosphere.
     public static PlanetTerrainGenerator.NoiseParams Ideal(Species s)
     {
         var p = PlanetTerrainGenerator.NoiseParams.Default;
@@ -56,6 +58,47 @@ public static class TerraformVisuals
 
         // NOTE: `scale` is meaningless here and Blend never reads it. Feature scale is the world's own
         // geography — how big its continents are — and terraforming does not move continents.
+        return p;
+    }
+
+    /// The same ideal, but solved for THIS world's temperature rather than assigned as a raw heat value.
+    ///
+    /// WHY THE OVERLOAD EXISTS. `heat` is not a temperature — PlanetTemperature.BaseCelsius adds up to
+    /// 45°C of greenhouse warming on top of it, scaled by the world's own atmosphere. GalaxyGenerator
+    /// builds a species' cradle by solving for the temperature it wants (CradleHeat); if terraforming
+    /// kept walking worlds toward the old raw-heat curve instead, the two would describe different
+    /// climates for the same species — and the tell would be a fully terraformed world that ends up
+    /// HOTTER than the homeworld it was supposed to resemble. For a Terran world that lands at 51°C,
+    /// past the 50°C liquid-water ceiling, so maxing terraforming on your own capital would push it out
+    /// of the band and kill the biosphere it started with.
+    ///
+    /// Pinned only when the SPECIES' own cradle is a living one AND the world could actually hold that
+    /// climate — see the two-part gate in the body, which explains why each half is needed.
+    public static PlanetTerrainGenerator.NoiseParams Ideal(Species s, CelestialBody b)
+    {
+        var p = Ideal(s);
+        if (s == null || b == null) return p;
+
+        // BOTH conditions, and each rules out a different absurdity.
+        //
+        // The SPECIES gate matches GalaxyGenerator.CradleHeat exactly, so the cradle and the terraform
+        // target cannot drift apart. Without it, a Cryithn or Pyrothian working on a rocky world would
+        // be pinned to a temperate target — the wrong species' idea of pleasant, on their own world.
+        //
+        // The BODY gate stops the solve being asked for something the world cannot be. A volcanic world
+        // carries a +90°C type modifier, so demanding 23.5°C of it needs heat ≈ 0.44 — under the 0.45
+        // floor this model is documented to work in, and low enough that the terrain classifier's
+        // temperature field reads frozen while the °C readout says room temperature. You cannot make a
+        // lava world temperate by wanting it; you remodel it into a rocky one first (Planetary
+        // Remodelling), and the pin applies from the moment its TYPE changes.
+        //
+        // This costs nothing at the cradle, which is Rocky or Ocean by construction for exactly the
+        // three species the species gate lets through — so parity with CradleHeat is exact.
+        bool pinnable = b.type == CelestialBodyType.RockyPlanet || b.type == CelestialBodyType.OceanPlanet;
+        if (GalaxyGenerator.CradleWantsLife(s) && pinnable)
+            p.heat = PlanetTemperature.HeatForCelsius(
+                GalaxyGenerator.CradleTargetCelsius(s), b.atmosphereThickness, b.type);
+
         return p;
     }
 
@@ -124,7 +167,11 @@ public static class TerraformVisuals
         PlanetTerrainGenerator.NoiseParams p =
             b.remodelToType >= 0
                 ? Blend(natural, TypeClimate((CelestialBodyType)b.remodelToType), b.remodelT)
-                : Blend(natural, Ideal(s), Progress(b) * power);
+                // The BODY-AWARE ideal — see the overload. With the plain Ideal(s) here, a terraformed
+                // world converged on a different climate than the one GalaxyGenerator built the
+                // species' cradle with, and for a Terran world that meant drifting past the
+                // liquid-water ceiling and losing the biosphere at full terraforming.
+                : Blend(natural, Ideal(s, b), Progress(b) * power);
 
         // Foreground: the specific projects run on THIS world, also scaled by power.
         var d = TerraformClimate.Accumulated(b);

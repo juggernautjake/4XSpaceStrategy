@@ -1052,6 +1052,10 @@ public class LoadingScreen : MonoBehaviour
         public Renderer rend;
         public Material mat;
         public Texture2D tex;
+        // The REAL surface texture this moon takes on once its development finishes
+        // (FinishMoonTexture). Tracked so ClearMoons can free it — it is built here, so nothing else
+        // owns it, and a load leaks one per moon otherwise.
+        public Texture2D realTex;
         public Color[] pixels, final;
         public int revealed;
         public float clock;
@@ -1216,7 +1220,14 @@ public class LoadingScreen : MonoBehaviour
         // other would dissolve a hard-edged mosaic into a smooth detailed world and visibly re-shape
         // every coastline. Handing the preview the exact texture the real planet wears closes that gap
         // completely, and this is the right moment: the world "finishes" as it gains its sky.
-        PlanetAppearance.RefreshTexture(homeBody, previewBody.gameObject);
+        // Written onto the SHARED material we own, not through PlanetAppearance.RefreshTexture.
+        //
+        // RefreshTexture reads `rend.material`, which INSTANTIATES a clone — so the preview would end up
+        // wearing a copy that nothing tracks. The next load's SetSubject reassigns sharedMaterial back to
+        // the shared one, orphaning that clone and its full-size surface texture: one Material and one
+        // Texture2D leaked per load. It also destroyed the morph texture as a side effect, which was
+        // harmless only by luck.
+        ApplyRealPlanetTexture();
 
         PlanetAppearance.AddAtmosphere(homeBody, previewBody.gameObject);
         PlanetAppearance.AddClouds(homeBody, previewBody.gameObject);
@@ -1224,10 +1235,74 @@ public class LoadingScreen : MonoBehaviour
         for (int i = 0; i < moons.Count; i++)
         {
             if (moons[i].body == null || moons[i].source == null) continue;
-            PlanetAppearance.RefreshTexture(moons[i].source, moons[i].body.gameObject);
+
+            // NO RefreshTexture HERE — that is the planet's moment, not the moons'.
+            //
+            // This ran at the START of the moon phase, before a single moon had begun revealing, and
+            // RefreshTexture DESTROYS the texture already on the material (PlanetAppearance.cs — it has
+            // to, or terraforming would leak one surface texture per refresh). That texture is each
+            // moon's morph texture. So every moon's reveal was painting into a destroyed Texture2D,
+            // which is the MissingReferenceException out of SetPixels, once per moon per frame.
+            //
+            // A moon takes its real texture when IT finishes instead — see FinishMoonTexture.
             PlanetAppearance.AddAtmosphere(moons[i].source, moons[i].body.gameObject);
             PlanetAppearance.AddClouds(moons[i].source, moons[i].body.gameObject);
         }
+    }
+
+    /// The planet's twin of FinishMoonTexture — see the note at its call site for why it does not go
+    /// through PlanetAppearance.RefreshTexture.
+    Texture2D realPlanetTex;
+
+    void ApplyRealPlanetTexture()
+    {
+        if (homeBody == null || subjectMats == null) return;
+        var mat = subjectMats[(int)Subject.Planet];
+        if (mat == null) return;
+
+        var real = SurfaceTextureRenderer.BuildGrid(homeBody) ?? SurfaceTextureRenderer.Build(homeBody);
+        if (real == null) return;
+
+        real.wrapMode = TextureWrapMode.Repeat;
+        real.filterMode = FilterMode.Bilinear;
+
+        // Free the one from a PREVIOUS generation before replacing it — this screen is a singleton that
+        // outlives any one game.
+        if (realPlanetTex != null && realPlanetTex != real) Destroy(realPlanetTex);
+        realPlanetTex = real;
+
+        mat.mainTexture = real;
+        if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", real);
+    }
+
+    /// Hand a finished moon the REAL world's surface texture, and retire its morph texture.
+    ///
+    /// The planet's equivalent is the RefreshTexture call in RevealAtmosphere above, and for the same
+    /// reason: the morph runs on a tiny point-filtered grid, and cross-fading that into the real
+    /// bilinear globe would visibly re-shape every coastline. The difference is timing — a moon earns
+    /// it when its own development completes, not when the planet's does.
+    ///
+    /// Written straight onto `m.mat`, the material we own, rather than through
+    /// PlanetAppearance.RefreshTexture: that reads `rend.material`, which INSTANTIATES a clone — so the
+    /// moon would end up wearing a copy nothing tracks, and ClearMoons would destroy the original while
+    /// the clone and its texture leaked, once per moon per load.
+    void FinishMoonTexture(MoonPreview m)
+    {
+        if (m == null || m.mat == null || m.source == null) return;
+
+        var real = SurfaceTextureRenderer.BuildGrid(m.source) ?? SurfaceTextureRenderer.Build(m.source);
+        if (real != null)
+        {
+            real.wrapMode = TextureWrapMode.Repeat;
+            real.filterMode = FilterMode.Bilinear;
+            m.mat.mainTexture = real;
+            if (m.mat.HasProperty("_BaseMap")) m.mat.SetTexture("_BaseMap", real);
+            m.realTex = real;      // tracked so ClearMoons can free it
+        }
+
+        // The morph texture has done its job. Nulled as well as destroyed, so the reveal loop's own
+        // guard reads it as finished rather than as a live texture that happens to be dead.
+        if (m.tex != null) { Destroy(m.tex); m.tex = null; }
     }
 
     /// Point the preview at the real world the same way the game camera is about to.
@@ -1402,12 +1477,17 @@ public class LoadingScreen : MonoBehaviour
 
             if (!m.revealing) continue;
 
+            // A finished moon has had its morph texture retired (FinishMoonTexture). Anything else that
+            // takes it away is a bug — but this method throwing every frame for the rest of the load is
+            // a worse way to find out about it than the moon quietly arriving early.
+            if (m.tex == null) { m.revealing = false; m.done = true; continue; }
+
             m.clock += dt;
             int total = moonOrder.Length;
             int target = Mathf.Min(total, Mathf.FloorToInt(total * Mathf.Clamp01(m.clock / MoonMorphDuration)));
             if (target <= m.revealed)
             {
-                if (target >= total) { m.revealing = false; m.done = true; }
+                if (target >= total) { m.revealing = false; m.done = true; FinishMoonTexture(m); }
                 continue;
             }
 
@@ -1420,7 +1500,9 @@ public class LoadingScreen : MonoBehaviour
             m.tex.SetPixels(m.pixels);
             m.tex.Apply();
 
-            if (m.revealed >= total) { m.revealing = false; m.done = true; }
+            // Its development is complete — swap the mosaic for the real globe, exactly as the planet
+            // does when it gains its sky.
+            if (m.revealed >= total) { m.revealing = false; m.done = true; FinishMoonTexture(m); }
         }
     }
 
@@ -1431,6 +1513,7 @@ public class LoadingScreen : MonoBehaviour
             if (m.body != null) Destroy(m.body.gameObject);
             if (m.mat != null) Destroy(m.mat);
             if (m.tex != null) Destroy(m.tex);
+            if (m.realTex != null) Destroy(m.realTex);
         }
         moons.Clear();
         moonsShown = 0;
@@ -1445,6 +1528,12 @@ public class LoadingScreen : MonoBehaviour
     void ResetPlanetPlaceholder()
     {
         morphActive = false;
+
+        // The previous generation's real surface texture goes with the placeholder reset — this runs
+        // once per new game (Open), and it is the point at which the last game's homeworld stops being
+        // anything this screen needs.
+        if (realPlanetTex != null) { Destroy(realPlanetTex); realPlanetTex = null; }
+
         if (subjectMats == null) return;
         var mat = subjectMats[(int)Subject.Planet];
         if (mat == null) return;
@@ -1859,6 +1948,7 @@ public class LoadingScreen : MonoBehaviour
             if (r != null && r.sharedMaterial != null) Destroy(r.sharedMaterial);
         ClearMoons();
         if (morphTex != null) Destroy(morphTex);
+        if (realPlanetTex != null) Destroy(realPlanetTex);
         if (Instance == this) Instance = null;
     }
 }

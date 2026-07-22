@@ -101,7 +101,11 @@ public class UnitInfoPanel : MonoBehaviour
 
         var row = UIFactory.NewUI(content, "Row"); UIFactory.AddLayout(row, 30);
         var h = row.AddComponent<HorizontalLayoutGroup>(); h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true;
+        // TWO ways to send, because they answer different situations. "Send…" arms click-to-target and
+        // is the fast one when the destination is on screen. "Send to…" lists everywhere you have
+        // actually charted, which is the only workable route to a world three systems over.
         UIFactory.Button(row.transform, "Send…", DoSend, 28);
+        UIFactory.Button(row.transform, "Send to…", DoSendTo, 28);
         returnBtn = UIFactory.Button(row.transform, "Return Home", DoReturn, 28);
 
         // Queue controls + a live list of queued orders (each removable).
@@ -201,6 +205,15 @@ public class UnitInfoPanel : MonoBehaviour
         foreach (var u in UnitSelection.Selected) if (u.location != null || u.inSpace) fleet.Add(u);
         if (fleet.Count == 0 && current != null && (current.location != null || current.inSpace)) fleet.Add(current);
         FleetMovementController.Instance?.Arm(fleet);
+    }
+
+    /// Open the destination list for whatever is selected (or, failing that, the ship on show).
+    void DoSendTo()
+    {
+        var fleet = new List<Unit>();
+        foreach (var u in UnitSelection.Selected) if (u.location != null || u.inSpace) fleet.Add(u);
+        if (fleet.Count == 0 && current != null && (current.location != null || current.inSpace)) fleet.Add(current);
+        SendToWindow.Instance?.Open(fleet);
     }
 
     void DoReturn()
