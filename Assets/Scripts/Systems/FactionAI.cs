@@ -225,6 +225,13 @@ public class FactionAI : MonoBehaviour
     {
         if (b == null || b.owner != null || b.parentBody != null) return false;
         if (b.type == CelestialBodyType.GasGiant || b.type == CelestialBodyType.Asteroid) return false;
+        // A CONCEALED WORLD IS NOT A PLACE TO PUT A CIVILISATION.
+        //
+        // Generation hides a rare world as Undiscovered, and SeedHomeworlds runs afterwards — with no
+        // ownership assigned yet, so the `b.owner != null` test above does not protect it. A rival
+        // capital planted there would be invisible and unclickable but would still grow, expand and be
+        // impossible to attack, while its owner ring kept drawing around nothing.
+        if (VisibilityService.IsHidden(b)) return false;
         // Leave the player's home system to the player — rivals grow their empires elsewhere.
         var g = SystemContext.Galaxy;
         if (g != null && b.system == g.Home) return false;

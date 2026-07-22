@@ -23,6 +23,7 @@ public class DerelictRenderer : MonoBehaviour
         public float angle;
         public bool orbiting;
         public LineRenderer ring;
+        public bool concealed;    // what we last told ConcealBinding, so it isn't re-applied every frame
     }
 
     Transform root;
@@ -37,6 +38,18 @@ public class DerelictRenderer : MonoBehaviour
 
     void Awake() { Instance = this; }
 
+    /// The hulls were destroyed underneath us — rebuild them on the next frame.
+    ///
+    /// This root is parented to SystemContext.SystemParent, and VisualizeGalaxy destroys every child of
+    /// that transform. Until now that only ever happened when the Galaxy OBJECT changed, so the
+    /// `g != builtFor` test below was a complete answer. GameManager.RebuildVisuals re-visualizes the
+    /// SAME galaxy (a system was deleted or restored), and without this every derelict in the game would
+    /// vanish for good the first time anyone used that tool — silently, with no error.
+    public static void RebuildNow()
+    {
+        if (Instance != null) Instance.builtFor = null;
+    }
+
     void Update()
     {
         var g = SystemContext.Galaxy;
@@ -46,12 +59,40 @@ public class DerelictRenderer : MonoBehaviour
         foreach (var r in _rendered)
         {
             if (r == null || r.go == null) continue;
+
+            // A HULL IN A CONCEALED SYSTEM IS CONCEALED.
+            //
+            // A derelict is not a child of any body, so ConcealBinding's subtree sweep never reaches it —
+            // the same gap that left owner rings drawing around hidden worlds. Without this, hiding a
+            // system leaves its derelicts orbiting the empty space where its star was, drawn and
+            // clickable, which is a marker pointing straight at what was just hidden. It also matters at
+            // the genesis handoff, whose whole premise is that the homeworld arrives into empty space.
+            // Only on CHANGE: ConcealBinding re-sweeps its subtree on every repeat call, which is right
+            // for a planet whose atmosphere shell can be rebuilt underneath it, and pure waste for a hull
+            // that nothing ever adds to. During genesis every derelict in the galaxy is concealed at once.
+            bool wantConcealed = ConcealedSystem(g, r.d);
+            if (wantConcealed != r.concealed)
+            {
+                r.concealed = wantConcealed;
+                ConcealBinding.Set(r.go, wantConcealed);
+            }
+
             if (r.orbiting)
             {
                 r.angle += r.d.orbitSpeed * dt;
                 Position(r);
             }
         }
+    }
+
+    // A derelict belongs to a SYSTEM (by index), or to no system at all — dead space and the galactic
+    // core are outside every system, and those are concealed with the galaxy rather than with a system.
+    static bool ConcealedSystem(Galaxy g, Derelict d)
+    {
+        if (g == null || d == null) return false;
+        if (d.systemIndex >= 0 && d.systemIndex < g.systems.Count)
+            return g.systems[d.systemIndex].hideReason != HideReason.None;
+        return g.center != null && g.center.hideReason != HideReason.None;
     }
 
     void Rebuild(Galaxy g)

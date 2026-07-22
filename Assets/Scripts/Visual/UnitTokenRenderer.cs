@@ -82,6 +82,12 @@ public class UnitTokenRenderer : MonoBehaviour
                 if (UnitModelRenderer.UsesModel(u)) continue;
                 if (!tokens.ContainsKey(u)) tokens[u] = BuildToken(u);
             }
+
+        // A cloaked ship's token is a brand new GameObject that knows nothing about the cloak, so
+        // concealment has to be re-asserted here — the same reason SystemVisualizer re-applies it after
+        // rebuilding the galaxy. Rebuild is the ONLY place a token comes into being, so this is the only
+        // place it has to happen.
+        foreach (var kv in tokens) VisibilityService.Apply(kv.Key);
     }
 
     UnitToken BuildToken(Unit u)

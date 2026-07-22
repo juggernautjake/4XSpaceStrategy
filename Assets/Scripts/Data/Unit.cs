@@ -37,6 +37,13 @@ public class Unit
     public UnitType type;
     public Faction owner;
 
+    // Why this ship is not drawn — the same three reasons a world can be concealed for (see
+    // Visibility.cs). This is the field a cloaking device writes: the ship keeps flying, keeps its
+    // orders, keeps building and keeps being ticked; it simply is not rendered and cannot be clicked.
+    // Not saved yet — a cloak is a state a tech will grant rather than something generation produces,
+    // and there is no tech to grant it until that slice is built.
+    public HideReason hideReason = HideReason.None;
+
     public CelestialBody location;         // where it currently is (null while mid-transit)
     public UnitStatus status = UnitStatus.Idle;
 

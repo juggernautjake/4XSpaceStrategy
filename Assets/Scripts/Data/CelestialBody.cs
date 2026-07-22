@@ -8,10 +8,14 @@ public class CelestialBody
     public CelestialBodyType type;
     public ResourceDeposit resources;
 
-    // MASS VALUE — the player-facing measure of how big this world is (Earth-like ~2, gas giants 7-13,
-    // moons/asteroids below 1 in first-decimal steps). Set at generation from MassRules; surfaceSize below
-    // is DERIVED from it (MassRules.SurfaceSize). This is what the info windows show as the world's size.
-    public float mass = 2f;
+    // MASS VALUE — the player-facing measure of how big this world is (gas giants 7-13, moons/asteroids
+    // below 1 in first-decimal steps). Set at generation from MassRules; surfaceSize below is DERIVED
+    // from it (MassRules.SurfaceSize = mass x 3). This is what the info windows show as the world's size.
+    //
+    // The DEFAULT only applies to a body nothing has rolled a mass for — a hand-constructed one, or an
+    // older save. 3 rather than 2, so such a body lands on a 9-cell grid with room to build on rather
+    // than the 6-cell minimum.
+    public float mass = 3f;
 
     // Grid/visual size — still the number the whole engine sizes maps, orbits and atmosphere from, but now
     // a function of `mass` (MassRules.SurfaceSize) rather than an independent roll. Kept as its own field so
@@ -74,6 +78,22 @@ public class CelestialBody
     public float habitability = 0f;     // 0..100
     public bool isHabitable = false;    // true if physically inside the Goldilocks zone
     public bool habitabilityLocked = false; // home world's difficulty-set rating won't be recomputed
+
+    // --- Concealment (see Visibility.cs) ---
+    // WHY the world is not drawn, not merely THAT it isn't. Dev / Cloaked / Undiscovered render
+    // identically today; they exist apart so a cloaking tech and an exploration discovery can each undo
+    // only their own concealment later without also un-hiding what a developer tucked away.
+    //
+    // Concealed is not absent: the world keeps orbiting, keeps being ticked, keeps its colony and its
+    // units. Only its renderers, colliders and lights are switched off. Never drive this field directly
+    // — VisibilityService owns it, because it also has to reach the orbit ring, which lives on a
+    // different GameObject.
+    public HideReason hideReason = HideReason.None;
+
+    /// The orbit LINE, concealed on its own. Independent of the world so a dev can strip the rings out
+    /// of a busy system without hiding anything in it; hiding the world conceals its line as well
+    /// (VisibilityService.ReasonForOrbitLine), since a ring drawn around nothing announces what is there.
+    public HideReason ringHideReason = HideReason.None;
 
     // --- Ownership ---
     // TWO STAGES, and they are genuinely different things. See Claim.cs.

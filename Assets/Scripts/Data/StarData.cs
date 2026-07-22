@@ -34,6 +34,15 @@ public class StarData
 
     public float HzCenter => (hzInner + hzOuter) * 0.5f;
     public float HzWidth  => Mathf.Max(0.001f, hzOuter - hzInner);
+
+    // Why this sun is not drawn — Dev, Cloaked, Undiscovered, or None. Per-SUN rather than per-system,
+    // so one member of a binary can be concealed while its companion stays lit. See Visibility.cs.
+    public HideReason hideReason = HideReason.None;
+
+    // The rendered sun (or, for a black hole, its event-horizon root). Set by SystemVisualizer as it
+    // builds them; NonSerialized because it is scene state, not star physics — and because the whole
+    // galaxy's visuals are destroyed and rebuilt whenever a system is deleted or a save is loaded.
+    [System.NonSerialized] public GameObject visualObject;
 }
 
 public static class StarDatabase

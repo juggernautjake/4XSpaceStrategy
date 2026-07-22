@@ -50,6 +50,12 @@ public class SystemVisualizer : MonoBehaviour
         SystemContext.Galaxy = galaxy;
         SystemContext.Zone = zone;
         SystemContext.Set(focus.bodies, focus.combinedStar, focus.pivot, systemParent, this);
+
+        // Every visual above is brand new and knows nothing about what was concealed. Concealment lives
+        // on the DATA (CelestialBody.hideReason and friends), so it survives a rebuild — but it has to be
+        // pushed back at the freshly built objects, or a rare undiscovered world would be drawn in plain
+        // sight the moment the galaxy is generated, and a cloaked one would reappear on every reload.
+        VisibilityService.ApplyAll();
     }
 
     // Re-applies fog / reveal to every body based on current Surveyed state (called when Dev Mode
@@ -231,6 +237,11 @@ public class SystemVisualizer : MonoBehaviour
         si.star = combined;   // combined cluster data (shared light/heat/HZ)
         si.member = s;         // this sun's OWN data, so the editor can target it individually
 
+        // The handle concealment needs. A star has no back-reference to its GameObject anywhere else —
+        // bodies have CelestialBody.visualObject and this is its equivalent, set at the one place suns
+        // are built.
+        s.visualObject = star;
+
         var lightGo = new GameObject("StarLight");
         lightGo.transform.SetParent(star.transform, false);
         var light = lightGo.AddComponent<Light>();
@@ -260,6 +271,11 @@ public class SystemVisualizer : MonoBehaviour
         var root = BlackHoleVisual.Build(parent, scale, withLight: true,
                                          lightIntensity: combined.lightIntensity,
                                          clickable: true);
+
+        // A black hole renders from combinedStar rather than from the stars list, so this is where its
+        // concealment handle comes from — the ROOT, not the horizon, so hiding it takes the disc, the
+        // photon ring and the halo with it rather than leaving a glowing hole where it used to be.
+        combined.visualObject = root;
 
         var horizon = root.transform.Find("EventHorizon");
         if (horizon == null) return;

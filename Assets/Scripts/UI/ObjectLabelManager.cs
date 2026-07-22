@@ -102,11 +102,46 @@ public class ObjectLabelManager : MonoBehaviour
         habT.color = Habitability.ScoreColor(body.habitability);
     }
 
+    // True while the labels are being withheld because the thing they name has been concealed. Tracked
+    // rather than re-applied every frame so this costs two component reads and a branch, and so it does
+    // not fight ShowForStar (which deliberately leaves the habitability line off).
+    bool suppressed;
+
     void LateUpdate()
     {
-        if (target == null) return;
+        // A DESTROYED TARGET MUST TAKE THE LABELS WITH IT.
+        //
+        // This used to be a bare `return`, which is fine while nothing ever destroys a body's visual out
+        // from under a live selection — and the galaxy rebuild now does exactly that (a deleted system,
+        // a restored one). The labels are separate GameObjects, so they simply stayed active at whatever
+        // screen position they were last written to, frozen over empty space until something else
+        // happened to call Hide.
+        if (target == null) { if (body != null || nameT.gameObject.activeSelf) Hide(); return; }
+
         if (cam == null) cam = Camera.main;
         if (cam == null) return;
+
+        // A CONCEALED OBJECT MUST NOT KEEP ITS NAME BADGE.
+        //
+        // Concealment can happen to whatever is already selected — hide the selected world from the
+        // object panel, or cloak the ship you are watching — and the labels track a transform rather
+        // than a renderer, so they would go on floating over the empty space where it used to be. Read
+        // off the binding rather than off the data, because that covers stars and bodies with one test
+        // and needs no back-reference from a Transform to whatever it is drawing.
+        var binding = target.GetComponent<ConcealBinding>();
+        bool concealed = binding != null && binding.Concealed;
+        if (concealed != suppressed)
+        {
+            suppressed = concealed;
+            if (concealed) HideNow();
+            else
+            {
+                nameT.gameObject.SetActive(true);
+                catT.gameObject.SetActive(true);
+                habT.gameObject.SetActive(body != null);   // stars have no habitability line
+            }
+        }
+        if (concealed) return;
 
         Vector3 center = cam.WorldToScreenPoint(target.position);
         if (center.z < 0f)

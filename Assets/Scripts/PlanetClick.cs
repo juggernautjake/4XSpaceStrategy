@@ -40,7 +40,9 @@ public class PlanetClick : MonoBehaviour
         //
         // Handing the click over rather than just declining it: declining would select nothing, because
         // nothing else is going to fire for that ship.
-        if (ClickPriority.TryClickUnitUnderCursor()) return;
+        // Passing this world's visual means the click only goes to a ship when the cursor is OUTSIDE the
+        // planet as drawn — click the planet, get the planet; click the ship beside it, get the ship.
+        if (ClickPriority.TryClickUnitUnderCursor(gameObject)) return;
 
         // Left-clicking a world INSPECTS it. Worlds are never "commandable", so this also drops any
         // ship selection — to send ships you select the ships, then right-click a destination.

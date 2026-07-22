@@ -43,6 +43,18 @@ public class SystemSummaryWindow : MonoBehaviour
         root.SetActive(false);
     }
 
+    /// Close if the system on show is no longer in the galaxy.
+    ///
+    /// A window can outlive its subject now that systems can be deleted (GalaxyTrash). Left open it
+    /// keeps reporting a system that does not exist, and its "Go to system" button flies the camera to
+    /// the empty coordinates where it used to be.
+    public void HideIfGone()
+    {
+        if (system == null) return;
+        var g = SystemContext.Galaxy;
+        if (g != null && !g.systems.Contains(system)) Hide();
+    }
+
     /// Close the window. Needed because a double-click on a system proxy opens the full Overview instead,
     /// and leaving this one stacked behind it would show the same system twice.
     public void Hide()

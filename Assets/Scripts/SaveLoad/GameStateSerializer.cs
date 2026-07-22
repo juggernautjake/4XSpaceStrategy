@@ -20,6 +20,7 @@ public static class GameStateSerializer
             homeIndex = galaxy != null ? galaxy.homeIndex : 0,
             galaxyName = galaxy != null ? galaxy.name : "",
             galaxySeed = galaxy != null ? galaxy.visualSeed : 0,
+            centerHideReason = galaxy != null && galaxy.center != null ? Persist(galaxy.center.hideReason) : 0,
             timeScale = Time.timeScale
         };
 
@@ -93,9 +94,13 @@ public static class GameStateSerializer
             px = sys.galaxyPosition.x, py = sys.galaxyPosition.y, pz = sys.galaxyPosition.z,
             isBlackHole = sys.isBlackHole,
             ownerId = sys.owner != null ? sys.owner.id : -1,
-            isHome = sys.isHome
+            isHome = sys.isHome,
+            hideReason = Persist(sys.hideReason)
         };
         foreach (var s in sys.stars) sd.starTypes.Add((int)s.type);
+        // Null-guarded, and it has to stay aligned with starTypes above — the loader zips the two by
+        // index, so a skipped entry would shift every later sun's concealment onto its neighbour.
+        foreach (var s in sys.stars) sd.starHideReasons.Add(s != null ? Persist(s.hideReason) : 0);
         // Flat: planets first, then their moons tagged with parentId. See BodyDTO.parentId for why.
         foreach (var b in sys.bodies)
         {
@@ -126,6 +131,29 @@ public static class GameStateSerializer
     {
         if (amp <= 0f) amp = 1f;
         return Mathf.Clamp01(1f - 0.5f * amp);
+    }
+
+    // ============================================================================================
+    // `Sequence` IS RENDER STATE, NOT SAVE STATE — AND SAVING IT IS UNRECOVERABLE
+    //
+    // The genesis sequence conceals the whole galaxy while it is born and gives it back at the end
+    // (GenesisReveal). The pause menu is reachable during that window — Escape is not blocked by the
+    // loading panel — so a player can save while every system in the galaxy is flagged Sequence.
+    //
+    // Written to disk, that flag is restored faithfully on load and then NOTHING EVER CLEARS IT:
+    // GenesisReveal.Running is false on a loaded game, so Finish() early-returns, and no other code
+    // path touches Sequence. The player's galaxy would be invisible forever, with the Dev-Mode object
+    // panel's "Reveal all" as the only way out — and only if they knew to look.
+    //
+    // So it is flattened to "visible" on the way out. Dev, Cloaked and Undiscovered are all real,
+    // durable facts about the world and persist unchanged; this one is a frame of a cinematic.
+    static int Persist(HideReason r) => r == HideReason.Sequence ? 0 : (int)r;
+
+    /// The same rule on the way in, for a save written before Persist existed.
+    static HideReason Restore(int v)
+    {
+        var r = (HideReason)v;
+        return r == HideReason.Sequence ? HideReason.None : r;
     }
 
     static BodyDTO ToDTO(CelestialBody b)
@@ -163,7 +191,8 @@ public static class GameStateSerializer
             placedBuildings = b.placedBuildings != null ? new List<PlacedBuilding>(b.placedBuildings) : new List<PlacedBuilding>(),
             deepSurveyed = b.deepSurveyed, clueIndex = b.clueIndex, cityGrowthTimer = b.cityGrowthTimer,
             birthrightClaim = b.birthrightClaim, settled = b.settled,
-            visited = b.visited, explorationProgress = b.explorationProgress
+            visited = b.visited, explorationProgress = b.explorationProgress,
+            hideReason = Persist(b.hideReason), ringHideReason = Persist(b.ringHideReason)
         };
 
         if (b.resources != null)
@@ -211,6 +240,8 @@ public static class GameStateSerializer
         galaxy.center = StarDatabase.BlackHole();
         galaxy.center.visualScale = 6f;
         galaxy.center.name = $"{galaxy.name} Core";
+        // Rebuilt from scratch above, so its concealment has to be put back by hand.
+        galaxy.center.hideReason = Restore(game.centerHideReason);
 
         foreach (var sd in game.galaxySystems)
         {
@@ -220,7 +251,8 @@ public static class GameStateSerializer
                 galaxyPosition = new Vector3(sd.px, sd.py, sd.pz),
                 isBlackHole = sd.isBlackHole,
                 isHome = sd.isHome,
-                owner = sd.ownerId >= 0 ? FactionManager.Get(sd.ownerId) : null
+                owner = sd.ownerId >= 0 ? FactionManager.Get(sd.ownerId) : null,
+                hideReason = Restore(sd.hideReason)
             };
 
             if (sd.isBlackHole)
@@ -234,6 +266,13 @@ public static class GameStateSerializer
                 if (sys.stars.Count == 0) sys.stars.Add(StarDatabase.Get(StarType.G));
                 sys.combinedStar = StarDatabase.Combine(sys.stars);
             }
+
+            // Per-sun concealment. Indexed defensively rather than zipped: a save written before this
+            // existed carries an EMPTY list, and a black-hole system substitutes one star for a star list
+            // that may have held none — so the two lists are not guaranteed to be the same length, and a
+            // missing entry means "visible", which is the right reading either way.
+            for (int si = 0; si < sys.stars.Count && si < sd.starHideReasons.Count; si++)
+                sys.stars[si].hideReason = Restore(sd.starHideReasons[si]);
 
             // Bodies are stored FLAT (see BodyDTO.parentId), and a moon can appear before its parent in
             // the list — so this is two passes: PLANETS FIRST, then moons with their parent resolved.
@@ -333,6 +372,9 @@ public static class GameStateSerializer
         // so leaving Dev Mode restores THIS save rather than whatever was on screen before it. Last,
         // after every Import above, because it snapshots the state they just wrote.
         DevCheats.OnGameReplaced();
+        // Same reason: the deleted systems sitting in the object bin came out of the galaxy this save
+        // just replaced.
+        GalaxyTrash.OnGameReplaced();
 
         var bg = SpaceBackground.Instance;
         if (bg != null)
@@ -367,7 +409,8 @@ public static class GameStateSerializer
             biosphereActive = dto.biosphereActive, atmosphereThickness = dto.atmosphereThickness,
             hasTectonics = dto.hasTectonics,
             birthrightClaim = dto.birthrightClaim, settled = dto.settled,
-            visited = dto.visited, explorationProgress = dto.explorationProgress
+            visited = dto.visited, explorationProgress = dto.explorationProgress,
+            hideReason = Restore(dto.hideReason), ringHideReason = Restore(dto.ringHideReason)
         };
         // A save written before atmosphereThickness existed has it defaulted to 0 by JsonUtility, same
         // as a genuine asteroid/small-moon would read — so backfilling from Type+Size whenever it comes

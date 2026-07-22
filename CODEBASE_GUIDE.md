@@ -176,6 +176,81 @@ Two layers: **projects raise a world's CEILING**; terraformer ships then grind h
 - `ApplyPhysicalEffect` — projects really change the world (water added/vented, spin, orbit, and
   **`Reshape`** converts the body TYPE and re-scores habitability).
 
+### Visibility.cs  *(hiding, and WHY a thing is hidden)*
+Concealment is a **game mechanic** with a dev tool on top, not a boolean.
+- `enum HideReason` — `None · Dev · Cloaked · Undiscovered`. They render identically today, on purpose:
+  the reason costs nothing to carry now, and a cloaking tech or a discovery event later becomes a flag
+  change rather than a rewrite. What it must not become is one bool — "drop every cloak" and "un-hide
+  what I hid in the editor" are then the same operation, and they are not.
+- **Concealed is not absent.** A hidden body keeps orbiting, keeps being ticked, keeps its colony and
+  its units. Only renderers, colliders and lights go — which is why this never uses `SetActive(false)`.
+- **`ConcealBinding`** — the component that does it. **Records** what it disabled and re-enables exactly
+  that, because half the galaxy's renderers are legitimately off for somebody else's reasons (a ring the
+  player turned off, an airless world's missing atmosphere shell). Re-sweeps on `OnEnable` and on a
+  repeat conceal, so a subtree that GREW while hidden (fog swap, atmosphere rebuild) stays hidden.
+- **`VisibilityService`** — the one place concealment is decided, and the chokepoint that would become
+  server-authoritative if this ever goes multiplayer. `Hide/Reveal` for a `CelestialBody`, a `StarData`
+  (one sun, or a black hole), a `Unit` (the cloaking tech's target), `HideOrbitLine/RevealOrbitLine`,
+  `HideSystem/RevealSystem`, `HideAll/RevealAll`, `ListHidden()`, `ApplyAll()`.
+- `ReasonFor(...)` — the EFFECTIVE reason: a system-wide conceal outranks a body's own flag, because
+  that is the one that has to be undone first for anything to reappear. Hiding a world conceals its
+  orbit line too (`ReasonForOrbitLine`) — a ring drawn around nothing announces what is there.
+- State lives on the DATA (`CelestialBody.hideReason/ringHideReason`, `StarData.hideReason`,
+  `StarSystemData.hideReason`, `Unit.hideReason`), so it survives a re-visualize and a save/load. It has
+  to be **pushed back** at freshly built visuals — `SystemVisualizer.VisualizeGalaxy` and both unit
+  renderers' `Rebuild` do that.
+- Three places had to learn about it because they draw things the visualizer doesn't:
+  `OrbitController.SetRingConcealed` (the ring hangs off the system container, not the body),
+  `GalaxyStarProxy.SetAlpha` and `GalaxyLOD.ApplyProxies` (galaxy zoom replaces a system with a proxy —
+  without this you hide a system, zoom out, and there it is).
+- Generation seeds a **rare undiscovered world** (`GalaxyGenerator.SeedUndiscoveredWorlds`, ~1.2% of
+  unclaimed non-home planets), concealed as `Undiscovered` so a later discovery event can reveal
+  exactly those and nothing a developer hid by hand.
+
+### GenesisReveal.cs  *(the galaxy arrives)*
+The whole galaxy is generated up front and almost all of it starts **concealed**; only the home system's
+sun(s) are drawn. The homeworld joins them when the camera takes over, and everything else arrives at
+the very end, a beat behind the orbit lines.
+- **`Begin()`** — called from `GameManager.GenerateGalaxyRoutine` right after `Visualize()`, and
+  **after `FactionAI.NewGame`**. That ordering is load-bearing: `FactionAI` won't plant a capital on a
+  concealed world, so concealing first means it finds no candidate anywhere and the game generates with
+  no rival civilisations at all.
+- **`RevealHomeworld(body)`** — from `SnapCameraToHome`, the instant the camera is framed on it and
+  while the panel still covers everything.
+- **`Finish()`** — from the last beat of `LoadingScreen.Finale`, **and again** as a backstop once
+  generation returns. Idempotent on purpose: a galaxy left invisible is the worst way this could fail,
+  so its existence must not depend on a coroutine reaching its last line.
+- Hidden as `HideReason.Sequence` and revealed by that reason alone (`VisibilityService.RevealAll(reason)`),
+  which is why the fourth reason exists — a blanket reveal would hand the player the rare `Undiscovered`
+  world on turn one and there would be nothing left to find.
+- Concealed is not paused: every hidden system is orbiting, ticking and thinking from the moment
+  generation finishes.
+- **`Sequence` is never saved.** `GameStateSerializer.Persist/Restore` flatten it to "visible" in both
+  directions. A save taken mid-sequence would otherwise restore every system as concealed, and nothing
+  on a loaded game ever clears it — an invisible galaxy with the Dev panel as the only way out. The
+  pause menu is also gated on `GameManager.IsGenerating` now, so that save can't be taken at all.
+- The reveal backstop lives in `GenerateGalaxyRoutine`'s **`finally`**, not at the end of the body. The
+  finale is driven by `while (fin.MoveNext())` on the same stack, so a throw inside it skips every
+  later line — which would have left the galaxy invisible *and* latched `generating`, so New Game
+  silently did nothing forever after.
+
+### GalaxyTrash.cs  *(deletion, with a way back)*
+Deleting genuinely removes: out of `galaxy.systems`, `sys.bodies`, `body.moons`. Nothing iterates it,
+nothing ticks it, and the save no longer carries it.
+- **`DeleteSystem / DeleteBody / DeleteStar`** (each `out string why`), **`Restore / Purge / PurgeAll`**,
+  `OnGameReplaced` (a new galaxy or a loaded save empties the bin — restoring a system from a dead
+  galaxy into a live one is not a thing).
+- **A bin rather than a confirmation dialog.** The mistake you make with a tool like this is deleting
+  the wrong row, not clicking the button by accident, and a modal on every delete protects against
+  neither while making the tool unusable.
+- `DeleteStar` refuses a system's LAST sun: `StarDatabase.Combine` on an empty list rolls a fresh
+  G-type, so the system would quietly grow a new star. Delete the system instead.
+- Fixes up the two things stored as POSITIONS rather than references — `Galaxy.homeIndex` and
+  `Derelict.systemIndex` — on both delete and restore.
+- Redraws via `GameManager.RebuildVisuals()`, the same full rebuild a save load does (which is why it
+  is safe): everything under `systemParent` is destroyed and rebuilt from what is still in the galaxy,
+  so a deleted object needs no destruction of its own.
+
 ### ControlGroups.cs
 - **`Assign(g, units)` / `Members(g)` / `GroupOf(unit)`**, `Export/Import`.
 - **`ControlGroupInput`** — `Ctrl+1..9` bind, `1..9` select + fly camera, `Shift+1..9` add.
@@ -219,10 +294,27 @@ Two layers: **projects raise a world's CEILING**; terraformer ships then grind h
 - **`Apply(body, go)`** — textures the sphere with its surface map, sets material params, adds a
   per-type **atmosphere** shell (airless bodies get none), and layers optional CC0 detail maps.
 
+### PlanetTemperature.cs  *(°C, derived from heat — and the inverse)*
+- **`BaseCelsius(heat, atmosphere, type)`** — `288.15·√heat − 273.15 + typeNudge + atmosphere·45`. The
+  greenhouse term is the one that catches people out: it adds up to **45 °C** on top of what `heat`
+  alone says, so `heat` and "how warm is this world" are not interchangeable.
+- **`HeatForCelsius(targetC, atmosphere, type)`** — the algebraic inverse. Anything choosing a world's
+  climate by TEMPERATURE must solve through this rather than assigning `heat` directly.
+  `GalaxyGenerator.CradleHeat` is why it exists: the home world's heat was set from the species'
+  `idealTemp` by a blind lerp, the greenhouse term pushed the result past the 50 °C liquid-water
+  ceiling, and `BiosphereRules` then correctly refused — so two Terran homeworlds in three, and every
+  Sylvan one, generated sterile. Bigger cradles now get a lower heat to offset their thicker air.
+
 ### SpaceBackground.cs  *(procedural sky)*
 - **`Create()`**, **`Rebuild()`**, **`Regenerate()`**, `SetEnabled/SetSolidMode/SetSolidColor/SetSeed`.
 - `LateUpdate` — parallax drift + shooting-star timer.
 - Texture gen: `GenerateNebula, GenerateStars, GenerateGalaxy, GenerateDot`.
+- **`StarTint`** draws from `StarDatabase.ColorFromTemperature` — the same blackbody ramp every sun in
+  the game is coloured from — rather than from three hardcoded tints, so the sky is made of the same
+  stars the galaxy is. Weighted for a NAKED-EYE sky rather than a census: by population the galaxy is
+  ~76% M-class red dwarfs, but almost none are visible, which is why a real night sky reads blue-white
+  with a scattering of orange. Brightness comes back with the colour (`lumBias`) because rolling the
+  two independently is what makes a procedural star field look like static.
 - Helper classes **`TwinkleStar`** (brightness pulse) and **`ShootingStar`** (streak + fade).
 
 ### PostFxController.cs
@@ -370,6 +462,23 @@ one grid **iff the ground they light overlaps** — that single rule is the whol
 - **On the stocks** — every ship building or queued, each with a progress bar, a drag grip, pause
   (hands its power to the next ship) and cancel (full refund).
 - Same rebuild discipline as ResearchWindow: signature-gated structure, per-frame values in place.
+
+### ObjectVisibilityWindow.cs  *(HUD "Objects" — every object in the galaxy)*
+The tool that makes `Visibility.cs` and `GalaxyTrash.cs` usable. A tree grouped by system: the system,
+its suns, its planets, their moons, and each world's **orbit line as its own row** — every row carrying
+the same hide switch and delete button, because the requirement was universal rather than a list of
+special cases.
+- A **system row acts on everything under it**, which is what makes "delete an entire solar system" one
+  click. Collapsed by default (a twelve-system galaxy is several hundred rows); the filter box expands
+  whatever matches.
+- **HIDE AS** picks which reason the hide buttons write — `Dev` by default, with `Cloaked` and
+  `Undiscovered` selectable so the other two states can actually be looked at.
+- **Bin** shows what was deleted, newest first, with Restore and Delete forever.
+- Controls that are deliberately unavailable **say why** (a single sun can't be deleted on its own; an
+  orbit line has nothing to delete because it is drawn from the body's orbit) — same rule as
+  `PlanetViewWindow.TabAvailable`.
+- Dev Mode only, and unlike the terrain sandbox it **closes itself** when Dev Mode goes off rather than
+  greying out: it deletes things, and a delete button reachable in normal play is a way to lose a save.
 
 ### SaveLoadMenu.cs
 - **`Toggle()`**, `DoSave` (named), `RefreshList`, `BuildRow`, `DoLoad`, `DoDelete`. Multiple saves supported.

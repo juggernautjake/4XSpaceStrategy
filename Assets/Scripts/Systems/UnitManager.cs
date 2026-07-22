@@ -69,6 +69,13 @@ public class UnitManager : MonoBehaviour
 
     public IReadOnlyList<Unit> Units => units;
 
+    /// Something outside this class changed where the fleet is, or what is in it.
+    ///
+    /// C# events can only be raised from the type that declares them, and the renderers rebuild off this
+    /// one — so a caller that re-homes ships (GalaxyTrash, evicting a fleet off a world it is deleting)
+    /// has no way to tell them without it.
+    public void NotifyUnitsChanged() => OnUnitsChanged?.Invoke();
+
     // ---- New game setup ----
     public void NewGame(CelestialBody homePlanet)
     {

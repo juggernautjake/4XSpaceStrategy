@@ -152,6 +152,10 @@ public static class AncientClues
                 // sit on the player's already-known home world, and a gas giant has no surface for it.
                 if (b.type == CelestialBodyType.GasGiant || b.type == CelestialBodyType.Asteroid) continue;
                 if (b.owner != null) continue;
+                // ...nor on a world that has been concealed. A fragment must be FOUND, and a hidden world
+                // has no collider to select, so it can be neither surveyed nor studied — the fragment
+                // would be one of ten that simply cannot be collected, with no way to tell.
+                if (VisibilityService.IsHidden(b)) continue;
                 var cap = b;
                 setters.Add(i => cap.clueIndex = i);
             }

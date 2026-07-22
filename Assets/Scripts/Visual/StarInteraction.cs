@@ -70,7 +70,7 @@ public class StarInteraction : MonoBehaviour
 
         // A ship parked at this star wins the click — same reasoning as PlanetClick, and a star's pick
         // sphere is the largest of the lot.
-        if (ClickPriority.TryClickUnitUnderCursor()) return;
+        if (ClickPriority.TryClickUnitUnderCursor(gameObject)) return;
 
         SimpleAudio.Instance?.PlaySelect();
 

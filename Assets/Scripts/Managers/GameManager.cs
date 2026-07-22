@@ -49,6 +49,10 @@ public class GameManager : MonoBehaviour
     /// its worlds, and generates a full terrain grid for every one of them.
     bool generating;
 
+    /// A galaxy is being built right now. Read by anything that must not act on a half-built game —
+    /// the pause menu, above all, whose Save button would otherwise capture the galaxy mid-cinematic.
+    public bool IsGenerating => generating;
+
     public void GenerateGalaxyAsync(int systemCount, int avgPlanets, System.Action onDone = null)
     {
         // One at a time. SolarSystemGenerator keeps its working state on the component itself —
@@ -63,7 +67,35 @@ public class GameManager : MonoBehaviour
         StartCoroutine(GenerateGalaxyRoutine(systemCount, avgPlanets, onDone));
     }
 
+    /// The real backstop, and it has to be OUT HERE to be one.
+    ///
+    /// The genesis sequence conceals the entire galaxy and relies on something giving it back. Putting
+    /// that "something" at the end of the generation coroutine looked like a safety net and was not: the
+    /// loading finale is driven by `while (fin.MoveNext())` on this same stack, so an exception anywhere
+    /// inside it propagates out, Unity stops the coroutine at the throw, and every line after it —
+    /// including the reveal — is simply never reached. The result would be a galaxy the player can never
+    /// see AND a latched `generating` flag, so New Game silently does nothing forever after.
+    ///
+    /// `yield return` inside a try/finally is legal in a C# iterator (only a `catch` is not), and Unity
+    /// disposes the enumerator when it stops a coroutine — so this runs on the normal path, on an
+    /// exception, and on a StopCoroutine alike.
     System.Collections.IEnumerator GenerateGalaxyRoutine(int systemCount, int avgPlanets, System.Action onDone)
+    {
+        var inner = GenerateGalaxyBody(systemCount, avgPlanets, onDone);
+        try
+        {
+            while (inner.MoveNext()) yield return inner.Current;
+        }
+        finally
+        {
+            // Idempotent: Finish() early-returns once it has run, and the finale already called it on its
+            // last beat. This is only here for the paths where it did not.
+            GenesisReveal.Finish();
+            generating = false;
+        }
+    }
+
+    System.Collections.IEnumerator GenerateGalaxyBody(int systemCount, int avgPlanets, System.Action onDone)
     {
         if (solarSystemGenerator == null)
         {
@@ -199,13 +231,32 @@ public class GameManager : MonoBehaviour
         OrbitController.SetRevealAlpha(0f);
 
         Visualize();
+
         var homePlanet = FindHomePlanet();
         PlayerEconomy.NewGame(homePlanet, SpeciesManager.Current);
         UnitManager.Instance?.NewGame(homePlanet);
         FactionAI.NewGame(Galaxy);
+
+        // AND NOW HIDE ALMOST ALL OF IT.
+        //
+        // The galaxy is fully generated and fully running from this line onward — orbits turning,
+        // economy ticking, factions thinking — but only the home system's sun(s) are drawn. The
+        // homeworld joins them when the camera takes over, and the rest of the galaxy arrives at the
+        // very end, after the orbit lines.
+        //
+        // AFTER FactionAI.NewGame, and that ordering is load-bearing rather than tidy. FactionAI won't
+        // plant a capital on a concealed world (a rival empire nobody can see or attack), so conceal the
+        // galaxy first and it finds NO candidate anywhere — the game generates with no rival
+        // civilisations at all. Everything that chooses worlds has to have chosen them before the lights
+        // go out.
+        GenesisReveal.Begin();
+
         // A new galaxy replaces whatever Dev Mode was holding a baseline for — see DevCheats. After
         // PlayerEconomy.NewGame, so the starting resources are what leaving Dev Mode restores.
         DevCheats.OnGameReplaced();
+        // ...and whatever was in the object bin belonged to the PREVIOUS galaxy. Restoring one of those
+        // would splice a system out of a dead galaxy into this one.
+        GalaxyTrash.OnGameReplaced();
         yield return null;
 
         // The homeworld's surface only exists once Finish has run, which is why the star held the screen
@@ -277,7 +328,8 @@ public class GameManager : MonoBehaviour
             OrbitController.SetRevealAlpha(1f);
         }
 
-        generating = false;
+        // (The reveal backstop and the `generating` reset both live in GenerateGalaxyRoutine's finally —
+        // see the note there for why they cannot live here.)
         onDone?.Invoke();
     }
 
@@ -286,6 +338,13 @@ public class GameManager : MonoBehaviour
     static void SnapCameraToHome(CelestialBody home, float screenFraction)
     {
         if (home?.visualObject == null) return;
+
+        // The homeworld and its moons come out of hiding HERE — the moment the camera is framed on
+        // them and while the panel still covers everything. The brief's requirement is that the world
+        // is unhidden by the time the camera brings it into view, and this is that instant: any later
+        // and the dissolve would reveal an empty frame, any earlier is invisible anyway.
+        GenesisReveal.RevealHomeworld(home);
+
         CameraController.Instance?.SnapFocus(home.visualObject.transform, true, screenFraction);
 
         // START THE CLOCK HERE, not when the loading screen finally closes.
@@ -356,7 +415,81 @@ public class GameManager : MonoBehaviour
         Visualize();
     }
 
-    public void SetFocus(StarSystemData sys) { if (sys != null) FocusedSystem = sys; }
+    /// Focus a system — but only one this galaxy actually contains.
+    ///
+    /// StarOverview.Open focuses whatever system it was handed, and a window can outlive the system it
+    /// is showing (delete it from the object panel while its overview is open). Focusing a system that
+    /// is no longer in the galaxy leaves the habitable-zone band being built around a pivot that was
+    /// destroyed, and the next rebuild framing a system that is not there.
+    public void SetFocus(StarSystemData sys)
+    {
+        if (sys == null) return;
+        if (Galaxy != null && !Galaxy.systems.Contains(sys)) return;
+        FocusedSystem = sys;
+    }
+
+    /// Re-draw the galaxy from the data as it stands now.
+    ///
+    /// For structural changes the visualizer cannot patch in place — a system deleted out of the galaxy,
+    /// or restored back into it (see GalaxyTrash). It is the same full rebuild a save load does, which is
+    /// why it is safe: every consumer already has to survive VisualizeGalaxy replacing every GameObject
+    /// underneath it, because loading a save does exactly that.
+    ///
+    /// The focus is re-pointed FIRST. VisualizeGalaxy builds the habitable-zone band around
+    /// FocusedSystem, and a system that has just been deleted is still sitting in that field — reading it
+    /// would build the band around a system that is no longer in the galaxy.
+    public void RebuildVisuals()
+    {
+        if (Galaxy == null) return;
+        if (FocusedSystem == null || !Galaxy.systems.Contains(FocusedSystem)) FocusedSystem = Galaxy.Home;
+
+        // Whatever the camera was locked onto is about to be destroyed and replaced. Remembered as a
+        // BODY rather than a Transform, because the body survives the rebuild and its GameObject does
+        // not — a follow target left pointing at the old one goes quietly fake-null and the camera stops
+        // tracking the planet the player deliberately chose to watch.
+        var cam = CameraController.Instance;
+        CelestialBody following = null;
+        if (cam != null && cam.IsFollowing && cam.followTarget != null)
+            foreach (var b in SystemContext.AllBodies())
+                if (b.visualObject != null && b.visualObject.transform == cam.followTarget) { following = b; break; }
+
+        Visualize();
+
+        // Three things are parented under SystemParent but built by somebody OTHER than the visualizer,
+        // and VisualizeGalaxy destroys every child of it. Each of these only rebuilds when the Galaxy
+        // OBJECT changes — which an in-place rebuild is not — so without these calls the galaxy-zoom
+        // proxies go stale, every derelict hull in the game disappears for good, and comets stop
+        // spawning for the rest of the session.
+        GalaxyLOD.RebuildNow();
+        DerelictRenderer.RebuildNow();
+        CometManager.RebuildNow();
+
+        // Re-point the camera and the floating label at the NEW GameObjects.
+        //
+        // The FIELD, not FocusAndZoom. FocusAndZoom only skips re-framing when it is already following
+        // this exact Transform — and the Transform has just been replaced, so it would fall through to
+        // its "frame the whole neighbourhood" branch and throw away whatever zoom the player had set.
+        // Deleting an unrelated planet in another system would visibly pull the camera off the world
+        // they were watching. Writing the target directly keeps the height exactly where it was;
+        // LateUpdate re-centres from there.
+        if (following != null && following.visualObject != null)
+        {
+            cam.followTarget = following.visualObject.transform;
+            cam.SetFollow(true);
+        }
+        else if (cam != null && cam.IsFollowing)
+        {
+            // The followed world is the one that just left. Release properly rather than leaving
+            // `following` true with a destroyed target — which reads as "Follow: on" in the HUD while
+            // nothing is being followed, and quietly changes the zoom floor.
+            cam.ClearFocus();
+        }
+
+        // (Concealment is re-applied by VisualizeGalaxy itself, at the end.)
+        var sel = PlanetUI.Selected;
+        if (sel != null && sel.visualObject != null) ObjectLabelManager.Instance?.ShowForBody(sel);
+        else ObjectLabelManager.Instance?.Hide();
+    }
 
     void Visualize()
     {

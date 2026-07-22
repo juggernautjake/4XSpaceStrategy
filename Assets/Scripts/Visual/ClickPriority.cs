@@ -29,14 +29,29 @@ public static class ClickPriority
     ///
     /// Called from the click handlers of things that are BIGGER than ships and easier to hit by
     /// accident: planets, moons and stars.
-    public static bool TryClickUnitUnderCursor()
+    public static bool TryClickUnitUnderCursor(GameObject bodyVisual = null)
     {
         var cam = Camera.main;
         if (cam == null) return false;
 
+        var ray = cam.ScreenPointToRay(Input.mousePosition);
+
+        // THE BODY'S OWN DISC ALWAYS WINS.
+        //
+        // The first version of this handed the click to any ship under the cursor, which overshot: a
+        // ship parked near a world made the WORLD unclickable, because the ship's pick box (floored to
+        // 0.8 units so tiny hulls are hittable at all) reached across the planet you were aiming at.
+        //
+        // The rule that actually matches intent: if the ray passes through the body as DRAWN — its real
+        // rendered sphere, not the inflated pick volume — the player is pointing at the world and gets
+        // the world. Only outside that disc, in the halo of pick volume where nothing is drawn, does a
+        // ship win. So clicking the planet selects the planet, clicking the ship beside it selects the
+        // ship, and the ambiguous ring between them resolves toward the smaller, deliberate target.
+        if (bodyVisual != null && RayHitsDrawnSphere(ray, bodyVisual)) return false;
+
         // RaycastAll, not Raycast: the whole point is to see PAST the body that won the nearest-hit
         // test and find out whether something small is standing inside it.
-        var hits = Physics.RaycastAll(cam.ScreenPointToRay(Input.mousePosition));
+        var hits = Physics.RaycastAll(ray);
         if (hits == null || hits.Length == 0) return false;
 
         UnitToken bestToken = null;
@@ -69,5 +84,32 @@ public static class ClickPriority
         if (bestToken != null) return bestToken.HandleClick();
         if (bestModel != null) return bestModel.HandleClick();
         return false;
+    }
+
+    /// Does the ray pass through the body as it is actually DRAWN?
+    ///
+    /// Measured from the renderer's own bounds rather than from its collider, and that distinction is
+    /// the entire point: the collider is deliberately several times larger than the art so a distant
+    /// world stays easy to hit. Asking the collider "is the cursor on the planet" would answer yes over
+    /// a wide ring of empty space, which is what made ships beside a world steal its clicks — and,
+    /// before that, what made the world steal theirs.
+    static bool RayHitsDrawnSphere(Ray ray, GameObject go)
+    {
+        var rend = go.GetComponentInChildren<Renderer>();
+        if (rend == null) return false;
+
+        Vector3 c = rend.bounds.center;
+        // The body's own sphere, not the bounds of everything hanging off it. An atmosphere shell is
+        // drawn noticeably wider than the surface, and counting it would put the "planet" edge out in
+        // the haze where the world does not really look solid.
+        float r = Mathf.Min(rend.bounds.extents.x, Mathf.Min(rend.bounds.extents.y, rend.bounds.extents.z));
+        if (r <= 0.0001f) return false;
+
+        // Standard point-to-line distance: the closest approach of the ray to the sphere's centre.
+        Vector3 toC = c - ray.origin;
+        float along = Vector3.Dot(toC, ray.direction);
+        if (along < 0f) return false;                       // the body is behind the camera
+        float perpSq = toC.sqrMagnitude - along * along;
+        return perpSq <= r * r;
     }
 }

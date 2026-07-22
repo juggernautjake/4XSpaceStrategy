@@ -81,8 +81,53 @@ public class OrbitController : MonoBehaviour
         orbitRing.startWidth = orbitRing.endWidth = lineWidth;
         ApplyRingColor();
         DrawEllipse(orbitRing, orbitRadius, SemiMinor(orbitRadius, eccentricity));
-        orbitRing.enabled = ringVisible && RevealAlpha > 0.001f;
+        ApplyRingEnabled();
         Live.Add(this);
+    }
+
+    // ---- The single answer to "should this ring be drawn" ----
+    //
+    // THREE independent gates, and every one of them has a legitimate claim: the player's own per-body
+    // intent (ringVisible, from the orbit panel and CelestialBody.showRing), the loading finale's global
+    // reveal (RevealAlpha), and concealment (VisibilityService — this body or its whole system hidden,
+    // cloaked or undiscovered). They were being ANDed by hand at three separate call sites, which is
+    // exactly how a fourth gate gets forgotten at one of them: SetRevealAlpha would have switched a
+    // cloaked planet's orbit line straight back on at the end of every load.
+    bool ringConcealed;
+
+    // ALL THREE LINE RENDERERS, not just the orbit ring.
+    //
+    // The habitable-zone highlight and the owner ring hang off the same unscaled system container as the
+    // orbit ring does (see SetHabitableHighlight / SetOwnerHighlight below), so ConcealBinding's sweep of
+    // the BODY's subtree reaches none of them. Concealing a claimed world without this left a coloured
+    // faction ring tracking an invisible planet around its star every frame — a labelled marker saying
+    // exactly where the thing you just hid is.
+    //
+    // The two highlights track the BODY's concealment rather than the orbit line's: hiding just the
+    // orbit line is a statement about the line, and has no business removing the world's owner ring.
+    bool bodyConcealed;
+    bool habitableWanted;
+    bool ownerWanted;
+
+    void ApplyRingEnabled()
+    {
+        if (orbitRing != null) orbitRing.enabled = ringVisible && !ringConcealed && RevealAlpha > 0.001f;
+        if (habitableRing != null) habitableRing.enabled = habitableWanted && !bodyConcealed;
+        if (ownerRing != null) ownerRing.enabled = ownerWanted && !bodyConcealed;
+    }
+
+    /// Concealment's handle on everything this controller draws. Kept apart from `ringVisible` and from
+    /// the highlights' own on/off state so revealing a world restores exactly what the player (and the
+    /// habitable-zone overlay, and whoever owns it) had set, rather than switching things on.
+    ///
+    /// `orbitLine` is passed separately because it can be concealed on its own — see
+    /// VisibilityService.ReasonForOrbitLine, which already folds the body's own concealment into it.
+    public void SetConcealed(bool body, bool orbitLine)
+    {
+        if (bodyConcealed == body && ringConcealed == orbitLine) return;
+        bodyConcealed = body;
+        ringConcealed = orbitLine;
+        ApplyRingEnabled();
     }
 
     // ============================================================================================
@@ -114,7 +159,7 @@ public class OrbitController : MonoBehaviour
             var oc = Live[i];
             if (oc == null) { Live.RemoveAt(i); continue; }   // destroyed without OnDestroy running
             oc.ApplyRingColor();
-            if (oc.orbitRing != null) oc.orbitRing.enabled = oc.ringVisible && RevealAlpha > 0.001f;
+            oc.ApplyRingEnabled();
         }
     }
 
@@ -207,9 +252,10 @@ public class OrbitController : MonoBehaviour
     public void SetEccentricity(float v){ eccentricity = Mathf.Clamp(v, 0f, 0.7f); RedrawRing(); UpdatePosition(); }
     public void SetVerticalOffset(float v){ verticalOffset = v; UpdatePosition(); }
 
-    // ANDed with the global reveal: during the loading finale every ring is held at zero, and a per-body
-    // toggle must not be able to switch one back on ahead of the cue.
-    public void SetRingVisible(bool v)  { ringVisible = v; if (orbitRing != null) orbitRing.enabled = v && RevealAlpha > 0.001f; }
+    // ANDed with the global reveal AND with concealment (see ApplyRingEnabled): during the loading
+    // finale every ring is held at zero, and a per-body toggle must not be able to switch one back on
+    // ahead of the cue — or to un-cloak a world's orbit.
+    public void SetRingVisible(bool v)  { ringVisible = v; ApplyRingEnabled(); }
     // Through ApplyRingColor, not straight to the LineRenderer: writing the colour directly would light
     // this one ring at full alpha ahead of the loading finale's reveal.
     public void SetRingColor(Color c)   { ringColor = c; ApplyRingColor(); }
@@ -232,6 +278,10 @@ public class OrbitController : MonoBehaviour
 
     public void SetHabitableHighlight(bool on)
     {
+        // Recorded as INTENT and then ANDed with concealment (ApplyRingEnabled). Writing `.enabled`
+        // straight through would light a concealed world's ring the next time the habitable-zone
+        // overlay was toggled.
+        habitableWanted = on;
         if (on)
         {
             if (habitableRing == null)
@@ -249,7 +299,7 @@ public class OrbitController : MonoBehaviour
                 habitableRing.startWidth = habitableRing.endWidth = 0.12f;
                 DrawEllipse(habitableRing, r, r);
             }
-            habitableRing.enabled = true;
+            ApplyRingEnabled();
             UpdatePosition();
         }
         else if (habitableRing != null)
@@ -262,6 +312,7 @@ public class OrbitController : MonoBehaviour
     // habitable ring so they can both show).
     public void SetOwnerHighlight(Color c, bool on)
     {
+        ownerWanted = on;   // intent; concealment gates it — see SetHabitableHighlight
         if (on)
         {
             if (ownerRing == null)
@@ -278,7 +329,7 @@ public class OrbitController : MonoBehaviour
                 DrawEllipse(ownerRing, r, r);
             }
             ownerRing.startColor = ownerRing.endColor = c;
-            ownerRing.enabled = true;
+            ApplyRingEnabled();
             UpdatePosition();
         }
         else if (ownerRing != null)

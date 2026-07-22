@@ -319,7 +319,11 @@ public class GalaxyLOD : MonoBehaviour
 
         UpdateProxyScales(h, b1);
         foreach (var p in proxies) if (p != null) p.SetAlpha(alpha);
-        if (coreProxyFade != null) coreProxyFade.SetAlpha(alpha);
+        // The galactic core is hideable like anything else, and like a system proxy it is drawn here
+        // rather than by the visualizer, so its concealment has to be honoured on this side too.
+        bool coreHidden = builtFor != null && builtFor.center != null
+                          && builtFor.center.hideReason != HideReason.None;
+        if (coreProxyFade != null) coreProxyFade.SetAlpha(coreHidden ? 0f : alpha);
     }
 
     // Takes only the alpha now: the deep view is fixed-scale, so it no longer depends on camera height,
@@ -358,7 +362,27 @@ public class GalaxyLOD : MonoBehaviour
 
     // ---- Building --------------------------------------------------------------------------------
 
-    void Rebuild(Galaxy g)
+    /// Rebuild the wide-zoom representations for the galaxy as it stands NOW.
+    ///
+    /// Update only rebuilds when the Galaxy OBJECT changes, which is the right test for "a new game was
+    /// started" and the wrong one for "a system was deleted out of the galaxy in front of me" — same
+    /// instance, one fewer system, and a proxy still standing where it used to be. Deleting or restoring
+    /// a system calls this (see GalaxyTrash).
+    /// resetMode:false — the CONTENT changed, the camera did not.
+    ///
+    /// The three mode fields below (detailOn / SystemMode / proxyFade) exist for the new-galaxy case and
+    /// are actively wrong for an in-place rebuild. Reset while sitting in the galaxy overview, they blink
+    /// the entire overview out and re-dissolve it over 0.3s on every single delete, and — because
+    /// MapTierVisibility reads SystemMode in LateUpdate while the UI click was handled in Update —
+    /// flash every ship in the fleet back on for one frame across a map with no planets in it.
+    public static void RebuildNow()
+    {
+        if (Instance != null) Instance.Rebuild(SystemContext.Galaxy, false);
+    }
+
+    void Rebuild(Galaxy g) => Rebuild(g, true);
+
+    void Rebuild(Galaxy g, bool resetMode)
     {
         foreach (var m in proxies) if (m != null) Destroy(m.gameObject);
         proxies.Clear();
@@ -376,14 +400,18 @@ public class GalaxyLOD : MonoBehaviour
         // so if we were in galaxy view when the galaxy changed, ApplyDetail would compare want:false to
         // detailOn:false, conclude nothing had changed, and leave the new detailed systems rendering
         // underneath the proxies. Resetting to true forces the next ApplyDetail to actually re-evaluate.
-        detailOn = true;
-        // Must move together with detailOn. ApplyDetail early-returns when `want == detailOn`, so if the
-        // galaxy changed while in galaxy mode and the camera lands below the boundary, that early return
-        // fires and SystemMode is never written — leaving it false while the planets render. Every ship
-        // then stays hidden indefinitely (and newly built ones get hidden too, since MapTierVisibility
-        // re-applies while hidden), until the player manually zooms out past the boundary and back.
-        SystemMode = true;
-        proxyFade = 0f;
+        if (resetMode)
+        {
+            detailOn = true;
+            // Must move together with detailOn. ApplyDetail early-returns when `want == detailOn`, so if
+            // the galaxy changed while in galaxy mode and the camera lands below the boundary, that early
+            // return fires and SystemMode is never written — leaving it false while the planets render.
+            // Every ship then stays hidden indefinitely (and newly built ones get hidden too, since
+            // MapTierVisibility re-applies while hidden), until the player manually zooms out past the
+            // boundary and back.
+            SystemMode = true;
+            proxyFade = 0f;
+        }
 
         if (g == null)
         {
@@ -586,6 +614,12 @@ public class GalaxyStarProxy : MonoBehaviour
     public StarSystemData system;
     public Transform art;      // scaled by the zoom ramp; the collider lives on the unscaled root
 
+    // One container per sun, and the sun it draws — so a single member of a cluster can be concealed on
+    // its own. Parallel lists, filled together in Build; empty for a black-hole system, which is drawn
+    // from combinedStar and has no per-member art.
+    public readonly List<Transform> sunArt = new List<Transform>();
+    public readonly List<StarData> sunData = new List<StarData>();
+
     SphereCollider pick;
     float baseColliderRadius = 1f;
     const float ColliderMaxScale = 2.5f;
@@ -632,7 +666,16 @@ public class GalaxyStarProxy : MonoBehaviour
                 if (sun == null) sun = sys.combinedStar;
                 Color c = sun != null ? sun.color : Color.white;
 
-                var sphere = SpaceMaterials.Primitive(PrimitiveType.Sphere, art, "Sun" + i);
+                // Each sun's art gets its own container, so ONE member of a cluster can be concealed
+                // without the others. Hiding a single sun of a binary took it out of the system view but
+                // left the proxy drawing both dots at galaxy zoom — concealment has to hold at every
+                // zoom, not just the one the object was hidden from. (SetAlpha does the toggling.)
+                var sunRoot = new GameObject("SunArt" + i).transform;
+                sunRoot.SetParent(art, false);
+                proxy.sunArt.Add(sunRoot);
+                proxy.sunData.Add(sun);
+
+                var sphere = SpaceMaterials.Primitive(PrimitiveType.Sphere, sunRoot, "Sun" + i);
                 // Spread the members of a cluster so a binary/ternary reads as more than one dot.
                 Vector3 off = Vector3.zero;
                 if (n > 1)
@@ -689,11 +732,13 @@ public class GalaxyStarProxy : MonoBehaviour
                 // Two coronae, not one: a tight bright halo that reads as the star's own light, and a
                 // wide faint one that gives it presence against the backdrop. A single quad has to
                 // choose between looking hot and looking big, and ends up doing neither.
-                var glow = SpaceMaterials.Glow(art, "Glow" + i, dia * 3.0f,
+                // Under sunRoot alongside the sphere, so concealing one member takes its glow with it
+                // rather than leaving a haloed hole where the star used to be.
+                var glow = SpaceMaterials.Glow(sunRoot, "Glow" + i, dia * 3.0f,
                                                new Color(c.r, c.g, c.b, 0.85f));
                 glow.transform.localPosition = off;
 
-                var halo = SpaceMaterials.Glow(art, "Halo" + i, dia * 4.6f,
+                var halo = SpaceMaterials.Glow(sunRoot, "Halo" + i, dia * 4.6f,
                                                new Color(c.r, c.g, c.b, 0.30f));
                 halo.transform.localPosition = off;
             }
@@ -731,7 +776,65 @@ public class GalaxyStarProxy : MonoBehaviour
 
     public void SetAlpha(float a)
     {
+        // A CONCEALED SYSTEM MUST BE CONCEALED AT EVERY ZOOM.
+        //
+        // The galaxy overview does not draw the real system at all — it draws this proxy instead, built
+        // by GalaxyLOD rather than by SystemVisualizer. So the subtree sweep that hides the real suns
+        // and worlds (ConcealBinding) never reaches it: hide a system, zoom out, and there it is again
+        // as a star with an empire ring on it. Read straight off the data every frame rather than being
+        // pushed at from VisibilityService, because a proxy is rebuilt whenever the galaxy changes and
+        // would otherwise come back visible.
+        // Per-SUN concealment first: one member of a binary hidden on its own.
+        for (int i = 0; i < sunArt.Count && i < sunData.Count; i++)
+        {
+            if (sunArt[i] == null) continue;
+            bool show = sunData[i] == null || sunData[i].hideReason == HideReason.None;
+            if (sunArt[i].gameObject.activeSelf != show) sunArt[i].gameObject.SetActive(show);
+        }
+
+        bool concealed = Concealed;
+        if (concealed) a = 0f;
+
+        // ...and it must not be clickable while it is invisible, or the hidden system still answers the
+        // cursor and opens its overview.
+        if (pick != null) pick.enabled = a > 0.004f;
+
+        // Two things survive merely disabling the collider, and both leave the concealed system on
+        // screen after it has gone. Unity does not fire OnMouseExit for a collider that is disabled
+        // under the cursor, so the hover card stays pinned — naming the system, its class, its mass and
+        // its owner. And a single click is DEFERRED by a double-click window (see OnMouseDown), so a
+        // click made in the same beat as the conceal still opens the summary window 0.35s later.
+        if (concealed)
+        {
+            pendingClick = false;
+            if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
+        }
+
         if (fade != null) fade.SetAlpha(a);
+    }
+
+    /// Nothing here is meant to be drawn, or pointed at, or clicked.
+    ///
+    /// Either the system itself is concealed, or every sun in it has been concealed one at a time —
+    /// which amounts to the same thing for a marker whose entire job is to stand in for those suns.
+    bool Concealed
+    {
+        get
+        {
+            if (system == null) return false;
+            if (system.hideReason != HideReason.None) return true;
+
+            if (sunData.Count > 0)
+            {
+                foreach (var s in sunData)
+                    if (s == null || s.hideReason == HideReason.None) return false;
+                return true;
+            }
+
+            // A black-hole system has no per-member art: it renders from combinedStar.
+            return system.isBlackHole && system.combinedStar != null
+                   && system.combinedStar.hideReason != HideReason.None;
+        }
     }
 
     public void SetScale(float f)
@@ -751,6 +854,7 @@ public class GalaxyStarProxy : MonoBehaviour
 
     void OnMouseOver()
     {
+        if (Concealed) return;
         if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
         MapHoverPanel.Instance?.ShowAtCursor(HoverText());
     }
@@ -771,6 +875,7 @@ public class GalaxyStarProxy : MonoBehaviour
     // Overview at all. Waiting costs 0.35s on the single click and makes the double click actually work.
     void OnMouseDown()
     {
+        if (Concealed) return;
         if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
         SimpleAudio.Instance?.PlaySelect();
         if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
@@ -793,6 +898,7 @@ public class GalaxyStarProxy : MonoBehaviour
     void Update()
     {
         if (!pendingClick) return;
+        if (Concealed) { pendingClick = false; return; }
         if (Time.unscaledTime - lastClickTime < DoubleClickWindow) return;
         pendingClick = false;
         // Re-check the pointer: between the click and now it may have moved onto the HUD, and a window

@@ -65,6 +65,16 @@ public static class PlanetAppearance
 
         AddAtmosphere(body, go);
         AddClouds(body, go);
+
+        // RE-ASSERT CONCEALMENT LAST.
+        //
+        // The two calls above DESTROY and REBUILD the atmosphere and cloud shells, and the new ones
+        // arrive with their renderers enabled — so a world that is hidden, cloaked or undiscovered would
+        // sprout a glowing haze and a cloud ball the next time anything re-applied its appearance. That
+        // happens more often than it sounds: RefreshFog runs on every Dev Mode toggle, BodyFog runs when
+        // a survey completes, and UnitManager runs it when a probe reveals a world. Cheap and idempotent
+        // on a visible body — ConcealBinding.Set returns immediately when there is nothing to conceal.
+        VisibilityService.Apply(body);
     }
 
     // A slowly-drifting cloud shell for worlds with real air, sat just above the surface and below the

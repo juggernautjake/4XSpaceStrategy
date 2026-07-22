@@ -20,6 +20,10 @@ public class SaveGame
     // load rather than left blank (see GameStateSerializer.Apply).
     public string galaxyName = "";
     public int galaxySeed = 0;
+    // The galactic core is hideable like anything else, but it is rebuilt from scratch on load
+    // (StarDatabase.BlackHole()) rather than deserialized — so its concealment needs its own field or it
+    // comes back visible. 0 = visible; see HideReason.
+    public int centerHideReason;
     public List<SystemDTO> galaxySystems = new List<SystemDTO>();
     public ResearchDTO research = new ResearchDTO();
 
@@ -101,6 +105,16 @@ public class SystemDTO
     public bool isBlackHole;
     public int ownerId = -1;                 // -1 == unclaimed
     public bool isHome;
+
+    // Concealment (see Visibility.cs): 0 = visible, 1 = Dev, 2 = Cloaked, 3 = Undiscovered. Held as an
+    // int because JsonUtility serializes enums as ints anyway and an int is what an older save missing
+    // this field deserializes to — 0, i.e. visible, which is the correct reading of a save written
+    // before anything could be hidden.
+    public int hideReason;
+    // Per-sun concealment, parallel to starTypes. Empty in an older save, and the loader treats a short
+    // list as "the rest are visible" rather than indexing off the end.
+    public List<int> starHideReasons = new List<int>();
+
     public List<BodyDTO> bodies = new List<BodyDTO>();
 }
 
@@ -190,6 +204,13 @@ public class BodyDTO
     public bool settled;            // people live here (Claim.cs). Distinct from owning it.
     public bool visited;
     public float explorationProgress;
+
+    // Why this world (and, separately, its orbit line) is not drawn — 0 visible, 1 Dev, 2 Cloaked,
+    // 3 Undiscovered. See SystemDTO.hideReason for why these are ints. A galaxy is regenerated from
+    // seeds on load, so without these the rare undiscovered worlds would quietly reappear the first
+    // time the player saved and came back.
+    public int hideReason;
+    public int ringHideReason;
 
     public List<ResourceDTO> resources = new List<ResourceDTO>();
     public List<OreCellDTO> ores = new List<OreCellDTO>();

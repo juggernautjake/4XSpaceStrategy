@@ -207,7 +207,11 @@ public class CameraController : MonoBehaviour
 
     // Keep the view volume big enough for whatever height we're at. Without this the far plane silently
     // eats the galaxy; with it, zooming out simply works.
-    private void UpdateClipPlanes()
+    /// Public because the genesis sequence flies the camera itself and must keep the view volume in step.
+    /// Frozen clip planes are not cosmetic: a near plane left at 10.24 (what framing a whole galaxy
+    /// produces) sits IN FRONT of a homeworld filmed from ~10 units away, and the entire intro renders
+    /// empty. The far plane has the mirror problem on the closing pull-back.
+    public void UpdateClipPlanes()
     {
         if (cam == null) cam = GetComponent<Camera>();
         if (cam == null) return;
@@ -296,6 +300,15 @@ public class CameraController : MonoBehaviour
 
     private void Update()
     {
+        // THE GENESIS SEQUENCE OWNS THE CAMERA WHILE IT RUNS.
+        //
+        // Exclusive, not cooperative. Two systems easing the same transform toward different targets is
+        // a fight neither wins: the sequence composes a shot, this rig's zoom easing pulls toward its own
+        // targetHeight on the same frame, and the result is a camera that judders and never settles. So
+        // input, zoom smoothing, follow and the clip-plane update all stand down for the duration, and
+        // GenesisCamera.Release hands back a synced rig.
+        if (GenesisCamera.Active) return;
+
         bool menuOpen = (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen)
                      || (StartMenu.Instance != null && StartMenu.Instance.IsOpen);
         bool planetViewOpen = PlanetViewWindow.Instance != null && PlanetViewWindow.Instance.IsOpen;
@@ -381,6 +394,9 @@ public class CameraController : MonoBehaviour
 
     private void LateUpdate()
     {
+        // See Update: the sequence owns the camera outright while it runs.
+        if (GenesisCamera.Active) return;
+
         // A followed SHIP's transform is re-resolved every frame — see followUnit. Done before the
         // follow test below so a ship whose token was rebuilt this frame is picked straight back up
         // rather than dropping the follow for a frame (which reads as a stutter).
@@ -506,8 +522,12 @@ public class CameraController : MonoBehaviour
             float r = WorldRadius(target, 0f);
             var cam = GetComponent<Camera>();
             float vfov = cam != null ? cam.fieldOfView : 60f;
-            float half = Mathf.Max(0.01f, Mathf.Clamp01(screenFraction) * vfov * 0.5f * Mathf.Deg2Rad);
-            float d = r / Mathf.Tan(half);
+            // ONE solve, shared with the genesis sequence — see GenesisCamera.DistanceForFraction for
+            // the derivation. This used to be `r / tan(f·V/2)`, which treats screen height as
+            // proportional to ANGLE; perspective is linear in tan, so that came out ~9% short at a 60°
+            // FOV. It matters here more than anywhere: this framing exists to match an apparent size
+            // across a cut, and both sides have to compute it the same way or the cut pops.
+            float d = GenesisCamera.DistanceForFraction(r, vfov * Mathf.Deg2Rad, screenFraction);
             targetHeight = Mathf.Clamp(d * Mathf.Sin(Pitch * Mathf.Deg2Rad), minHeight, maxHeight);
         }
 
@@ -614,6 +634,21 @@ public class CameraController : MonoBehaviour
     }
 
     public float Height => transform.position.y;
+
+    /// Adopt whatever pose the camera is in right now as the rig's own resting state.
+    ///
+    /// Called when the genesis sequence hands the camera back without naming a subject. `targetHeight`
+    /// is the zoom, and it is what Update eases toward — so if it still held the value it had before the
+    /// sequence, the very first frame of player control would glide the camera away from the shot the
+    /// intro just spent thirty seconds composing.
+    public void SyncToCurrentPose()
+    {
+        targetHeight = Mathf.Clamp(transform.position.y, minHeight, maxHeight);
+        following = false;
+        followTarget = null;
+        followUnit = null;
+        haveAnchor = false;
+    }
 
     /// Same rebase as ClearFocus when it turns following OFF — the reference plane the zoom is measured
     /// from is changing, so the height has to be re-expressed in the new one or the camera jumps.

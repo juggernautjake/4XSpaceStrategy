@@ -30,6 +30,7 @@ public static class GameBootstrap
         TargetIndicator.Create();           // pulsing lock-on ring for right-click sends
         UnitTokenRenderer.Create();
         UnitModelRenderer.Create();         // 3D meshes for stations + colony ships (falls back to tokens)
+        GenesisCamera.Create();             // the intro films the real world with the real camera
         SpaceBackground.Create();
         PostFxController.Create();
 
@@ -76,6 +77,7 @@ public static class GameBootstrap
         //   ColonyWindow.Create(canvas.transform);
         SystemSummaryWindow.Create(canvas.transform);
         ViewEditorWindow.Create(canvas.transform);
+        ObjectVisibilityWindow.Create(canvas.transform);   // Dev Mode: hide / delete anything in the galaxy
         PlanetGlobeWindow.Create(canvas.transform);
         // Sibling order here does not matter — the menus are created after this. Open() calls
         // SetAsLastSibling(), which is what actually puts it in front of everything.

@@ -249,6 +249,34 @@ public partial class InspectorWindow : MonoBehaviour
 
     public void Hide() { if (root != null) root.SetActive(false); }
 
+    /// Close if what it is inspecting is no longer in the galaxy.
+    ///
+    /// The PlanetUI.OnClosed hook only covers BODY selections. Opening a star's Overview
+    /// (StarOverview.Open) never sets PlanetUI.Selected, so deleting that system left the Inspector
+    /// showing it — with a live star editor writing to a StarData that is out of the galaxy.
+    public void HideIfGone()
+    {
+        if (root == null || !root.activeSelf) return;
+
+        var g = SystemContext.Galaxy;
+        if (g == null) return;
+
+        bool gone = false;
+        if (target.system != null) gone = !g.systems.Contains(target.system);
+        else if (target.body != null)
+        {
+            gone = true;
+            foreach (var sys in g.systems)
+            {
+                foreach (var b in sys.AllBodies()) if (b == target.body) { gone = false; break; }
+                if (!gone) break;
+            }
+        }
+
+        // The breadcrumb goes too: every step of it can only lead back to the thing that just left.
+        if (gone) { Hide(); trail.Clear(); }
+    }
+
     public void Toggle()
     {
         bool show = !root.activeSelf;
