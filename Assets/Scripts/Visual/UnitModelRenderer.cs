@@ -210,6 +210,18 @@ public class UnitModelRenderer : MonoBehaviour
         var box = go.AddComponent<BoxCollider>();
         box.center = go.transform.InverseTransformPoint(bounds.center);
         box.size = bounds.size / Mathf.Max(0.0001f, go.transform.lossyScale.x);
+
+        // FLOORED, the same way a body's pick sphere is (SystemVisualizer.EnsureClickCollider).
+        //
+        // FitTo has already normalised the hull to 0.16-0.34 world units, so its true bounds give a pick
+        // box a few PIXELS across at system zoom — against a body's pick sphere that never drops below
+        // 1.5 units and grows to 13. Without a floor, a meshed ship docked at a world is essentially
+        // unhittable, which is the exact case ClickPriority exists to rescue: it can only hand the click
+        // over if the ray pierces this box in the first place.
+        const float MinPickWorld = 0.8f;
+        float lossy = Mathf.Max(0.0001f, go.transform.lossyScale.x);
+        box.size = Vector3.Max(box.size, Vector3.one * (MinPickWorld / lossy));
+
         go.AddComponent<UnitModelClick>().Init(u);
 
         // Seeded from the unit id so an orbit is stable across frames and reloads, and two stations at
@@ -334,15 +346,28 @@ public class UnitModelClick : MonoBehaviour
     Unit unit;
     public void Init(Unit u) { unit = u; }
 
-    void OnMouseDown()
+    /// The ship this hull stands for, so a raycast can identify what it hit (see ClickPriority).
+    public Unit Unit => unit;
+
+    void OnMouseDown() => HandleClick();
+
+    /// See UnitToken.HandleClick — a docked ship loses the nearest-hit test to its world's oversized
+    /// pick sphere, so the body's handler forwards the click here.
+    /// Returns whether the click was actually consumed — see ClickPriority.
+    public bool HandleClick()
     {
-        if (unit == null) return;
+        if (unit == null) return false;
         if (UnityEngine.EventSystems.EventSystem.current != null &&
-            UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
+            UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return false;
+        if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return false;
 
         bool add = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
         UnitSelection.Select(unit, add);
         SimpleAudio.Instance?.PlayUnitSelect(unit.type);
+        // Same follow behaviour as a token — a ship with a real hull should not behave differently from
+        // one drawn as a billboard just because its class happens to have a model.
+        CameraController.Instance?.FocusUnit(unit, CameraController.AutoFollow);
         UnitInfoPanel.Instance?.Show(unit);
+        return true;
     }
 }

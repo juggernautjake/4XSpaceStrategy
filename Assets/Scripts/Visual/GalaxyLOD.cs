@@ -589,6 +589,22 @@ public class CoreProxyHover : MonoBehaviour
     {
         if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
     }
+
+    // The core is READ at galaxy zoom and only clickable in system view — which is backwards, since
+    // galaxy zoom is the one place it is actually on screen as the thing the whole map turns around.
+    // Opens the same Galaxy panel its event horizon does (see StarInteraction.isGalacticCore).
+    void OnMouseDown()
+    {
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
+        if (galaxy == null) return;
+        // A fleet mid-order owns the click, same guard every other map object carries.
+        if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;
+
+        SimpleAudio.Instance?.PlaySelect();
+        if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
+        InspectorWindow.Instance?.Inspect(
+            InspectorTarget.GalaxyTarget(galaxy, galaxy.center), resetTrail: true);
+    }
 }
 
 // One enlarged 3D star (or cluster, or black hole) standing in for a whole system in the galaxy overview.
@@ -691,7 +707,16 @@ public class GalaxyStarProxy : MonoBehaviour
                 // competing with a full starfield backdrop. Bloom is thresholded, so a small bright disc
                 // spills far less glow than a large one at the same value. Overshooting the curve is what
                 // makes the two read as equally hot to the eye, which is the actual requirement.
-                const float GalaxyBoost = 2.2f;
+                // 1.25, down from 2.2 — because the base curve it multiplies is no longer broken.
+                //
+                // EmissionStrength used to leave an ordinary sun at 0.975, below the bloom threshold, so
+                // this boost was doing the work of making a proxy read as a light source at all. Now the
+                // base is 1.7-4.5 and genuinely HDR; keeping 2.2 on top would take a blue giant's marker
+                // to ~10 and turn the galaxy overview into a field of white discs with the spiral washed
+                // out behind them. A modest boost still earns its place: out here a star is a small disc
+                // against a full starfield, and bloom spills less from a small bright area than a large
+                // one, so matching the system view's number exactly still reads dimmer than it is.
+                const float GalaxyBoost = 1.25f;
                 float emK = StarDatabase.EmissionStrength(sun) * GalaxyBoost;
                 Color hot = new Color(c.r * emK, c.g * emK, c.b * emK, 1f);
 

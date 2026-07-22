@@ -218,19 +218,30 @@ public class UnitToken : MonoBehaviour
         transform.localScale = Vector3.one * (sel ? baseScale * 1.4f : baseScale);
     }
 
-    void OnMouseDown()
+    void OnMouseDown() => HandleClick();
+
+    /// Select this ship. Public because a DOCKED ship usually loses Unity's nearest-hit test to the
+    /// oversized pick sphere of the world it is parked at, so its own OnMouseDown never fires — the
+    /// body's handler resolves the click and calls this instead. See ClickPriority.
+    /// Returns whether the click was actually consumed — see ClickPriority.
+    public bool HandleClick()
     {
+        if (unit == null) return false;
         if (UnityEngine.EventSystems.EventSystem.current != null &&
-            UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
-        if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;
+            UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return false;
+        if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return false;
 
         // Shift-click adds to the current fleet selection; a plain click selects just this ship.
         bool additive = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
         if (additive) UnitSelection.Select(unit, true);
         else UnitSelection.SelectOnly(unit);
         SimpleAudio.Instance?.PlayUnitSelect(unit.type);
-        CameraController.Instance?.FocusAndZoom(transform, 3f, false);
+        // FOLLOW the ship, the same way clicking a world follows it — and honour the same AutoFollow
+        // preference, so the two behave alike. FocusUnit tracks it by identity rather than by transform,
+        // because a ship's token is destroyed and rebuilt whenever the fleet changes.
+        CameraController.Instance?.FocusUnit(unit, CameraController.AutoFollow);
         UnitInfoPanel.Instance?.Show(unit);
+        return true;
     }
 
     void OnMouseEnter()

@@ -83,6 +83,10 @@ public static class BlackHoleVisual
             light.color = new Color(1f, 0.6f, 0.3f);
             light.intensity = lightIntensity;
             light.range = Mathf.Max(60f, scale * 26f);
+            // Same rule as a star (SystemVisualizer.CreateStarVisual): an accretion glow is a light
+            // SOURCE, and a source that also carves shadows across its own system is neither cheap nor
+            // correct.
+            light.shadows = LightShadows.None;
         }
 
         return root;

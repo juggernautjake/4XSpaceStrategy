@@ -72,8 +72,24 @@ public static class StarDatabase
     // How strongly a star's surface glows (emission multiplier), tied to its LIGHT INTENSITY so the Dev
     // editor's intensity slider visibly brightens or dims the sun itself, not only the light it casts.
     // One formula, shared by the renderer and the editor, so an edited star matches a generated one.
+    //
+    // THE FLOOR IS ABOVE 1.0, AND THAT IS THE WHOLE FIX.
+    //
+    // This used to be `0.45 + lightIntensity * 0.7`, which put an ordinary sun at **0.975** — under one.
+    // An unlit material writes its colour straight into the HDR buffer, so a value below 1 is just a
+    // normal-brightness surface: bloom's threshold never sees it, the ACES tonemapper has no headroom to
+    // work with, and the star renders as a flat painted ball. Only rare O/B giants ever crossed 1, which
+    // is why the galaxy overview had to multiply this by 2.2 to make its markers read as hot at all.
+    //
+    // Now the DIMMEST red dwarf sits at ~1.7 and the brightest blue giant at 4.5, so:
+    //   * everything glows, because everything is genuinely HDR;
+    //   * the spread is ~2.6x rather than compressed against the bloom threshold, so spectral class is
+    //     visible at a glance — a red dwarf is plainly a lesser thing than an F-type;
+    //   * the ceiling is deliberately modest. Bloom spills as a function of how far past the threshold a
+    //     pixel is, so pushing the top much higher stops reading as "bright" and starts reading as a
+    //     white hole with the system behind it washed out.
     public static float EmissionStrength(StarData s)
-        => s == null ? 1f : Mathf.Clamp(0.45f + s.lightIntensity * 0.7f, 0.45f, 3.5f);
+        => s == null ? 1f : Mathf.Clamp(1.15f + s.lightIntensity * 1.05f, 1.15f, 4.5f);
 
     // A short human classification of a system from its combined star: "Single G-type", "Binary system",
     // "Ternary system", or "Black hole".

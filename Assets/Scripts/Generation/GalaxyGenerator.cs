@@ -424,20 +424,39 @@ public static class GalaxyGenerator
         // furnace and a Cryithn ice world never generate with a biosphere whatever their temperature
         // (GeneratesWithBiosphere gates on type), so forcing them into a temperate band would only strip
         // the character out of their worlds for no gain — they keep the original curve.
-        bool wantsLife = planet.type == CelestialBodyType.RockyPlanet
-                      || planet.type == CelestialBodyType.OceanPlanet;
-
-        if (!wantsLife) return Mathf.Lerp(0.55f, 1.7f, ideal);
+        if (!CradleWantsLife(species)) return Mathf.Lerp(0.55f, 1.7f, ideal);
 
         // Inside the band with real margin at both ends, because heat is not frozen after generation:
         // terraforming moves it, and the Dev sandbox moves it further. A cradle that started 1°C inside
         // the ceiling would fall out of it the first time anything nudged the world.
-        float targetC = Mathf.Lerp(BiosphereRules.MinLiquidC + 5f, BiosphereRules.MaxLiquidC - 8f, ideal);
-        return PlanetTemperature.HeatForCelsius(targetC, planet.atmosphereThickness, planet.type);
+        return PlanetTemperature.HeatForCelsius(
+            CradleTargetCelsius(species), planet.atmosphereThickness, planet.type);
     }
 
+    /// Is this species' own cradle one that is MEANT to be alive — a Rocky or Ocean world?
+    ///
+    /// Gated on the SPECIES, not on the world being judged, and the distinction is load-bearing. A
+    /// Pyrothian furnace and a Cryithn ice world never generate with a biosphere whatever their
+    /// temperature (BiosphereRules gates on type), so their cradles keep the raw heat curve and their
+    /// character. Ask this about the BODY instead and a Cryithn terraforming a rocky world gets pinned
+    /// to a Terran's +11°C rather than their own −11°C — the wrong species' answer, on their own world.
+    public static bool CradleWantsLife(Species species)
+    {
+        var t = BestTypeFor(species);
+        return t == CelestialBodyType.RockyPlanet || t == CelestialBodyType.OceanPlanet;
+    }
+
+    /// The temperature a species' cradle is aimed at, in °C — shared with TerraformVisuals so that
+    /// terraforming a world toward this species' ideal converges on the SAME climate the cradle was
+    /// built with, rather than on a second, greenhouse-blind one that drifts away from it.
+    public static float CradleTargetCelsius(Species species)
+        => Mathf.Lerp(BiosphereRules.MinLiquidC + 5f, BiosphereRules.MaxLiquidC - 8f,
+                      Mathf.Clamp01(species != null ? species.idealTemp : 0.5f));
+
     // The body type the species is happiest on (highest affinity).
-    static CelestialBodyType BestTypeFor(Species s)
+    /// Public because "what kind of world is this species' cradle" is a question terraforming asks too
+    /// (through CradleWantsLife), and two answers to it would drift apart.
+    public static CelestialBodyType BestTypeFor(Species s)
     {
         CelestialBodyType[] candidates =
         {

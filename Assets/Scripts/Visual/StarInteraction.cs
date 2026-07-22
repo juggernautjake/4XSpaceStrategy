@@ -9,6 +9,15 @@ public class StarInteraction : MonoBehaviour
     public StarData member;        // this specific sun's OWN data (== star for a single-star system)
     public StarSystemData system;
 
+    /// This is the GALACTIC CORE, not a star in a system — so clicking it reports on the galaxy rather
+    /// than on a system that does not exist.
+    ///
+    /// Set explicitly by SystemVisualizer rather than inferred from `system == null`. A rare black-hole
+    /// SYSTEM is a genuine system with worlds orbiting it and must keep the star tabs; inferring
+    /// "core-ness" from a missing field would eventually catch one of those and hide its planets behind
+    /// a galaxy readout.
+    public bool isGalacticCore;
+
     /// The rendered transform for a StarData, or null if it isn't on screen.
     ///
     /// StarData is pure data and holds no back-reference to its visual — unlike CelestialBody, which has
@@ -54,6 +63,15 @@ public class StarInteraction : MonoBehaviour
             UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
             return;
 
+        // While a fleet is being aimed, this click is the destination confirmation — FleetMovementController
+        // owns it. PlanetClick has always guarded this; stars never did, and it started to matter once
+        // ClickPriority could forward a click here.
+        if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;
+
+        // A ship parked at this star wins the click — same reasoning as PlanetClick, and a star's pick
+        // sphere is the largest of the lot.
+        if (ClickPriority.TryClickUnitUnderCursor()) return;
+
         SimpleAudio.Instance?.PlaySelect();
 
         // The tabbed Inspector is the ONE readout for anything you click, stars included. The old simpler
@@ -66,7 +84,11 @@ public class StarInteraction : MonoBehaviour
         // only add a branch that does nothing. The galaxy overview is the place that genuinely needed the
         // gesture: out there a single click opens the light summary window, so double-click is what
         // reaches the full per-sun breakdown (see GalaxyStarProxy.OnMouseDown).
-        StarOverview.OpenFromStar(star, system);
+        if (isGalacticCore)
+            InspectorWindow.Instance?.Inspect(
+                InspectorTarget.GalaxyTarget(SystemContext.Galaxy, star), resetTrail: true);
+        else
+            StarOverview.OpenFromStar(star, system);
 
         // Clicking a star no longer moves the camera either (it just shows the info + the Inspector, which
         // has its own "Focus" button). Auto-focusing on click was disorienting and was also what let a star

@@ -6,7 +6,7 @@ using TMPro;
 
 // What the Inspector is currently looking at. A single window inspects every kind of thing in the
 // game, so the "subject" is a small tagged union rather than a class hierarchy.
-public enum InspectorKind { None, Body, Unit, Fleet, City, Shipyard, ResearchCenter, Structure, Star }
+public enum InspectorKind { None, Body, Unit, Fleet, City, Shipyard, ResearchCenter, Structure, Star, Galaxy }
 
 public struct InspectorTarget : IEquatable<InspectorTarget>
 {
@@ -14,8 +14,9 @@ public struct InspectorTarget : IEquatable<InspectorTarget>
     public CelestialBody body;      // Body / City / Shipyard / ResearchCenter / Structure
     public Unit unit;               // Unit
     public BuildingType structure;  // Structure
-    public StarData star;           // Star
+    public StarData star;           // Star, and the core object for Galaxy
     public StarSystemData system;   // Star (the system it anchors)
+    public Galaxy galaxy;           // Galaxy (the galactic core was clicked)
 
     public static InspectorTarget Of(CelestialBody b) => new InspectorTarget { kind = InspectorKind.Body, body = b };
     public static InspectorTarget Of(Unit u) => new InspectorTarget { kind = InspectorKind.Unit, unit = u };
@@ -28,8 +29,13 @@ public struct InspectorTarget : IEquatable<InspectorTarget>
     public static InspectorTarget Of(StarData s, StarSystemData sys)
         => new InspectorTarget { kind = InspectorKind.Star, star = s, system = sys };
 
+    /// The galactic core — the one thing that is inspected at GALAXY scale rather than system scale.
+    public static InspectorTarget GalaxyTarget(Galaxy g, StarData core)
+        => new InspectorTarget { kind = InspectorKind.Galaxy, galaxy = g, star = core };
+
     public bool Equals(InspectorTarget o)
-        => kind == o.kind && body == o.body && unit == o.unit && structure == o.structure && star == o.star;
+        => kind == o.kind && body == o.body && unit == o.unit && structure == o.structure
+        && star == o.star && galaxy == o.galaxy;
 
     public bool IsValid
     {
@@ -41,6 +47,9 @@ public struct InspectorTarget : IEquatable<InspectorTarget>
                 case InspectorKind.Unit: return unit != null;
                 case InspectorKind.Fleet: return UnitSelection.Selected.Count > 0;
                 case InspectorKind.Star: return star != null;
+                // The core can be inspected even when its own StarData is missing — the galaxy is the
+                // subject, and SystemContext supplies it if the target did not.
+                case InspectorKind.Galaxy: return galaxy != null || SystemContext.Galaxy != null;
                 default: return body != null;
             }
         }
@@ -198,6 +207,9 @@ public partial class InspectorWindow : MonoBehaviour
                 { tr = target.body.visualObject.transform; hint = target.body.surfaceSize; }
                 break;
             case InspectorKind.Star:
+            // The core is found the same way — StarInteraction carries the only mapping from a StarData
+            // to its rendered transform, and the core's horizon carries one like any other.
+            case InspectorKind.Galaxy:
                 tr = StarInteraction.TransformOf(target.star);
                 if (tr != null) hint = tr.lossyScale.x;
                 break;
@@ -306,7 +318,17 @@ public partial class InspectorWindow : MonoBehaviour
             if (b.terraformProjects != null) foreach (int p in b.terraformProjects) sb.Append(p).Append(',');
         }
         if (target.unit != null) sb.Append('|').Append(target.unit.id).Append('|').Append((int)target.unit.type);
-        if (target.star != null)
+        // A GALAXY target also carries a `star` (the core), but it must not take the star branch: that
+        // appends the FOCUSED SYSTEM's body count, which this panel never shows — so changing focused
+        // system would throw away the galaxy panel's scroll position for a number that is not on it,
+        // while nothing galaxy-shaped was in the signature at all.
+        if (target.kind == InspectorKind.Galaxy)
+        {
+            var gx = target.galaxy ?? SystemContext.Galaxy;
+            sb.Append("|G|").Append(gx != null ? gx.name : "").Append('|')
+              .Append(gx != null && gx.systems != null ? gx.systems.Count : 0);
+        }
+        else if (target.star != null)
         {
             sb.Append('|').Append(target.star.name).Append('|').Append((int)target.star.type).Append('|');
             sb.Append(target.system != null ? target.system.name : "").Append('|');
@@ -398,6 +420,13 @@ public partial class InspectorWindow : MonoBehaviour
                 if (t.star == null) return "Star";
                 if (!string.IsNullOrEmpty(t.star.name)) return t.star.name;
                 return t.star.isBlackHole ? "Black Hole" : $"{t.star.type}-type Star";
+            case InspectorKind.Galaxy:
+            {
+                // The GALAXY's name, not the core's. The core is named for the galaxy anyway
+                // ("<Galaxy> Core"), and at this scale the galaxy is what the player is looking at.
+                var g = t.galaxy ?? SystemContext.Galaxy;
+                return g != null ? g.name : "Galaxy";
+            }
             default: return "Inspector";
         }
     }
@@ -424,6 +453,13 @@ public partial class InspectorWindow : MonoBehaviour
                     : t.star.starCount == 2 ? "Binary system"
                     : $"{t.star.type}-type star";
                 return t.system != null ? $"{kind} · {t.system.name} · {FactionManager.OwnerLabel(t.system.owner)}" : kind;
+            case InspectorKind.Galaxy:
+            {
+                var g = t.galaxy ?? SystemContext.Galaxy;
+                int n = g != null && g.systems != null ? g.systems.Count : 0;
+                string coreName = t.star != null && !string.IsNullOrEmpty(t.star.name) ? t.star.name : "Galactic core";
+                return $"{coreName} · supermassive black hole · {n} systems";
+            }
             default: return "";
         }
     }
@@ -465,6 +501,7 @@ public partial class InspectorWindow : MonoBehaviour
             case InspectorKind.ResearchCenter: CollectLabTabs(); break;
             case InspectorKind.Structure: CollectStructureTabs(); break;
             case InspectorKind.Star: CollectStarTabs(); break;
+            case InspectorKind.Galaxy: CollectGalaxyTabs(); break;
         }
     }
 
