@@ -380,11 +380,20 @@ public class LoadingScreen : MonoBehaviour
     const float CollapseBeat = 0.45f; // the bar closing in on itself
     const float BlinkBeat = 0.18f;    // the flash as it goes
     const float TravelBeat = 1.1f;    // planet + moons moving to centre, alongside the collapse
-    const float WelcomeFadeIn = 0.5f; // "Welcome to <world>" arriving
+    const float WelcomeFadeIn = 0.5f * GenesisSequence.Pace; // "Welcome to <world>" arriving
     const float HandoffBeat = 0.7f;   // the panel dissolving out from behind it
-    const float WelcomeHold = 1.1f;   // the message over the live solar system
+    const float WelcomeHold = 1.1f * GenesisSequence.Pace;   // the message over the live solar system
     const float AlignBeat = 0.6f;      // the preview turning to match the real planet
-    const float WelcomeFadeOut = 0.6f; // and then completely gone, before anything else happens
+    const float WelcomeFadeOut = 0.6f * GenesisSequence.Pace; // and then completely gone, before anything else happens
+
+    /// How long the welcome titles occupy the screen, start to finish.
+    ///
+    /// Public and DERIVED because GenesisSequence has to wait exactly this long — its TitleHold beat is
+    /// defined as this value. The two used to be independent numbers that happened to be close, and
+    /// slowing the sequence broke the coincidence: TitleHold went to 4.0s while the titles still finished
+    /// in 2.2s, leaving 1.8 seconds of a motionless shot with no text, no bar and no camera move between
+    /// the message vanishing and the pull-back starting. Tied together, that cannot recur at any Pace.
+    public const float WelcomeTotal = WelcomeFadeIn + WelcomeHold + WelcomeFadeOut;
     const float RingRevealGap = 0.25f; // a beat of empty sky, so the cue reads as its own event
     const float RingRevealBeat = 1.2f; // the orbits drawing in — the "you have control" cue
     const float GalaxyArrivalGap = 0.45f; // ...then the rest of the galaxy, a beat behind the rings

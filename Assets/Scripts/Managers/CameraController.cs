@@ -67,7 +67,7 @@ public class CameraController : MonoBehaviour
 
     private void Start()
     {
-        targetHeight = transform.position.y;
+        RebaseZoom(transform.position.y);
         if (cam == null) cam = GetComponent<Camera>();
         UpdateClipPlanes();
     }
@@ -189,7 +189,7 @@ public class CameraController : MonoBehaviour
     {
         ClearFocus();
         float radius = GalaxyRadius();
-        if (radius <= 0f) { targetHeight = Mathf.Min(maxHeight, 1600f); return; }
+        if (radius <= 0f) { RebaseZoom(Mathf.Min(maxHeight, 1600f)); return; }
 
         // Centre on the galaxy's middle rather than wherever we happened to be.
         Vector3 centre = Vector3.zero;
@@ -199,7 +199,7 @@ public class CameraController : MonoBehaviour
             foreach (var sys in g.systems) centre += sys.galaxyPosition;
             centre /= g.systems.Count;
         }
-        targetHeight = HeightToFrame(radius);
+        RebaseZoom(HeightToFrame(radius));
         var p = transform.position; p.y = targetHeight; transform.position = p;
         FocusOn(centre);
         UpdateClipPlanes();
@@ -418,11 +418,56 @@ public class CameraController : MonoBehaviour
             }
         }
 
-        // Recenter on the followed body after orbits move it (zoom is already smoothed in Update).
+        // Re-place the camera on the followed body after orbits move it.
         if (following && followTarget != null)
         {
-            FocusOn(followTarget.position);
+            // ROTATION FIRST. The placement below projects back along `transform.forward`, so it has to
+            // read this frame's orientation — otherwise spinning the view while following solves the
+            // position against the previous frame's bearing, and the body slides off centre for as long
+            // as you keep rotating.
             KeepCameraAngle();
+            PlaceAtConstantDistance(followTarget.position);
+        }
+    }
+
+    /// Put the camera exactly `SlantRange` away from `worldPos`, along its own view direction.
+    ///
+    /// THIS IS WHY A FOLLOWED PLANET NO LONGER SWELLS AND SHRINKS AS IT ORBITS.
+    ///
+    /// The old path called FocusOn, which holds the camera's CURRENT height and slides x/z until the
+    /// view ray meets the body — so the camera-to-body distance came out as `(body.y - camera.y) /
+    /// forward.y`. An orbit is inclined, so a planet's world Y swings once per lap, and that swing landed
+    /// straight in the distance. Apparent size goes as 1/d, so the planet grew on the near side of its
+    /// orbit and shrank on the far side.
+    ///
+    /// FollowPlaneY was an attempt at this: it aimed the height LERP at `body.y + targetHeight`. But a
+    /// lerp only ever chases — it lags a continuously moving target by an amount proportional to how fast
+    /// the target moves, and the residual error is exactly the wobble it was meant to remove. Worse, the
+    /// lerp runs in Update while the body is moved elsewhere in the frame, so the height was solved
+    /// against a position the body had already left.
+    ///
+    /// Solving for DISTANCE instead removes the problem rather than damping it. The camera is placed a
+    /// fixed slant range back along its own forward vector, so the distance is constant BY CONSTRUCTION
+    /// — independent of the body's height, of frame ordering, and of how fast it is moving. A planet
+    /// holds precisely the size the zoom asked for, all the way around its orbit, on both sides.
+    void PlaceAtConstantDistance(Vector3 worldPos)
+    {
+        ClearAnchor();   // same reasoning as FocusOn: a stale zoom anchor would drag the view off centre
+        transform.position = worldPos - transform.forward * SlantRange;
+    }
+
+    /// The camera-to-subject distance implied by the current zoom.
+    ///
+    /// `heightNow` is the zoom expressed as height above the subject; the camera looks down at a fixed
+    /// Pitch, so the straight-line distance is that height over sin(Pitch). Reading the SMOOTHED height
+    /// rather than `targetHeight` keeps the scroll wheel's ease intact — zooming still glides, it just
+    /// glides along the view axis instead of down the world Y axis.
+    float SlantRange
+    {
+        get
+        {
+            float h = Mathf.Max(minHeight * 0.25f, smoothHeight);
+            return h / Mathf.Sin(Pitch * Mathf.Deg2Rad);
         }
     }
 
@@ -453,7 +498,7 @@ public class CameraController : MonoBehaviour
         // follow:false on the body already being followed). `targetHeight` is body-relative while
         // following, so releasing without re-expressing it in world terms lurches the camera by the
         // body's whole Y offset. Same reasoning as ClearFocus.
-        if (following && !follow) targetHeight = Mathf.Clamp(transform.position.y, minHeight, maxHeight);
+        if (following && !follow) EndFollowRebase();
 
         followTarget = target;
         following = follow;
@@ -531,19 +576,28 @@ public class CameraController : MonoBehaviour
             targetHeight = Mathf.Clamp(d * Mathf.Sin(Pitch * Mathf.Deg2Rad), minHeight, maxHeight);
         }
 
-        // FocusAndZoom sets targetHeight and lets Update ease the camera to it. Complete that ease by
-        // hand: put the camera at the final height first, THEN centre — FocusOn solves the look-at from
-        // whatever height the camera is at, so centring before the height is right aims it somewhere
-        // else entirely.
-        var p = transform.position;
-        // Body-relative, matching SmoothHeightMovement — see the note there. Snapping to the absolute
-        // height here and letting the ease correct it afterwards would land the handoff a fraction of
-        // the body's Y offset away from the framing that was just solved for, which is precisely the
-        // one moment (the loading finale's cross-fade) that has to match exactly.
-        p.y = targetHeight + FollowPlaneY;
-        transform.position = p;
+        // Complete the ease BY HAND rather than letting Update glide into it. This is the one moment
+        // that has to match exactly — the loading finale cross-fades into it — so the camera is placed
+        // at its final pose in a single step.
+        //
+        // RebaseZoom collapses the ease so the placement below is solved against the height that was
+        // just computed, not the one the camera is drifting away from.
+        RebaseZoom(targetHeight);
         haveAnchor = false;          // no pending anchor to drag the view off centre afterwards
-        FocusOn(target.position);
+
+        if (following && followTarget != null)
+        {
+            // Exactly the placement the follow uses every frame, so the very first followed frame is
+            // identical to the handoff frame and the cut cannot pop.
+            PlaceAtConstantDistance(target.position);
+        }
+        else
+        {
+            var p = transform.position;
+            p.y = targetHeight;
+            transform.position = p;
+            FocusOn(target.position);
+        }
     }
 
     /// Point the ease at `worldPos` being centred once the camera reaches `atHeight`.
@@ -628,7 +682,7 @@ public class CameraController : MonoBehaviour
     public void JumpTo(Vector3 worldPos, float height)
     {
         ClearFocus();
-        targetHeight = Mathf.Clamp(height, minHeight, maxHeight);
+        RebaseZoom(height);
         var p = transform.position; p.y = targetHeight; transform.position = p;
         FocusOn(worldPos);
     }
@@ -643,7 +697,7 @@ public class CameraController : MonoBehaviour
     /// intro just spent thirty seconds composing.
     public void SyncToCurrentPose()
     {
-        targetHeight = Mathf.Clamp(transform.position.y, minHeight, maxHeight);
+        RebaseZoom(transform.position.y);
         following = false;
         followTarget = null;
         followUnit = null;
@@ -654,23 +708,52 @@ public class CameraController : MonoBehaviour
     /// from is changing, so the height has to be re-expressed in the new one or the camera jumps.
     public void SetFollow(bool on)
     {
-        if (!on && following) targetHeight = Mathf.Clamp(transform.position.y, minHeight, maxHeight);
+        if (!on && following) EndFollowRebase();
         following = on;
+    }
+
+    /// Hand the camera back to free-look without moving what is on screen.
+    ///
+    /// THE NAIVE VERSION — `RebaseZoom(transform.position.y)` — DROPS THE CAMERA ONTO THE ECLIPTIC.
+    ///
+    /// While following, the camera sits at `body.y + smoothHeight`, and a body's Y is SIGNED: an orbit is
+    /// inclined, so it spends half of every lap below the plane (planets ±7°, moons ±15°, and the orbit
+    /// panel allows ±45° plus a ±10 vertical offset). Zoomed in on a world, `smoothHeight` is under a
+    /// unit — so on that half of the orbit the camera's own Y is NEGATIVE. Clamping it into
+    /// [minHeight, maxHeight] turned that into 0.04, and free-look then eased the camera from, say, −6 up
+    /// to 0.04: the planet leaves the frame entirely and the view ends up lying on the ecliptic pointing
+    /// at nothing. Clicking empty space over a world on the low half of its orbit did that.
+    ///
+    /// So the ZOOM is what carries over, not the camera's world height. The camera is lifted to that
+    /// height and re-centred on the same subject, which keeps the framing and leaves a legal free-look
+    /// state. The one visible difference is a small size change equal to the body's Y offset — which is
+    /// simply free-look's own geometry, arriving at the moment the player asked to leave follow.
+    void EndFollowRebase()
+    {
+        Vector3 subject = followTarget != null ? followTarget.position : Vector3.zero;
+
+        RebaseZoom(smoothHeight);     // the zoom the player chose, not where the orbit happened to be
+        var p = transform.position;
+        p.y = targetHeight;
+        transform.position = p;
+
+        if (followTarget != null) FocusOn(subject);
     }
     public bool IsFollowing => following;
     /// Stop following, and REBASE the zoom on the way out.
     ///
-    /// While following, `targetHeight` is measured from the body's own plane (see FollowPlaneY). Drop
-    /// `following` without rebasing and that reference plane collapses to world zero in a single frame,
-    /// so the smoothing target jumps by the body's entire Y offset — up to ±5 units for an inner world
-    /// and ±18 for an outer one. Zoomed right in, where the ground distance is well under a unit, that
-    /// reads as the camera violently lurching away the instant you press Unfollow or click empty space.
+    /// While following, the camera's world Y is wherever the constant-distance placement puts it — which
+    /// depends on where the body is in its orbit, and is NOT the zoom. Drop `following` without rebasing
+    /// and the free-look path immediately starts easing the camera's Y toward `targetHeight` as an
+    /// absolute world height, so it lurches by the body's entire Y offset — up to ±5 units for an inner
+    /// world and ±18 for an outer one. Zoomed right in, where the ground distance is well under a unit,
+    /// that is the camera violently jumping the instant you press Unfollow or click empty space.
     ///
-    /// Taking the CURRENT height as the new absolute target means the camera stays exactly where it is
-    /// and simply stops tracking, which is what "unfollow" should look like.
+    /// Carrying the ZOOM over — rather than the camera's world height, which is signed and can be
+    /// negative — means the framing survives and the camera stays legal. See EndFollowRebase.
     public void ClearFocus()
     {
-        if (following) targetHeight = Mathf.Clamp(transform.position.y, minHeight, maxHeight);
+        if (following) EndFollowRebase();
         following = false;
         followTarget = null;
         followUnit = null;   // or the next LateUpdate would re-acquire the ship we just released
@@ -900,37 +983,47 @@ public class CameraController : MonoBehaviour
     // ============================================================================================
     // A FOLLOWED BODY MUST NOT CHANGE SIZE AS IT ORBITS
     //
-    // `targetHeight` is the zoom, and it used to be an ABSOLUTE world height. FocusOn then holds that
-    // height and slides x/z until the view ray meets the body:
-    //
-    //     d = (body.y - camera.y) / forward.y
-    //
-    // A planet's orbit is INCLINED (OrbitController tilts the orbit plane by `inclination`), so its
-    // world Y swings up and down once per lap. With the camera pinned to a fixed absolute height, that
-    // swing lands entirely in `d` — the distance from the camera to the planet — and apparent size goes
-    // as 1/d. The planet visibly swelled and shrank as it went round, which is what it looked like:
-    // the camera drifting toward and away from it.
-    //
-    // Measuring the zoom from the BODY'S OWN PLANE instead makes `d` constant: camera.y is now
-    // body.y + targetHeight, so d = -targetHeight / forward.y, which does not depend on where in the
-    // orbit the body is. The planet holds exactly the size the zoom asked for, all the way round.
-    //
-    // Only the smoothing TARGET moves. `targetHeight` itself stays the one thing the scroll wheel owns
-    // (HandleHeightChange multiplies it and never reads position.y back), so the zoom ladder, the LOD
-    // boundaries and the floor/ceiling are all untouched — and a planet's Y offset is a couple of units
-    // against boundaries measured in hundreds.
-    float FollowPlaneY => (following && followTarget != null) ? followTarget.position.y : 0f;
+    // Solved in PlaceAtConstantDistance — see the note there for why aiming the height LERP at the
+    // body's own plane (the previous attempt, `FollowPlaneY`) could only ever damp the wobble rather
+    // than remove it.
+    // ============================================================================================
+
+    /// Set the zoom AND its eased value together, with no glide.
+    ///
+    /// Used wherever the zoom is being REBASED rather than changed — leaving a follow, snapping to a
+    /// framing, restoring a saved view. In all of those the camera is already where it should be, and
+    /// easing from the previous value would be a visible drift away from a position that was just solved
+    /// exactly. Anything that genuinely wants to glide sets `targetHeight` alone.
+    void RebaseZoom(float h)
+    {
+        targetHeight = Mathf.Clamp(h, minHeight, maxHeight);
+        smoothHeight = targetHeight;
+    }
+
+    /// The eased zoom, as a height above the subject. Owned here; `targetHeight` is where it is heading.
+    ///
+    /// Split out from the camera's world Y because while FOLLOWING the two are no longer the same thing:
+    /// the camera's Y is wherever the constant-distance placement puts it, which depends on where the
+    /// body happens to be in its orbit, whereas the zoom is a property of the view. Keeping the zoom in
+    /// its own variable is what lets the follow path solve for distance without the scroll wheel and the
+    /// orbit fighting over one number.
+    float smoothHeight;
 
     private void SmoothHeightMovement()
     {
         float k = 1f - Mathf.Exp(-ZoomEaseRate * Time.unscaledDeltaTime);
+
+        // Ease the ZOOM first, in its own variable, so both paths below read the same value.
+        smoothHeight = Mathf.Lerp(smoothHeight, targetHeight, k);
+
+        // While following, LateUpdate places the camera outright from this height (see
+        // PlaceAtConstantDistance) — writing Y here as well would fight it and reintroduce the wobble.
+        if (following && followTarget != null) return;
+
         Vector3 pos = transform.position;
+        pos.y = Mathf.Lerp(pos.y, targetHeight, k);
 
-        pos.y = Mathf.Lerp(pos.y, targetHeight + FollowPlaneY, k);
-
-        // Following pins X/Z to the body (LateUpdate re-centres every frame), so an anchor would only
-        // fight it.
-        if (haveAnchor && !following)
+        if (haveAnchor)
         {
             pos.x = Mathf.Lerp(pos.x, anchorXZ.x, k);
             pos.z = Mathf.Lerp(pos.z, anchorXZ.y, k);

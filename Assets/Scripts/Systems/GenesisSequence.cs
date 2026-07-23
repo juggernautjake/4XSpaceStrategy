@@ -31,15 +31,30 @@ public class GenesisSequence : MonoBehaviour
     public static GenesisSequence Instance;
 
     // ---- Pacing. Tuned by eye; every one of these is meant to be adjusted while watching it. --------
-    public const float StarHold = 2.2f;      // the sun alone, before anything moves
-    public const float DriftToWorld = 3.4f;  // the camera sliding from star to homeworld
-    public const float WorldForms = 9f;      // the signature beat: terrain developing
-    public const float MoonBeat = 0.6f;      // gap before each moon starts
-    public const float MoonForms = 2.6f;     // a moon's own development — quicker; the planet is the subject
-    public const float SettleHold = 1.4f;    // the finished world simply turning
-    public const float TravelToCentre = 1.1f;
-    public const float TitleHold = 1.8f;
-    public const float PullBack = 1.6f;
+    //
+    // THE ONE KNOB. Every duration below is a base value times this, so the whole sequence can be sped
+    // up or slowed down without changing the RELATIVE weight of the beats — which is the part that was
+    // actually tuned. Raise it and every move, hold and morph stretches together; the crescendo still
+    // lands in the same place, just later.
+    //
+    // At 1.0 the whole thing ran about 21 seconds for a moonless world and 31 with three moons, and the
+    // camera moves in particular read as hurried: the drift from the star to the homeworld is the shot
+    // that establishes the entire scene and it was over in 3.4s. Everything below is slower in its own
+    // right AND multiplied by this.
+    public const float Pace = 1.25f;
+
+    public const float StarHold = 3.2f * Pace;      // the sun alone, before anything moves
+    public const float DriftToWorld = 5.5f * Pace;  // the camera sliding from star to homeworld
+    public const float WorldForms = 14f * Pace;     // the signature beat: terrain developing
+    public const float MoonBeat = 1.0f * Pace;      // gap before each moon starts
+    public const float MoonForms = 4.0f * Pace;     // a moon's own development — quicker; the planet is the subject
+    public const float SettleHold = 2.4f * Pace;    // the finished world simply turning
+    public const float TravelToCentre = 2.2f * Pace;
+    // NOT an independent number. This beat exists to wait out the welcome titles, so it IS their
+    // duration — see LoadingScreen.WelcomeTotal. Set by hand it drifted the moment the pacing changed,
+    // and the sequence sat on a dead, motionless shot for the difference.
+    public const float TitleHold = LoadingScreen.WelcomeTotal;
+    public const float PullBack = 3.2f * Pace;
 
     // A moon is a fraction of its planet's size, so at the planet's framing it is a few dozen pixels.
     // The camera eases in slightly for the moon beat so their surfaces are legible — the brief's own
