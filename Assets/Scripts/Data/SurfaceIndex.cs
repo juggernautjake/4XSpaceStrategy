@@ -416,8 +416,8 @@ public static class SurfaceIndex
             case SurfaceIndexKind.Mineral: return "Broken, raised crust — mountains, canyons and exposed seams. Mines want the highest they can get.";
             case SurfaceIndexKind.Heat: return "Heat in the CRUST, not the air: volcanoes and geyser fields. A volcano on an ice world is still that world's best geothermal site.";
             case SurfaceIndexKind.Fertile: return "Warm AND wet AND flat — farmland needs all three at once, not any one of them.";
-            case SurfaceIndexKind.Wind: return "Weather, which needs AIR: an airless world has none at all, and a thick-aired one is violently stormy. Within that, exposure — high open ground, coasts and polar latitudes; forests and canyons are sheltered.";
-            case SurfaceIndexKind.Solar: return "Thin air and long polar days. Output falls a quarter for every atmosphere above Earth-normal and hits zero at five, while a near-airless world beats Earth outright. Dry ground is bright ground, and a world far from its star is dim everywhere.";
+            case SurfaceIndexKind.Wind: return "Needs AIR: no atmosphere, no weather. Within that — high open ground, coasts and poles.";
+            case SurfaceIndexKind.Solar: return "Thin air and long polar days. Dry ground is bright ground; a world far from its star is dim everywhere.";
             case SurfaceIndexKind.Water: return "Flowing water: rivers and coasts WITH relief to drop through. A flat open sea has no head to work with.";
             default: return "";
         }

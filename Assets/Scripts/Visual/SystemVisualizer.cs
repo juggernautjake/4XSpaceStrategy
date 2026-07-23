@@ -224,6 +224,26 @@ public class SystemVisualizer : MonoBehaviour
             rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             rend.receiveShadows = false;
         }
+
+        // ---- THE CORONA ----
+        //
+        // A soft additive halo around the sun, sized and faded by how luminous it is. This is the cue
+        // that tells a player who has never heard of a spectral class that THIS star is a monster and
+        // that one is an ember.
+        //
+        // Emission alone could not carry that. A star's glow is at the mercy of bloom — which has a
+        // threshold, can be switched off, and does not widen as the star shrinks on screen — so zoomed
+        // out to the whole system, a blue giant and a red dwarf collapsed into two dots that differed
+        // only in tint. A real quad in the scene is bright at every distance and every setting.
+        //
+        // Parented to the star and scaled in ITS local space, so it tracks the sun's size for free; the
+        // FaceCamera inside Glow keeps it turned toward the viewer at any angle.
+        // Non-interactive: SpaceMaterials.Primitive strips the quad's collider, which matters here —
+        // the halo is much wider than the star, and a clickable one would grab the sun whenever you
+        // aimed at a planet passing near it.
+        SpaceMaterials.Glow(star.transform, "Corona", StarDatabase.CoronaScale(s),
+            new Color(s.color.r, s.color.g, s.color.b, StarDatabase.CoronaAlpha(s)));
+
         EnsureClickCollider(star, 1.8f);
 
         // A star is NOT a planet. If starPrefab happens to carry a PlanetClick — which it does whenever

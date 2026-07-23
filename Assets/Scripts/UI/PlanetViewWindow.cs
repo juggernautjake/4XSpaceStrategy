@@ -312,6 +312,28 @@ public class PlanetViewWindow : MonoBehaviour
     // width; the far-right 1/4 is the selected tab's panel. Expressed as an anchor fraction rather than a
     // pixel width so it scales with the full-screen window and can never creep past three-quarters.
     const float MapFraction = 0.75f;
+
+    // The status line's height. FIXED, and the map's bottom edge is a matching fixed literal.
+    //
+    // It was 30px, which fitted the one or two lines it carried at the time. Then the Survey readout
+    // learned to describe an index AND the power grid AND the world-wide weather or solar ceiling at
+    // once, three lines need ~41px, and UISanityGuard caught the bottom line being clipped.
+    //
+    // THE OBVIOUS FIX — grow the box and push the map's bottom edge up with it — IS A TRAP, and it was
+    // tried first. `gridHolder` is the map viewport, and every one of the map's own bounds is derived
+    // from its rect: `FitTilePx`, `CoverTilePx`, `MaxTilePx`, and `ClampPan`'s slack. `tilePx` and
+    // `mapPan` are persistent fields that those bounds CLAMP but never restore, so each resize was a
+    // one-way ratchet — hovering on and off the map stripped about 1% of zoom every time, permanently.
+    // Worse, at contain zoom the map's bottom edge coincides with the viewport's, so a cursor in the
+    // last few pixels flipped hover-valid → 3-line status → viewport shrinks → hover invalid → 1-line
+    // status → viewport grows, a two-frame flicker that rebuilt the moon panes every frame it ran.
+    //
+    // So the geometry stays still and the TEXT adapts instead: three lines are reserved, and TMP's auto
+    // sizing shrinks the font a couple of points on the rare occasion the content needs a fourth.
+    // Nothing downstream of the layout can tell the difference, which is the entire point.
+    const float StatusHeight = 44f;         // three lines at UITheme.SmallSize
+    const float StatusMapGap = 4f;          // breathing room between the status line and the map above it
+    const float StatusMapBottom = StatusHeight + StatusMapGap;
     const float PanelGap = 8f;      // gap between the map's right edge and the panel
 
     public static void Create(Transform parent)
@@ -341,7 +363,7 @@ public class PlanetViewWindow : MonoBehaviour
         // grew the panel off the edge of the screen.
         gridHolder = UIFactory.NewUI(content, "Viewport").GetComponent<RectTransform>();
         gridHolder.anchorMin = new Vector2(0, 0); gridHolder.anchorMax = new Vector2(MapFraction, 1);
-        gridHolder.offsetMin = new Vector2(0, 34f);                 // clear the thin status line below
+        gridHolder.offsetMin = new Vector2(0, StatusMapBottom);     // clear the status line below
         gridHolder.offsetMax = new Vector2(-PanelGap, -32);        // clear the tabs; gap before the panel
         var vpImg = gridHolder.gameObject.AddComponent<Image>();
         vpImg.color = new Color(0.06f, 0.08f, 0.11f, 1f);          // themed grout that shows between tiled panes
@@ -477,8 +499,18 @@ public class PlanetViewWindow : MonoBehaviour
         statusText = UIFactory.Text(content, "", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.TopLeft);
         var srt = statusText.rectTransform;
         srt.anchorMin = new Vector2(0, 0); srt.anchorMax = new Vector2(MapFraction, 0);
-        srt.pivot = new Vector2(0.5f, 0); srt.sizeDelta = new Vector2(-PanelGap, 30f);
+        srt.pivot = new Vector2(0.5f, 0); srt.sizeDelta = new Vector2(-PanelGap, StatusHeight);
         srt.anchoredPosition = new Vector2(-PanelGap * 0.5f, 2f);
+
+        // SHRINK THE FONT RATHER THAN CLIP THE TEXT. The three reserved lines cover every ordinary
+        // state; the Survey tab at its very fullest — a long index description, the grid legend, the
+        // balance and a hovered tile — can still want a fourth, and on a window narrowed by its resize
+        // grip, a fifth. Auto sizing gives those states a slightly smaller line instead of a missing
+        // one. The floor is 9pt: below that it stops being readable, and a state that needs less than
+        // 9pt is a state whose text should be shortened rather than squeezed.
+        statusText.enableAutoSizing = true;
+        statusText.fontSizeMin = 9f;
+        statusText.fontSizeMax = UITheme.SmallSize;
 
         PlanetUI.OnBodySelected += OnBodySelected;
         PlanetUI.OnClosed += HideOnDeselect;

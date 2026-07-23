@@ -199,8 +199,14 @@ public static class OrbitSafety
     {
         float starRadius = StarRadius(star);
         min = starRadius + StarClearance;
-        float lum = star != null ? Mathf.Max(0.05f, star.luminosity) : 1f;
-        max = min + Mathf.Sqrt(lum) * StarDatabase.AU * 12f;
+        // Through the shared compressed distance law, like everything else that measures a star's reach.
+        // Raw sqrt(luminosity) here gave an O-type a limit near 37,000 units, which is meaningless next
+        // to a system whose outermost world sits around 150.
+        //
+        // Worth knowing: `max` currently has NO consumer — OrbitControlPanel takes `min` and derives its
+        // own upper bound from the outermost planet. This is changed for consistency, so the next caller
+        // to want it gets a number on the same scale as everything else, not because a slider was broken.
+        max = min + StarDatabase.ReferenceDistance(star) * 12f;
     }
 
     // ---- Diagnostics ----

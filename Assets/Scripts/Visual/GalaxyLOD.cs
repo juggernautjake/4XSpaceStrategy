@@ -691,7 +691,7 @@ public class GalaxyStarProxy : MonoBehaviour
                 //
                 // These were plain LDR unlit spheres tinted with sun.color, and that is why they looked
                 // dull and washed-out next to the same star in system view. A real star gets
-                // `_EmissionColor = color * EmissionStrength(s)` — up to 3.5x, i.e. HDR — so bloom and the
+                // `_EmissionColor = color * EmissionStrength(s)` — up to 6.5x, i.e. HDR — so bloom and the
                 // ACES tonemapper pick it up and it reads as a light source. A flat colour under 1.0
                 // reads as a painted ball, and no amount of picking a nicer colour fixes that, because
                 // the difference is luminance range rather than hue.
@@ -707,16 +707,21 @@ public class GalaxyStarProxy : MonoBehaviour
                 // competing with a full starfield backdrop. Bloom is thresholded, so a small bright disc
                 // spills far less glow than a large one at the same value. Overshooting the curve is what
                 // makes the two read as equally hot to the eye, which is the actual requirement.
-                // 1.25, down from 2.2 — because the base curve it multiplies is no longer broken.
+                // 1.05, down from 2.2 — because the base curve it multiplies is no longer broken.
                 //
                 // EmissionStrength used to leave an ordinary sun at 0.975, below the bloom threshold, so
                 // this boost was doing the work of making a proxy read as a light source at all. Now the
-                // base is 1.7-4.5 and genuinely HDR; keeping 2.2 on top would take a blue giant's marker
-                // to ~10 and turn the galaxy overview into a field of white discs with the spiral washed
+                // base is 1.25-6.5 and genuinely HDR; keeping 2.2 on top would take a blue giant's marker
+                // past 14 and turn the galaxy overview into a field of white discs with the spiral washed
                 // out behind them. A modest boost still earns its place: out here a star is a small disc
                 // against a full starfield, and bloom spills less from a small bright area than a large
                 // one, so matching the system view's number exactly still reads dimmer than it is.
-                const float GalaxyBoost = 1.25f;
+                //
+                // Trimmed from 1.25 when the emission curve was widened to separate the star classes.
+                // The point of that widening is CONTRAST — dim stars dimmer, bright stars brighter — and
+                // a large multiplier works against it by pushing the whole range up into the tonemapper's
+                // shoulder, where everything flattens back out to white.
+                const float GalaxyBoost = 1.05f;
                 float emK = StarDatabase.EmissionStrength(sun) * GalaxyBoost;
                 Color hot = new Color(c.r * emK, c.g * emK, c.b * emK, 1f);
 

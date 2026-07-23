@@ -115,6 +115,13 @@ public partial class InspectorWindow
         Stat(stats, multi ? "Combined luminosity" : "Luminosity", () => $"{s.luminosity:F2}× our sun");
         Stat(stats, multi ? "Combined mass" : "Mass", () => $"{s.mass:F2} solar masses");
         Stat(stats, "Habitable zone", () => s.hasHabitableZone ? $"{s.hzInner:F1} – {s.hzOuter:F1}" : "<color=#FF7A6E>none</color>");
+        // Said in words as well as shown on the map. "A-type, 20x luminosity" tells an astronomer
+        // everything and a new player nothing; "a giant, blazing star" tells both.
+        // Single suns only, for the same reason the temperature row above is single-only: Combine takes
+        // visualScale from the LARGEST member, temperature from the BRIGHTEST and luminosity from the
+        // SUM, so on an M+B binary this sentence would describe the B alone and call the pair "a giant,
+        // blazing deep blue". The per-sun cards below are where a cluster's members are described.
+        if (!s.isBlackHole && !multi) Stat(stats, "At a glance", () => StarDatabase.PlainDescription(s));
 
         // For a bound cluster, break the combined star back into its individual suns and list EACH one's
         // full info in its own card — the map labels only carry the names, so this panel is where the
@@ -143,6 +150,8 @@ public partial class InspectorWindow
                 var sunCard = Card(p);
                 UIFactory.WrapText(sunCard, $"<color=#{hex}>•</color> <b>{nm}</b>", UITheme.SmallSize, UITheme.Text);
                 Stat(sunCard, "Class", () => $"{cap.type}-type");
+                // Per sun, where it is meaningful — the combined card above deliberately omits it.
+                Stat(sunCard, "At a glance", () => StarDatabase.PlainDescription(cap));
                 Stat(sunCard, "Surface temperature", () => $"{cap.temperatureK:F0} K");
                 Stat(sunCard, "Luminosity", () => $"{cap.luminosity:F2}× our sun");
                 Stat(sunCard, "Mass", () => $"{cap.mass:F2} solar masses");
@@ -318,7 +327,14 @@ public partial class InspectorWindow
         var s = EditSun(); if (s == null) return;
         s.visualScale = v;
         s.density = StarDatabase.DensityOf(s.mass, v);
-        foreach (var t in StarInteraction.MembersOf(s)) if (t != null) t.localScale = Vector3.one * v;
+        // The corona is re-fitted per member, not just re-parented: its clamp is a function of the star's
+        // radius, so a resized star needs a recomputed halo or the clamp is silently bypassed.
+        foreach (var t in StarInteraction.MembersOf(s))
+        {
+            if (t == null) continue;
+            t.localScale = Vector3.one * v;
+            RefreshCorona(t, s);
+        }
         SetSliderQuiet(starDensityS, s.density);
         RelayoutCluster();       // a grown sun re-spaces so it can't clip its partner
         RecombineAndRetime();    // combined size/HZ/cluster reach may have shifted
@@ -384,7 +400,34 @@ public partial class InspectorWindow
             }
             var light = t.GetComponentInChildren<Light>();
             if (light != null) { light.color = s.color; light.intensity = s.lightIntensity / Mathf.Max(1, n); }
+
+            RefreshCorona(t, s);
         }
+    }
+
+    /// Re-fit the corona halo to a star the editor just changed.
+    ///
+    /// The halo is a CHILD of the star transform, so it inherits visualScale — which means a fixed
+    /// multiple grows in absolute world units as the star grows. StarDatabase.CoronaScale exists to clamp
+    /// that so the halo can never reach the innermost orbit, and the Size slider was walking straight
+    /// past it: dragging a K dwarf from 4.8 to 30 kept the scale computed for 4.8 and swelled the halo to
+    /// a 23-unit radius, exactly the "the star's glow ate its own planets" bug the clamp was added for.
+    ///
+    /// Colour and alpha are re-applied here too, so the intensity and RGB sliders move the halo with the
+    /// star instead of leaving it at whatever it was generated with.
+    static void RefreshCorona(Transform starT, StarData s)
+    {
+        if (starT == null || s == null) return;
+
+        var corona = starT.Find("Corona");
+        if (corona == null) return;
+
+        corona.localScale = Vector3.one * StarDatabase.CoronaScale(s);
+
+        var cr = corona.GetComponent<Renderer>();
+        if (cr != null)
+            SpaceMaterials.ApplyColor(cr.material,
+                new Color(s.color.r, s.color.g, s.color.b, StarDatabase.CoronaAlpha(s)));
     }
 
     // Recompute the COMBINED cluster data in place from the current per-sun stats (mass/light/HZ/cluster
@@ -419,9 +462,13 @@ public partial class InspectorWindow
         combined.lightIntensity = Mathf.Clamp(0.6f + Mathf.Sqrt(lum) * 0.25f, 0.6f, 3.5f);
         combined.density = StarDatabase.DensityOf(combined.mass, combined.visualScale);
         combined.clusterRadius = StarCluster.Layout(stars).reach;
-        float sqrtL = Mathf.Sqrt(lum);
-        combined.hzInner = 0.95f * sqrtL * StarDatabase.AU;
-        combined.hzOuter = 1.37f * sqrtL * StarDatabase.AU;
+        // The SAME compressed law generation uses (StarDatabase.ReferenceDistance). This is the Dev star
+        // editor recomputing a cluster after an edit, and it was carrying its own copy of the raw flux
+        // law — so editing a star's luminosity would fling its habitable zone out to where generation
+        // never puts one, and the ring would jump the moment you touched the slider.
+        float reach = StarDatabase.ReferenceDistance(combined);
+        combined.hzInner = 0.80f * reach;
+        combined.hzOuter = 1.55f * reach;
         combined.hasHabitableZone = true;
     }
 
@@ -509,7 +556,7 @@ public partial class InspectorWindow
         {
             case StarType.O: parts.Add("A blue supergiant: monstrously hot, blindingly bright, and short-lived. It burns too fiercely and dies too young for life to get started around it."); break;
             case StarType.B: parts.Add("A blue-white giant — enormously luminous and violent, with a lifespan too short for a biosphere to form."); break;
-            case StarType.A: parts.Add("A hot white star. Bright and fast-burning, with a habitable band pushed far out."); break;
+            case StarType.A: parts.Add("A hot white star. Bright and fast-burning, with a habitable band pushed well out past its inner worlds."); break;
             case StarType.F: parts.Add("A yellow-white star, hotter and brighter than our sun, with a comfortably wide habitable band."); break;
             case StarType.G: parts.Add("A yellow main-sequence star — the familiar, forgiving kind. Stable, long-lived, and kind to worlds in its band."); break;
             case StarType.K: parts.Add("An orange dwarf: cooler and dimmer than our sun but astonishingly long-lived. Its habitable band sits close in, and it will stay put for billions of years."); break;

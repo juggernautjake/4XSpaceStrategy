@@ -144,6 +144,64 @@ Both pre-existing, both surfaced because atmosphere now depends on heat:
   rather than a fresh random each call, or a world's stated maximum atmosphere would flicker
   every frame the UI drew it.
 
+## Slice 11 — Star scale, and finding the habitable world — **BUILT**
+
+The complaint: a system's only habitable planet could sit ten times further out than its
+siblings, off the edge of the screen and findable only through the menus.
+
+**The cause was not the zone — it was that nothing else knew where the zone had gone.** The
+habitable zone scaled with `sqrt(luminosity)`, correctly: an O-type is 50,000x the Sun, so its
+zone sat at 223x Earth's orbit. But the planet LAYOUT did not scale with luminosity at all —
+every system started a few units out and stepped ~20 at a time, regardless of its star. Around
+a bright star the zone was simply past the outermost planet.
+
+Fixed by giving both the same source of truth, `StarDatabase.FluxScale`:
+
+* the exponent is compressed 0.5 -> **0.30** and clamped to **0.55 .. 3.0**, squeezing the range
+  from 500:1 to about 5:1 — which is what reins in the O and B giants specifically
+* the same scale multiplies **planet spacing**, so a star that pushes its zone out pushes its
+  planets out with it, by construction
+* every system is also spread **18% wider** regardless of star, floored so dim systems never
+  come out tighter than before
+* the zone band itself widened from 0.95–1.37 to **0.80–1.55** so it is visible and two
+  neighbouring worlds can share it
+
+Result, checked numerically: the zone now lands **inside** the planet range for every spectral
+class, and the in-lane relocation `EnsureHabitableWorld` performs always has room to succeed.
+
+Three other copies of the raw flux law — `TempReference`, `OrbitSafety.OrbitLimits`, and the Dev
+star editor's cluster recombine — were each recomputing it independently and are now routed
+through the same function.
+
+## Slice 12 — Telling the player what kind of star they are looking at — **BUILT**
+
+Aimed at players who do not know what an "O-type" is:
+
+* **Deeper blue at the hot end.** A real O-type is only faintly blue-white, which on screen is
+  indistinguishable from an A-type. Exaggerated for legibility, deliberately.
+* **`SubtleTint` is now temperature-dependent.** A flat 50% pull to white was washing out exactly
+  the stars that most needed to look different; Sun-like stars still go near-white, the extremes
+  keep two-thirds of their saturation.
+* **Size spread widened** from 2.4–5.0 to 1.9–8.0, and the per-star variance NARROWED from
+  0.72–1.38 to 0.85–1.18 — previously a big M dwarf could out-size a small B giant, so size was
+  noise rather than signal. The class bands no longer overlap.
+* **A corona halo**, sized and faded by luminosity. Emission alone could not carry this: bloom has
+  a threshold, can be switched off, and does not widen as the star shrinks, so zoomed out a giant
+  and a dwarf collapsed into two dots differing only in tint.
+  * Caught during the build: the halo is a child of the star transform, so a flat multiple grows
+    in absolute terms with the star — at 3.1x an O-type's halo had a 24.8-unit radius against an
+    innermost orbit of ~15, **swallowing its first two planets**. Now clamped to stay inside the
+    clearance generation reserves, verified for every class.
+* **A plain-language line** on the star panel — "a giant, blazing deep blue" — so the words and the
+  picture teach each other.
+
+## Slice 13 — Status line clipping — **FIXED**
+
+`UISanityGuard` caught the Planet View status line needing 41px in a hard-coded 30px box, with
+the bottom line cut off. It had grown to describe an index, the power grid and the world-wide
+weather or solar ceiling at once. It now measures its own content and the map's bottom edge moves
+with it — and only re-measures when the text actually changes, since it runs every frame.
+
 ## Slice 10 — Reefs are alive — **BUILT**
 
 The spec's "very high water levels ... can spawn algae in its oceans or coral reefs". Reef was

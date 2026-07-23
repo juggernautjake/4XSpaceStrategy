@@ -255,8 +255,15 @@ public class SolarSystemGenerator : MonoBehaviour
             float outerReach = OuterReach(body);   // moons already assigned -> real reach
             prevOuterReach = currentRadius + outerReach;
 
-            // Reserve for the next planet reaching inward: its own disc + a typical moon system.
-            currentRadius = prevOuterReach + LaneGap + TypicalInnerReach + Random.Range(0f, 2.5f);
+            // Reserve for the next planet reaching inward: its own disc + a typical moon system, then
+            // widen the whole step by this star's spread. The reserved parts are NOT scaled — a moon
+            // system is the size it is regardless of which sun it orbits — so only the empty lane between
+            // worlds grows. That keeps the guarantee that nothing intersects while still letting a blue
+            // giant's system read as genuinely vast next to a red dwarf's huddle.
+            float spread = SystemSpread(currentStar);
+            currentRadius = prevOuterReach + LaneGap + TypicalInnerReach
+                          + (LaneGap + TypicalInnerReach) * (spread - 1f)
+                          + Random.Range(0f, 2.5f * spread);
         }
 
         // Lean towards a living world: make sure at least one planet sits in the habitable zone.
@@ -468,14 +475,31 @@ public class SolarSystemGenerator : MonoBehaviour
         }
     }
 
-    // The distance at which this star delivers roughly Earth-like warmth (sqrt-of-luminosity law).
-    // Planet type and climate are judged relative to this, so a bright star's "temperate" band sits
-    // much further out than a dim red dwarf's.
-    static float TempReference(StarData star)
-    {
-        float L = star != null ? Mathf.Max(0.02f, star.luminosity) : 1f;
-        return Mathf.Sqrt(L) * StarDatabase.AU;
-    }
+    /// The distance at which this star's warmth is Earth-normal — the yardstick every climate roll and
+    /// every heat bias measures against.
+    ///
+    /// Now the SAME compressed law the habitable zone uses (StarDatabase.ReferenceDistance). It used to
+    /// be its own copy of `sqrt(L) * AU`, which meant the two agreed only by coincidence — and around a
+    /// bright star they did not agree at all: the zone said "temperate at 60 units" while every planet in
+    /// the system sat between 8 and 30 and was therefore classified as scorched.
+    static float TempReference(StarData star) => StarDatabase.ReferenceDistance(star);
+
+    /// How much wider this star's system is laid out than a Sun-like one's.
+    ///
+    /// Tied to the same FluxScale as the habitable zone, so THE TWO CAN NEVER DRIFT APART: a star that
+    /// pushes its zone outward pushes its planets outward with it, and a habitable world therefore lands
+    /// among its siblings rather than ten times further out. That was the actual bug — not that the zone
+    /// was in the wrong place, but that nothing else knew where it had gone.
+    ///
+    /// Damped to 70% of the full flux scale so a blue giant's system does not sprawl past what the camera
+    /// can frame, then floored at 1 and multiplied by a flat 1.18.
+    ///
+    /// THE FLOOR MATTERS. Without it the damped lerp returns 0.81 for a red dwarf, so the dimmest systems
+    /// would have come out TIGHTER than before — the opposite of "spread the planets out a little", and
+    /// on precisely the systems that are already the most cramped. Flooring at 1 means the 1.18 is a
+    /// genuine across-the-board loosening, and brighter stars widen from there.
+    static float SystemSpread(StarData star)
+        => 1.18f * Mathf.Max(1f, Mathf.Lerp(1f, StarDatabase.FluxScale(star), 0.70f));
 
     // Body type by ACTUAL temperature (physical distance vs the star's warmth) rather than ordinal
     // slot. Oceans only ever form in the temperate band, so no water worlds hug the star.
