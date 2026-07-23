@@ -226,7 +226,10 @@ public class ObjectVisibilityWindow : MonoBehaviour
         if (!string.IsNullOrEmpty(filter)) open = true;
 
         var row = Row(0);
-        var toggle = UIFactory.Button(row, open ? "▾" : "▸", () =>
+        // ASCII disclosure markers. The runtime font (LiberationSans SDF) is the minimal Latin atlas —
+        // it has no glyph for the triangles U+25B8/U+25BE (nor ➤, as an earlier panel found), so they
+        // rendered as tofu boxes and TMP logged a "character not found" warning on every layout pass.
+        var toggle = UIFactory.Button(row, open ? "-" : "+", () =>
         {
             if (expanded.Contains(sys.name)) expanded.Remove(sys.name); else expanded.Add(sys.name);
             Rebuild();
@@ -278,7 +281,9 @@ public class ObjectVisibilityWindow : MonoBehaviour
     void StarRow(StarSystemData sys, StarData s, string label, int depth, bool deletable)
     {
         var row = Row(depth);
-        Name(row, $"<color=#FFD9A0>★</color> {label}", VisibilityService.ReasonFor(s, sys));
+        // Asterisk, not U+2605 — the star glyph is not in the runtime font and tofu'd. The warm colour
+        // is what actually reads as "star" here; the character is just a marker.
+        Name(row, $"<color=#FFD9A0>*</color> {label}", VisibilityService.ReasonFor(s, sys));
         HideButton(row, VisibilityService.ReasonFor(s, sys), on =>
         {
             if (on) VisibilityService.Hide(s, paintReason); else VisibilityService.Reveal(s);
@@ -294,7 +299,7 @@ public class ObjectVisibilityWindow : MonoBehaviour
         else
             // A single sun, or the galactic core: no delete, and the button says why rather than being
             // silently absent. (Deleting the last star would leave Combine to roll a replacement.)
-            DeadButton(row, "✕", sys == null
+            DeadButton(row, "X", sys == null
                 ? "The galactic core is scenery, not a system object — it cannot be deleted."
                 : "A system's only star can't be deleted on its own — delete the system.");
     }
@@ -302,7 +307,11 @@ public class ObjectVisibilityWindow : MonoBehaviour
     void BodyRows(CelestialBody b, int depth)
     {
         var row = Row(depth);
-        string glyph = b.parentBody != null ? "<color=#9FB4C8>◦</color>" : "<color=#8FD2FF>●</color>";
+        // ASCII markers, not U+25E6/U+25CF — those geometric discs are not in the runtime font. The
+        // COLOUR carries planet-vs-moon; the glyph is only a bullet, and a lowercase 'o' for a moon vs an
+        // 'O' for a planet keeps the same small-vs-large read without a character that tofus. (These rows
+        // only render under an EXPANDED system, which is why they escaped the first tofu report.)
+        string glyph = b.parentBody != null ? "<color=#9FB4C8>o</color>" : "<color=#8FD2FF>O</color>";
         var effectiveBody = VisibilityService.ReasonFor(b);
 
         // A moon goes with its planet (VisibilityService.ReasonFor), so its own switch cannot bring it
@@ -333,8 +342,8 @@ public class ObjectVisibilityWindow : MonoBehaviour
         // its planet's. ReasonFor already folds all three together, which is exactly the question here.
         bool byBody = effectiveBody != HideReason.None;
         Name(lineRow, byBody
-            ? "<color=#5F6C7B>↻ orbit line  <size=10>(hidden with the world)</size></color>"
-            : "<color=#5F8FBF>↻</color> orbit line", effective);
+            ? "<color=#5F6C7B>orbit line  <size=10>(hidden with the world)</size></color>"
+            : "<color=#5F8FBF>o</color> orbit line", effective);
 
         if (byBody)
             DeadButton(lineRow, "Hidden", "Concealed along with the world it circles. Reveal the world to get it back.");
@@ -358,7 +367,7 @@ public class ObjectVisibilityWindow : MonoBehaviour
                            "Restore puts it back where it was.";
 
         var head = Row(0);
-        UIFactory.Button(head, "← Back to the galaxy", () => { showTrash = false; Rebuild(); }, 28);
+        UIFactory.Button(head, "< Back to the galaxy", () => { showTrash = false; Rebuild(); }, 28);
         if (GalaxyTrash.Items.Count > 0)
             UIFactory.Button(head, "Empty the bin", () => GalaxyTrash.PurgeAll(), 28);
 
@@ -430,7 +439,9 @@ public class ObjectVisibilityWindow : MonoBehaviour
 
     void DeleteButton(Transform row, System.Action onClick)
     {
-        var b = UIFactory.Button(row, "✕", onClick, 26);
+        // Capital X — U+2715 (multiplication X) is not in the runtime font. Same tofu as the triangles
+        // and the star above.
+        var b = UIFactory.Button(row, "X", onClick, 26);
         Fixed(b.gameObject, 30);
         var lbl = b.GetComponentInChildren<TMP_Text>();
         if (lbl != null) lbl.color = new Color(1f, 0.55f, 0.55f);

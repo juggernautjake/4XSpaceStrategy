@@ -51,11 +51,11 @@ public static class TileCatalog
         E(TerrainType.Glacier, "Frozen", "A thick highland ice cap grinding downhill.",
             "Highlands / peaks", "Well below 0°C", "Wet", "Ice worlds"),
         E(TerrainType.Snow, "Frozen", "Snow-covered ground — buried by cold at height or latitude.",
-            "Any raised or polar ground", "Below 0°C (deep cold: below −25°C)", Any, "Cold worlds, high peaks, poles"),
+            "Any raised or polar ground", "Below 0°C (deep cold: below -25°C)", Any, "Cold worlds, high peaks, poles"),
         E(TerrainType.Tundra, "Frozen", "Frozen ground with sparse, hardy low cover.",
             "Lowland", "Just below freezing", "Low–moderate", "Cold worlds, cold shores"),
         E(TerrainType.Taiga, "Cold forest", "Boreal conifer forest that endures long, hard winters.",
-            "Lowland", "Cold (below ~−12°C band)", "Wet", "Life-bearing worlds"),
+            "Lowland", "Cold (below ~-12°C band)", "Wet", "Life-bearing worlds"),
         E(TerrainType.CrystalField, "Frozen", "Fields of ice/mineral crystals on a frozen world.",
             "Mid to high", "Below 0°C", "Wet", "Ice worlds, airless bodies"),
 
