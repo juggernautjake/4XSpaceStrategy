@@ -7,15 +7,21 @@ using TMPro;
 // ============================================================================================
 // PLANET VIEW — the surface map you actually develop a world on.
 //
-// Three tabs over one shared grid:
+// Four tabs over one shared grid (plus a Dev-Mode-only terrain sandbox), in a strip UNDER the map:
 //
-//   INFO    — what this world is: name, type, size, climate, weather.
-//   BUILD   — pick a structure, then place it. The selected building follows the cursor as a GHOST:
-//             snapped to the mouse while it's over open UI, snapped to the GRID once it's over the
-//             map. Right-click rotates it at any point, before or after it snaps. Left-click commits.
-//             Footprints are tetromino-like, so packing a dense city is a real puzzle.
-//   SURVEY  — the index overlays. Each paints the grid with its own colour ramp so you can see, at a
-//             glance, where a mine or a geothermal plant or a farm actually wants to go.
+//   OVERVIEW — what this world is: name, type, size, climate, weather, and how its colony is doing.
+//   BUILD    — pick a structure, then place it. The tray is a row of COLOURED CATEGORY TABS (see
+//              SurfaceBuildingCategory) rather than one long list. The selected building follows the
+//              cursor as a GHOST: snapped to the mouse while it's over open UI, snapped to the GRID once
+//              it's over the map. Right-click rotates it at any point, before or after it snaps.
+//              Left-click commits. Footprints are tetromino-like, so packing a dense city is a puzzle.
+//   SURVEY   — the index overlays. Each paints the grid with its own colour ramp so you can see, at a
+//              glance, where a mine or a geothermal plant or a farm actually wants to go. The Sites list
+//              and the power grid are folded in here.
+//   ORBIT    — what is in orbit, and the shipyard.
+//
+// Which tabs you may open depends on how far you have got with the world — see TabAvailable, which is
+// also the one place that answers "why can't I click that?" in words.
 //
 // The grid is drawn as ONE point-filtered texture per layer (terrain tint + overlay), not as hundreds
 // of UI objects — a 40x20 world is 800 cells and building a GameObject per cell would be miserable.
@@ -143,6 +149,12 @@ public class PlanetViewWindow : MonoBehaviour
 
     CelestialBody body;
     Tab tab = Tab.Overview;
+
+    // Which category the Build tab's structure tray is showing. Persists across rebuilds AND across
+    // worlds: laying out a city means placing six power pieces in a row, and being dropped back on Civil
+    // after each one would be maddening. Civil is the opening category because it is where a new colony
+    // starts — habitats and storage before reactors.
+    SurfaceBuildingCategory buildCategory = SurfaceBuildingCategory.Civil;
 
     // ---- Map panes (the planet AND its moons) ----
     // Every map is a toggleable pane now: the planet has its own (bigger) tab alongside the moon tabs, and
@@ -336,6 +348,18 @@ public class PlanetViewWindow : MonoBehaviour
     const float StatusMapBottom = StatusHeight + StatusMapGap;
     const float PanelGap = 8f;      // gap between the map's right edge and the panel
 
+    // The tab strip sits UNDER the map, between it and the status line — Raptok's layout, and the reason
+    // the map column now stacks bottom-up as: status line, tabs, map.
+    //
+    // Tabs under the map rather than over it puts the control you click NEXT to the thing it changes:
+    // the side panel's contents are what a tab switches, and the eye travels tab → panel across the
+    // bottom-right corner instead of all the way back up over the map. It also gives the map the full
+    // height of the column, since the content area already clears the title bar on its own.
+    const float TabStripHeight = 26f;
+    const float TabStripGap = 6f;                                    // between the tabs and the map above
+    const float TabStripBottom = StatusMapBottom;                    // tabs sit directly on the status line
+    const float MapBottom = TabStripBottom + TabStripHeight + TabStripGap;
+
     public static void Create(Transform parent)
     {
         if (Instance != null) return;
@@ -350,12 +374,17 @@ public class PlanetViewWindow : MonoBehaviour
         var content = UIFactory.Window(parent, "Planet View", WindowSize(parent), out root, out titleText);
         root.GetComponent<RectTransform>().anchoredPosition = Vector2.zero;
 
-        // Tabs — sit ABOVE THE MAP (the left 3/4), not the whole window, per Raptok's layout.
+        // Tabs — UNDER THE MAP (the left 3/4), sitting directly on top of the status line, per Raptok's
+        // layout. Inset by PanelGap on the right exactly as the status line is, so the map, the tabs and
+        // the status readout share one right edge and the side panel starts cleanly past all three.
         tabStrip = UIFactory.NewUI(content, "Tabs").GetComponent<RectTransform>();
-        tabStrip.anchorMin = new Vector2(0, 1); tabStrip.anchorMax = new Vector2(MapFraction, 1);
-        tabStrip.pivot = new Vector2(0.5f, 1); tabStrip.sizeDelta = new Vector2(0, 26);
+        tabStrip.anchorMin = new Vector2(0, 0); tabStrip.anchorMax = new Vector2(MapFraction, 0);
+        tabStrip.pivot = new Vector2(0.5f, 0);
+        tabStrip.sizeDelta = new Vector2(-PanelGap, TabStripHeight);
+        tabStrip.anchoredPosition = new Vector2(-PanelGap * 0.5f, TabStripBottom);
         var th = tabStrip.gameObject.AddComponent<HorizontalLayoutGroup>();
         th.spacing = 4; th.childControlWidth = true; th.childControlHeight = true; th.childForceExpandWidth = false;
+        th.childAlignment = TextAnchor.MiddleLeft;   // tabs read left-to-right from the map's left edge
 
         // The VIEWPORT: a fixed window onto the surface, anchored to the LEFT and capped at 3/4 of the
         // window width (MapFraction). It never changes size — zooming scales the map INSIDE it, which is
@@ -363,8 +392,11 @@ public class PlanetViewWindow : MonoBehaviour
         // grew the panel off the edge of the screen.
         gridHolder = UIFactory.NewUI(content, "Viewport").GetComponent<RectTransform>();
         gridHolder.anchorMin = new Vector2(0, 0); gridHolder.anchorMax = new Vector2(MapFraction, 1);
-        gridHolder.offsetMin = new Vector2(0, StatusMapBottom);     // clear the status line below
-        gridHolder.offsetMax = new Vector2(-PanelGap, -32);        // clear the tabs; gap before the panel
+        gridHolder.offsetMin = new Vector2(0, MapBottom);           // clear the tabs AND the status line below
+        // Flush to the top of the content area: UIFactory.Window already insets `content` by 42 to clear
+        // the title bar, so the old -32 here was reserving room for a tab strip that has moved to the
+        // bottom. The map gets that height back.
+        gridHolder.offsetMax = new Vector2(-PanelGap, 0);           // gap before the panel
         var vpImg = gridHolder.gameObject.AddComponent<Image>();
         vpImg.color = new Color(0.06f, 0.08f, 0.11f, 1f);          // themed grout that shows between tiled panes
         gridHolder.gameObject.AddComponent<RectMask2D>();          // panes are clipped to the map area
@@ -490,7 +522,10 @@ public class PlanetViewWindow : MonoBehaviour
         sideHolder.anchorMin = new Vector2(MapFraction, 0); sideHolder.anchorMax = new Vector2(1, 1);
         sideHolder.pivot = new Vector2(0.5f, 0.5f);
         sideHolder.offsetMin = new Vector2(0f, 8f);     // full-height control column (the docked hover panel sits under the MAP — a separate column)
-        sideHolder.offsetMax = new Vector2(0f, -32f);   // clear the tab strip / title chrome
+        // Top-aligned with the map now that the tab strip has moved to the bottom of the map column. The
+        // old -32 kept this level with a map that started 32px down; both start at the content top today,
+        // so the panel and the map read as one row rather than one sitting proud of the other.
+        sideHolder.offsetMax = new Vector2(0f, 0f);
         UIFactory.ScrollView(sideHolder, out sidePanel);
 
         // A thin status line at the very bottom of the map column — build hints, the power balance, the
@@ -1935,42 +1970,144 @@ public class PlanetViewWindow : MonoBehaviour
 
         Note("Click a structure to pick it up, then click the map to place it. <b>Right-click rotates.</b> Esc cancels. Footprints interlock — pack them tightly.");
 
-        // Grouped by what a structure is FOR, so a growing catalogue stays navigable.
-        foreach (SurfaceBuildingCategory cat in System.Enum.GetValues(typeof(SurfaceBuildingCategory)))
+        // A ROW OF COLOURED TABS, not one long list with headings.
+        //
+        // The catalogue outgrew the list: twenty-five structures under six headings in a quarter-width
+        // scrolling panel meant hunting for a reactor past every farm and habitat. Tabs cost one click and
+        // give back the whole panel, and the colour is what makes the click a reflex rather than a read —
+        // you go to "the yellow one" for power without processing the word ELECTRICAL first.
+        BuildCategoryTabs();
+        Note(SurfaceBuildingCategoryStyle.Blurb(buildCategory));
+
+        int shown = 0;
+        foreach (var info in SurfaceBuildingDatabase.All)
         {
-            bool headerAdded = false;
-            foreach (var info in SurfaceBuildingDatabase.All)
-            {
-                if (info == null || info.category != cat) continue;
-                // The capitol and the grounded ship aren't placed from the tray — the ship arrives with
-                // the colony, and the capitol is what it becomes. Listing them here would only confuse.
-                if (info.type == SurfaceBuildingType.PlanetCapitol) continue;
-                if (info.type == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode) continue;
-                // Settlements/towns/cities are grown by the population, never placed.
-                if (CityGrowth.IsSettlement(info.type) && !GameMode.DevMode) continue;
-                if (!headerAdded) { Header(CategoryName(cat)); headerAdded = true; }
-                BuildStructureCard(info);
-            }
+            if (info == null || info.category != buildCategory) continue;
+            if (!PlaceableFromTray(info)) continue;
+            BuildStructureCard(info);
+            shown++;
         }
+
+        // Defensive: no category is empty today (the thinnest, Agriculture and Science, hold one each, and
+        // tech-locked structures still show as locked cards rather than being filtered out). It exists so
+        // that adding a category before its buildings — or filtering them all out — reads as an empty
+        // category rather than as a tab that silently does nothing.
+        if (shown == 0)
+            Note("<i>Nothing to build here yet.</i>");
 
         // The built-here list is the (richer) Infrastructure panel, folded in now that Infrastructure is
         // no longer its own tab: per-structure health, siting, power draw, select-on-map, upgrade and
-        // demolish. This replaces the simpler BuildPlacedList (kept below, unused, as reference).
+        // demolish. Deliberately NOT filtered by the selected category: it is the inventory of what
+        // stands on this world, and hiding four-fifths of it behind whichever tab you happen to be on
+        // would make "what have I actually built here?" unanswerable without six clicks.
         BuildInfrastructurePanel();
     }
 
-    static string CategoryName(SurfaceBuildingCategory c)
+    /// Whether a structure is offered in the build tray at all. The capitol and the grounded colony ship
+    /// aren't placed — the ship arrives with the colony and the capitol is what it becomes — and
+    /// settlements/towns/cities are grown by the population. Dev Mode reveals the placeable ones for
+    /// testing. Factored out of the tray loop so the tab COUNTS and the list can never disagree about
+    /// what is on offer.
+    static bool PlaceableFromTray(SurfaceBuildingInfo info)
     {
-        switch (c)
+        if (info == null) return false;
+        if (info.type == SurfaceBuildingType.PlanetCapitol) return false;
+        if (info.type == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode) return false;
+        if (CityGrowth.IsSettlement(info.type) && !GameMode.DevMode) return false;
+        return true;
+    }
+
+    static int TrayCount(SurfaceBuildingCategory cat)
+    {
+        int n = 0;
+        foreach (var info in SurfaceBuildingDatabase.All)
+            if (info != null && info.category == cat && PlaceableFromTray(info)) n++;
+        return n;
+    }
+
+    // Two rows of three. A quarter-width panel cannot hold six tabs across, and a horizontally scrolling
+    // tab strip is worse than a second row — you cannot see what you are choosing between.
+    void BuildCategoryTabs()
+    {
+        const int PerRow = 3;
+        var cats = (SurfaceBuildingCategory[])System.Enum.GetValues(typeof(SurfaceBuildingCategory));
+
+        Transform row = null;
+        for (int i = 0; i < cats.Length; i++)
         {
-            case SurfaceBuildingCategory.Government: return "GOVERNMENT";
-            case SurfaceBuildingCategory.Harvesting: return "HARVESTING";
-            case SurfaceBuildingCategory.Industry: return "INDUSTRY";
-            case SurfaceBuildingCategory.Military: return "MILITARY";
-            case SurfaceBuildingCategory.Electrical: return "ELECTRICAL ENGINEERING";
-            default: return c.ToString().ToUpper();
+            if (i % PerRow == 0) row = CategoryTabRow();
+            AddCategoryTab(row, cats[i]);
         }
     }
+
+    Transform CategoryTabRow()
+    {
+        var go = UIFactory.NewUI(sidePanel, "CategoryRow");
+        var h = go.AddComponent<HorizontalLayoutGroup>();
+        h.spacing = 3;
+        h.childControlWidth = true; h.childControlHeight = true;
+        h.childForceExpandWidth = true; h.childForceExpandHeight = false;
+        var le = go.AddComponent<LayoutElement>();
+        le.minHeight = 22f; le.preferredHeight = 22f; le.flexibleHeight = 0f;
+        return go.transform;
+    }
+
+    void AddCategoryTab(Transform row, SurfaceBuildingCategory cat)
+    {
+        var captured = cat;
+        bool active = cat == buildCategory;
+        Color tint = SurfaceBuildingCategoryStyle.Of(cat);
+
+        var btn = UIFactory.Button(row, SurfaceBuildingCategoryStyle.Name(cat), () =>
+        {
+            buildCategory = captured;
+            // Picking up a structure and then switching category would leave a ghost from a tab you can
+            // no longer see, so the selection is dropped with the tab — same rule the main tab strip uses.
+            selected = null; CancelPlace();
+            lastSig = null;                 // force one rebuild; the tray is redrawn for the new category
+        }, 22f);
+
+        // Equal thirds of the row, whatever the panel's width. Button's own LayoutElement sets a
+        // preferred width that would otherwise pin the tabs to their label lengths and leave MILITARY
+        // three times the size of CIVIL.
+        var le = btn.GetComponent<LayoutElement>();
+        if (le != null) { le.minWidth = 0f; le.preferredWidth = 0f; le.flexibleWidth = 1f; }
+
+        // THE COLOUR IS ALWAYS ON, selected or not — a dim wash of the category's hue when it isn't
+        // chosen, the full hue when it is. Colour that only appears on the active tab would be useless
+        // for finding the tab you want, which is the entire reason for colouring them.
+        var colors = btn.colors;
+        colors.normalColor = active ? tint : Dim(tint, 0.30f);
+        colors.highlightedColor = active ? tint : Dim(tint, 0.45f);
+        colors.selectedColor = colors.normalColor;
+        colors.pressedColor = tint;
+        btn.colors = colors;
+
+        var lbl = btn.GetComponentInChildren<TMP_Text>();
+        if (lbl != null)
+        {
+            lbl.fontSize = 9;
+            lbl.color = active ? LabelOn(tint) : tint;
+        }
+
+        int n = TrayCount(cat);
+        UIFactory.Tooltip(btn.gameObject,
+            $"{SurfaceBuildingCategoryStyle.Name(cat)} — {SurfaceBuildingCategoryStyle.Blurb(cat)}\n" +
+            (n == 1 ? "1 structure" : $"{n} structures"));
+    }
+
+    /// Readable text over a filled category tab. The bright categories (yellow, green, steel) need dark
+    /// text and the darker ones (blue, red) need light, so this is decided by PERCEIVED luminance rather
+    /// than by a hand-kept list that would go stale the moment a colour is retuned.
+    static Color LabelOn(Color bg)
+        => (bg.r * 0.299f + bg.g * 0.587f + bg.b * 0.114f) > 0.6f
+            ? new Color(0.06f, 0.07f, 0.09f)
+            : Color.white;
+
+    /// Darken a colour while keeping it OPAQUE. Unity's `Color * float` scales alpha along with the
+    /// channels, so the obvious `tint * 0.3f` would make an unselected tab 30% transparent rather than
+    /// 30% bright — the panel behind it showing through, and the dimming barely visible.
+    static Color Dim(Color c, float k) => new Color(c.r * k, c.g * k, c.b * k, c.a);
 
     void BuildStructureCard(SurfaceBuildingInfo info)
     {
@@ -2135,18 +2272,26 @@ public class PlanetViewWindow : MonoBehaviour
             return $"{n} structure(s) · {SurfaceBuildManager.Density(body) * 100f:F0}% of buildable land developed";
         });
 
-        // Grouped by category so a long list stays navigable, matching the build tray.
+        // Grouped by category so a long list stays navigable. Headed in each category's own COLOUR, so
+        // this list and the tray's tabs read as the same scheme — the yellow block is your power plant
+        // whether you are choosing one or reviewing one.
         foreach (SurfaceBuildingCategory cat in System.Enum.GetValues(typeof(SurfaceBuildingCategory)))
         {
             bool headerAdded = false;
             foreach (var p in new List<PlacedBuilding>(placed))
             {
                 if (p.Info.category != cat) continue;
-                if (!headerAdded) { Header(CategoryName(cat)); headerAdded = true; }
+                if (!headerAdded) { CategoryHeader(cat); headerAdded = true; }
                 BuildInfraRow(p);
             }
         }
     }
+
+    /// A section heading in its category's colour. Replaces the old plain-accent Header for anything
+    /// grouped by category, so the colour scheme is one scheme rather than a tray convention.
+    void CategoryHeader(SurfaceBuildingCategory cat)
+        => UIFactory.WrapText(sidePanel, $"<b>{SurfaceBuildingCategoryStyle.Name(cat)}</b>",
+                              UITheme.SmallSize, SurfaceBuildingCategoryStyle.Of(cat));
 
     void BuildInfraRow(PlacedBuilding p)
     {

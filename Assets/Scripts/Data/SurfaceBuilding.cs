@@ -5,25 +5,91 @@ using UnityEngine;
 // IMPORTANT: append only — the ordinal is serialized.
 public enum SurfaceBuildingType
 {
+    // The comments below mark the order these were ADDED in, which is the only thing this enum's order is
+    // allowed to mean — the ordinals are serialized, so nothing here may ever be reordered to match how
+    // the build menu groups things. For what a structure is FOR, read its SurfaceBuildingCategory; the
+    // two deliberately do not line up, and chasing them into agreement would corrupt every save.
     Mine, Farm, GeothermalPlant, SolarArray, WindFarm,
     Habitat, Factory, ResearchOutpost, Spaceport, Refinery,
-    // Government
     ColonyShipBase, PlanetCapitol,
-    // Industry
     StorageDepot, PowerDistribution,
-    // Military
     SurfaceShipyard,
-    // Harvesting
     HydroPlant,
-    // Government — grown by the population itself, not placed (see CityGrowth)
+    // Grown by the population itself, never placed (see CityGrowth)
     Settlement, Town, City,
-    // Electrical — the power grid (see PowerGrid.cs)
+    // The power grid (see PowerGrid.cs)
     PowerNode, Capacitor, CombustionPlant, SteamTurbine, FissionReactor, FusionReactor
 }
 
-// What a structure is FOR. The build menu groups by this, so a long catalogue stays navigable and you
-// can find "the thing that makes power" without reading every card.
-public enum SurfaceBuildingCategory { Government, Harvesting, Industry, Military, Electrical }
+// What a structure is FOR. The build menu is a row of coloured tabs over this, so a long catalogue stays
+// navigable and you can find "the thing that makes power" without reading every card.
+//
+// SAFE TO REORDER AND RENAME, unlike SurfaceBuildingType next door. A category is a property of the
+// DATABASE, not of a placed building: saves store a building's `type` ordinal and look its category up
+// on load, so moving a structure between categories changes a menu and nothing else. (SurfaceBuildingType
+// itself must never be reordered — those ordinals ARE in every save.)
+//
+// The set is the spec's five, plus Industry. Industry earns its place because Mine, Factory and Refinery
+// have no honest home in the other five: filing a mine under Agriculture would make the tab mean
+// "resources" while saying "agriculture", and a category whose name lies is worse than one more tab.
+public enum SurfaceBuildingCategory { Civil, Electrical, Agriculture, Science, Industry, Military }
+
+// The colour each category is drawn in — its tab, and the rule under its heading.
+//
+// This is the one place the mapping lives, so the tab, the card and anything that grows later can never
+// drift apart. Chosen to stay legible on the dark panel background (UITheme.RowBg) and, as far as five
+// hues allow, to stay distinguishable to the most common forms of colour blindness: the red/green pair
+// that deuteranopia collapses (Military/Agriculture) is separated hard by BRIGHTNESS as well as hue, and
+// no category is identified by colour alone — every tab carries its name.
+public static class SurfaceBuildingCategoryStyle
+{
+    public static Color Of(SurfaceBuildingCategory c)
+    {
+        switch (c)
+        {
+            case SurfaceBuildingCategory.Civil:       return new Color(0.95f, 0.60f, 0.22f);  // orange
+            case SurfaceBuildingCategory.Electrical:  return new Color(0.97f, 0.85f, 0.30f);  // yellow
+            case SurfaceBuildingCategory.Agriculture: return new Color(0.45f, 0.82f, 0.40f);  // green
+            case SurfaceBuildingCategory.Science:     return new Color(0.38f, 0.55f, 0.92f);  // dark blue, lifted
+                                                                                              // enough to read on dark
+            case SurfaceBuildingCategory.Industry:    return new Color(0.68f, 0.72f, 0.78f);  // steel
+            case SurfaceBuildingCategory.Military:    return new Color(0.90f, 0.35f, 0.35f);  // red
+            default:                                  return new Color(0.80f, 0.80f, 0.80f);
+        }
+    }
+
+    /// The tab label. Held here beside the colour rather than in the UI, so adding a category means
+    /// editing one file.
+    public static string Name(SurfaceBuildingCategory c)
+    {
+        switch (c)
+        {
+            case SurfaceBuildingCategory.Civil:       return "CIVIL";
+            case SurfaceBuildingCategory.Electrical:  return "ELECTRICAL";
+            case SurfaceBuildingCategory.Agriculture: return "AGRICULTURE";
+            case SurfaceBuildingCategory.Science:     return "SCIENCE";
+            case SurfaceBuildingCategory.Industry:    return "INDUSTRY";
+            case SurfaceBuildingCategory.Military:    return "MILITARY";
+            default:                                  return c.ToString().ToUpper();
+        }
+    }
+
+    /// One line on what belongs here, shown under the tab row so an empty or unfamiliar category still
+    /// explains itself rather than reading as a bug.
+    public static string Blurb(SurfaceBuildingCategory c)
+    {
+        switch (c)
+        {
+            case SurfaceBuildingCategory.Civil:       return "Where people live, govern and store what they have.";
+            case SurfaceBuildingCategory.Electrical:  return "Everything that makes power, and everything that carries it.";
+            case SurfaceBuildingCategory.Agriculture: return "Growing food on the ground you have made liveable.";
+            case SurfaceBuildingCategory.Science:     return "Study of the world itself.";
+            case SurfaceBuildingCategory.Industry:    return "Digging things up and turning them into other things.";
+            case SurfaceBuildingCategory.Military:    return "Defence, and the yards that put ships into the sky.";
+            default:                                  return "";
+        }
+    }
+}
 
 // One surface structure: its footprint SHAPE, what index makes it efficient, and what it produces.
 //
@@ -260,7 +326,7 @@ public static class SurfaceBuildingDatabase
         // ================= GOVERNMENT =================
         // The colony ship doesn't vanish when it settles — it lands and becomes the colony's first
         // administration, and stays that until you can afford to build a real capitol around it.
-        var shipBase = new SurfaceBuildingInfo(SurfaceBuildingType.ColonyShipBase, SurfaceBuildingCategory.Government,
+        var shipBase = new SurfaceBuildingInfo(SurfaceBuildingType.ColonyShipBase, SurfaceBuildingCategory.Civil,
             "Colony Ship Base",
             "The grounded hull of the colony ship that settled this world, pressed into service as its first seat of government. Cramped and improvised — upgrade it to a Planet Capitol when the colony can afford one.",
             S(0, 0, 1, 0, 0, 1, 1, 1), SurfaceIndexKind.None, 0, 0, 0f, new Color(0.70f, 0.72f, 0.60f));
@@ -271,7 +337,7 @@ public static class SurfaceBuildingDatabase
         shipBase.storageCapacity = 400f;   // the ship's own holds
         _all[(int)SurfaceBuildingType.ColonyShipBase] = shipBase;
 
-        var capitol = new SurfaceBuildingInfo(SurfaceBuildingType.PlanetCapitol, SurfaceBuildingCategory.Government,
+        var capitol = new SurfaceBuildingInfo(SurfaceBuildingType.PlanetCapitol, SurfaceBuildingCategory.Civil,
             "Planet Capitol",
             "The seat of this world's government. Administers the colony properly: faster growth, real warehousing, and somewhere for the population to take its grievances.",
             S(0, 0, 1, 0, 0, 1, 1, 1), SurfaceIndexKind.None, 180, 140, 26f, new Color(0.95f, 0.85f, 0.45f));
@@ -282,37 +348,37 @@ public static class SurfaceBuildingDatabase
 
         // ================= HARVESTING =================
         // L-tromino — tucks into the corner left by a square plant.
-        _all[(int)SurfaceBuildingType.Mine] = new SurfaceBuildingInfo(SurfaceBuildingType.Mine, SurfaceBuildingCategory.Harvesting, "Mine",
+        _all[(int)SurfaceBuildingType.Mine] = new SurfaceBuildingInfo(SurfaceBuildingType.Mine, SurfaceBuildingCategory.Industry, "Mine",
             "Digs metal out of the ground. Put it on a rich seam: its yield is set by the Mineral Index under its footprint, and never changes once built.",
             S(0, 0, 0, 1, 1, 0), SurfaceIndexKind.Mineral, 60, 30, 16f, new Color(0.62f, 0.42f, 0.20f))
         { metalPerSec = 1.6f };
 
         // 2x3 block — farms want a lot of contiguous ground.
-        _all[(int)SurfaceBuildingType.Farm] = new SurfaceBuildingInfo(SurfaceBuildingType.Farm, SurfaceBuildingCategory.Harvesting, "Farmland",
+        _all[(int)SurfaceBuildingType.Farm] = new SurfaceBuildingInfo(SurfaceBuildingType.Farm, SurfaceBuildingCategory.Agriculture, "Farmland",
             "Feeds the colony and grows its population. Wants the greenest ground you can find — check the Fertile Index. Irrigation and processing need a modest amount of power, so keep it in reach of the grid.",
             S(0, 0, 1, 0, 0, 1, 1, 1, 0, 2, 1, 2), SurfaceIndexKind.Fertile, 45, 25, 14f, new Color(0.35f, 0.80f, 0.30f))
         { waterPerSec = 0.3f, popGrowthPerSec = 1.8f };
 
         // O-tetromino — a compact 2x2 plant.
-        _all[(int)SurfaceBuildingType.GeothermalPlant] = new SurfaceBuildingInfo(SurfaceBuildingType.GeothermalPlant, SurfaceBuildingCategory.Harvesting, "Geothermal Plant",
+        _all[(int)SurfaceBuildingType.GeothermalPlant] = new SurfaceBuildingInfo(SurfaceBuildingType.GeothermalPlant, SurfaceBuildingCategory.Electrical, "Geothermal Plant",
             "Taps the heat under the crust. Sited on a volcano or a geyser field it is the best power in the game; sited on cold rock it is a waste of metal. Check the Heat Index.",
             S(0, 0, 1, 0, 0, 1, 1, 1), SurfaceIndexKind.Heat, 90, 40, 20f, new Color(1.00f, 0.45f, 0.15f))
         { energyPerSec = 2.6f };
 
         // I-tetromino — a long array of panels.
-        _all[(int)SurfaceBuildingType.SolarArray] = new SurfaceBuildingInfo(SurfaceBuildingType.SolarArray, SurfaceBuildingCategory.Harvesting, "Solar Array",
+        _all[(int)SurfaceBuildingType.SolarArray] = new SurfaceBuildingInfo(SurfaceBuildingType.SolarArray, SurfaceBuildingCategory.Electrical, "Solar Array",
             "A run of panels. Thin air and long polar days beat equatorial noon, and dry ground is cloudless ground. Output falls a quarter for every atmosphere above Earth-normal and reaches nothing at five, so a thick-skied world cannot use them at all. Check the Solar Index.",
             S(0, 0, 1, 0, 2, 0, 3, 0), SurfaceIndexKind.Solar, 55, 20, 12f, new Color(0.95f, 0.90f, 0.45f))
         { energyPerSec = 1.5f };
 
         // T-tetromino.
-        _all[(int)SurfaceBuildingType.WindFarm] = new SurfaceBuildingInfo(SurfaceBuildingType.WindFarm, SurfaceBuildingCategory.Harvesting, "Wind Farm",
+        _all[(int)SurfaceBuildingType.WindFarm] = new SurfaceBuildingInfo(SurfaceBuildingType.WindFarm, SurfaceBuildingCategory.Electrical, "Wind Farm",
             "Turbines, which need AIR to turn: an airless world has no weather at all and a thick-aired one is a gale everywhere. Within that, wants exposure — ridgelines, coasts and open steppe. Check the Weather Index.",
             S(0, 0, 1, 0, 2, 0, 1, 1), SurfaceIndexKind.Wind, 50, 25, 12f, new Color(0.70f, 0.90f, 1.00f))
         { energyPerSec = 1.3f };
 
         // S-tetromino — awkward on purpose; it's the piece that forces you to plan.
-        _all[(int)SurfaceBuildingType.Habitat] = new SurfaceBuildingInfo(SurfaceBuildingType.Habitat, SurfaceBuildingCategory.Government, "Habitat Block",
+        _all[(int)SurfaceBuildingType.Habitat] = new SurfaceBuildingInfo(SurfaceBuildingType.Habitat, SurfaceBuildingCategory.Civil, "Habitat Block",
             "Housing. Doesn't care what it sits on — put it wherever the awkward gaps are.",
             S(0, 0, 1, 0, 1, 1, 2, 1), SurfaceIndexKind.None, 40, 30, 12f, new Color(0.55f, 0.70f, 0.95f))
         { popGrowthPerSec = 1.2f };
@@ -324,7 +390,7 @@ public static class SurfaceBuildingDatabase
         { metalPerSec = 1.1f };
 
         // J-tetromino.
-        _all[(int)SurfaceBuildingType.ResearchOutpost] = new SurfaceBuildingInfo(SurfaceBuildingType.ResearchOutpost, SurfaceBuildingCategory.Industry, "Research Outpost",
+        _all[(int)SurfaceBuildingType.ResearchOutpost] = new SurfaceBuildingInfo(SurfaceBuildingType.ResearchOutpost, SurfaceBuildingCategory.Science, "Research Outpost",
             "A surface laboratory feeding research to the empire. Terrain-agnostic.",
             S(0, 0, 0, 1, 0, 2, 1, 2), SurfaceIndexKind.None, 80, 70, 20f, new Color(0.45f, 0.85f, 1.00f))
         { researchPerSec = 0.6f };
@@ -340,7 +406,7 @@ public static class SurfaceBuildingDatabase
         // Storage is what lets you SAVE for something. Without depots your stockpile tops out and any
         // income above the ceiling is simply wasted — the megaprojects are unaffordable by design until
         // you have somewhere to put the materials.
-        var depot = new SurfaceBuildingInfo(SurfaceBuildingType.StorageDepot, SurfaceBuildingCategory.Industry,
+        var depot = new SurfaceBuildingInfo(SurfaceBuildingType.StorageDepot, SurfaceBuildingCategory.Civil,
             "Storage Depot",
             "Warehousing. Raises how much metal, energy and water your empire can hold at once — anything you produce above that ceiling is thrown away. Build these before you try to bank for a terraformer or a mega-station.",
             S(0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1), SurfaceIndexKind.None, 70, 40, 16f, new Color(0.60f, 0.62f, 0.70f));
@@ -348,7 +414,7 @@ public static class SurfaceBuildingDatabase
         _all[(int)SurfaceBuildingType.StorageDepot] = depot;
 
         // T-tetromino. The payoff for packing tightly rather than sprawling.
-        var grid = new SurfaceBuildingInfo(SurfaceBuildingType.PowerDistribution, SurfaceBuildingCategory.Industry,
+        var grid = new SurfaceBuildingInfo(SurfaceBuildingType.PowerDistribution, SurfaceBuildingCategory.Electrical,
             "Power Distribution",
             "A switchyard and transmission hub. Every power plant whose footprint TOUCHES this one runs markedly better — the reason to interlock a dense industrial block instead of scattering your generators across the map.",
             S(0, 0, 1, 0, 2, 0, 1, 1), SurfaceIndexKind.None, 85, 55, 18f, new Color(0.95f, 0.95f, 0.55f));
@@ -373,7 +439,7 @@ public static class SurfaceBuildingDatabase
         { metalPerSec = 1.2f };
 
         // Hydro — the one thing that WANTS water, and needs relief to drop it through.
-        var hydro = new SurfaceBuildingInfo(SurfaceBuildingType.HydroPlant, SurfaceBuildingCategory.Harvesting,
+        var hydro = new SurfaceBuildingInfo(SurfaceBuildingType.HydroPlant, SurfaceBuildingCategory.Electrical,
             "Hydro Plant",
             "A dam and turbine hall. Needs flowing water with somewhere to fall — a river or a coast WITH relief. A flat open sea has no head to work with and won't do.",
             S(0, 0, 1, 0, 2, 0, 2, 1), SurfaceIndexKind.Water, 80, 35, 18f, new Color(0.35f, 0.75f, 1.00f));
@@ -384,7 +450,7 @@ public static class SurfaceBuildingDatabase
         // The population houses itself (CityGrowth). You never build these; they appear near what's
         // already there and thicken over time. They occupy real tiles and compete for the ground you
         // wanted to mine, which is the point — a living world costs you something.
-        var settlement = new SurfaceBuildingInfo(SurfaceBuildingType.Settlement, SurfaceBuildingCategory.Government,
+        var settlement = new SurfaceBuildingInfo(SurfaceBuildingType.Settlement, SurfaceBuildingCategory.Civil,
             "Settlement",
             "A handful of homes that grew up on their own as the colony spread out. Given people and time it will become a town.",
             S(0, 0, 1, 0), SurfaceIndexKind.None, 0, 0, 0f, new Color(0.62f, 0.66f, 0.78f));
@@ -392,7 +458,7 @@ public static class SurfaceBuildingDatabase
         settlement.storageCapacity = 120f;
         _all[(int)SurfaceBuildingType.Settlement] = settlement;
 
-        var town = new SurfaceBuildingInfo(SurfaceBuildingType.Town, SurfaceBuildingCategory.Government,
+        var town = new SurfaceBuildingInfo(SurfaceBuildingType.Town, SurfaceBuildingCategory.Civil,
             "Town",
             "A proper town, grown from a settlement. Houses people, and puts a little of everything back into the colony.",
             S(0, 0, 1, 0, 0, 1, 1, 1), SurfaceIndexKind.None, 0, 0, 0f, new Color(0.74f, 0.78f, 0.90f));
@@ -401,7 +467,7 @@ public static class SurfaceBuildingDatabase
         town.storageCapacity = 350f;
         _all[(int)SurfaceBuildingType.Town] = town;
 
-        var city = new SurfaceBuildingInfo(SurfaceBuildingType.City, SurfaceBuildingCategory.Government,
+        var city = new SurfaceBuildingInfo(SurfaceBuildingType.City, SurfaceBuildingCategory.Civil,
             "City",
             "A full city. Only a genuinely habitable world grows these — and a world that grows enough of them becomes one continuous city.",
             S(0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1, 1, 2), SurfaceIndexKind.None, 0, 0, 0f, new Color(0.88f, 0.92f, 1.00f));
