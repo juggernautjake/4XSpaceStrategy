@@ -220,6 +220,169 @@ public static class BiosphereRules
 }
 
 // ---------------------------------------------------------------------------------------------
+// WILL THIS PROJECT ACTUALLY WORK HERE? — the standing physical caps, read as prose.
+//
+// Separate from TerraformDiagnosis, which asks "what is WRONG with this world". This asks the
+// narrower question the Begin button needs: the fault is real and you can afford the fix, but would
+// the fix DO anything? Three ways it wouldn't:
+//
+//   * The world cannot hold the air. Mass, a dead core, an orbit inside the stellar wind, or heat
+//     that boils off whatever you make — the processors run, the gas escapes, nothing changes.
+//   * The world cannot hold the water. Below 0.6 atmospheres surface water goes to space; above the
+//     liquid band it goes to steam. Either way the convoy unloads into a world that keeps none of it.
+//   * The world cannot take a biosphere yet (the pre-existing microbial case, folded in here).
+//
+// Every message names the SPECIFIC project that lifts the cap, because that is the whole design: a
+// dead-core world needs Core Ignition before Atmospheric Processors mean anything, an inner world
+// needs Orbital Migration first, a baking one needs shades first. Refusing without naming the
+// unlock would just read as the button being broken.
+// ---------------------------------------------------------------------------------------------
+public static class TerraformFeasibility
+{
+    // ---- Air ------------------------------------------------------------------------------------
+
+    /// Fraction of a world's SUSTAINABLE ceiling each air project delivers. A fraction rather than a
+    /// flat number of atmospheres so one project reads the same on every world: Atmospheric Processors
+    /// get a thin world about halfway to what it can hold whether that is 1 atmosphere or 6. Costs
+    /// already scale with the size of the world (TerraformProjects.SizeScale), so a big world pays for
+    /// the bigger delivery.
+    ///
+    /// No project reaches the cap alone, and the set of them does not quite sum to it either. That is
+    /// deliberate — air is something you accumulate across several projects and several technologies,
+    /// not a switch. Negative for the one project whose job is taking air AWAY.
+    public static float AirGainFraction(TerraformProjectType t)
+    {
+        switch (t)
+        {
+            case TerraformProjectType.SeedAtmosphere:      return 0.45f;   // the bulk of it: raw gas from rock and ice
+            case TerraformProjectType.CometBombardment:    return 0.30f;   // its description promises air as well as water
+            case TerraformProjectType.OxygenSeeding:       return 0.25f;   // finishes what the processors started
+            case TerraformProjectType.ScrubAtmosphere:     return 0.15f;   // replaces poison rather than adding bulk
+            case TerraformProjectType.AtmosphericThinning: return -0.35f;  // bleeding a crushing sky back off
+            default: return 0f;
+        }
+    }
+
+    public static bool ChangesAir(TerraformProjectType t) => !Mathf.Approximately(AirGainFraction(t), 0f);
+
+    /// Null = an air-building project has room to work. Otherwise the reason it would achieve nothing,
+    /// naming the cap that is binding and the project that lifts it.
+    ///
+    /// Caps are reported MOST-FIXABLE FIRST, not by which bites hardest. They all multiply, so on a
+    /// world with several there is no single "the" reason — but there IS a next thing to do, and that is
+    /// what the player needs off a disabled button.
+    public static string BuildAirWarning(CelestialBody b)
+    {
+        if (b == null) return "no world selected";
+        if (b.type == CelestialBodyType.Asteroid) return "far too small to hold an atmosphere at all";
+        if (AtmosphereRules.Headroom(b) >= AtmosphereRules.MinUsefulGain) return null;
+
+        // Heat first: it is the cheapest to fix and the only cap that is genuinely reversible.
+        if (AtmosphereRules.HeatRetention(Mathf.Max(0f, b.mass), b.terrainParams.heat) < 0.999f)
+            return "too hot to hold more air — it would boil straight back off. Cool the world first (orbital shades).";
+
+        if (AtmosphereRules.InnerOrbitRetention(WorldClassifier.RelOf(b)) < 0.999f)
+            return "orbits too close to the star — the stellar wind strips air faster than processors can make it. " +
+                   "Move its orbit outward first.";
+
+        if (!b.hasMagneticField)
+            return $"no magnetic field, so it holds only half the air its mass could ({AtmosphereRules.Ceiling(b):0.#} " +
+                   "atmospheres) — and it is already full. Restart the core or hang a magnetospheric shield first.";
+
+        return $"already holding all the air its mass can keep ({AtmosphereRules.Ceiling(b):0.#} atmospheres).";
+    }
+
+    /// Null = a project that bleeds air off has air to bleed. The mirror of the above, and much simpler:
+    /// there is no cap to explain, the world is just already thin.
+    public static string ThinAirWarning(CelestialBody b)
+    {
+        if (b == null) return "no world selected";
+        if (b.atmospheres <= AtmosphereRules.MinUsefulGain) return "there is barely any atmosphere here to bleed off";
+        return null;
+    }
+
+    // ---- Water ----------------------------------------------------------------------------------
+
+    /// Null = water delivered to this world would STAY on it. Otherwise why it wouldn't.
+    ///
+    /// Two ways to lose it, and the fix differs, so they are reported separately. Too thin: the water
+    /// goes to space, and no amount of hauling more in changes that — thicken the air first. Too hot:
+    /// it goes to steam, and the world needs cooling first.
+    ///
+    /// Deliberately NOT applied to Melt the Ice Caps, whose whole premise is a world too COLD, with its
+    /// water already here as ice. Melting it is the point; the air check still applies, because a
+    /// melted cap on an airless world sublimates straight off.
+    public static string HoldsWaterWarning(CelestialBody b)
+    {
+        if (b == null) return "no world selected";
+
+        if (b.atmospheres < AtmosphereRules.LifeFloor)
+            return $"the air is too thin ({b.atmospheres:0.#} atm) to hold surface water — it would boil off into " +
+                   "space. Build the atmosphere up past 0.6 first.";
+
+        // Type-independent, for the same reason WorldClassifier is: the type modifier would have a
+        // volcanic world failing this on the strength of being volcanic rather than of being hot.
+        float c = PlanetTemperature.BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, CelestialBodyType.RockyPlanet);
+        if (c > BiosphereRules.MaxLiquidC)
+            return $"the surface runs at {PlanetTemperature.Label(c)} — water arrives as steam and is gone. " +
+                   "Cool the world first (orbital shades).";
+
+        return null;
+    }
+
+    // ---- The one call TerraformManager.CanStart makes --------------------------------------------
+
+    /// Null = nothing physical stands in this project's way. Otherwise the reason, ready to show on the
+    /// disabled button. Dispatches to whichever of the checks above the project is subject to.
+    public static string Warning(CelestialBody b, TerraformProjectType t)
+    {
+        switch (t)
+        {
+            // Air in. Atmospheric Scrubbing is deliberately NOT here: its job is taking the poison OUT of
+            // a sky, which works whether or not there is room to make that sky thicker. Gating it on
+            // headroom would withdraw the fix for a toxic atmosphere from volcanic worlds — the only
+            // worlds that HAVE one. Its small air gain simply clamps to whatever room exists, possibly
+            // none, and the project still does the thing it is for.
+            case TerraformProjectType.SeedAtmosphere:
+            case TerraformProjectType.OxygenSeeding:
+                return BuildAirWarning(b);
+
+            // Air out.
+            case TerraformProjectType.AtmosphericThinning:
+                return ThinAirWarning(b);
+
+            // Water in. Cometary Bombardment delivers BOTH water and air, so it is only pointless if
+            // the world can keep neither — either one landing makes the project worth running.
+            case TerraformProjectType.HaulWater:
+            case TerraformProjectType.TapAquifers:
+                return HoldsWaterWarning(b);
+
+            case TerraformProjectType.CometBombardment:
+            {
+                string water = HoldsWaterWarning(b);
+                if (water == null) return null;
+                return BuildAirWarning(b) == null ? null : water;
+            }
+
+            // Melting a frozen world's caps: only the air check applies (see HoldsWaterWarning).
+            case TerraformProjectType.MeltIceCaps:
+                return b != null && b.atmospheres < AtmosphereRules.LifeFloor
+                    ? $"the air is too thin ({b.atmospheres:0.#} atm) — melted ice would sublimate straight off " +
+                      "into space. Build the atmosphere up past 0.6 first."
+                    : null;
+
+            // Life. The pre-existing check, folded in here so CanStart has one feasibility call rather
+            // than a growing chain of special cases.
+            case TerraformProjectType.MicrobialSeeding:
+                return BiosphereRules.MicrobialSeedingWarning(b);
+
+            default:
+                return null;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Diagnosis: read a world through the current species' biology and list what's wrong with it.
 // ---------------------------------------------------------------------------------------------
 public static class TerraformDiagnosis
@@ -279,6 +442,34 @@ public static class TerraformDiagnosis
                         detail = $"Orbits well outside {s.name}'s band. Mirrors alone cannot fix this."
                     });
             }
+        }
+
+        // ---- An orbit close enough to cap the world's AIR ----
+        //
+        // Spec §3's other half. The block above diagnoses OrbitTooClose from STARLIGHT, and only at the
+        // extreme (over > 0.85) — which is a species-relative test, so a world whose orbit is quietly
+        // holding its atmosphere to a fraction of what its mass could keep was never diagnosed at all
+        // unless it also happened to be scorching THIS species. The result: the standing inner-orbit air
+        // cap existed and bit, and the one project that lifts it was never offered.
+        //
+        // Species-INDEPENDENT on purpose, unlike everything around it. The stellar wind does not care who
+        // is trying to live there; a Pyrothian world can be perfectly warm and still be losing its sky.
+        //
+        // The 0.9 deadband keeps the fault off worlds sitting just inside the edge, where the cut is a
+        // couple of percent and moving a planet to recover it would be absurd.
+        float airRetention = AtmosphereRules.InnerOrbitRetention(WorldClassifier.RelOf(b));
+        if (airRetention < 0.9f && b.type != CelestialBodyType.GasGiant && b.type != CelestialBodyType.Asteroid &&
+            !Has(list, TerraformProblem.OrbitTooClose))
+        {
+            float uncut = AtmosphereRules.Ceiling(b) / Mathf.Max(0.01f, airRetention);
+            list.Add(new TerraformIssue
+            {
+                problem = TerraformProblem.OrbitTooClose,
+                severity = Mathf.Clamp01(1f - airRetention),
+                detail = $"Orbits inside the habitable zone, where the stellar wind strips air away as fast as it forms — " +
+                         $"holding {b.name} to {AtmosphereRules.Ceiling(b):0.#} atmospheres against the {uncut:0.#} its " +
+                         $"mass could otherwise keep. Only moving the orbit outward lifts that cap."
+            });
         }
 
         // ---- Water ----
@@ -469,37 +660,29 @@ public static class TerraformDiagnosis
         }
     }
 
-    /// A body's kind, named for WHAT ITS SURFACE ACTUALLY IS — with "Moon" as a suffix when it orbits a
+    /// A body's kind, named for WHAT ITS ATTRIBUTES AMOUNT TO — with "moon" as a suffix when it orbits a
     /// planet rather than a star.
     ///
-    /// Moons have rolled real surface types (Ocean, Ice, Volcanic, Rocky — see RollMoonType) for a while
-    /// now, and every readout in the game threw that away and printed "moon". A world with oceans on it
-    /// was described identically to a dead grey rock. So: *Ocean Moon*, *Volcanic Moon*, *Barren Moon*,
-    /// *Rocky Temperate Moon*.
+    /// Delegates to WorldClassifier.Describe, which derives the name (terran, ocean, desert, swamp,
+    /// tundra, archipelago, continental, toxic, molten…) from the live attributes rather than from the
+    /// physics enum. That is what gives a moon of a gas giant in the habitable zone the same "terran
+    /// world" name a planet would get, and what makes the name update as a world is terraformed.
     ///
-    /// Suffix rather than prefix ("ocean moon", not "moon, ocean-type") because it reads as a noun
-    /// phrase in every place it is already used — a list row, a tooltip, mid-sentence.
-    ///
-    /// LOWERCASE, matching the planet forms above. Title Case would have been the nicer label in
-    /// isolation, but this string is dropped into running prose — "They would rather be on a temperate
-    /// rocky world" sits three lines from the Type row — and mixing the two produced sentences that
-    /// capitalised moons and not planets. One casing, chosen by where the text actually appears.
+    /// A moon reuses the same descriptor with the word "moon" swapped in for "world" (or appended, for
+    /// the descriptors that are not "<x> world"). Lowercase throughout, because this string is dropped
+    /// into running prose ("They would rather be on a terran world") where mixed casing reads wrong.
     public static string Pretty(CelestialBody b)
     {
         if (b == null) return "unknown";
-        if (b.parentBody == null) return Pretty(b.type);
 
-        switch (b.type)
-        {
-            case CelestialBodyType.RockyPlanet: return "rocky temperate moon";
-            case CelestialBodyType.OceanPlanet: return "ocean moon";
-            case CelestialBodyType.IcePlanet: return "ice moon";
-            case CelestialBodyType.VolcanicPlanet: return "volcanic moon";
-            case CelestialBodyType.BarrenPlanet: return "barren moon";
-            // The bare Moon type is the airless grey default that never rolled a surface of its own.
-            case CelestialBodyType.Moon: return "barren moon";
-            default: return $"{b.type} moon";
-        }
+        string name = WorldClassifier.Describe(b);
+        if (b.parentBody == null) return name;
+
+        // Moon phrasing: "ocean world" -> "ocean moon"; "gas giant"/"asteroid" keep their noun and gain
+        // a suffix (a moon is neither, but the fallback stays sensible); anything else gets "moon"
+        // appended.
+        if (name.EndsWith(" world")) return name.Substring(0, name.Length - 6) + " moon";
+        return name + " moon";
     }
 
     public static string Describe(TerraformProblem p)
@@ -627,7 +810,7 @@ public static class TerraformProjectDatabase
 
         P(new TerraformProjectInfo(TerraformProjectType.OrbitShiftOut, "Orbital Migration — Outward", TerraformProblem.OrbitTooClose, "X9",
             1200, 1500, 0, 160f, 20f,
-            "The largest thing your civilization can attempt: swing asteroids past the planet for centuries, stealing momentum until its whole orbit walks outward, away from the fire. Nothing else can save a world this close to its star."));
+            "The largest thing your civilization can attempt: swing asteroids past the planet for centuries, stealing momentum until its whole orbit walks outward, away from the fire. Nothing else can save a world this close to its star — and nothing else lifts the cap the stellar wind puts on how much air it can ever hold."));
 
         P(new TerraformProjectInfo(TerraformProjectType.OrbitShiftIn, "Orbital Migration — Inward", TerraformProblem.OrbitTooFar, "X9",
             1200, 1500, 0, 160f, 20f,

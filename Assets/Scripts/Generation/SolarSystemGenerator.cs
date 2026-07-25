@@ -74,54 +74,25 @@ public class SolarSystemGenerator : MonoBehaviour
 
         for (int i = 0; i < bodyCount; i++)
         {
-            // A 0..1 SIZE RANK, rolled first: in the size-sensitive outer bands it orders which type spawns
-            // (the biggest become gas giants, the smallest asteroids — the request's "gas giants ... the
-            // largest of planet sizes"). The type FREQUENCIES it produces are unchanged from the old bare
-            // roll (the cutoffs in RollBodyByTemperature reproduce the same proportions). The actual world
-            // SIZE is no longer taken from this — it comes from the body's Mass Value (MassRules) once the
-            // type is known — but because each type has its own mass band, size and type stay consistent.
+            // A 0..1 SIZE RANK. It now feeds MassRules.ByBand, which orders bodies within a band from
+            // small to large — the biggest in the cold outer bands become gas giants, the smallest
+            // asteroids, exactly the request's "gas giants are the largest of planet sizes". Mass is the
+            // first attribute set; everything else, including the type, is derived from it downstream.
             float sizeRank = Random.value;
 
-            // Type is chosen by ACTUAL temperature at this radius for this star, with sizeRank breaking the
-            // size-sensitive ties in the outer (cool/cold) bands.
-            CelestialBodyType type = RollBodyByTemperature(currentRadius, currentStar, sizeRank, out float rolledWaterLevel);
+            // ATTRIBUTE-FIRST. Mass comes from the orbital band (MassRules.ByBand), then the whole
+            // pipeline sets field, tectonics, climate, water and air and CLASSIFIES the type from them —
+            // rather than the old path of picking a type and deriving mass from it.
+            float rel = currentRadius / Mathf.Max(0.5f, TempReference(currentStar));
 
-            CelestialBody body = MakeBody(type);
+            CelestialBody body = new(CelestialBodyType.RockyPlanet) { id = _idCounter++ };
             body.name = NameGenerator.PlanetName(systemName, i);
-
-            // The SAME roll that decided Ocean/Rocky/Barren in the temperate band also sets the body's
-            // actual water coverage, so the type and the map agree (a bare-minimum "Ocean" world reads as
-            // mostly islands; a maxed-out one is fully drowned — exactly the request's own description
-            // of the Water Level slider). Bands where waterLevel wasn't rolled (-1 sentinel) are
-            // untouched, keeping their existing TerrainVariance-rolled elevation exactly as before.
-            if (rolledWaterLevel >= 0f)
-            {
-                var wp = body.terrainParams;
-                wp.seaLevel = PlanetTerrainGenerator.SeaLevelFromWaterLevel(rolledWaterLevel);
-                body.terrainParams = wp;
-            }
-
-            // Orbital layout (data-authoritative so save/load & sandbox can round-trip it).
             body.distanceFromStar = currentRadius;
             body.orbitRadius = currentRadius;
-            BiasHeat(body, currentRadius, currentStar);                       // climate follows distance
+            body.mass = MassRules.ByBand(rel, sizeRank);
 
-            // Air is rolled HERE, not in MakeBody, because BiasHeat above is what finally decides how
-            // hot this world is — and heat is what boils atmosphere off. A close-in world now genuinely
-            // loses the air its mass alone would have held. Water loss follows immediately, and both run
-            // BEFORE the biosphere check and the terrain bake below, which read them: GeneratesWithBiosphere
-            // tests the 0.6-atmosphere floor, and the biome classifier reads the greenhouse warmth.
-            body.atmospheres = AtmosphereRules.RollAtmospheres(
-                body.type, body.mass, body.hasMagneticField,
-                AtmosphereRules.TectonicBonus(body), body.terrainParams.heat);
-            AtmosphereRules.ApplyWaterLoss(body);
-
-            TerraformVisuals.CaptureNatural(body);   // re-capture: BiasHeat is the world's real natural climate, not the pre-bias variance SeedTerrain rolled
-            // Only worlds that start out warm and wet enough get a living biosphere for free; everything
-            // else stays sterile until something like Microbial Seeding starts one (see BiosphereRules).
-            // MUST be set before the surface below is baked, or the very first render of a qualifying
-            // world would still come out sterile (the flag the classifier reads would still be false).
-            body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body);
+            ApplyWorldPipeline(body, rel, isMoon: false);
+            ResourceGenerator.GenerateResources(body);   // type is settled, so resources match it
             // STEPPED. A world's terrain is by far the most expensive step in the whole load, and built
             // in one go it was a single frame lasting as long as generating an entire planet. Now it
             // yields every few milliseconds from inside its own loop, so one enormous frame becomes
@@ -133,10 +104,8 @@ public class SolarSystemGenerator : MonoBehaviour
                 while (surf.MoveNext()) yield return surf.Current;
             }
             yield return null;
-            // Ore has to be populated against THIS surface, not the provisional one MakeBody baked —
-            // that one is already gone (a fresh grid, no tile carryover). Pre-existing bug, found while
-            // reviewing an unrelated change: every top-level planet was generating with zero ore, because
-            // OreGenerator.Populate used to run inside MakeBody, against the surface this line replaces.
+            // Ore is populated against the REAL baked surface, here — not earlier, when there is no
+            // surface to seed it into yet.
             OreGenerator.Populate(body);
             body.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
             body.spinSpeed = OrbitalMechanics.Spin(body, Random.Range(0.7f, 1.3f));
@@ -152,71 +121,29 @@ public class SolarSystemGenerator : MonoBehaviour
             // The first moon has to clear the PLANET'S OWN SURFACE, which the old fixed 2.6 start did
             // not: a large world's visual radius is surfaceSize * 0.08 * 0.5, so a big gas giant's
             // surface reached past 2.6 and its innermost moon flew through it.
-            int moonCount = RollMoonCount(type);
+            int moonCount = RollMoonCount(body.type);
             float planetVisRadius = Mathf.Max(0.6f, body.surfaceSize * 0.08f) * 0.5f;
             float moonR = planetVisRadius + MaxMoonVisRadius + MoonSurfaceGap;
             for (int m = 0; m < moonCount; m++)
             {
                 CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
                 moon.name = NameGenerator.MoonName(body.name, m);
-                // A moon's MASS comes from its host planet: at most half the host, rarely that high (see
-                // MassRules.ForMoon) — so a big gas giant can have a sizeable moon, a small planet only tiny
-                // ones. Grid/visual size derives from it, same as a planet.
+                // A moon's MASS comes from its host planet: at most 40% of the host, rarely that high (see
+                // MassRules.ForMoon) — so a big gas giant can have a sizeable moon, a small planet only
+                // tiny ones. Everything after mass runs through the SAME pipeline a planet does.
                 moon.mass = MassRules.ForMoon(body.mass);
-                moon.surfaceSize = MassRules.SurfaceSize(moon.mass);
                 moon.distanceFromStar = body.distanceFromStar;   // shares the planet's solar distance
-
-                // A moon is no longer stuck with the single airless "Moon" palette. It rolls a real
-                // world-type from the SAME attributes a planet does — its temperature (taken from its
-                // parent's solar distance) and, for a big enough moon, a Water Level draw — gated by its
-                // small mass: only a moon large enough to hold air and surface water can come out temperate
-                // or ocean, while a hot orbit can make any moon volcanic (Io) and a cold one icy (Europa),
-                // and the rest stay airless rock. This is the request's "moons use the same generation
-                // system as planets" — see RollMoonType. (Its body class stays a moon for orbit/spacing:
-                // OrbitSafety keys moon-scale off parentBody, which is set below and restored on load.)
-                float moonRel = moon.distanceFromStar / Mathf.Max(0.5f, TempReference(currentStar));
-                moon.type = RollMoonType(moonRel, moon.surfaceSize, out float moonWaterLevel);
-
-                // A moon's air is decided by MASS on exactly the same terms as a planet's — there is no
-                // separate moon rule any more. That is what lets a big moon of a gas giant come out with
-                // thicker air than Earth, which the spec asks for and our own solar system supports
-                // (Titan). A small moon still ends up with essentially nothing, but because it is light,
-                // not because it is filed under "moon". Tectonics keys on type + size like a planet's.
-                moon.hasMagneticField = AtmosphereRules.RollMagneticField(moon.type, moon.mass);
-                moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.surfaceSize);
-
-                SeedTerrain(moon);
-                // Feed the Water Level draw into the moon's real terrain AFTER SeedTerrain — TerrainVariance
-                // (called inside it) resets terrainParams, so setting elevation earlier would be discarded;
-                // this is exactly the ordering the planet path uses above. A -1 (no temperate roll) keeps
-                // the variance-rolled elevation untouched.
-                if (moonWaterLevel >= 0f)
-                {
-                    var wp = moon.terrainParams;
-                    wp.seaLevel = PlanetTerrainGenerator.SeaLevelFromWaterLevel(moonWaterLevel);
-                    moon.terrainParams = wp;
-                }
-                BiasHeat(moon, moon.distanceFromStar, currentStar);           // same climate band as its planet
-
-                // Rolled here, after BiasHeat, because the moon's FINAL heat is what decides how much of
-                // its ceiling boils off — and BiasHeat is the last thing to move it. Water loss follows,
-                // so a moon whose air is under the 0.6 floor loses the ocean the Water Level draw just
-                // gave it rather than keeping an impossible one.
-                moon.atmospheres = AtmosphereRules.RollAtmospheres(
-                    moon.type, moon.mass, moon.hasMagneticField,
-                    AtmosphereRules.TectonicBonus(moon), moon.terrainParams.heat);
-                AtmosphereRules.ApplyWaterLoss(moon);
-
-                TerraformVisuals.CaptureNatural(moon);   // re-capture the post-bias climate as this moon's natural state
-                // A large, warm, wet moon with an atmosphere starts out living, just like a qualifying
-                // planet; GeneratesWithBiosphere still returns false for barren/airless/ice/volcanic moons,
-                // so most moons stay sterile. Set before the bake so the first render agrees with the flag.
-                moon.biosphereActive = BiosphereRules.GeneratesWithBiosphere(moon);
-                // BEFORE GenerateSurface. The grid size is capped at half the host's (MapMetrics.SurfW),
-                // and that cap reads parentBody — so setting it afterwards meant the moon was BUILT at its
-                // uncapped size and then RENDERED and reported at the capped one. Two grids that disagree,
-                // which is the exact bug MapMetrics exists to prevent.
+                // Set BEFORE the pipeline so the moon's grid size cap (MapMetrics keys off parentBody) and
+                // its classification both see the relationship.
                 moon.parentBody = body;
+
+                // ONE PIPELINE, moons included. `isMoon: true` is the only difference — it keeps a tiny or
+                // cold moon a Moon rather than an Asteroid/Barren, but a moon that ends up massive,
+                // magnetised, temperate and wet classifies to the same temperate world a planet would.
+                // That is the spec's headline: a big moon of a gas giant in the habitable zone can be a
+                // Terran world.
+                float moonRel = moon.distanceFromStar / Mathf.Max(0.5f, TempReference(currentStar));
+                ApplyWorldPipeline(moon, moonRel, isMoon: true);
                 {
                     var msurf = PlanetTerrainGenerator.BuildStepped(moon, moon.terrainParams,
                                                                    PlanetTerrainGenerator.Octaves,
@@ -352,48 +279,51 @@ public class SolarSystemGenerator : MonoBehaviour
             best.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, best.orbitRadius);
         }
 
-        bool cool = currentStarType == StarType.M || currentStarType == StarType.K;
-        best.type = cool ? CelestialBodyType.OceanPlanet : CelestialBodyType.RockyPlanet;
-        // Re-roll Mass (and the size derived from it) for the NEW type: "best" may have been a gas giant
-        // that happened to orbit near the zone centre, and its 7-13 mass would read absurdly on a small
-        // rocky/ocean world. Done before atmosphere/tectonics below, which read surfaceSize.
-        best.mass = MassRules.ForType(best.type);
-        best.surfaceSize = MassRules.SurfaceSize(best.mass);
-        // Recomputed under the NEW type (atmosphere thickness depends on type, not just size) before the
-        // biosphere check below reads it. Tectonics is re-rolled too — "best" may originally have been
-        // whatever type happened to orbit near the zone centre (even a GasGiant/Asteroid, which never
-        // roll tectonics), so its old roll doesn't carry over to a freshly-retyped Rocky/Ocean world.
-        best.hasTectonics = TectonicsRules.Roll(best.type, best.surfaceSize);
-        SeedTerrain(best);
+        // FORCE THE ATTRIBUTES, NOT THE TYPE. The old path slammed the type to Ocean/Rocky and back-
+        // derived everything; now this world is given the attributes a habitable world HAS — a real
+        // terrestrial mass, a guaranteed magnetic field, water in the liquid band — and the classifier
+        // names it whatever those attributes amount to (Terran, Ocean, Continental, Swamp…). That is the
+        // same inversion the rest of generation just made, applied to the guaranteed-liveable world.
+        float bestRel = best.distanceFromStar / Mathf.Max(0.5f, TempReference(currentStar));
 
-        // RE-BIAS THE CLIMATE. SeedTerrain calls TerrainVariance, which rebuilds terrainParams from
-        // scratch — including heat — so the distance-based climate BiasHeat applied to this world during
-        // the main loop was just thrown away. That was already wrong (the one world guaranteed to be
-        // habitable was the one world whose temperature ignored its orbit); it matters more now, because
-        // heat is what decides how much atmosphere boils off, and rolling air against the pre-orbit
-        // variance would judge this world at a temperature it does not have.
+        // A comfortable Earth-to-super-Earth mass. "best" may have been a gas giant that happened to
+        // orbit near the zone centre, whose 7-13 mass would read absurdly on a habitable world.
+        best.mass = Random.Range(2, 6);
+        best.surfaceSize = MassRules.SurfaceSize(best.mass);
+
+        // The guarantees a liveable world cannot be allowed to lose on a coin flip: a magnetic field (or
+        // its atmosphere halves away under the 0.6 floor and it sterilises) and tectonics rolled fresh
+        // under a terrestrial mass.
+        best.hasMagneticField = true;
+        best.type = CelestialBodyType.RockyPlanet;             // provisional, for the tectonics/air rolls
+        best.hasTectonics = TectonicsRules.Roll(best.type, best.surfaceSize);
+
+        SeedTerrain(best);
+        // RE-BIAS THE CLIMATE. SeedTerrain rebuilds terrainParams (heat included) from scratch, throwing
+        // away the distance-based climate the main loop applied — so re-apply it, or this world's
+        // temperature would ignore its own orbit and its air would be rolled against a heat it never has.
         BiasHeat(best, best.distanceFromStar, currentStar);
 
-        // THE GUARANTEED HABITABLE WORLD GETS A GUARANTEED MAGNETIC FIELD.
-        //
-        // This body was force-retyped to Rocky/Ocean precisely so the system has somewhere livable. A
-        // failed field roll would halve its ceiling, dry it out under the 0.6 floor and sterilise it —
-        // defeating the entire purpose of the retype, intermittently, in maybe a third of systems. The
-        // one world we promise is habitable does not get to lose that promise on a coin flip.
-        best.hasMagneticField = true;
+        // WATER IN THE LIQUID BAND, guaranteed. A free roll could hand the one promised world a bone-dry
+        // or fully-drowned surface; this keeps it in the range that classifies to a living world.
+        {
+            var wp = best.terrainParams;
+            wp.seaLevel = Random.Range(0.35f, 0.75f);
+            best.terrainParams = wp;
+        }
+
         best.atmospheres = AtmosphereRules.RollAtmospheres(
             best.type, best.mass, true,
-            AtmosphereRules.TectonicBonus(best), best.terrainParams.heat);
+            AtmosphereRules.TectonicBonus(best), best.terrainParams.heat, bestRel);
         AtmosphereRules.ApplyWaterLoss(best);
-        // Re-captured because everything above — the retype, the re-seed, the re-bias — changed what this
-        // world's NATURAL state is. Without this, terraforming would measure it against the climate it
-        // had before it was rebuilt, and "restoring" it would mean undoing the world it actually is.
-        TerraformVisuals.CaptureNatural(best);
-        // This world was just force-retyped to a habitable Rocky/Ocean type specifically to guarantee the
-        // system has one — it deserves the same biosphere check as any other qualifying world, computed
-        // fresh under its NEW type rather than left at whatever its old type produced (or the false
-        // default), and before the surface below bakes so the rendered terrain agrees with the flag.
+
+        // NOW classify from the forced attributes, exactly as a normal world — and in the same order the
+        // main pipeline uses: biosphere set BEFORE AmplifyBiome (so the lush/cold biome amplifications can
+        // fire, see ApplyWorldPipeline), and CaptureNatural LAST (AmplifyBiome moves the climate).
+        best.type = WorldClassifier.Physics(best, bestRel, isMoon: false);
         best.biosphereActive = BiosphereRules.GeneratesWithBiosphere(best);
+        WorldClassifier.AmplifyBiome(best);
+        TerraformVisuals.CaptureNatural(best);
         {
             var bsurf = PlanetTerrainGenerator.BuildStepped(best, best.terrainParams,
                                                            PlanetTerrainGenerator.Octaves,
@@ -419,25 +349,77 @@ public class SolarSystemGenerator : MonoBehaviour
     // that was the single largest cost in the load, and it bought nothing: nothing between here and the
     // real bake reads body.surface (GenerateResources works off type and size), and the terrain
     // generator draws no UnityEngine.Random, so removing it cannot shift the shared RNG stream either.
-    CelestialBody MakeBody(CelestialBodyType type)
+    /// THE ATTRIBUTE-FIRST PIPELINE (Advanced Planet Generation spec), shared by planets AND moons.
+    ///
+    /// The type is no longer chosen up front and mass derived from it. Instead every attribute is set in
+    /// the spec's order and the type is CLASSIFIED from the result (WorldClassifier). One method for both
+    /// planets and moons is the whole point: a moon that ends up massive enough, magnetised, temperate
+    /// and wet classifies to the same temperate world a planet would — the spec's headline example.
+    ///
+    /// The caller must already have set `body.mass` and `body.distanceFromStar`. Everything from surface
+    /// size onward happens here, in order:
+    ///   size -> provisional type (mass alone) -> field -> tectonics -> terrain seed -> climate bias ->
+    ///   water level -> atmosphere (with the inner-orbit cut) -> water loss -> CLASSIFY -> biome amplify
+    ///   -> capture natural -> biosphere.
+    void ApplyWorldPipeline(CelestialBody body, float rel, bool isMoon)
     {
-        CelestialBody body = new(type) { id = _idCounter++ };
-        // The body's MASS VALUE (MassRules.ForType) and its grid/visual size DERIVED from it
-        // (MassRules.SurfaceSize): a gas giant is born heavy (7-13) and so large, an asteroid tiny. Type was
-        // already chosen by RollBodyByTemperature; the per-type mass ranges keep size and type consistent
-        // (heavy -> gas giant -> big) without a separate size roll.
-        body.mass = MassRules.ForType(type);
         body.surfaceSize = MassRules.SurfaceSize(body.mass);
+
+        // PROVISIONAL type from mass alone. Gas-giant and asteroid are decided by size outright, and the
+        // atmosphere roll needs to know which so it hands a giant its deep air and a pebble none; a
+        // terrestrial mass gets Rocky as a stand-in until the real classification at the end.
+        body.type = ProvisionalType(body.mass, isMoon);
+
         body.hasMagneticField = AtmosphereRules.RollMagneticField(body.type, body.mass);
         body.hasTectonics = TectonicsRules.Roll(body.type, body.surfaceSize);
-        SeedTerrain(body);
-        // ATMOSPHERE IS DELIBERATELY *NOT* ROLLED HERE. It depends on heat (boil-off), and the heat
-        // SeedTerrain leaves behind is only the pre-orbit variance — BiasHeat has not run yet, because
-        // this body does not have a distance from its star until the caller places it. Rolling here
-        // would judge a world's air against a temperature it does not have, so an inner furnace would
-        // keep the thick atmosphere it should have lost. The caller does it, right after BiasHeat.
-        ResourceGenerator.GenerateResources(body);
-        return body;
+
+        SeedTerrain(body);                                     // seed, variance, ridge boost, capture
+        BiasHeat(body, body.distanceFromStar, currentStar);    // climate follows distance
+
+        SetBandWater(body, rel);                               // water level appropriate to the band
+
+        // Atmosphere against the FINAL heat, cut for a close-in orbit. Water loss then trims any liquid a
+        // thin-aired world could not hold (ice is spared — see ApplyWaterLoss).
+        body.atmospheres = AtmosphereRules.RollAtmospheres(
+            body.type, body.mass, body.hasMagneticField,
+            AtmosphereRules.TectonicBonus(body), body.terrainParams.heat, rel);
+        AtmosphereRules.ApplyWaterLoss(body);
+
+        // THE TYPE, at last, from everything above.
+        body.type = WorldClassifier.Physics(body, rel, isMoon);
+
+        // BIOSPHERE BEFORE BIOME AMPLIFICATION. AmplifyBiome leans a world's terrain toward its
+        // descriptive class (swamp wetter, tundra colder, desert drier), and that class — read from
+        // WorldClassifier.Describe — only resolves to the lush/cold biomes when the world is actually
+        // ALIVE. Setting biosphereActive first is what lets those cases fire at all; with it still at its
+        // default false, every temperate world read as a lifeless desert/barren and only the desert
+        // amplification ever ran. CaptureNatural then has to come LAST, because AmplifyBiome moves heat and
+        // moisture and the natural climate terraforming lerps from must be the amplified one.
+        body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body);
+        WorldClassifier.AmplifyBiome(body);                    // make a flavoured world look like itself
+        TerraformVisuals.CaptureNatural(body);                 // the real natural climate, post-amplify
+    }
+
+    /// The size-only physics class, used as a stand-in until the full classification. Gas giants and
+    /// asteroids ARE just a matter of mass; everything in between is provisionally terrestrial.
+    static CelestialBodyType ProvisionalType(float mass, bool isMoon)
+    {
+        if (mass >= WorldClassifier.GasGiantMassFloor) return CelestialBodyType.GasGiant;
+        if (mass < WorldClassifier.AsteroidMassCeil) return isMoon ? CelestialBodyType.Moon : CelestialBodyType.Asteroid;
+        return CelestialBodyType.RockyPlanet;
+    }
+
+    /// The water level a body is BORN with, before atmosphere loss trims it — set by the orbital band per
+    /// the spec: near-dry inside the habitable zone (too hot, and the air is being stripped), a free
+    /// full-range roll in the temperate and cold bands so everything from a desert to an ocean world (and
+    /// ice worlds out cold) can appear.
+    static void SetBandWater(CelestialBody body, float rel)
+    {
+        var p = body.terrainParams;
+        p.seaLevel = rel < WorldClassifier.HotRel
+            ? Random.Range(0.02f, 0.15f)     // scorched inner: near-dry
+            : Random.Range(0.10f, 1.00f);    // temperate & cold: the whole range of coverage
+        body.terrainParams = p;
     }
 
     // Stable terrain identity — must be set before generating any surface so both the low-res grid
@@ -500,100 +482,6 @@ public class SolarSystemGenerator : MonoBehaviour
     /// genuine across-the-board loosening, and brighter stars widen from there.
     static float SystemSpread(StarData star)
         => 1.18f * Mathf.Max(1f, Mathf.Lerp(1f, StarDatabase.FluxScale(star), 0.70f));
-
-    // Body type by ACTUAL temperature (physical distance vs the star's warmth) rather than ordinal
-    // slot. Oceans only ever form in the temperate band, so no water worlds hug the star.
-    //
-    // `waterLevel` (out param) is -1 except in the temperate band, where it's a genuine, independent
-    // Water Level roll (0 driest .. 1 fully covered) that the CALLER then feeds straight into the body's
-    // actual terrain (see GenerateSystem, PlanetTerrainGenerator.ElevationFromWaterLevel). This is the
-    // one band where the request's "planet type should emerge from Water Level" is safe to do exactly:
-    // the cutoffs below (0.55 / 0.15) are chosen so a uniform roll reproduces the IDENTICAL Ocean/Rocky/
-    // Barren proportions (45%/40%/15%) the old bare `r` draw already had — so this is a like-for-like
-    // rewire (the type and the world's actual water coverage now come from the SAME number, instead of
-    // two unrelated rolls that could disagree, e.g. an "OceanPlanet" that TerrainVariance happened to
-    // roll bone-dry), not a balance change. Gas Giant / Ice / Asteroid frequency (the bands below) still
-    // comes from Size/temperature-band weighting exactly as before — reworking those into a fully
-    // attribute-driven pick would change how often each type appears across the whole galaxy, which
-    // needs real playtesting to calibrate and isn't attempted here (see the dev-request planning doc).
-    CelestialBodyType RollBodyByTemperature(float distance, StarData star, float sizeRank, out float waterLevel)
-    {
-        float rel = distance / Mathf.Max(0.5f, TempReference(star));   // <1 hot, ~1 temperate, >1 cold
-        float r = Random.value;
-        waterLevel = -1f;
-
-        if (rel < 0.45f)                       // scorching — right by the star
-            return r < 0.65f ? CelestialBodyType.VolcanicPlanet : CelestialBodyType.BarrenPlanet;
-
-        if (rel < 0.85f)                       // hot
-        {
-            if (r < 0.45f) return CelestialBodyType.RockyPlanet;
-            if (r < 0.75f) return CelestialBodyType.VolcanicPlanet;
-            return CelestialBodyType.BarrenPlanet;
-        }
-
-        if (rel <= 1.5f)                       // temperate (habitable band) — the ONLY place oceans form
-        {
-            waterLevel = r;   // the SAME draw that decides the type also becomes its water coverage
-            if (waterLevel > 0.55f) return CelestialBodyType.OceanPlanet;
-            if (waterLevel > 0.15f) return CelestialBodyType.RockyPlanet;
-            return CelestialBodyType.BarrenPlanet;
-        }
-
-        if (rel < 3f)                          // cool — sizeRank sorts these by size (small -> large)
-        {
-            // Same proportions as the old r-based roll (Barren 10% / Rocky 25% / Ice 45% / GasGiant 20%),
-            // just ordered by sizeRank so the most massive fifth become the gas giants and the lightest
-            // tenth the barren dwarfs — and each type's own Mass band (MassRules) then makes sizes agree.
-            if (sizeRank < 0.10f) return CelestialBodyType.BarrenPlanet;
-            if (sizeRank < 0.35f) return CelestialBodyType.RockyPlanet;
-            if (sizeRank < 0.80f) return CelestialBodyType.IcePlanet;
-            return CelestialBodyType.GasGiant;
-        }
-
-        // Cold outer system — again size-sorted: the biggest are gas giants, the smallest asteroids. Same
-        // proportions as before (GasGiant 50% / Ice 30% / Barren 12% / Asteroid 8%).
-        if (sizeRank < 0.08f) return CelestialBodyType.Asteroid;
-        if (sizeRank < 0.20f) return CelestialBodyType.BarrenPlanet;
-        if (sizeRank < 0.50f) return CelestialBodyType.IcePlanet;
-        return CelestialBodyType.GasGiant;
-    }
-
-    // A moon's world-type, rolled from the same attributes a planet uses (temperature + a Water Level
-    // draw) but gated by its small mass. `rel` is the moon's temperature ratio — its parent's solar
-    // distance over the star's temperate reference, exactly as RollBodyByTemperature reads it (<1 hot,
-    // ~1 temperate, >1 cold).
-    //
-    // Only a LARGE moon (enough gravity to hold an atmosphere and keep surface water) can become a
-    // temperate or ocean world — the request's own "a moon ... that has an atmosphere, has liquid water,
-    // and is within the Habitable zone ... could very likely spawn as a temperate rocky type". A hot
-    // orbit can turn any moon volcanic (Io's tidal volcanism needs no atmosphere), a cold one icy
-    // (Europa's frozen shell likewise), and everything else stays the airless Moon rock that used to be
-    // every moon's only look. Gas Giant and Asteroid are deliberately never rolled here — a moon is
-    // neither. `waterLevel` is -1 except in the temperate band, where it's the same 0..1 draw the caller
-    // feeds into the moon's real water coverage, so a bare-minimum ocean moon reads as islands and a
-    // maxed one is fully drowned, identically to a planet.
-    static CelestialBodyType RollMoonType(float rel, int surfaceSize, out float waterLevel)
-    {
-        waterLevel = -1f;
-        bool large = surfaceSize >= AtmosphereRules.LargeMoonSurfaceSize;   // can hold air + surface water
-        float r = Random.value;
-
-        if (rel < 0.85f)                       // hot orbit: volcanic (Io) or bare sun-baked rock
-            return r < 0.5f ? CelestialBodyType.VolcanicPlanet : CelestialBodyType.Moon;
-
-        if (rel <= 1.5f)                       // temperate band — the only place a moon can be a living world
-        {
-            if (!large) return CelestialBodyType.Moon;   // too little mass to hold the air/water it needs
-            waterLevel = r;                    // the SAME draw decides the type AND the moon's water coverage
-            if (waterLevel > 0.6f)  return CelestialBodyType.OceanPlanet;
-            if (waterLevel > 0.25f) return CelestialBodyType.RockyPlanet;
-            return CelestialBodyType.BarrenPlanet;
-        }
-
-        // Cold outer orbit: an icy shell (frozen water needs no atmosphere) or airless rock.
-        return r < 0.55f ? CelestialBodyType.IcePlanet : CelestialBodyType.Moon;
-    }
 
     // Bias a world's terrain temperature by how close it is to the star: closer = hotter climate,
     // further = colder. Call before generating the surface so biomes reflect it.

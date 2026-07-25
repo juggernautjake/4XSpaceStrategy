@@ -2732,6 +2732,13 @@ public class PlanetViewWindow : MonoBehaviour
         Header("TERRAIN SANDBOX");
         Note("<color=#FFBF4D>Dev Mode.</color> Regenerates this world's surface live. Every map reads the same terrainParams, so what you see here is what the world becomes.");
 
+        // The CLASSIFICATION these sliders produce, live. Generation sets the attributes and the type is
+        // derived from them (WorldClassifier); this is the same derivation, so a developer can dial in
+        // Mass, Atmosphere, Water and Temperature and watch the world-class change — the spec's
+        // "prerequisite settings represented with sliders" made visible.
+        var cls = Card();
+        Stat(cls, "Classifies as", () => $"<color=#DCE6F0>{WorldClassifier.DescribeLive(body)}</color>");
+
         var p = body.terrainParams;
         SliderRow("Feature scale", "continent size", 0.4f, 3f, p.scale, v => SetTerrain(0, v));
         // Water Level and Relief are now SEPARATE axes. Water drives seaLevel (slot 5) and only floods;
@@ -2781,7 +2788,21 @@ public class PlanetViewWindow : MonoBehaviour
         Stat(air, "Atmospheres", () => $"{body.atmospheres:0.#} ({AtmosphereRules.Describe(body)})");
         Stat(air, "Ceiling", () => $"{AtmosphereRules.Ceiling(body):0.#} — mass {body.mass:0.#}" +
                                    (body.hasMagneticField ? "" : ", halved with no magnetic field") +
-                                   (body.hasTectonics ? $", +{AtmosphereRules.TectonicBonus(body):0.#} from tectonics" : ""));
+                                   (body.hasTectonics ? $", +{AtmosphereRules.TectonicBonus(body):0.#} from tectonics" : "") +
+                                   (AtmosphereRules.InnerOrbitRetention(WorldClassifier.RelOf(body)) < 0.999f ? ", cut close to the star" : ""));
+
+        // What TERRAFORMING can reach, which is the ceiling above cut again by the heat the world is
+        // actually at — the limit air projects clamp to. Shown separately rather than folded into the
+        // line above because the two differ for a reason worth seeing: the ceiling is structural (mass,
+        // core, orbit), this one is reversible, and watching it climb as the Temperature slider comes
+        // down is the clearest demonstration of why shades come before processors.
+        Stat(air, "Terraformable to", () =>
+        {
+            float sustainable = AtmosphereRules.SustainableCeiling(body);
+            float heatKeep = AtmosphereRules.HeatRetention(Mathf.Max(0f, body.mass), body.terrainParams.heat);
+            return $"{sustainable:0.#}" + (heatKeep < 0.999f ? $" — {(1f - heatKeep) * 100f:F0}% boils off at this temperature" : "")
+                   + $" (headroom {AtmosphereRules.Headroom(body):0.#})";
+        });
 
         SliderRow("Atmosphere", "vacuum <-> gas-giant deep", 0f, 12f, body.atmospheres, v =>
         {

@@ -91,7 +91,8 @@ public static class AtmosphereRules
         return Mathf.Clamp01(v - Mathf.Floor(v));
     }
 
-    /// The most atmosphere this world could hold, before heat is taken into account.
+    /// The most atmosphere this world could hold, before HEAT boil-off is taken into account — but AFTER
+    /// the orbital capacity cut, because that is a hard limit rather than a transient loss (see below).
     public static float Ceiling(CelestialBody b)
     {
         if (b == null) return 0f;
@@ -99,7 +100,15 @@ public static class AtmosphereRules
 
         float baseline = Mathf.Max(0f, b.mass);
         if (!b.hasMagneticField) baseline *= NoFieldPenalty;
-        return baseline + TectonicBonus(b);
+
+        // Spec §3: a body orbiting CLOSER than the habitable zone has its atmosphere CAPACITY lowered,
+        // harder the nearer the star — the stellar wind and radiation of a close orbit strip air faster
+        // than temperature alone. Unlike heat boil-off (transient, applied at roll time and reversible by
+        // cooling the world), this is a standing cap: it is the limit terraforming reads, and it is what
+        // stops a scorched inner world being pumped back up to its full mass-based air without first moving
+        // its orbit outward. InnerOrbitRetention is 1 at and beyond the zone's inner edge, so temperate and
+        // outer worlds are unaffected.
+        return (baseline + TectonicBonus(b)) * InnerOrbitRetention(WorldClassifier.RelOf(b));
     }
 
     /// The same ceiling, from loose values — for generation, which is deciding these attributes in the
@@ -139,6 +148,34 @@ public static class AtmosphereRules
         return 1f - loss;
     }
 
+    // ---- What terraforming can actually reach ---------------------------------------------------
+
+    /// The most air a world can HOLD AS IT STANDS TODAY: its ceiling, cut by the heat it is actually at.
+    ///
+    /// This is the limit TERRAFORMING reads, and it is deliberately stricter than Ceiling. Ceiling is the
+    /// standing structural cap — mass, magnetic field, tectonics, orbital distance. Heat is the reversible
+    /// one: generation applies it at roll time (RollAtmospheres), so a hot world is already born with less
+    /// air than its ceiling. Without the same cut here, an atmosphere project could pump that world
+    /// straight back up to a ceiling physics says it cannot keep — the identical bug the inner-orbit
+    /// review fix closed, one term over.
+    ///
+    /// Being reversible is the point: shading a world cools it, which RAISES this number, which is what
+    /// makes "hang the shades, THEN build the air" a real dependency rather than flavour text.
+    public static float SustainableCeiling(CelestialBody b)
+    {
+        if (b == null) return 0f;
+        return Ceiling(b) * HeatRetention(Mathf.Max(0f, b.mass), b.terrainParams.heat);
+    }
+
+    /// How much room is left between the air a world HAS and the air it can keep. Zero means an
+    /// atmosphere project would deliver nothing at all, whatever it cost.
+    public static float Headroom(CelestialBody b)
+        => b == null ? 0f : Mathf.Max(0f, SustainableCeiling(b) - b.atmospheres);
+
+    /// Less headroom than this and a project is not worth starting — it is below the one-decimal
+    /// resolution atmospheres are quantized and displayed at, so the readout would not even move.
+    public const float MinUsefulGain = 0.1f;
+
     // ---- Generation ----------------------------------------------------------------------------
 
     /// What a freshly-generated body is born with: its ceiling, cut by heat, with a little variance so
@@ -151,6 +188,32 @@ public static class AtmosphereRules
 
         float kept = ceiling * HeatRetention(mass, heat) * Random.Range(0.85f, 1.0f);
         return Quantize(kept);
+    }
+
+    /// The same roll, then cut for a world orbiting CLOSER TO THE STAR than the habitable zone.
+    ///
+    /// The spec's step 3: "If a celestial body is closer to the sun than the habitable zone, the Maximum
+    /// Atmosphere capacity will be lowered drastically the closer it is." Heat retention already thins a
+    /// hot world's air, but this is a separate, stronger effect — the stellar wind and radiation of a
+    /// close orbit strip an atmosphere faster than temperature alone would (Mercury holds essentially
+    /// none despite not being that much hotter than a thick-aired Venus further out).
+    ///
+    /// `rel` is distance / the star's Earth-warmth distance. At or beyond the zone's inner edge there is
+    /// no penalty; inside it, capacity falls off toward the star.
+    public static float RollAtmospheres(CelestialBodyType type, float mass, bool magneticField,
+                                        float tectonicBonus, float heat, float rel)
+    {
+        float a = RollAtmospheres(type, mass, magneticField, tectonicBonus, heat);
+        return Quantize(a * InnerOrbitRetention(rel));
+    }
+
+    /// Fraction of atmosphere a world keeps against the stellar wind at its orbital distance. 1 at and
+    /// beyond the habitable zone's inner edge; falling toward the star inside it.
+    public static float InnerOrbitRetention(float rel)
+    {
+        const float ZoneInner = 0.85f;   // matches WorldClassifier.HotRel
+        if (rel >= ZoneInner) return 1f;
+        return Mathf.Lerp(0.12f, 1f, Mathf.Clamp01(rel / ZoneInner));
     }
 
     /// One decimal. Atmospheres are a headline statistic shown next to Mass, and "3.4 atmospheres" reads
@@ -186,6 +249,15 @@ public static class AtmosphereRules
     public static void ApplyWaterLoss(CelestialBody b)
     {
         if (b == null) return;
+
+        // FROZEN WATER IS ICE, AND ICE DOES NOT BOIL OFF. A cold, airless world keeps its water as a
+        // frozen shell (Europa, Pluto) — the "thin air strips the oceans" rule only applies where the
+        // water would be LIQUID and could actually evaporate. Without this, every cold outer world with a
+        // big water roll dried to bare rock the instant its (naturally thin) air fell under the floor, so
+        // ice worlds could barely generate. Type-independent temperature, for the same reason
+        // WorldClassifier uses it — the type is not settled yet when this runs.
+        float c = PlanetTemperature.BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, CelestialBodyType.RockyPlanet);
+        if (c < 0f) return;
 
         float keep = WaterRetention(b.atmospheres);
         if (keep >= 1f) return;

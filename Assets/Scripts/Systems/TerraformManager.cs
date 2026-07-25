@@ -90,14 +90,18 @@ public class TerraformManager : MonoBehaviour
         if (p.applies != null && !p.applies(b, s))
         { reason = "not possible on this kind of world"; return false; }
 
-        // Microbial Seeding is the one project whose success genuinely depends on the world's physical
-        // state (water level + temperature) rather than just its type — warn before the player spends
-        // resources on a seeding attempt that's going to fail.
-        if (t == TerraformProjectType.MicrobialSeeding)
-        {
-            string biosphereWarning = BiosphereRules.MicrobialSeedingWarning(b);
-            if (biosphereWarning != null) { reason = biosphereWarning; return false; }
-        }
+        // The fault is real and this project addresses it — but would it actually ACHIEVE anything here?
+        // Air projects on a world that cannot hold air, water projects on one that cannot hold water,
+        // seeding on ground that cannot take it. Each refusal names the project that lifts the cap, so a
+        // disabled button teaches the chain (shades → processors, core → shield, migration → air) rather
+        // than just refusing. See TerraformFeasibility.
+        //
+        // NOT waived in Dev Mode, unlike the research and resource gates above: those are about what the
+        // player has EARNED, and skipping them is the point of a sandbox. This one is about what the
+        // world can physically do, and forcing it through would leave the project marked complete having
+        // changed nothing — which is exactly the confusing state this check exists to prevent.
+        string blocked = TerraformFeasibility.Warning(b, t);
+        if (blocked != null) { reason = blocked; return false; }
 
         int m = TerraformProjects.MetalCost(p, b), e = TerraformProjects.EnergyCost(p, b), w = TerraformProjects.WaterCost(p, b);
         if (!GameMode.DevMode &&
@@ -336,6 +340,13 @@ public class TerraformManager : MonoBehaviour
     // does clear the poison. Without this the fault would be "fixed" but still diagnosed.
     static void ApplyPhysicalEffect(CelestialBody b, TerraformProjectType t)
     {
+        // AIR FIRST, for every project that moves it. This is the half that was missing: Core Ignition's
+        // description has always promised "it raises the roof, and the atmosphere projects fill the room",
+        // but nothing anywhere wrote b.atmospheres outside generation — so the roof went up, the room
+        // stayed empty, and the standing caps (no field, close orbit) capped a number terraforming could
+        // never move in the first place. Now they bite.
+        ApplyAirChange(b, t);
+
         switch (t)
         {
             case TerraformProjectType.HaulWater:
@@ -421,6 +432,46 @@ public class TerraformManager : MonoBehaviour
             // WorldRemodelling is handled in Complete (dithered over the project's duration and finalized
             // there — see the remodel block), so it intentionally does nothing here.
         }
+    }
+
+    // Move a world's ATMOSPHERE, for the projects whose job that is. The amount is a fraction of what
+    // this world can sustainably hold (TerraformFeasibility.AirGainFraction), so one project reads the
+    // same on a thin world as on a heavy one.
+    //
+    // The clamp is where the whole atmosphere model finally closes: air can never be pushed past
+    // SustainableCeiling, which folds in mass, the magnetic field, tectonic outgassing, the inner-orbit
+    // stellar-wind cut and the heat the world is currently at. Every one of those is something a
+    // different project lifts — which is what turns a list of independent projects into an order you
+    // have to work out (cool it, restart its core, move it out, THEN build the air).
+    static void ApplyAirChange(CelestialBody b, TerraformProjectType t)
+    {
+        if (b == null || !TerraformFeasibility.ChangesAir(t)) return;
+        // Neither has an atmosphere in the sense these projects mean: an asteroid holds nothing at all,
+        // and a gas giant IS its atmosphere — there is no surface envelope to thicken or bleed.
+        if (b.type == CelestialBodyType.Asteroid || b.type == CelestialBodyType.GasGiant) return;
+
+        float frac = TerraformFeasibility.AirGainFraction(t);
+        float cap = AtmosphereRules.SustainableCeiling(b);
+        float target = b.atmospheres + cap * frac;
+
+        // Never past the cap when adding. The Max against what the world already HAS matters for the
+        // world that is over its own sustainable cap — one that has since heated up, or drifted inward —
+        // where a bare Min would have an air-BUILDING project quietly strip air instead. A project that
+        // cannot help must do nothing, not harm; CanStart has already refused it in that state anyway.
+        if (frac > 0f) target = Mathf.Min(target, Mathf.Max(cap, b.atmospheres));
+
+        float before = b.atmospheres;
+        b.atmospheres = AtmosphereRules.Quantize(Mathf.Max(0f, target));
+        if (Mathf.Approximately(before, b.atmospheres)) return;
+
+        // Thin air cannot hold surface water or life. Bleeding a world below the 0.6 floor really does
+        // cost it its oceans and whatever was living in them — the same rule generation applies, reused
+        // rather than restated so the two can never disagree about where the line is.
+        AtmosphereRules.ApplyWaterLoss(b);
+
+        // Air is a greenhouse term (PlanetTemperature reads atmosphereThickness), so changing it changes
+        // the world's temperature, and temperature is half of what habitability is scored on.
+        RescoreType(b);
     }
 
     // Physically convert a world to another type and re-score everything that depends on it. Also

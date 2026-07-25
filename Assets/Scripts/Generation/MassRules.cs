@@ -13,23 +13,51 @@ using UnityEngine;
 // small-body / planet scale.
 public static class MassRules
 {
-    // The mass a freshly-generated body of this TYPE is born with. Ranges chosen so that SurfaceSize()
-    // below reproduces roughly the world sizes the game had before (gas giants biggest, and Earth-like
-    // rocky worlds around 2). Moons are NOT rolled here — they derive from their host (see ForMoon).
-    public static float ForType(CelestialBodyType type)
+    // Mass rolled from the ORBITAL BAND and a size rank, not from a chosen type — the first step of the
+    // attribute-first pipeline (see WorldClassifier). `rel` is distance / the star's Earth-warmth
+    // distance; `sizeRank` is a 0..1 roll that orders bodies within a band from small to large.
+    //
+    // The band shapes what masses are LIKELY, matching where each kind of world sits in a real system:
+    //   * the cool/cold outer bands can produce gas-giant-scale masses (7..13) at the large end and
+    //     asteroids (<0.5) at the small end — Jupiter out past the frost line, rubble beyond that;
+    //   * the hot and temperate inner bands stay terrestrial (1..7), because a gas giant does not form
+    //     that close to a star and an asteroid there would just be a scorched pebble.
+    //
+    // The type is NOT decided here — WorldClassifier reads the finished mass (plus field, air, water…)
+    // and names it. This only decides how heavy the body is, which is the one thing that has to come
+    // first because the field odds, the atmosphere ceiling and the gas-giant/asteroid cutoffs all read
+    // it.
+    public static float ByBand(float rel, float sizeRank)
     {
-        switch (type)
+        // Outer system: the full range, size-ordered. A big sizeRank out here is a gas giant; a tiny one
+        // is an asteroid. The power curve biases toward the small end so giants stay the minority they
+        // are in a real system.
+        if (rel > WorldClassifier.HotRel && rel > WorldClassifier.TemperateRelMax)
         {
-            case CelestialBodyType.GasGiant:       return Random.Range(7, 14);      // 7..13, ~10 typical
-            case CelestialBodyType.OceanPlanet:    return Random.Range(2, 8);       // 2..7
-            case CelestialBodyType.IcePlanet:      return Random.Range(2, 8);       // 2..7
-            case CelestialBodyType.RockyPlanet:    return Random.Range(1, 7);       // 1..6 (Earth = 2)
-            case CelestialBodyType.VolcanicPlanet: return Random.Range(1, 6);       // 1..5
-            case CelestialBodyType.BarrenPlanet:   return Random.Range(1, 6);       // 1..5
-            case CelestialBodyType.Asteroid:       return Random.Range(1, 5) * 0.1f; // 0.1..0.4
-            default:                               return 2f;                        // fallback (incl. bare Moon)
+            float t = sizeRank * sizeRank;                 // bias small
+            if (t < 0.06f) return QuantizeSmall(Random.Range(0.1f, 0.4f));   // asteroid
+            return Quantize(Mathf.Lerp(0.6f, 13f, t));
         }
+
+        // Temperate band: terrestrial, Earth-ish, occasionally a super-Earth. No gas giants in the
+        // habitable zone — that is what keeps the zone full of worlds you can actually land on.
+        if (rel > WorldClassifier.HotRel)
+            // Capped JUST BELOW the gas-giant floor, not at it. Lerp's top of exactly 7 combined with
+            // Random.value's inclusive 1.0 could land a mass-7 body — which WorldClassifier reads as a gas
+            // giant — inside the habitable zone, the one band meant to guarantee landable worlds. 6.99
+            // floors to a mass-6 super-Earth, so the zone stays terrestrial.
+            return Quantize(Mathf.Lerp(1f, WorldClassifier.GasGiantMassFloor - 0.01f, sizeRank));
+
+        // Hot / scorching inner band: terrestrial and generally smaller (the volatiles that would have
+        // made it big boiled off), but still a real world.
+        float h = sizeRank * sizeRank;                     // bias small
+        if (h < 0.04f) return QuantizeSmall(Random.Range(0.1f, 0.4f));       // a scorched pebble
+        return Quantize(Mathf.Lerp(1f, 5f, sizeRank));
     }
+
+    // Whole numbers at 1+, first-decimal below 1 — the request's mass scheme, shared by every roll.
+    static float Quantize(float m) => m >= 1f ? Mathf.Floor(m) : Mathf.Round(m * 10f) / 10f;
+    static float QuantizeSmall(float m) => Mathf.Clamp(Mathf.Round(m * 10f) / 10f, 0.1f, 0.9f);
 
     // A moon's mass from its HOST planet's mass: at most 40% of the host, weighted so reaching that cap is
     // rare (most moons are small). The cap was 50%, which left a gas giant's big moons reading almost as

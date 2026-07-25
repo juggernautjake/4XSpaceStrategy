@@ -27,11 +27,11 @@ public static class TectonicsRules
                 return Random.value < Mathf.Lerp(0.10f, 0.30f, Mathf.InverseLerp(LargeMoonSurfaceSize, 13f, surfaceSize));
 
             default:
-                // "~1/3 of the time... more likely for the larger planets" (request's own words, and its
-                // own note that this ratio is a starting guess to adjust later). surfaceSize now derives
-                // from Mass (MassRules.SurfaceSize); the chance spans a band
-                // centred close to 1/3 rather than a flat 33% for every size, so bigger worlds really are
-                // more likely, and small ones are less likely without ever being impossible.
+                // Spec §2: tectonics on terrestrial worlds ~1/5 of the time, "more likely for the larger
+                // planets" (and flagged as a starting guess to tune later). surfaceSize derives from Mass
+                // (MassRules.SurfaceSize), so the chance is size-scaled rather than flat: ~0.20 at the small
+                // end — a typical Earth-mass world, which is the spec's 1/5 — climbing toward 0.55 for the
+                // largest, so bigger worlds really are more likely without small ones ever being impossible.
                 float sizeFactor = Mathf.InverseLerp(5f, 23f, surfaceSize);
                 float chance = Mathf.Lerp(0.20f, 0.55f, sizeFactor);
                 return Random.value < chance;
