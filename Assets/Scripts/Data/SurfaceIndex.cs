@@ -57,7 +57,7 @@ public static class SurfaceIndex
         {
             case SurfaceIndexKind.Mineral: return Mineral(f, t);
             case SurfaceIndexKind.Heat: return Heat(b, f);
-            case SurfaceIndexKind.Fertile: return Fertile(f);
+            case SurfaceIndexKind.Fertile: return Fertile(b, f);
             case SurfaceIndexKind.Wind: return Wind(b, f);
             case SurfaceIndexKind.Solar: return Solar(b, f);
             case SurfaceIndexKind.Water: return Water(b, f, x, y);
@@ -135,8 +135,19 @@ public static class SurfaceIndex
     // ---- FERTILE: where farmland pays ----
     // Crops want warmth, water and flat ground — all three, which is why this multiplies rather than
     // adds. A soaking tundra and a warm desert are both useless; you need the overlap.
-    static float Fertile(PlanetTerrainGenerator.Sample f)
+    static float Fertile(CelestialBody b, PlanetTerrainGenerator.Sample f)
     {
+        // NO BIOSPHERE, NO FERTILITY — ZERO, not "a bit". Fertility is not a property of dirt: it is soil,
+        // and soil is the product of things having lived and died in it. A sterile world has warm, flat,
+        // even damp ground and nothing whatever to farm, so the index reads nothing at all until a
+        // biosphere exists (Microbial Seeding is the project that starts one — see BiosphereRules).
+        //
+        // It used to score a dead world on warmth and flatness alone. The moisture flooring in
+        // SampleNormalized held the number down on Rocky worlds, but only there and only partly, so
+        // barren, ice and volcanic worlds surveyed as usefully farmable and a Rocky one still read ~25%
+        // on ground where nothing could grow.
+        if (b == null || !b.biosphereActive) return 0f;
+
         if (f.water) return 0.02f;
 
         // A temperate optimum: too cold OR too hot both kill it.
@@ -389,7 +400,19 @@ public static class SurfaceIndex
 
     /// Is this tile in the best `fraction` of this world for this index?
     public static bool IsTopFraction(CelestialBody b, SurfaceIndexKind k, int x, int y, float fraction)
-        => k != SurfaceIndexKind.None && Get(b, k, x, y) >= TopFractionThreshold(b, k, fraction);
+    {
+        if (k == SurfaceIndexKind.None || b?.surface == null) return false;
+
+        // AN INDEX THAT IS ZERO EVERYWHERE HAS NO BEST TILES — the best 10% of nothing is nothing.
+        //
+        // Without this, the threshold on such a world is itself 0 and the `>=` below is true for every
+        // tile, so the best-sites overlay lights up the entire map. Fertile on a world with no biosphere
+        // is exactly that case now that it reads a flat zero: the index correctly says "you cannot farm
+        // here" while the overlay said "farm anywhere".
+        if (Best(b, k) <= 0f) return false;
+
+        return Get(b, k, x, y) >= TopFractionThreshold(b, k, fraction);
+    }
 
     public static float Best(CelestialBody b, SurfaceIndexKind k)
         => b?.surface == null || k == SurfaceIndexKind.None ? 0f : GetStats(b, k).max;
@@ -415,7 +438,7 @@ public static class SurfaceIndex
         {
             case SurfaceIndexKind.Mineral: return "Broken, raised crust — mountains, canyons and exposed seams. Mines want the highest they can get.";
             case SurfaceIndexKind.Heat: return "Heat in the CRUST, not the air: volcanoes and geyser fields. A volcano on an ice world is still that world's best geothermal site.";
-            case SurfaceIndexKind.Fertile: return "Warm AND wet AND flat — farmland needs all three at once, not any one of them.";
+            case SurfaceIndexKind.Fertile: return "Warm AND wet AND flat — farmland needs all three at once, not any one of them. Needs a LIVING world above all: no biosphere, no soil, and the index reads nothing.";
             case SurfaceIndexKind.Wind: return "Needs AIR: no atmosphere, no weather. Within that — high open ground, coasts and poles.";
             case SurfaceIndexKind.Solar: return "Thin air and long polar days. Dry ground is bright ground; a world far from its star is dim everywhere.";
             case SurfaceIndexKind.Water: return "Flowing water: rivers and coasts WITH relief to drop through. A flat open sea has no head to work with.";

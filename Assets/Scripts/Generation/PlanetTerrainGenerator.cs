@@ -55,6 +55,44 @@ public static class PlanetTerrainGenerator
     public static float WaterLevelFromSeaLevel(float seaLevel) => Mathf.Clamp01(seaLevel);
     public static float SeaLevelFromWaterLevel(float waterLevel) => Mathf.Clamp01(waterLevel);
 
+    // ---- Where the sea stands, in landHeight units --------------------------------------------------
+    //
+    // THE ONE RULE: water level moves the WATERLINE, never the land. Every classifier below gets the
+    // ground's real height plus this offset, and adds the offset ONLY to its water tests. So filling a
+    // world drowns its lowest ground first and leaves the shape of everything above the water untouched;
+    // draining it uncovers exactly the terrain that was always there.
+    //
+    // 0.5 must map to 0. Every threshold in this file — Terran's 0.36 shoreline, Ice's 0.3, Barren's salt
+    // flats — was tuned against a neutral sea, and a neutral sea has to keep meaning what it meant.
+    //
+    // THE MIDDLE IS THE OLD MAPPING, EXACTLY: `sea = waterLevel - 0.5`, slope 1. Every world already
+    // generated or saved sits in here, and its coastline has to come back identical — a mapping that
+    // merely "felt right" would silently reflood the whole galaxy on the next load.
+    //
+    // Only the last few percent at each END is stretched, and only because a slope-1 mapping cannot quite
+    // reach: landHeight spans roughly -0.5..1.5 at maximum Elevation Range, so a linear −0.5 still leaves
+    // water lying in the deepest basins of a world set to NO water, and a linear +0.5 still leaves summits
+    // dry on one set to FULL. Inside the ramp zone the ends run out to clear both extremes, so 0 really is
+    // a dry world and 1 really is a drowned one, at any relief setting.
+    const float SeaShiftDry = -1.1f;      // below the deepest basin at max relief
+    const float SeaShiftDrowned = 1.6f;   // above the highest summit at max relief
+    const float SeaRamp = 0.08f;          // how much of each end is stretched
+
+    public static float SeaShift(float waterLevel)
+    {
+        float w = Mathf.Clamp01(waterLevel);
+
+        // The dry end: from the linear value at the top of the ramp, out to fully drained at 0.
+        if (w < SeaRamp)
+            return Mathf.Lerp(SeaShiftDry, SeaRamp - 0.5f, w / SeaRamp);
+
+        // The drowned end: from the linear value at the bottom of the ramp, out to fully flooded at 1.
+        if (w > 1f - SeaRamp)
+            return Mathf.Lerp((1f - SeaRamp) - 0.5f, SeaShiftDrowned, (w - (1f - SeaRamp)) / SeaRamp);
+
+        return w - 0.5f;
+    }
+
     // Back-compat shims for callers that still speak in elevation. A world loaded from a save made
     // before seaLevel existed had its water baked into its elevation amplitude, so this recovers the
     // water level that amplitude used to mean.
@@ -416,16 +454,19 @@ public static class PlanetTerrainGenerator
         // value at u=0, by construction rather than by luck. Wrapped on a globe the two edges are the same
         // meridian, so anything sampled on a flat plane leaves a hard seam there — a continent chopped in
         // half, a coastline that stops dead, a climate band that jumps. See WrapU.
-        // RELIEF around the mid-line, then the SEA slid across it — two independent things.
+        // RELIEF around the mid-line, and the SEA standing at its own height across it — two independent
+        // things that never touch each other.
         //
         // `p.elevation` scales the land's variation about 0.5, so raising it makes deeper valleys AND
-        // higher peaks while leaving the average ground where it was. `seaLevel` then shifts the whole
-        // field against the classifiers' fixed water thresholds: a higher sea pushes everything down
-        // past them, drowning the lowlands first and finally the summits, without ever changing how
-        // tall those summits are relative to each other.
+        // higher peaks while leaving the average ground where it was. `seaLevel` says nothing about the
+        // ground at all: it only decides how high the water stands against it, so raising it drowns the
+        // lowlands first and finally the summits without moving a single contour.
         //
-        // Multiplying the raw field (the old behaviour) did both jobs with one number and did neither
-        // properly: "more water" was really "less relief", so a maximally wet world was a flat one.
+        // Two earlier versions of this got it wrong in two different ways. Multiplying the raw field made
+        // "more water" mean "less relief", so a maximally wet world was a flat one. Subtracting the sea
+        // from the field before classifying kept the relief but slid the LAND thresholds with it, so
+        // flooding a world demoted its mountains to highlands and draining one promoted its plains into
+        // mountains. The land and the waterline are separate values now, and only water tests see both.
         float rawElev = WrapU(u, freq * 2f, 1f, fy, seed, seed * 1.3f, octaves);
 
         // THE LAND'S OWN HEIGHT — relief only, sea level nowhere in it. This is the terrain's real
@@ -440,13 +481,17 @@ public static class PlanetTerrainGenerator
         // out-of-range values are meaningful — a 1.4 summit really is higher than a 1.0 one.
         float landHeight = 0.5f + (rawElev - 0.5f) * p.elevation;
 
-        // HEIGHT RELATIVE TO THE SEA — what the classifiers read to decide water from land.
+        // WHERE THE SEA STANDS, in the same units as landHeight. The classifiers get the ground's REAL
+        // height and this line separately, and only their WATER tests add it — so raising the Water Level
+        // floods the lowest ground first and leaves every land threshold (hills, highlands, mountains,
+        // badlands, salt flats) exactly where it was.
         //
-        // Deliberately NOT clamped at the bottom. The classifiers only ever ask `elev < someThreshold`,
-        // so a deeply submerged peak reading -0.3 is water exactly as -0.0 would be — but clamping to
-        // zero would have flattened every underwater feature into one indistinguishable seabed, and at
-        // maximum sea level that is the entire planet.
-        float elevation = landHeight - (p.SeaLevelOrNeutral - 0.5f);
+        // This used to subtract the sea from the elevation field before classifying, which moved the
+        // land thresholds too: filling a world's oceans quietly demoted its mountains to highlands and
+        // its highlands to plains, and draining it promoted plains into mountains. The terrain appeared
+        // to change shape as the water moved, when the only thing that should change is how much of it
+        // is under water.
+        float seaShift = SeaShift(p.SeaLevelOrNeutral);
         float moisture  = WrapU(u, freq * 2f,        1.3f, fy * 1.3f, seed + 31f, seed + 17f,  octaves) * p.moisture;
         float ridge     = WrapU(u, freq * 2f,        2.2f, fy * 2.2f, seed + 91f, seed + 53f,  octaves) * p.ridge;
 
@@ -533,7 +578,8 @@ public static class PlanetTerrainGenerator
         // `body.biosphereActive` is threaded in because CORAL IS ALIVE. A reef on a sterile world is the
         // same category error as a forest on one — it was being drawn purely from "shallow and warm",
         // so a dead ocean world grew coral shallows with nothing in the galaxy to have built them.
-        TerrainType t = Classify(classifyType, elevation, moisture, temperature, ridge, lat, body.biosphereActive);
+        TerrainType t = Classify(classifyType, landHeight, seaShift, moisture, temperature, ridge, lat,
+                                 body.biosphereActive);
 
         // A raised, actively-converging tile can be a volcano rather than a plain peak. Deterministic
         // (heatNoise is a stable field), so it's a sparse scatter along the belt, and only on Rocky worlds
@@ -714,22 +760,26 @@ public static class PlanetTerrainGenerator
     }
 
     // ---- Biome classification (deterministic; identical logic at any resolution) ----
-    static TerrainType Classify(CelestialBodyType planet, float elev, float moist, float temp, float ridge, float lat,
-                                bool living)
+    /// `elev` is the ground's REAL height (landHeight) and never moves with the water. `sea` is where the
+    /// waterline stands in those same units — see SeaShift. Classifiers add `sea` to their WATER tests
+    /// and to the shoreline band that hugs them, and to nothing else: a mountain is a mountain at any
+    /// tide, and is simply submerged once the water is over it.
+    static TerrainType Classify(CelestialBodyType planet, float elev, float sea, float moist, float temp,
+                                float ridge, float lat, bool living)
     {
         switch (planet)
         {
             case CelestialBodyType.GasGiant:       return GasGiant(lat, elev, moist);
             case CelestialBodyType.VolcanicPlanet: return Volcanic(elev, temp, ridge, lat);
-            case CelestialBodyType.IcePlanet:      return Ice(elev, moist, temp, ridge, lat);
+            case CelestialBodyType.IcePlanet:      return Ice(elev, sea, moist, temp, ridge, lat);
             // `moist` is the jitter field: independent of latitude, so it can actually break up a
             // latitude threshold. See PolarIceEdge.
-            case CelestialBodyType.OceanPlanet:    return OceanWorld(elev, temp, lat, moist, living);
-            case CelestialBodyType.BarrenPlanet:   return Barren(elev, ridge);
+            case CelestialBodyType.OceanPlanet:    return OceanWorld(elev, sea, temp, lat, moist, living);
+            case CelestialBodyType.BarrenPlanet:   return Barren(elev, sea, temp, ridge);
             case CelestialBodyType.Moon:
-            case CelestialBodyType.Asteroid:       return Airless(elev, temp, ridge);
+            case CelestialBodyType.Asteroid:       return Airless(elev, sea, temp, ridge);
             case CelestialBodyType.RockyPlanet:
-            default:                               return Terran(elev, moist, temp, ridge);
+            default:                               return Terran(elev, sea, moist, temp, ridge);
         }
     }
 
@@ -753,7 +803,7 @@ public static class PlanetTerrainGenerator
         return TerrainType.GeyserField;
     }
 
-    static TerrainType Ice(float elev, float moist, float temp, float ridge, float lat)
+    static TerrainType Ice(float elev, float sea, float moist, float temp, float ridge, float lat)
     {
         // Same liquid-water threshold Terran freezes its oceans at (elev<0.36 -> FrozenSea below 0.22),
         // so warming an Ice world through terraforming melts these tiles at the point Terran would
@@ -765,7 +815,7 @@ public static class PlanetTerrainGenerator
         // mountain-building fault line (or a stray ridge-noise peak) crossing the low band would raise
         // Mountains straight out of the frozen sea. A drowned fault stays sea, as Earth's mid-ocean
         // ridges do; only faults over high ground fold up into ranges.
-        if (elev < 0.3f)   return frozen ? TerrainType.FrozenSea : TerrainType.Ocean;
+        if (elev < 0.3f + sea) return frozen ? TerrainType.FrozenSea : TerrainType.Ocean;
         if (ridge > 0.8f)  return TerrainType.Mountains;
         if (elev > 0.72f)  return frozen ? TerrainType.Glacier : TerrainType.Highlands;
         if (moist > 0.72f) return frozen ? TerrainType.CrystalField : TerrainType.Lake;
@@ -816,11 +866,19 @@ public static class PlanetTerrainGenerator
     /// reads as the coldest part of an already-frozen world rather than as its own separate band.
     static float PolarSnowEdge(float noise) => Belt(0.62f, noise);
 
-    static TerrainType OceanWorld(float elev, float temp, float lat, float noise, bool living)
+    static TerrainType OceanWorld(float elev, float sea, float temp, float lat, float noise, bool living)
     {
-        if (elev > 0.80f) return TerrainType.Mountains;
-        if (elev > 0.70f) return TerrainType.Island;
-        if (elev > 0.64f) return TerrainType.Beach;
+        // WHAT IS ABOVE THE WATER, and then what that ground is. The waterline is the only part that
+        // moves: once a tile is out of the sea, its own height decides whether it reads as a mountain, an
+        // island or a beach, at the same fixed heights every other world uses. Drain an ocean world and
+        // its exposed seabed reads as the low ground it always was, rather than every tile being promoted
+        // to a mountain because the sea left.
+        if (elev >= 0.64f + sea)
+        {
+            if (elev > 0.80f) return TerrainType.Mountains;
+            if (elev > 0.70f) return TerrainType.Island;
+            return TerrainType.Beach;
+        }
 
         // The polar ice edge, perturbed rather than flat.
         //
@@ -846,22 +904,44 @@ public static class PlanetTerrainGenerator
         // is also why an ocean world is where they cluster — a drowned world is nearly all shallows near
         // its islands, which is the spec's "very high water levels ... can spawn algae in its oceans or
         // coral reefs".
-        if (living && elev < 0.40f && temp > 0.6f) return TerrainType.Reef;
+        if (living && elev < 0.40f + sea && temp > 0.6f) return TerrainType.Reef;
         return TerrainType.Ocean;
     }
 
-    static TerrainType Barren(float elev, float ridge)
+    static TerrainType Barren(float elev, float sea, float temp, float ridge)
     {
+        // A BARREN WORLD CAN HOLD WATER. It is barren for want of life and air, not for want of a basin —
+        // and until now this classifier had no water terrain in it at all, so the Water Level slider had
+        // nowhere to put the sea. All it could do was push more ground under the old fixed `elev < 0.3`
+        // line and widen the SALT FLATS: pouring an ocean onto a dead world made it drier-looking.
+        //
+        // Water first, before ridge, exactly as Terran and Ice do it — a drowned fault line stays sea
+        // rather than folding into a mountain range that happens to be underwater.
+        if (elev < 0.3f + sea) return temp < 0.22f ? TerrainType.FrozenSea : TerrainType.Ocean;
+
         if (ridge > 0.82f) return TerrainType.Mountains;
         if (ridge > 0.7f)  return TerrainType.Canyon;
         if (elev > 0.66f)  return TerrainType.Highlands;
+
+        // SALT FLATS ARE WHAT A DRIED SEABED LEAVES BEHIND — so this threshold stays FIXED, and the water
+        // test above does all the moving. The two together give exactly the right behaviour for free:
+        //
+        //   * Dry the world out and the sea retreats below this line, so the flats spread across the
+        //     seabed it uncovered. The less water, the more evaporite — which is what a salt flat IS.
+        //   * Flood it and the sea rises past this line, so there are no flats at all. Correct: you
+        //     cannot have a dried lake bed under a lake.
+        //
+        // The old code had this line and no water test at all, so the only thing the Water Level slider
+        // could do on a barren world was push more ground under a FIXED salt-flat threshold. Adding water
+        // made the world look drier, which is exactly backwards.
         if (elev < 0.3f)   return TerrainType.SaltFlat;
+
         if (ridge > 0.5f)  return TerrainType.Badlands;
         if (elev > 0.55f)  return TerrainType.MetallicCrust;
         return TerrainType.Wasteland;
     }
 
-    static TerrainType Airless(float elev, float temp, float ridge)
+    static TerrainType Airless(float elev, float sea, float temp, float ridge)
     {
         if (ridge > 0.85f) return TerrainType.Highlands;
         if (elev > 0.7f)   return TerrainType.MetallicCrust;
@@ -872,17 +952,24 @@ public static class PlanetTerrainGenerator
         // never actually read here — every moon showed frost in its low ground regardless of how hot its
         // orbit ran. Same freeze threshold Terran/Ice already use, so a moon's look agrees with its own
         // °C reading (PlanetTemperature) the same way a planet's does.
-        if (elev < 0.4f)   return temp < 0.22f ? TerrainType.Ice : TerrainType.CrackedGround;
+        // An airless body holds no LIQUID water — nothing here becomes Ocean at any water level, which is
+        // why this line reads Ice rather than sea. But ice on an airless world is real (Europa, Pluto:
+        // AtmosphereRules.ApplyWaterLoss deliberately spares frozen water for exactly this reason), so the
+        // frozen band still moves with the world's water: more water, more ice in the low ground.
+        if (elev < 0.4f + sea) return temp < 0.22f ? TerrainType.Ice : TerrainType.CrackedGround;
         return TerrainType.Barren;
     }
 
-    static TerrainType Terran(float elev, float moist, float temp, float ridge)
+    static TerrainType Terran(float elev, float sea, float moist, float temp, float ridge)
     {
         // Open water freezes when the world runs cold — so cooling a world (orbital shades, core cooling,
         // moving it outward) visibly ices its seas over, and warming one thaws them back. Temperature is
         // the same value PlanetTemperature reads, so the map and the °C readout always agree.
-        if (elev < 0.36f) return temp < 0.22f ? TerrainType.FrozenSea : TerrainType.Ocean;
-        if (elev < 0.40f) return temp < 0.22f ? TerrainType.Snow : TerrainType.Beach;
+        //
+        // These two are the only lines here that move with the water: the sea itself, and the strip of
+        // beach that hugs it. Everything below is ground, and ground does not care where the tide is.
+        if (elev < 0.36f + sea) return temp < 0.22f ? TerrainType.FrozenSea : TerrainType.Ocean;
+        if (elev < 0.40f + sea) return temp < 0.22f ? TerrainType.Snow : TerrainType.Beach;
 
         if (ridge > 0.82f) return TerrainType.Mountains;
         if (elev > 0.74f)  return TerrainType.Highlands;
