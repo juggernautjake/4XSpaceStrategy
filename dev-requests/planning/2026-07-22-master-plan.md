@@ -1,7 +1,16 @@
 # Master plan — every request, in slices
 
-**Compiled 2026-07-22.** Covers everything asked for from the Genesis Sequence brief onward.
+**Compiled 2026-07-22. Checkboxes brought back in line with the code on 2026-07-26.**
+Covers everything asked for from the Genesis Sequence brief onward.
 `[x]` = built and pushed · `[~]` = partly built · `[ ]` = not started
+
+> **This doc went stale almost immediately** and its boxes lied for four days: Parts D and E were both
+> written as "not started" while they were in fact shipped (`d1f196f` Build Mode, `9886afe` the research
+> ladder), as was C1 (`01102d4`). If you are reading it to find out what is left, **check the code** —
+> that is how the 2026-07-26 pass established the list below.
+>
+> **As of 2026-07-26 exactly one item here is open, and it is one only you can do: C3's ultrawide check.**
+> Everything else in this document is built.
 
 > **Nothing here is compiled by the agent that writes it** — there is no Unity in that environment.
 > Every slice is reviewed by independent agents instead, which has caught real bugs on every pass,
@@ -85,42 +94,84 @@
 - [x] **`TerrainMorph`** — drives an *actual* body's material, then hands back its real surface.
 - [x] **`GenesisSequence`** — the nine beats in one readable place.
 
-### Slice C1 — Wire the sequence into the live boot path  ← NEXT
-- [ ] `GameManager.GenerateGalaxyBody` calls `GenesisSequence` instead of `LoadingScreen.Finale`
-- [ ] `FrameHomeStar` as soon as the home system's visuals exist
-- [ ] Bar keeps reporting real progress underneath the live camera
-- [ ] Verify the handover: no snap, no tilt, no zoom jump
+### Slice C1 — Wire the sequence into the live boot path
+- [x] `GameManager.GenerateGalaxyBody` calls `GenesisSequence` instead of `LoadingScreen.Finale`
+- [x] `FrameHomeStar` as soon as the home system's visuals exist
+- [x] Bar keeps reporting real progress underneath the live camera
+- [x] Verify the handover: no snap, no tilt, no zoom jump — *as far as reading it can verify; the pose is
+      re-solved every frame and `Release` hands the rig the framing the last beat composed*
+
+Shipped as `01102d4` "The intro films the real world".
 
 **This is the change that makes the intro real.** After it, the planet you watch form *is* the
 homeworld, the moons *are* your moons on their generated orbits, and the world gets a real terminator
 from its real star — the cue that it is orbiting at all.
 
 ### Slice C2 — Retire the preview stage
-- [ ] Delete the private stage: sphere, corona quads, key light, `RenderTexture`, `RawImage`
-- [ ] Delete `AlignToReal` / `MatchChildRotation` — they exist only to make a fake match the real
-- [ ] Delete the cosmetic `MoonPreview` system
-- [ ] Delete the cross-fade handoff and `HandoffScreenFraction`
-- [ ] ~600 lines out of `LoadingScreen`
+- [x] Delete the private stage: sphere, corona quads, key light, `RenderTexture`, `RawImage`
+- [x] Delete `AlignToReal` / `MatchChildRotation` — they exist only to make a fake match the real
+- [x] Delete the cosmetic `MoonPreview` system
+- [x] Delete the cross-fade handoff and `HandoffScreenFraction`
+- [x] ~600 lines out of `LoadingScreen` — **it came to 1,881.** The estimate counted the stage and the
+      cross-fade but not the second implementation of world generation's visuals hanging off them: the
+      binary/trinary pop-out (`StepSunCluster`, companion suns, coronae, `LoadingBillboard`), the
+      tile-by-tile terrain morph (`MorphStages`, `BuildStage`, `PaintStage`, `BuildJitter`), the cosmetic
+      moons, the atmosphere shell, and the whole dead `Finale`. `LoadingScreen` is 2,326 lines → 445.
+
+`Finale`, `HandoffScreenFraction`, `SetHomePlanet`, `SetHomeMoons` and `StagedMoonCount` were already dead
+— C1 stopped calling them and nothing else ever did.
+
+**Knock-on to `GameManager`, which is the part to look at if this fails to compile.** `LoadingScreen.Subject`
+existed only to tell the preview which model to show, so it and the 3-argument `Report` are gone and its
+nine call sites now use `Report(t, stage)`. `SetHomeCluster` and the `PopBeat`/`PopGrow` hold that paced the
+pop-out are gone with it.
+
+**One visible change for the player, and it is deliberate:** the first ~60% of the load is now the
+starfield and the bar rather than a spinning stand-in. There was never a real galaxy to film during that
+stretch — the stage's whole reason for existing — and the honest version of "nothing to show yet" is not
+showing a stand-in for it. If you want something there, that is a new request, not a regression.
 
 ### Slice C3 — Scale and framing spec
 - [x] Homeworld ≈ 9% of viewport height at 35% width (resolution- and aspect-independent)
 - [x] One compression curve for relative sizes (star ≈ 1.9× the homeworld)
 - [x] 1.0× → 1.3× → 1.0× across the closing beats
-- [ ] Verify on an ultrawide — the solve is height-based for exactly this reason, unverified in practice
+- [ ] **Verify on an ultrawide — THIS IS THE ONE OPEN ITEM IN THE DOCUMENT, and it is yours.** It cannot be
+      done by reading: the solve is height-based specifically so aspect ratio does not move the subject's
+      size, and the only way to know it holds is to run it at 21:9 and look. What to watch: the homeworld
+      should stay the same apparent size as it does at 16:9, and only the horizontal anchor (35% across)
+      should place it further left.
 
 ### Slice C4 — Conveying the orbit
 - [x] Terminator sweep — free, once the real planet is lit by its real star
 - [x] Starfield parallax — exists
-- [ ] Slight camera drift during the forming beat
+- [x] Slight camera drift during the forming beat — `GenesisCamera.Drift(WorldForms)`, a 5% push in and a
+      4% rise over the beat, smoothstepped. A **push and a rise, not an arc**: yaw is pinned to
+      `SequenceYaw` for every beat precisely so nothing swings at the handover, so drifting the bearing
+      would spend the one invariant the framing spec is built on. Both persist when the drift ends and are
+      cleared by the next `Frame`/`EaseTo`, which recompose from the live pose — unwinding them would walk
+      the shot backwards at the exact moment the world finishes forming. `Release` hands the rig the
+      *drifted* fraction, so a skip mid-creep cannot pop the planet.
 
 ### Slice C5 — Skip and abort
-- [ ] Skip button, always available
-- [ ] `Esc` aborts to the end state (`GenesisSequence.Abort` exists; not yet bound)
-- [ ] Never runs when loading a save
+- [x] Skip button, always available — bottom right of the panel, live for the whole load. Generation
+      itself cannot be skipped (the galaxy has to exist first), so pressed early it means "don't play the
+      intro when you get there", which is what the first check in `Play` does with it.
+- [x] `Esc` aborts to the end state. No contest for the key: `EscapeMenu` already refuses to open while
+      `GameManager.IsGenerating`, which covers the whole load.
+- [x] Never runs when loading a save — **already true, and no code was added for it.** `SaveLoadMenu.DoLoad`
+      goes to `GameStateSerializer.Apply` and never touches `GenerateGalaxyAsync`, so the sequence has no
+      path into a load. Verified rather than built.
+
+**The mechanism, because it is not the obvious one.** A skip is a static flag (`RequestSkip` /
+`SkipRequested`), checked at the top of every beat, and *not* a `StopCoroutine`. `Play` is not run as a
+coroutine on `GenesisSequence` at all — `GameManager` pumps the enumerator itself with
+`while (play.MoveNext())` so it can walk the bar across the sequence's own clock — and `StopAllCoroutines`
+cannot reach an enumerator somebody else is driving. `Abort`'s own call to it was therefore already a no-op
+against `Play`; its doc comment now says so.
 
 ---
 
-## PART D — Build Mode overhaul  *(not started)*
+## PART D — Build Mode overhaul  *(SHIPPED — `d1f196f` "Build Mode foundation: drawn footprints, Labor, and a per-planet build queue". The boxes below were never ticked; the code is there. D6 remains deliberately deferred.)*
 
 Drawn footprints instead of fixed tetrominoes; Labor; per-planet build queues.
 
@@ -151,7 +202,7 @@ blocking; freed Labor flows to the next queued project.
 
 ---
 
-## PART E — Survey and Deep Research  *(not started)*
+## PART E — Survey and Deep Research  *(SHIPPED — `9886afe` "Survey once; Deep Research three times, each earned". The boxes below were never ticked; the code is there.)*
 
 Basic survey once. "Deep survey" → **Deep Research**, also once, with tiers II and III unlocked by tech.
 
@@ -186,8 +237,25 @@ research level, or your capital loses overlays it has always had on turn one.
 
 ## Order I intend to build in
 
-1. **C1** — wire the sequence in. Everything else in the intro is downstream of it.
-2. **C2** — retire the preview stage, once C1 is proven.
-3. **D1–D5** — Build Mode. Largest gameplay feature outstanding.
-4. **E1–E5** — the research ladder.
-5. **C3–C5** — framing verification, drift, skip/abort.
+*All done, in a different order than planned — D and E went before C2–C5.*
+
+1. ~~**C1** — wire the sequence in.~~ `01102d4`
+2. ~~**D1–D5** — Build Mode.~~ `d1f196f`
+3. ~~**E1–E5** — the research ladder.~~ `9886afe`
+4. ~~**C2** — retire the preview stage.~~ 2026-07-26
+5. ~~**C4, C5** — drift, skip/abort.~~ 2026-07-26
+6. **C3** — the ultrawide check. Needs a running build; over to you.
+
+---
+
+## What is left, in one place (2026-07-26)
+
+* **C3's ultrawide check** — yours, needs a build.
+* **D6** — ship and station parts. Explicitly deferred, not forgotten.
+* **Shape changes to buildings that are already placed** — deferred on save safety: changing a placed
+  building's `shape` moves its footprint under saves that already have one standing. Only new buildings got
+  their spec'd tetromino shapes.
+
+Nothing else. **None of the 2026-07-26 work is compiled** — there is no Unity in the environment it was
+written in. Build before playing; a `LoadingScreen`/`GameManager` compile error is the likeliest failure,
+because C2 deleted 1,881 lines and changed nine call sites across the two files.

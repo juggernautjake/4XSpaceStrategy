@@ -64,6 +64,10 @@ public class GameManager : MonoBehaviour
         // made a second click hard to reach, which is not the same thing.
         if (generating) return;
         generating = true;
+        // A skip belongs to the load that was on screen when it was pressed. Cleared HERE rather than
+        // when the sequence starts, because the Skip button is live throughout generation and a request
+        // made during it has to survive until the sequence exists to honour it.
+        GenesisSequence.ClearSkip();
         StartCoroutine(GenerateGalaxyRoutine(systemCount, avgPlanets, onDone));
     }
 
@@ -133,39 +137,28 @@ public class GameManager : MonoBehaviour
 
         int count = GalaxyGenerator.ClampSystems(systemCount);
         var galaxy = GalaxyGenerator.Begin(solarSystemGenerator, avgPlanets);
-        // Subject.None, not Galaxy: this frame is immediately followed by the first Subject.Star report,
-        // so showing the galaxy model here means one frame of it appearing and vanishing — a flash, which
-        // is the exact artifact the star/planet split below exists to remove.
-        screen?.Report(0.03f, "Seeding " + galaxy.name, LoadingScreen.Subject.None);
+        screen?.Report(0.03f, "Seeding " + galaxy.name);
         yield return null;
 
-        // The home star CLUSTER itself was rolled in Begin — the whole reason that roll moved out of
-        // ForceHomeWorld, which runs last. So the preview can show the real star(s) from the very first
-        // frame — including the pop-out if the home turns out to be a binary or trinary — and only the
-        // NAME has to wait for system 0 to be built.
-        screen?.SetHomeCluster(galaxy.homeStars);
-
-        // The load is split in HALF by subject, deliberately: stars for the first 50%, the homeworld
-        // forming for the second. Alternating star/planet per system meant neither ever held the screen
-        // long enough to watch — the pop-out and the tile reveal are both several seconds of animation,
-        // and both were being interrupted by the next system before they finished.
+        // The systems' share of the bar. The load is still split roughly in half — the systems being
+        // generated, then the homeworld being filmed — but nothing here stages a preview any more: the
+        // first half is the bar and the starfield, and the second is GenesisSequence on the real camera.
         const float SystemsShare = 0.47f;
 
-        // A floor on how long the star half lasts, in wall-clock seconds.
+        // A floor on how long the first half lasts, in wall-clock seconds.
         //
         // The bar is split evenly by PROGRESS, but progress and time are not the same thing: a small
-        // galaxy can generate every system in a second or two, and the star half would flash past before
-        // the pop-out finished — or, on a single-sun game, before the player had really looked at it.
-        // Padding to a floor makes the two halves feel even as well as measure even.
+        // galaxy can generate every system in a second or two, and the whole first half of the load —
+        // including the one caption that names the player's home star — would flash past unread. Padding
+        // to a floor makes the two halves feel even as well as measure even.
         const float MinStarPhase = 6f;
         float starPhaseBegan = Time.unscaledTime;
         for (int i = 0; i < count; i++)
         {
-            // Announce the subject BEFORE the work, so the preview shows what is about to be built rather
-            // than what has just finished — during a long step the caption and the model would otherwise
-            // both be describing the previous system.
+            // Announce it BEFORE the work, so the caption describes what is about to be built rather than
+            // what has just finished — during a long step it would otherwise name the previous system.
             screen?.Report(0.03f + SystemsShare * (i / (float)count),
-                           $"Forming star system  {i + 1} / {count}", LoadingScreen.Subject.Star);
+                           $"Forming star system  {i + 1} / {count}");
             yield return null;
 
             // Stepped: this yields once per WORLD, not once per system, so a system with six planets and
@@ -174,30 +167,15 @@ public class GameManager : MonoBehaviour
             var step = GalaxyGenerator.AddSystemStepped(galaxy, solarSystemGenerator, i, count);
             while (step.MoveNext()) yield return step.Current;
 
-            // A binary/trinary home needs real time on screen to show its pop-out (LoadingScreen.
-            // StepSunCluster) — a companion sun after a beat, a third after another — and system
-            // generation alone may finish in well under that on a small galaxy. Held HERE, while the
-            // Subject is still Star, rather than after the caption below switches to Subject.Planet and
-            // the pop-out is no longer even on screen to hold.
-            if (i == 0 && galaxy.homeStars.Count > 1)
-            {
-                float popDuration = LoadingScreen.PopBeat * (galaxy.homeStars.Count - 1) + LoadingScreen.PopGrow + 0.5f;
-                yield return new WaitForSecondsRealtime(popDuration);
-            }
-
             // The home system's star gets NAMED on screen. Passing it as the stage string rather than
-            // having SetHomeStar write the caption is deliberate: Report always sets the caption, so a
-            // caption written anywhere else is overwritten by the very next report — which is exactly
-            // what happened the first time this was wired up, and the name never appeared at all.
-            // STILL Subject.Star. The whole first half belongs to the suns — switching to Planet here is
-            // what used to cut the pop-out short and leave the placeholder planet on screen for most of
-            // the load, before the real homeworld even existed to show.
+            // writing the caption from anywhere else is deliberate: Report always sets the caption, so a
+            // caption written elsewhere is overwritten by the very next report — which is exactly what
+            // happened the first time this was wired up, and the name never appeared at all.
             string caption = (i == 0 && galaxy.systems.Count > 0)
                 ? $"{galaxy.systems[0].name} — your home star"
                 : $"Forming star system  {i + 1} / {count}";
 
-            screen?.Report(0.03f + SystemsShare * ((i + 1) / (float)count),
-                           caption, LoadingScreen.Subject.Star);
+            screen?.Report(0.03f + SystemsShare * ((i + 1) / (float)count), caption);
             // Give the screen a couple of frames to actually animate in.
             //
             // One `yield return null` per system means one rendered frame per system, and a bar cannot
@@ -216,16 +194,16 @@ public class GameManager : MonoBehaviour
             if (i == 0 && count > 1) yield return new WaitForSecondsRealtime(1.1f);
         }
 
-        // Let the star half run its full time before handing over, so the suns are actually watched
+        // Let the first half run its full time before handing over, so its captions are actually read
         // rather than glimpsed. Costs nothing on a large galaxy, where generation already outlasts it.
         while (Time.unscaledTime - starPhaseBegan < MinStarPhase)
         {
-            screen?.Report(0.03f + SystemsShare, "The system settles", LoadingScreen.Subject.Star);
+            screen?.Report(0.03f + SystemsShare, "The system settles");
             yield return null;
         }
 
         // ---- Second half: the homeworld ----
-        screen?.Report(0.50f, "Settling the home world", LoadingScreen.Subject.Star);
+        screen?.Report(0.50f, "Settling the home world");
         yield return null;
         GalaxyGenerator.Finish(galaxy, SpeciesManager.Current, count);
 
@@ -300,11 +278,11 @@ public class GameManager : MonoBehaviour
             GenesisSequence.Instance.FrameHomeStar(Galaxy.Home);
 
             string homeCaption = $"{homePlanet.name} — your homeworld";
-            screen?.Report(0.62f, homeCaption, LoadingScreen.Subject.None);
+            screen?.Report(0.62f, homeCaption);
 
             // The bar is walked across the remaining span by the sequence's own clock, so what the
             // player watches fill IS the world being built rather than a number racing ahead of it.
-            var play = GenesisSequence.Instance.Play(homePlanet, () => screen?.Report(1f, "", LoadingScreen.Subject.None));
+            var play = GenesisSequence.Instance.Play(homePlanet, () => screen?.Report(1f, ""));
 
             float total = GenesisSequence.TotalSeconds(homePlanet);
             float elapsed = 0f;
@@ -316,7 +294,7 @@ public class GameManager : MonoBehaviour
                 // world's name sits under a finished bar for the whole travel-to-centre beat.
                 if (elapsed < total)
                     screen?.Report(Mathf.Lerp(0.62f, 0.99f, total > 0f ? elapsed / total : 1f),
-                                   homeCaption, LoadingScreen.Subject.None);
+                                   homeCaption);
                 yield return play.Current;
             }
         }

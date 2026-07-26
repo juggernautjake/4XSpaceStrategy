@@ -101,6 +101,38 @@ public class GenesisSequence : MonoBehaviour
     /// True while the intro is playing. The player has no control and nothing should act on input.
     public static bool Running { get; private set; }
 
+    // ---- Skip -------------------------------------------------------------------------------------
+    //
+    // A FLAG, NOT A StopCoroutine. Play is not run as a coroutine on this component: GameManager pumps
+    // the enumerator itself with `while (play.MoveNext())` so it can walk the loading bar across the
+    // sequence's own clock. StopAllCoroutines cannot reach an enumerator somebody else is driving, so
+    // the only thing that can end this early is the pump noticing — which is what the checks in Play do.
+    //
+    // STATIC, AND SETTABLE BEFORE THE SEQUENCE STARTS. The Skip button is on screen for the whole load,
+    // and the first half of that load is generation — real work, which cannot be skipped because the
+    // galaxy has to exist before anybody can be handed it. Pressed during generation this means "hand it
+    // over the moment it exists", and Play's first check does exactly that.
+    static bool skipRequested;
+
+    /// The player has asked to get on with it. Honoured at the top of every beat.
+    public static bool SkipRequested => skipRequested;
+
+    public static void RequestSkip() => skipRequested = true;
+
+    /// Cleared when a new galaxy starts generating, NOT when the sequence begins — a skip pressed during
+    /// generation has to survive until Play is reached, which is the whole point of it being pressable
+    /// there. See GameManager.GenerateGalaxyAsync.
+    public static void ClearSkip() => skipRequested = false;
+
+    void Update()
+    {
+        // Esc is the keyboard half of the Skip button. There is no contest for the key here: EscapeMenu
+        // deliberately refuses to open while GameManager.IsGenerating (see the note on its GameRunning),
+        // and that flag covers the whole load including this sequence.
+        if (!Input.GetKeyDown(KeyCode.Escape)) return;
+        if (Running || (GameManager.Instance != null && GameManager.Instance.IsGenerating)) RequestSkip();
+    }
+
     /// Frame the home star. Called as soon as the home system's visuals exist, which is long before the
     /// homeworld's surface is generated — the star is what the first half of the load has to look at.
     public void FrameHomeStar(StarSystemData home)
@@ -127,6 +159,23 @@ public class GenesisSequence : MonoBehaviour
 
         Running = true;
 
+        // One place that ends the sequence early, so every beat bails out in exactly the same way. A
+        // local function rather than a method because it closes over `home` and `onBarComplete` — the two
+        // things "finish this properly" needs, and the two things only this invocation knows.
+        bool Skipping()
+        {
+            if (!skipRequested) return false;
+            // Complete the bar on the way out. Otherwise it is left part-filled for the frame or two
+            // before the panel closes, which reads as the load having failed rather than been skipped.
+            onBarComplete?.Invoke();
+            Abort(home);
+            return true;
+        }
+
+        // Checked before anything moves. The Skip button is live throughout generation, so a request may
+        // already be waiting by the time the homeworld exists to film.
+        if (Skipping()) yield break;
+
         // ============================================================================================
         // START THE CLOCK. THE WORLD HAS TO BE MOVING.
         //
@@ -151,6 +200,7 @@ public class GenesisSequence : MonoBehaviour
 
         // --- The star, alone ---
         yield return Wait(StarHold);
+        if (Skipping()) yield break;
 
         // --- Drift to the homeworld -------------------------------------------------------------
         //
@@ -171,11 +221,18 @@ public class GenesisSequence : MonoBehaviour
         cam.EaseTo(home.visualObject.transform, GenesisCamera.HomeworldScreenFraction,
                    GenesisCamera.SubjectAnchorX, DriftToWorld);
         yield return Wait(DriftToWorld);
+        if (Skipping()) yield break;
 
         // --- The world forms --------------------------------------------------------------------
+        //
+        // The camera creeps through this beat. It is the longest in the sequence and the shot has nothing
+        // to do but watch, and a held shot on a subject that is only changing texture reads as a frozen
+        // frame — see GenesisCamera.Drift for why it is a push and a rise rather than an arc.
+        cam.Drift(WorldForms);
         var morph = TerrainMorph.Begin(home, WorldForms, PlanetMorphW, PlanetMorphH, 20260720);
         yield return Wait(WorldForms + 0.2f);
         if (morph != null && !morph.Done) morph.Finish();   // never leave a half-formed world on screen
+        if (Skipping()) yield break;
 
         // --- Moons ------------------------------------------------------------------------------
         //
@@ -192,14 +249,17 @@ public class GenesisSequence : MonoBehaviour
             for (int i = 0; i < moons.Count; i++)
             {
                 yield return Wait(MoonBeat);
+                if (Skipping()) yield break;
                 var mm = TerrainMorph.Begin(moons[i], MoonForms, MoonMorphW, MoonMorphH, 20260721 + i);
                 yield return Wait(MoonForms);
                 if (mm != null && !mm.Done) mm.Finish();
+                if (Skipping()) yield break;
             }
         }
 
         // --- Settle ------------------------------------------------------------------------------
         yield return Wait(SettleHold);
+        if (Skipping()) yield break;
 
         // --- The bar closes as the world walks to centre ------------------------------------------
         //
@@ -210,10 +270,12 @@ public class GenesisSequence : MonoBehaviour
                    GenesisCamera.HomeworldScreenFraction * GenesisCamera.CentreGrowth,
                    0.5f, TravelToCentre);
         yield return Wait(TravelToCentre);
+        if (Skipping()) yield break;
 
         // --- Titles -------------------------------------------------------------------------------
         LoadingScreen.Instance?.ShowGenesisTitles(home.name);
         yield return Wait(TitleHold);
+        if (Skipping()) yield break;
 
         // --- Pull back; the orbits draw in; the galaxy arrives ------------------------------------
         cam.EaseTo(home.visualObject.transform, GenesisCamera.HomeworldScreenFraction,
@@ -223,6 +285,7 @@ public class GenesisSequence : MonoBehaviour
         // built them precisely so they have somewhere to arrive from.
         for (float e = 0f; e < PullBack; e += Time.unscaledDeltaTime)
         {
+            if (Skipping()) yield break;
             float k = Mathf.Clamp01(e / PullBack);
             OrbitController.SetRevealAlpha(1f - Mathf.Pow(1f - k, 2f));
             yield return null;
@@ -242,6 +305,12 @@ public class GenesisSequence : MonoBehaviour
     ///
     /// Every step is idempotent, because this can fire at any point — including in the middle of a beat
     /// that has already done half its work.
+    ///
+    /// THIS DOES NOT STOP Play. It cannot: Play is an enumerator GameManager pumps on its own stack, and
+    /// StopAllCoroutines only reaches coroutines this component started. What stops Play is Play, at its
+    /// next skip check — so callers reaching for this from outside the sequence want RequestSkip(), which
+    /// routes through those checks and ends up here anyway. The call below is kept for the case this class
+    /// ever does start a coroutine of its own.
     public void Abort(CelestialBody home)
     {
         StopAllCoroutines();

@@ -121,13 +121,21 @@ public class GenesisCamera : MonoBehaviour
     {
         Active = false;
         aliveClock = 0f;
+
+        // The DRIFTED fraction, because that is the size actually on screen. A skip can land here in the
+        // middle of a creep, and handing the rig the undrifted number would pop the planet by the drift's
+        // whole amount at the exact instant this method exists to make seamless. Captured before the
+        // clear so the next load starts from a clean camera either way.
+        float handover = subjectFraction * driftMul;
+        ClearDrift();
+
         if (rig == null || cam == null) return;
 
         // The FRACTION matters. Without it SnapFocus defaults to 0 and falls through to its
         // "frame the whole neighbourhood" branch — which for a homeworld means its moons' orbits too, so
         // the planet would jump to a different size and slide to centre in a single frame, at exactly
         // the moment this is supposed to leave the player where the sequence left them.
-        if (focusOn != null) rig.SnapFocus(focusOn, true, subjectFraction);
+        if (focusOn != null) rig.SnapFocus(focusOn, true, handover);
         else rig.SyncToCurrentPose();
     }
 
@@ -142,6 +150,7 @@ public class GenesisCamera : MonoBehaviour
         if (t == null || cam == null) return;
         subject = t; subjectFraction = screenFraction; anchorX = anchor;
         easeSeconds = 0f;
+        ClearDrift();
         ApplyPose(SolvePose(t, screenFraction, anchor));
     }
 
@@ -150,8 +159,11 @@ public class GenesisCamera : MonoBehaviour
     public void EaseTo(Transform t, float screenFraction, float anchor, float seconds)
     {
         if (cam == null) return;
+        // The live pose is captured BEFORE the drift is cleared, so a beat that drifted hands its actual
+        // finishing position to the next move rather than jumping back to the undrifted one.
         fromPos = cam.transform.position;
         fromRot = cam.transform.rotation;
+        ClearDrift();
         subject = t; subjectFraction = screenFraction; anchorX = anchor;
         easeSeconds = Mathf.Max(0.01f, seconds);
         easeClock = 0f;
@@ -159,14 +171,61 @@ public class GenesisCamera : MonoBehaviour
 
     public bool Easing => easeClock < easeSeconds;
 
+    // ---- Drift ------------------------------------------------------------------------------------
+    //
+    // A held shot is a dead shot. The forming beat is the longest in the sequence and the camera has
+    // nothing to do through it but watch, and because the subject is only changing TEXTURE — the planet
+    // neither moves across frame nor changes size — the result reads as a still image with an animation
+    // playing inside it. So the camera creeps: a slow push in and a slight rise.
+    //
+    // A PUSH AND A RISE RATHER THAN AN ARC. Yaw is pinned to SequenceYaw for every beat precisely so that
+    // nothing swings when control is handed to the player, so drifting the BEARING would spend the one
+    // invariant the whole framing spec is built on. Distance and vertical offset are ours to move, cost
+    // nothing, and read as the same thing.
+    //
+    // DELIBERATELY BARELY THERE. If a player can name what the camera is doing here it is too much; the
+    // job is only to stop the frame looking frozen.
+    const float DriftPush = 1.05f;   // ends 5% closer than it started
+    const float DriftRise = 0.04f;   // ...and this fraction of the framed half-height higher
+
+    float driftSeconds, driftClock;
+
+    // Both PERSIST when the drift runs out rather than unwinding, and are cleared by the next Frame or
+    // EaseTo. Unwinding would walk the shot backwards at the exact moment the world finishes forming;
+    // clearing on the next move is free, because both Frame and EaseTo recompose from the live pose.
+    float driftMul = 1f, driftRise;
+
+    /// Creep for `seconds`. Call at the top of a beat the camera would otherwise hold still through.
+    public void Drift(float seconds)
+    {
+        driftSeconds = Mathf.Max(0.01f, seconds);
+        driftClock = 0f;
+    }
+
+    void ClearDrift()
+    {
+        driftSeconds = 0f; driftClock = 0f;
+        driftMul = 1f; driftRise = 0f;
+    }
+
     void LateUpdate()
     {
         if (!Active || cam == null || subject == null) return;
 
+        // Advance the creep first, so this frame's pose already carries it.
+        if (driftClock < driftSeconds)
+        {
+            driftClock += Time.unscaledDeltaTime;
+            float dk = Mathf.Clamp01(driftClock / driftSeconds);
+            dk = dk * dk * (3f - 2f * dk);   // the same smoothstep as every other move in the sequence
+            driftMul = Mathf.Lerp(1f, DriftPush, dk);
+            driftRise = Mathf.Lerp(0f, DriftRise, dk);
+        }
+
         // Re-solved EVERY FRAME, not once at the start of the ease. The subject is orbiting — that is
         // the entire point — so a pose computed once would be stale before the ease finished, and the
         // planet would drift off its mark as it travelled.
-        var target = SolvePose(subject, subjectFraction, anchorX);
+        var target = SolvePose(subject, subjectFraction * driftMul, anchorX);
 
         if (easeClock < easeSeconds)
         {
@@ -257,7 +316,13 @@ public class GenesisCamera : MonoBehaviour
         float lateral = halfWidthWorld * (0.5f - anchor) * 2f;
         Vector3 right = rot * Vector3.right;
 
-        Vector3 pos = t.position - forward * d + right * lateral;
+        // The drift's vertical component (zero unless a Drift is running). Raising the CAMERA lowers the
+        // subject in frame, which alongside the push reads as a slow settle rather than a zoom. Scaled by
+        // the framed half-height so it is the same visual amount at any distance, subject size or
+        // resolution — the same reason the size spec is expressed against viewport height.
+        Vector3 up = rot * Vector3.up;
+
+        Vector3 pos = t.position - forward * d + right * lateral + up * (halfHeightWorld * driftRise);
         return (pos, rot);
     }
 
