@@ -3396,35 +3396,50 @@ public class PlanetViewWindow : MonoBehaviour
         var b = body;
         var s = SpeciesManager.Current;
 
-        // The Inspector hid its Terraform tab for gas giants — there is no surface to terraform.
-        if (b.type == CelestialBodyType.GasGiant) return;
+        // A GAS GIANT KEEPS THE PROJECTS AND LOSES THE CLIMATE.
+        //
+        // There is no surface, so the climate half of this tab is meaningless on one: nothing to warm, wet
+        // or thicken, a habitability ceiling Habitability short-circuits to nothing anyway, and a terraform
+        // toggle offering to change the weather on a body with no ground under it. The Inspector hides its
+        // Terraform tab outright for exactly that reason.
+        //
+        // But it must not be a DEAD END, which is what returning early here made it. Shellworld
+        // Construction is gated on this body type and nothing else (see Terraforming's project table) and
+        // it is the one project that turns a gas giant into somewhere you can stand — so the single useful
+        // thing you can do about a gas giant had no way to be reached from the gas giant's own panel. Skip
+        // the ceiling, the bar and the toggle; keep the diagnosis, which names NoSurface as the problem,
+        // and keep the console that can actually fix it.
+        bool noSurface = b.type == CelestialBodyType.GasGiant;
 
-        Header("HABITABILITY CEILING");
-        var card = Card();
-        var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
-        live.Text(t, () =>
+        if (!noSurface)
         {
-            float now = b.habitability, ceiling = Colony.TerraformCeiling(b);
-            float reach = TerraformProjects.ReachableCeiling(b, s), pot = TerraformProjects.PotentialCeiling(b, s);
-            return $"Now <color={Habitability.ScoreColorHex(now)}><b>{now:F0}%</b></color>  ->  " +
-                   $"ceiling today <color={Habitability.ScoreColorHex(ceiling)}><b>{ceiling:F0}%</b></color>  ->  " +
-                   $"with researched projects <color={Habitability.ScoreColorHex(reach)}><b>{reach:F0}%</b></color>  ->  " +
-                   $"with all known science <color={Habitability.ScoreColorHex(pot)}><b>{pot:F0}%</b></color>\n" +
-                   $"<color=#9FB4C8>Colonizable at {Colony.FoundThreshold:F0}%.</color>";
-        });
-
-        Bar(sidePanel, () => (b.habitability / 100f, $"{b.habitability:F0}% habitable", Habitability.ScoreColor(b.habitability)));
-
-        var mgr = ColonyManager.Instance;
-        if (mgr != null)
-        {
-            var tf = UIFactory.Button(sidePanel, "", () => { mgr.ToggleTerraform(b); lastSig = null; }, 26);
-            live.Button(tf, () =>
+            Header("HABITABILITY CEILING");
+            var card = Card();
+            var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
+            live.Text(t, () =>
             {
-                if (b.habitability >= Colony.FoundThreshold && !b.terraforming) return (false, "Already habitable");
-                if (!Colony.CanReachLivable(b) && !b.terraforming) return (false, $"Can't be made livable for {s.name} — run projects below first");
-                return (true, b.terraforming ? "Stop terraforming" : "Start terraforming (consumes water, energy, metal)");
+                float now = b.habitability, ceiling = Colony.TerraformCeiling(b);
+                float reach = TerraformProjects.ReachableCeiling(b, s), pot = TerraformProjects.PotentialCeiling(b, s);
+                return $"Now <color={Habitability.ScoreColorHex(now)}><b>{now:F0}%</b></color>  ->  " +
+                       $"ceiling today <color={Habitability.ScoreColorHex(ceiling)}><b>{ceiling:F0}%</b></color>  ->  " +
+                       $"with researched projects <color={Habitability.ScoreColorHex(reach)}><b>{reach:F0}%</b></color>  ->  " +
+                       $"with all known science <color={Habitability.ScoreColorHex(pot)}><b>{pot:F0}%</b></color>\n" +
+                       $"<color=#9FB4C8>Colonizable at {Colony.FoundThreshold:F0}%.</color>";
             });
+
+            Bar(sidePanel, () => (b.habitability / 100f, $"{b.habitability:F0}% habitable", Habitability.ScoreColor(b.habitability)));
+
+            var mgr = ColonyManager.Instance;
+            if (mgr != null)
+            {
+                var tf = UIFactory.Button(sidePanel, "", () => { mgr.ToggleTerraform(b); lastSig = null; }, 26);
+                live.Button(tf, () =>
+                {
+                    if (b.habitability >= Colony.FoundThreshold && !b.terraforming) return (false, "Already habitable");
+                    if (!Colony.CanReachLivable(b) && !b.terraforming) return (false, $"Can't be made livable for {s.name} — run projects below first");
+                    return (true, b.terraforming ? "Stop terraforming" : "Start terraforming (consumes water, energy, metal)");
+                });
+            }
         }
 
         Header("WHAT IS WRONG WITH THIS WORLD");
@@ -3440,7 +3455,9 @@ public class PlanetViewWindow : MonoBehaviour
         }
 
         Header("PROJECTS");
-        Note("Projects raise this world's ceiling permanently. The full console has costs, durations and progress.");
+        Note(noSurface
+            ? "A gas giant has no surface to raise a ceiling on — Shellworld Construction builds one from scratch. The full console has costs, durations and progress."
+            : "Projects raise this world's ceiling permanently. The full console has costs, durations and progress.");
         UIFactory.Button(sidePanel, "Open Terraforming Console »", () => TerraformWindow.Instance?.ShowFor(b), 26);
     }
 
@@ -3734,8 +3751,10 @@ public class PlanetViewWindow : MonoBehaviour
     // Like the power overlay, this doesn't ramp an index — it draws the plate geometry directly: a
     // translucent WHITE wash over the whole map (so it reads at a glance as the tectonic view), with the
     // FAULT LINES between plates painted red. Built from the same TectonicsMap the terrain generator folds
-    // its mountains from, so the red lines land exactly where the ranges and volcanoes cluster. Static
-    // (plates don't move frame to frame), so it's painted once per rebuild rather than on a timer.
+    // its mountains from, so the red lines mark exactly the margins the ranges and volcanoes gather along
+    // — the line is a GUIDELINE, not a boundary the mountains stay inside: the belt the terrain reads is
+    // several times wider than the line drawn here, and deliberately so. Static (plates don't move frame
+    // to frame), so it's painted once per rebuild rather than on a timer.
     void RefreshTectonicsOverlay()
     {
         int w = body.surface.width, h = body.surface.height;
@@ -3750,9 +3769,12 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 float u = (x + 0.5f) / w, v = (y + 0.5f) / h;
                 float boundary = TectonicsMap.Sample(body, u, v).boundary;
-                // A fault cell where the tile sits close to a plate boundary; the band comes out ~1-3 cells
-                // wide, widening where three plates meet at a corner, exactly as the request describes.
-                px[y * w + x] = boundary > 0.55f ? fault : wash;
+                // `boundary` is already the drawn hairline — nonzero exactly within TectonicsMap's fault
+                // half-width, which is calibrated in TILES — so the test is simply "inside the band". It
+                // used to threshold at 0.55 against a proximity that was not a distance at all, which is
+                // how a fault could bloom into a wedge covering a quarter of the map. The band comes out
+                // ~1-3 cells wide, widening only where three plates meet and two boundaries overlap.
+                px[y * w + x] = boundary > 0f ? fault : wash;
             }
         overlayTex.SetPixels(px);
         overlayTex.Apply();

@@ -83,7 +83,10 @@ public class EarthquakeManager : MonoBehaviour
             if (pb == null) continue;
             float cu = (pb.x + 0.5f) / w, cv = (pb.y + 0.5f) / h;
             var tec = TectonicsMap.Sample(b, cu, cv);
-            float prox = tec.boundary * (0.5f + 0.5f * Mathf.Max(0f, tec.convergence));
+            // `belt`, not `boundary`: the drawn fault line is one to three tiles wide, and a colony that
+            // happened to have nothing standing on those exact tiles would have been immune to quakes.
+            // What shakes is the whole active margin — the same field the mountains there were folded from.
+            float prox = tec.belt * (0.5f + 0.5f * Mathf.Max(0f, tec.convergence));
             if (prox > hotProx) { hotProx = prox; epicentre = new Vector2(pb.x, pb.y); }
         }
         if (hotProx < 0.25f) return;   // nothing built near an active fault this time — no damage

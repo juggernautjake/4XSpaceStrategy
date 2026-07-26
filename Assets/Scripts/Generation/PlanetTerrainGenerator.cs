@@ -568,11 +568,14 @@ public static class PlanetTerrainGenerator
         if (TectonicsMap.Active(body))
         {
             var tec = TectonicsMap.Sample(body, u, v);
-            ridge = Mathf.Clamp(ridge + tec.boundary * tec.convergence * TectonicRidgeGain, 0f, 2f);
+            // `belt`, NOT `boundary`. The red line the Survey overlay draws is a one-to-three tile
+            // annotation; an orogenic belt is a wide, ragged skirt either side of it. Reading the drawn
+            // line here would confine every range to the width of its own map symbol.
+            ridge = Mathf.Clamp(ridge + tec.belt * tec.convergence * TectonicRidgeGain, 0f, 2f);
             // Volcanoes cluster where plates DRIVE TOGETHER hardest (subduction). The strongest convergent
             // boundaries on a tectonically active world get a scattering of volcanoes among their peaks —
             // so some rocky worlds come out "somewhat volcanic" without being full Volcanic-type worlds.
-            volcanicHotspot = tec.boundary * tec.convergence > 0.72f;
+            volcanicHotspot = tec.belt * tec.convergence > 0.72f;
         }
 
         // `body.biosphereActive` is threaded in because CORAL IS ALIVE. A reef on a sterile world is the

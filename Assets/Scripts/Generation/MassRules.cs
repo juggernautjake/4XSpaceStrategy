@@ -76,13 +76,17 @@ public static class MassRules
         return Mathf.Clamp(m, 0.1f, max);
     }
 
-    // The grid / visual SIZE for a body of this mass — the same surfaceSize the whole engine already sizes
-    // maps, orbits and atmosphere from (MapMetrics, OrbitSafety, AtmosphereRules …), now a function of Mass
-    // rather than an independent roll. Deliberately PROPORTIONAL (no base offset): Earth-like ~6, gas giants
-    // (mass 7..13) ~21..32, tiny moons/asteroids at the floor. Proportionality matters because the moon /
-    // tectonics rules gate on surfaceSize thresholds (e.g. LargeMoonSurfaceSize = 9 ⇔ mass 3), so a body's
-    // size in cells must track its mass honestly rather than being flattened by an offset. Clamped to the
-    // range MapMetrics resolves.
+    // The abstract SIZE CLASS for a body of this mass — the number the rules layer gates on (OrbitSafety,
+    // AtmosphereRules …), now a function of Mass rather than an independent roll. Deliberately PROPORTIONAL
+    // (no base offset): Earth-like ~6, gas giants (mass 7..13) ~21..32, tiny moons/asteroids at the floor.
+    // Proportionality matters because the moon / tectonics rules gate on surfaceSize thresholds (e.g.
+    // LargeMoonSurfaceSize = 9 ⇔ mass 3), so a body's size class must track its mass honestly rather than
+    // being flattened by an offset.
+    //
+    // NOT the grid resolution, despite the name. MapMetrics derives the surface grid's width and height
+    // from `mass` directly now (WidthForMass), and ignores the surfaceSize argument its two remaining
+    // per-cell-pixel helpers still take — so the 3..32 clamp below bounds a size CLASS, not a cell count,
+    // and nothing downstream has to be able to "resolve" a value in that range.
     public static int SurfaceSize(float mass)
     {
         return Mathf.Clamp(Mathf.RoundToInt(mass * 3f), 3, 32);
