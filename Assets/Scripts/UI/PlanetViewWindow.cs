@@ -1362,6 +1362,25 @@ public class PlanetViewWindow : MonoBehaviour
                     else
                         sb.Append($" · rot {rotation * 90}° <size=10><color=#9FB4C8>(R / right-click rotates · Esc cancels · middle-drag pans)</color></size>");
 
+                    // WHAT THE MAP IS SHOWING YOU WHILE YOU HOLD THIS. The overlay switched to this
+                    // building's own index the moment it was picked up, so name it — an unexplained
+                    // coloured map is a decoration, and a named one is an instruction.
+                    if (info.index != SurfaceIndexKind.None)
+                    {
+                        if (SurfaceIndex.Unlocked(body, info.index))
+                        {
+                            string ihex = ColorUtility.ToHtmlStringRGB(SurfaceIndex.Outline(info.index));
+                            // "•", not "■": the Geometric Shapes block is missing from the LiberationSans
+                            // atlas this project ships, so a square draws as a tofu box (see
+                            // RefreshConfirmPanel, which settled on this same swatch glyph).
+                            sb.Append($"  <size=10><color=#{ihex}>•</color><color=#9FB4C8> the map is showing this world's best " +
+                                      $"{SurfaceIndex.Name(info.index)} ground</color></size>");
+                        }
+                        else
+                            sb.Append($"  <size=10><color=#C9A94D>{SurfaceIndex.Name(info.index)} not surveyed — " +
+                                      $"{SurfaceIndex.LockReason(body, info.index)}</color></size>");
+                    }
+
                     if (HasHoverCell)
                     {
                         // PREDICTED YIELD at whatever the cursor is over — the honest number, so hovering
@@ -3433,6 +3452,9 @@ public class PlanetViewWindow : MonoBehaviour
 
         Header("INDEX OVERLAYS");
         Note("Each overlay paints the grid with where a kind of building actually belongs. Survey a world to read its minerals; a deep survey by a research ship unlocks the rest.");
+        Note($"<color=#9FB4C8>Only ground worth building on is drawn: this world's <b>best {SurfaceIndex.TopBand * 100f:F0}%</b> " +
+             $"for that index, brightest and outlined, plus the rest of its better half where that clears " +
+             $"<b>{SurfaceIndex.ShowFloor * 100f:F0}%</b>. Everywhere blank is somewhere not to put it.</color>");
 
         AddIndexToggle(SurfaceIndexKind.None, "None (plain terrain)");
         foreach (var k in SurfaceIndex.All) AddIndexToggle(k, null);
@@ -3464,14 +3486,29 @@ public class PlanetViewWindow : MonoBehaviour
             sb.AppendLine($"<b>({hoverCell.x}, {hoverCell.y})</b> — {tile.type}");
             if (tile.HasOre && ResearchManager.IsDiscovered(tile.ore))
                 sb.AppendLine($"<color=#8FD0FF>Ore: {OreDatabase.Get(tile.ore).displayName}</color> ({tile.oreRichness * 100f:F0}% rich)");
+            // ONLY WHAT THE MAP IS DRAWING HERE, on exactly the map's own rule (SurfaceIndex.Shown): this
+            // world's best quarter for an index, plus anything else at 50% or better. A tile that is a
+            // poor site for all six now says so by listing none of them, which is a far clearer answer
+            // than six lines of single-digit percentages — that readout invited the player to weigh a 9%
+            // against an 11% as though either were a reason to build somewhere.
+            //
+            // Locked indexes are still listed. That is not a fact about this tile, it is a fact about
+            // your research, and silence there would read as "nothing here" rather than "you cannot see
+            // this yet".
+            int listed = 0;
             foreach (SurfaceIndexKind k in System.Enum.GetValues(typeof(SurfaceIndexKind)))
             {
                 if (k == SurfaceIndexKind.None) continue;
                 if (!SurfaceIndex.Unlocked(body, k)) { sb.AppendLine($"<color=#5A6A7A>{SurfaceIndex.Name(k)}: locked</color>"); continue; }
                 float v = SurfaceIndex.Get(body, k, hoverCell.x, hoverCell.y);
-                string hex = ColorUtility.ToHtmlStringRGB(SurfaceIndex.Ramp(k, v));
-                sb.AppendLine($"{SurfaceIndex.Name(k)}: <color=#{hex}><b>{v * 100f:F0}%</b></color>");
+                if (!SurfaceIndex.ShownFor(body, k, v, out float t)) continue;
+                listed++;
+                string hex = ColorUtility.ToHtmlStringRGB(SurfaceIndex.Highlight(k, t));
+                string best = t >= 0.75f ? "  <size=10><color=#9FB4C8>· best quarter of this world</color></size>" : "";
+                sb.AppendLine($"{SurfaceIndex.Name(k)}: <color=#{hex}><b>{v * 100f:F0}%</b></color>{best}");
             }
+            if (listed == 0)
+                sb.AppendLine("<color=#5A6A7A><i>Nothing worth siting on here.</i></color>");
             return sb.ToString();
         });
     }
@@ -3483,12 +3520,15 @@ public class PlanetViewWindow : MonoBehaviour
 
         if (k != SurfaceIndexKind.None)
         {
-            // A colour strip showing the ramp, so the legend IS the ramp.
+            // The legend IS the map. It draws Highlight rather than the raw ramp, so the strip runs
+            // through exactly the colours the overlay can produce — and it stops where the overlay stops,
+            // with the last two cells carrying the outline colour that marks a patch's edge. A legend
+            // showing a range of colours the map no longer paints would be worse than no legend.
             var strip = UIFactory.NewUI(card, "Ramp"); UIFactory.AddLayout(strip, 10);
             var srt = strip.GetComponent<RectTransform>();
             for (int i = 0; i < 10; i++)
             {
-                var q = UIFactory.Panel(srt, "s", SurfaceIndex.Ramp(k, i / 9f));
+                var q = UIFactory.Panel(srt, "s", i == 9 ? SurfaceIndex.Outline(k) : SurfaceIndex.Highlight(k, i / 8f));
                 q.raycastTarget = false;
                 var qrt = q.rectTransform;
                 qrt.anchorMin = new Vector2(i / 10f, 0); qrt.anchorMax = new Vector2((i + 1) / 10f, 1);
@@ -3784,10 +3824,6 @@ public class PlanetViewWindow : MonoBehaviour
     // ---- Overlay texture ----
     // One point-filtered texture the size of the grid, stretched over the map. A cell per texel means
     // the overlay lines up with the build grid exactly and costs nothing to redraw.
-    // The best fraction of a world highlighted when you pick a building up. Relative to THIS world, so
-    // a frozen planet still shows you its ten hottest tiles — you just also get told they're poor.
-    const float BestSitesFraction = 0.10f;
-
     void RefreshOverlay()
     {
         // The plate arrows belong to the tectonics overlay only — clear them up front so every other path
@@ -3806,8 +3842,13 @@ public class PlanetViewWindow : MonoBehaviour
         }
 
         // Two different overlays share one texture:
-        //  BUILD  — holding a structure highlights the best 10% of sites for it on this world.
-        //  SURVEY — the raw index ramp.
+        //  BUILD  — holding a structure raises THAT STRUCTURE'S OWN INDEX, so a farm shows the Fertile
+        //           map, an array the Solar map. It used to be a bespoke hot-pink "best sites" wash,
+        //           which threw away the one thing the player had already learned to read (the index
+        //           colours) and replaced it with a colour that meant nothing anywhere else.
+        //  SURVEY — the same index map, chosen by hand.
+        // Both are the SAME drawing now (RefreshIndexOverlay), so picking up a farm shows exactly what
+        // the Fertile overlay shows, and the survey you did is the survey you build from.
         // The power grid and the tectonics map are each their own overlay entirely: not a ramp over an
         // index but a purpose-drawn map (what the electricity reaches; where the plates and faults are), so
         // each gets its own pass rather than being forced through Ramp(). Both are Survey overlays chosen
@@ -3842,18 +3883,17 @@ public class PlanetViewWindow : MonoBehaviour
         if (MineralOverlayActive && body.surface != null)
         {
             overlayImage.gameObject.SetActive(true);
-            RefreshMineralOverlay();
+            RefreshIndexOverlay(SurfaceIndexKind.Mineral);
             return;
         }
 
         var kind = SurfaceIndexKind.None;
-        bool bestSites = false;
 
         if (tab == Tab.Build && selected.HasValue)
         {
             var info = SurfaceBuildingDatabase.Get(selected.Value);
             if (info.index != SurfaceIndexKind.None && SurfaceIndex.Unlocked(body, info.index))
-            { kind = info.index; bestSites = true; }
+                kind = info.index;
         }
         else if (tab == Tab.Survey && SurfaceIndex.Unlocked(body, activeIndex))   // power no longer excludes it — separate layer
         {
@@ -3864,16 +3904,93 @@ public class PlanetViewWindow : MonoBehaviour
         overlayImage.gameObject.SetActive(show);
         if (!show) return;
 
-        if (bestSites) { RefreshBestSitesOverlay(kind); return; }
+        RefreshIndexOverlay(kind);
+    }
 
+    // ============================================================================================
+    // AN INDEX MAP: PATCHES, NOT A WASH
+    //
+    // Draws only the ground SurfaceIndex.Shown accepts — this world's best quarter, plus anything else
+    // at 50% or better — and outlines each patch in a brightened version of the index's own colour, so a
+    // good area has a boundary you can aim a footprint at instead of a gradient you have to squint at.
+    //
+    // THE TEXTURE IS SUPERSAMPLED, a few texels per tile, purely so the outline can be a LINE. At one
+    // texel per tile the only way to mark a boundary is to recolour the whole edge tile, which eats the
+    // very ground the outline is pointing at. `sub` is chosen from the map's size so a big world doesn't
+    // pay for a texture nobody asked for, and at sub == 1 the outline is simply skipped — the fill still
+    // carries the information, and a 640-wide gas giant is not where anyone is siting a farm.
+    // ============================================================================================
+    static int OverlaySub(int w, int h)
+    {
+        long cells = (long)w * h;
+        if (cells <= 40_000) return 3;    // up to ~280x140 — every world you actually build on
+        if (cells <= 140_000) return 2;
+        return 1;                          // enormous: fill only
+    }
+
+    void RefreshIndexOverlay(SurfaceIndexKind kind)
+    {
         int w = body.surface.width, h = body.surface.height;
-        EnsureOverlayTex(w, h);
+        int sub = OverlaySub(w, h);
+        int tw = w * sub, th = h * sub;
+        EnsureOverlayTex(tw, th);
 
-        var px = new Color[w * h];
+        // Resolved for every tile FIRST, because the outline pass has to ask about neighbours — and
+        // asking Shown again per neighbour would re-sample the terrain noise four more times per tile.
+        var fill = new Color32[w * h];
+        var lit = new bool[w * h];
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
-                px[y * w + x] = SurfaceIndex.Ramp(kind, SurfaceIndex.Get(body, kind, x, y));
-        overlayTex.SetPixels(px);
+            {
+                int i = y * w + x;
+                float v = SurfaceIndex.Get(body, kind, x, y);
+                if (!SurfaceIndex.ShownFor(body, kind, v, out float t)) continue;
+                lit[i] = true;
+                fill[i] = SurfaceIndex.Highlight(kind, t);
+
+                // NAMED ORE DEPOSITS, on the mineral map only, and the one thing here that is a find
+                // rather than a field: drawn in the ore's own colour at near-full strength so a seam
+                // reads as Ferralite or Aurelium rather than as slightly warmer ground. Always inside
+                // the shown band by construction — a deposit floors the Mineral index at 0.6.
+                if (kind == SurfaceIndexKind.Mineral)
+                {
+                    var tile = body.surface.tiles[x, y];
+                    if (tile != null && tile.HasOre)
+                    {
+                        var oc = OreDatabase.Get(tile.ore).color;
+                        fill[i] = new Color(oc.r, oc.g, oc.b, Mathf.Lerp(0.62f, 0.95f, tile.oreRichness));
+                    }
+                }
+            }
+
+        var px = new Color32[tw * th];   // zeroed = fully transparent, which is what "not shown" means
+        Color32 edge = SurfaceIndex.Outline(kind);
+
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                if (!lit[y * w + x]) continue;
+                Color32 c = fill[y * w + x];
+
+                // LONGITUDE WRAPS and latitude does not, exactly as the map itself does: a patch running
+                // over the date line is one patch and must not be outlined down the seam, while a patch
+                // that reaches the pole row genuinely ends there.
+                bool openL = !lit[y * w + ((x - 1 + w) % w)];
+                bool openR = !lit[y * w + ((x + 1) % w)];
+                bool openD = y == 0 || !lit[(y - 1) * w + x];
+                bool openU = y == h - 1 || !lit[(y + 1) * w + x];
+
+                for (int sy = 0; sy < sub; sy++)
+                    for (int sx = 0; sx < sub; sx++)
+                    {
+                        bool onEdge = sub > 1 &&
+                            ((openL && sx == 0) || (openR && sx == sub - 1) ||
+                             (openD && sy == 0) || (openU && sy == sub - 1));
+                        px[(y * sub + sy) * tw + (x * sub + sx)] = onEdge ? edge : c;
+                    }
+            }
+
+        overlayTex.SetPixels32(px);
         overlayTex.Apply();
         overlayImage.texture = overlayTex;
     }
@@ -3893,92 +4010,6 @@ public class PlanetViewWindow : MonoBehaviour
         if (overlayImage == null) return;
         var rt = overlayImage.rectTransform;
         if (rt.GetSiblingIndex() != 0) rt.SetSiblingIndex(0);
-    }
-
-    // THE MINERAL INDEX — the prospecting map, and the only place named ore deposits are ever drawn.
-    //
-    // Two things stacked on one texture, because they answer two halves of the same question:
-    //   * the index RAMP underneath — how mineral-bearing the ground is generally (ridges, elevation,
-    //     metallic crust), which is what tells you where it is worth looking at all;
-    //   * the named DEPOSITS on top — Ferralite, Cuprion, Aurelium and the rest, drawn in each ore's own
-    //     colour at full strength so a seam reads as a distinct find rather than a slightly warmer patch.
-    //
-    // Richness drives the deposit's alpha, so a thin showing looks like one and a mother lode is
-    // unmistakable. That is the informed decision the overlay exists to support: not just "is there ore
-    // here" but "is there enough of it, and which one is it".
-    void RefreshMineralOverlay()
-    {
-        int w = body.surface.width, h = body.surface.height;
-        EnsureOverlayTex(w, h);
-
-        var px = new Color[w * h];
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-            {
-                Color c = SurfaceIndex.Ramp(SurfaceIndexKind.Mineral,
-                                            SurfaceIndex.Get(body, SurfaceIndexKind.Mineral, x, y));
-
-                var tile = body.surface.tiles[x, y];
-                if (tile != null && tile.HasOre)
-                {
-                    var oc = OreDatabase.Get(tile.ore).color;
-                    // Floor of 0.55 so even a poor seam is legible; a rich one reaches near-opaque.
-                    c = new Color(oc.r, oc.g, oc.b, Mathf.Lerp(0.55f, 0.95f, tile.oreRichness));
-                }
-
-                px[y * w + x] = c;
-            }
-
-        overlayTex.SetPixels(px);
-        overlayTex.Apply();
-        overlayImage.texture = overlayTex;
-    }
-
-    // "Where should this go?" — paints THIS WORLD'S best sites for the held structure.
-    //
-    // Deliberately relative (a percentile of this planet's own distribution) rather than an absolute
-    // threshold: on a cold world every geothermal site is poor, and an absolute cutoff would highlight
-    // nothing and tell you nothing. You always get to see where the best ground IS. Whether it's any
-    // good is a separate question the hover readout answers honestly, and tiles that can't meet the
-    // building's hard requirement are marked as refusals rather than sites.
-    void RefreshBestSitesOverlay(SurfaceIndexKind kind)
-    {
-        int w = body.surface.width, h = body.surface.height;
-        EnsureOverlayTex(w, h);
-
-        var info = SurfaceBuildingDatabase.Get(selected.Value);
-        float cut = SurfaceIndex.TopFractionThreshold(body, kind, BestSitesFraction);
-
-        var px = new Color[w * h];
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-            {
-                float v = SurfaceIndex.Get(body, kind, x, y);
-                bool buildable = info.minIndex <= 0f || v >= info.minIndex;
-                Color c;
-
-                if (v >= cut && buildable)
-                {
-                    // The prize: this world's best ground for this thing. Hot pink-red, unmissable.
-                    c = new Color(1f, 0.15f, 0.35f, 0.85f);
-                }
-                else if (v >= cut)
-                {
-                    // Best available, but still below the hard floor — this world can't support one.
-                    c = new Color(0.55f, 0.1f, 0.15f, 0.5f);
-                }
-                else
-                {
-                    // Everything else, dimly ramped so you can still read the gradient toward the good bits.
-                    c = SurfaceIndex.Ramp(kind, v);
-                    c.a *= 0.35f;
-                }
-                px[y * w + x] = c;
-            }
-
-        overlayTex.SetPixels(px);
-        overlayTex.Apply();
-        overlayImage.texture = overlayTex;
     }
 
     // ---- Power overlay ----
@@ -5030,6 +5061,37 @@ public class PlanetViewWindow : MonoBehaviour
     }
 
     // Polled every frame. Cheap, and independent of which input module is installed.
+    // ============================================================================================
+    // THE MAP ENDS WHERE THE VIEWPORT ENDS
+    //
+    // `mapRT` is far bigger than the window shows. Zoomed in it runs several screens wide, and the wrap
+    // mirrors extend it a whole world further in each direction; the RectMask2D on the viewport clips
+    // what is DRAWN, and nothing else. So the map is still lying there, full size, underneath the side
+    // panel, the tab strip and the status line.
+    //
+    // That was invisible for as long as everything went through uGUI, whose raycast the mask does filter.
+    // The build DRAG does not: PollBuildDraw reads Input.GetMouseButtonDown directly and starts from
+    // whatever cell PollHover last resolved — and PollHover resolved it against mapRT's own bounds. So
+    // clicking a card in the side panel with a structure in hand pressed and released over a cell of
+    // hidden map, and quietly built there. Hovering the panel showed that hidden tile's readout too.
+    //
+    // Hence one gate, asked before any cell is resolved: is the cursor inside the pane that is actually
+    // showing this world?
+    bool PointerOverHostMap()
+    {
+        if (!HostOpen || hostViewport == null) return false;
+        return RectTransformUtility.RectangleContainsScreenPoint(hostViewport, Input.mousePosition, null);
+    }
+
+    /// Forget the host map's hover. Called from every path that is NOT over the host map, so a cell can
+    /// never survive the cursor leaving the map and become the anchor of a drag somewhere else.
+    void ClearHostHover()
+    {
+        if (hoverCell.x < 0 && !hoverValid) return;
+        hoverCell = new Vector2Int(-1, -1);
+        hoverValid = false;
+    }
+
     void PollHover()
     {
         // The moon-tab strip owns MapHoverPanel while the cursor is over IT — MoonTabHover shows its own
@@ -5037,7 +5099,13 @@ public class PlanetViewWindow : MonoBehaviour
         // at all over that rect (even just to Hide() it), it would stomp MoonTabHover's own state every
         // single frame, since this runs unconditionally and that only runs once on the enter/exit edge.
         if (moonTabStrip != null && RectTransformUtility.RectangleContainsScreenPoint(moonTabStrip, Input.mousePosition, null))
+        {
+            // The tab strip floats OVER the host map, so the cell underneath it is still resolvable — and
+            // pressing a moon tab while holding a structure would otherwise start a drag on the map behind
+            // the button. Dropping the hover is the one thing this branch must still do.
+            ClearHostHover();
             return;
+        }
 
         // Over an open MOON map's frame? Show that moon's tile info in the floating tooltip — the same
         // biome / ore / temperature readout the main map gives, so a moon's surface is as inspectable as
@@ -5049,6 +5117,7 @@ public class PlanetViewWindow : MonoBehaviour
             if (!moonImg.TryGetValue(m, out var img) || img == null || m.surface == null) continue;
             if (!RectTransformUtility.RectangleContainsScreenPoint(frame, Input.mousePosition, null)) continue;
             activePane = m;
+            ClearHostHover();   // over a MOON's pane: the host map is not under this cursor
             if (ScreenToCellIn(img.rectTransform, m, Input.mousePosition, null, out int mx, out int my))
                 MapHoverPanel.Instance.ShowAtCursor(
                     $"<size=11><color=#8FD0FF>{m.name}</color></size>\n" + TileHoverText(m, mx, my));
@@ -5057,8 +5126,10 @@ public class PlanetViewWindow : MonoBehaviour
             return;
         }
 
-        // Otherwise the host planet's map, if it's open.
-        if (HostOpen && ScreenToCell(Input.mousePosition, null, out int x, out int y))
+        // Otherwise the host planet's map — but only where it is actually VISIBLE. PointerOverHostMap is
+        // the mask the RectMask2D only applies to drawing; without it the map answers for the whole
+        // screen, including everything the side panel is sitting on top of.
+        if (PointerOverHostMap() && ScreenToCell(Input.mousePosition, null, out int x, out int y))
         {
             activePane = body;
             if (x != hoverCell.x || y != hoverCell.y)
@@ -5074,11 +5145,7 @@ public class PlanetViewWindow : MonoBehaviour
         }
         else
         {
-            if (hoverCell.x >= 0)
-            {
-                hoverCell = new Vector2Int(-1, -1);
-                hoverValid = false;
-            }
+            ClearHostHover();
             MapHoverPanel.Instance.Hide();
         }
     }

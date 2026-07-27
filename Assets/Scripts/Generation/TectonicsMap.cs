@@ -47,6 +47,13 @@ using UnityEngine;
 // scale, which is what pins the drawn line at one to three tiles everywhere, at every map size, at the
 // poles as much as the equator.
 //
+// ---- WHY THE MARGINS ARE RAGGED --------------------------------------------------------------
+// Great-circle arcs plus a domain warp gave plates that were CURVED but smooth — soap bubbles, not
+// continents. The roughness that fixes it is not more warp (see the note on EdgeTerms for why that
+// approach is a dead end); it is a small scalar field added to the fault's own signed distance, in
+// TILES, which slides the boundary sideways without touching the space it is drawn in. Sample corrects
+// the band width for that field's gradient, so the line wanders without pinching or fattening.
+//
 // Two proximity fields come off that one distance, and the difference between them matters:
 //   `boundary` — the hairline: 1 on the fault, 0 about a tile away. This is the red line the Survey
 //                overlay draws, i.e. the GUIDELINE for where a range belongs.
@@ -76,10 +83,21 @@ public static class TectonicsMap
         public float phase;
     }
 
+    /// One octave of the EDGE ROUGHNESS field — see the note above Sample. Same seamless plane-wave
+    /// trick as WarpTerm, but this one is a SCALAR: it has no direction to push in, it simply says how
+    /// far sideways the fault line has moved at this point, so it needs no `dir`.
+    public struct EdgeTerm
+    {
+        public Vector3 freq;
+        public float amp;      // radians of LATERAL SHIFT of the boundary
+        public float phase;
+    }
+
     public class Layout
     {
         public Plate[] plates;
         public WarpTerm[] warp;
+        public EdgeTerm[] edge;      // the roughness on the margins themselves
         public float builtForSeed;   // the terrainSeed this was derived from; rebuild if the world reseeds
         public int builtForSize;     // and the surfaceSize — a Dev-sandbox size edit changes the world
                                      // without touching the seed, and a stale layout would outlive it
@@ -107,7 +125,14 @@ public static class TectonicsMap
     // gently with map size so a 10x5 pebble doesn't get a band a third of its height, then clamped at
     // both ends. (Measured against a rendered map: median drawn thickness 2 tiles, 99th percentile 2.8,
     // worst case 4 at a triple junction, on maps from 120x60 to 400x200.)
-    const float FaultTilesPerHeight = 0.033f, FaultTilesMin = 1.1f, FaultTilesMax = 2.0f;
+    //
+    // The ceiling went from 2.0 to 2.6 when the margins were roughened (see EdgeTiles below), and that is
+    // a consequence rather than a taste change: a line that WANDERS by a tile or two has to be thick
+    // enough to still land on tile centres as it wanders, or the overlay — which samples one point per
+    // tile — draws it as a dotted trail. Measured on rendered maps at 100x50 through 400x200: at 2.0 the
+    // roughened line broke into 32 fragments on a 200x100 world, at 2.6 it is 17 with the same coverage
+    // as the smooth line had. Small worlds are unaffected: their width is under the old cap anyway.
+    const float FaultTilesPerHeight = 0.033f, FaultTilesMin = 1.1f, FaultTilesMax = 2.6f;
 
     // The mountain belt is the geology, not the annotation: a wide skirt either side of the fault that
     // the ridge field reads, roughly seven times the drawn line.
@@ -127,6 +152,33 @@ public static class TectonicsMap
     // and saddles. Higher frequency than the warp — this is texture, not shape.
     const int GrainTerms = 2;
     const float GrainFreqMin = 14f, GrainFreqMax = 22f;
+
+    // ---- Edge roughness -------------------------------------------------------------------------
+    // WHY THIS IS NOT MORE DOMAIN WARP. The obvious way to roughen a margin is another, faster band of
+    // warp — and it does not work, for a reason worth writing down so nobody tries it twice. A warp
+    // term's displacement is amp = gain/|freq| RADIANS, while its gradient (how close the warp comes to
+    // folding space onto itself, which is the hard ceiling) is just `gain`. So at the frequencies that
+    // would give tile-scale detail, the displacement you can afford is a fraction of a tile: rendered
+    // out, adding a third warp band at 14-24 changed nothing a player could see, and pushing its gain
+    // far enough to matter folded the sphere.
+    //
+    // The displacement is also in radians, so the SAME warp draws a 4-tile wobble on a 400-wide world
+    // and a 0.5-tile one on a 100-wide world. The small worlds — the ones you actually settle — were
+    // exactly the ones that came out looking like soap bubbles.
+    //
+    // So the roughness is applied to the fault's own SIGNED DISTANCE instead, in TILES: a scalar field
+    // added to "how far are we from the boundary", which slides the boundary sideways without touching
+    // the space it lives in. It cannot fold, it is the same size in tiles on every world, and it costs
+    // two sines. Sample corrects the band's width for the field's own gradient, the same way it already
+    // corrects for the warp's stretch — without that the line pinches where the offset moves fastest and
+    // the overlay draws it as a dashed one.
+    //
+    // Two octaves, amplitudes in TILES. 1.2 at wavelength ~2h/6 tiles for the wander, 0.5 at ~2h/14 for
+    // the crinkle on top of it. Both chosen against rendered maps: enough that no margin reads as an arc
+    // any more, little enough that the line stays connected at tile resolution.
+    const int EdgeTerms = 2;
+    static readonly float[] EdgeFreq = { 6f, 14f };
+    static readonly float[] EdgeTiles = { 1.2f, 0.5f };
 
     static readonly Dictionary<int, Layout> cache = new Dictionary<int, Layout>();
 
@@ -226,10 +278,27 @@ public static class TectonicsMap
         // OUT of the warp range by index instead — see WarpCount).
         for (int k = 0; k < GrainTerms; k++) warp[w++] = MakeTerm(R, GrainFreqMin, GrainFreqMax, 1f);
 
+        // Drawn LAST, so every random number before this point is the one it always was: a world's plates
+        // and its warp are untouched by adding this, and only the fine shape of its margins moves.
+        var edge = new EdgeTerm[EdgeTerms];
+        for (int k = 0; k < EdgeTerms; k++)
+        {
+            float f = EdgeFreq[k];
+            edge[k] = new EdgeTerm
+            {
+                freq = RandomDirection(R) * f,
+                // Tiles -> radians, against THIS world's grid: hf tiles span pi of latitude. This is the
+                // whole reason the roughness reads the same on a moon and on a super-earth.
+                amp = EdgeTiles[k] * Mathf.PI / hf,
+                phase = R() * Mathf.PI * 2f
+            };
+        }
+
         return new Layout
         {
             plates = plates,
             warp = warp,
+            edge = edge,
             builtForSeed = b.terrainSeed,
             builtForSize = b.surfaceSize,
             heightTiles = hTiles,
@@ -343,7 +412,11 @@ public static class TectonicsMap
         // closed form, no approximation, and (unlike the difference-of-distances this used to use) an
         // actual distance, so a band of constant width really is a band of constant width.
         Vector3 m = (A - B).normalized;
-        float angle = Mathf.Abs(Mathf.Asin(Mathf.Clamp(Vector3.Dot(q, m), -1f, 1f)));
+
+        // SIGNED, and it stays signed until the roughness has been added. `abs` here would fold the two
+        // sides of the fault together, and an offset added after that fold would DILATE the band (making
+        // the red line fatter in places) rather than MOVE it, which is the opposite of a rough edge.
+        float signed = Mathf.Asin(Mathf.Clamp(Vector3.Dot(q, m), -1f, 1f));
 
         // That distance was measured in WARPED space. Where the warp stretches space apart the same band
         // would cover more ground and the red line would fatten; dividing by the warp's local stretch
@@ -352,14 +425,36 @@ public static class TectonicsMap
         Vector3 t = m - q * Vector3.Dot(m, q);   // the fault normal, brought into the tangent plane at q
         float tl = t.magnitude;
         float stretch = 1f;
-        if (tl > 1e-4f)
+        bool haveNormal = tl > 1e-4f;
+        if (haveNormal)
         {
             t /= tl;
             Vector3 e = t + WarpJacobian(l, p, t);
             e -= q * Vector3.Dot(e, q);          // only the part that moves ALONG the surface counts
             stretch = Mathf.Max(0.3f, e.magnitude / mag);
         }
-        float angReal = angle / stretch;
+
+        // ---- THE MARGIN'S OWN ROUGHNESS ----
+        //
+        // `offset` slides the boundary sideways by a couple of tiles, in a pattern that is continuous
+        // over the whole sphere and seamless at the date line. `slope` is that field's exact derivative
+        // ALONG the fault's normal, and dividing by |1 + slope| is what keeps the drawn band the width it
+        // is supposed to be: adding a varying offset to a distance field stops it being a distance field,
+        // and the correction restores it. Skipped where the normal is degenerate (q parallel to m, i.e.
+        // the two poles of the fault's great circle) — there is no "sideways" to move in there.
+        float offset = 0f, slope = 0f;
+        if (l.edge != null)
+        {
+            for (int i = 0; i < l.edge.Length; i++)
+            {
+                var w2 = l.edge[i];
+                float a2 = Vector3.Dot(w2.freq, q) + w2.phase;
+                offset += w2.amp * Mathf.Sin(a2);
+                if (haveNormal) slope += w2.amp * Mathf.Cos(a2) * Vector3.Dot(w2.freq, t);
+            }
+        }
+
+        float angReal = Mathf.Abs(signed / stretch + offset) / Mathf.Max(0.45f, Mathf.Abs(1f + slope));
 
         // Angle -> TILES on the 2:1 equirectangular map. h tiles span pi of latitude and w = 2h tiles span
         // 2pi of longitude, so a step north costs h/pi tiles while a step east costs h/(pi*cos lat): near

@@ -417,6 +417,88 @@ public static class SurfaceIndex
     public static float Best(CelestialBody b, SurfaceIndexKind k)
         => b?.surface == null || k == SurfaceIndexKind.None ? 0f : GetStats(b, k).max;
 
+    // ============================================================================================
+    // WHAT AN OVERLAY ACTUALLY DRAWS — the consolidation rule
+    //
+    // Every index used to paint EVERY tile. A ramp that fades toward transparent still tints the whole
+    // world, so a map whose fertility ran 8% to 30% came out uniformly green and said, in effect, "farm
+    // wherever you like, it is all a bit farmable". That is the opposite of what a siting overlay is for,
+    // and it made the survey ladder pointless: if everywhere works, where you build does not matter.
+    //
+    // So an index is now drawn in two bands and nowhere else:
+    //
+    //   THE BEST QUARTER of this world's tiles for that index — always drawn, always the brightest thing
+    //   on the map. RELATIVE, so a frozen world still shows you its hottest ground and a barely-fertile
+    //   one still shows you its greenest. This is the "unless the planet just is not abundant" clause:
+    //   the best sites a world HAS are always findable, however poor they are in absolute terms.
+    //
+    //   THE REST OF THE WORLD'S BETTER HALF, where it also scores 50% or better — drawn dimmer, so on a
+    //   rich world you can still see the good ground around the best ground and choose between sites for
+    //   reasons other than rank. Both cuts have to be passed: absolute keeps poor ground off the map,
+    //   relative keeps an exceptionally rich world from being painted corner to corner again.
+    //
+    // Below both, nothing is drawn at all. An 18% tile is not a faint opportunity, it is somewhere you
+    // should not put a farm, and the map now says so by leaving it blank.
+    //
+    // ONE RULE, EVERY READOUT. The survey overlay, the highlight while you hold a building, and the
+    // under-the-cursor readout all ask this, so they can never disagree about whether a tile counts.
+    // ============================================================================================
+
+    /// Below this an index is not drawn — unless the tile is in this world's best quarter anyway.
+    public const float ShowFloor = 0.5f;
+
+    /// The fraction of a world's tiles that always count as its best ground, however poor they are.
+    public const float TopBand = 0.25f;
+
+    /// The most of a world any one index may paint: its better half, and only the part of that half
+    /// which also clears ShowFloor.
+    public const float ShownFraction = 0.5f;
+
+    /// Should this tile be drawn for this index, and how brightly (0 dim .. 1 the world's best)?
+    public static bool Shown(CelestialBody b, SurfaceIndexKind k, int x, int y, out float t)
+        => ShownFor(b, k, Get(b, k, x, y), out t);
+
+    /// As above, for a value already read — the overlay walks every tile and must not pay for Get twice
+    /// (each call re-samples the terrain noise field).
+    public static bool ShownFor(CelestialBody b, SurfaceIndexKind k, float v, out float t)
+    {
+        t = 0f;
+        if (b?.surface == null || k == SurfaceIndexKind.None) return false;
+
+        float max = Best(b, k);
+        if (max <= 0f || v <= 0.001f) return false;   // an index that is zero everywhere has no best ground
+
+        // The value at which the best quarter begins. Compared with >= rather than by percentile so that
+        // a PLATEAU works: on a world where a third of the tiles sit at exactly the maximum, every one of
+        // them is the best ground there is, and a rank-based test would have called none of them top.
+        float cut = TopFractionThreshold(b, k, TopBand);
+
+        if (v >= cut)
+        {
+            // The bright band. Spread across the top of the ramp so the very best tile on the world is
+            // unmistakably the very best, rather than one of a uniformly glowing crowd.
+            t = max > cut ? Mathf.Lerp(0.75f, 1f, Mathf.InverseLerp(cut, max, v)) : 1f;
+            return true;
+        }
+
+        // TWO CUTS, NOT ONE, and they do different jobs.
+        //
+        //   ABSOLUTE (ShowFloor)  — is this tile any good? An 18% tile is not worth drawing on any world.
+        //   RELATIVE (the median) — is it good FOR HERE? Without this, an exceptionally rich world goes
+        //                           back to being painted corner to corner, because nearly all of it
+        //                           clears 50% — and "everywhere is fine" is the exact answer these
+        //                           overlays exist to stop giving.
+        //
+        // So no more than half of any world is ever painted, and on most worlds it is far less.
+        if (v < ShowFloor || v < TopFractionThreshold(b, k, ShownFraction)) return false;
+
+        // The dim band: good ground that simply is not this world's best. Its top end stops short of the
+        // bright band's floor, so the two never blur into each other.
+        float top = Mathf.Max(ShowFloor + 0.01f, cut);
+        t = Mathf.Lerp(0.12f, 0.66f, Mathf.InverseLerp(ShowFloor, top, v));
+        return true;
+    }
+
     // ---- Presentation ----
     public static string Name(SurfaceIndexKind k)
     {
@@ -454,7 +536,9 @@ public static class SurfaceIndex
         Color c;
         switch (k)
         {
-            case SurfaceIndexKind.Mineral: c = Color.Lerp(new Color(0.20f, 0.13f, 0.07f), new Color(0.78f, 0.52f, 0.24f), t); break;
+            // Brighter at the top than the old muddy tan, which was the one ramp whose best ground read as
+            // dirt rather than as a find. Orange, and clearly not Heat's red.
+            case SurfaceIndexKind.Mineral: c = Color.Lerp(new Color(0.28f, 0.16f, 0.06f), new Color(1.00f, 0.60f, 0.16f), t); break;
             case SurfaceIndexKind.Heat: c = Color.Lerp(new Color(0.85f, 0.45f, 0.10f), new Color(1.00f, 0.10f, 0.05f), t); break;
             case SurfaceIndexKind.Fertile: c = Color.Lerp(new Color(0.05f, 0.22f, 0.08f), new Color(0.30f, 1.00f, 0.25f), t); break;
             // PURPLE. It was a slate-to-whitish blue, which failed twice over: a pale desaturated blue
@@ -475,6 +559,39 @@ public static class SurfaceIndex
         }
         c.a = Mathf.Lerp(0.12f, 0.88f, t);
         return c;
+    }
+
+    /// The fill for a tile the overlay has decided to draw (see Shown). The index's own hue, taken from
+    /// the UPPER half of its ramp — a tile that made the cut is never painted in the muddy bottom end,
+    /// because everything muddy is now simply absent — and with alpha that climbs hard, so this world's
+    /// best ground is close to solid colour.
+    public static Color Highlight(SurfaceIndexKind k, float t)
+    {
+        t = Mathf.Clamp01(t);
+        var c = Ramp(k, Mathf.Lerp(0.45f, 1f, t));
+        c.a = Mathf.Lerp(0.45f, 0.92f, t);
+        return c;
+    }
+
+    /// The line drawn around a patch of highlighted ground: the same hue, brightened past anything the
+    /// fill can reach, and fully opaque.
+    ///
+    /// This is what makes a patch READ AS A PLACE. A translucent wash over textured terrain has no edge —
+    /// you can see roughly where it is strong but not where it stops, which is exactly the question when
+    /// you are about to draw a footprint. An outline in the index's own colour also keeps the map legible
+    /// with two overlays up: the shape is bounded in purple, so it is weather, whatever is under it.
+    public static Color Outline(SurfaceIndexKind k)
+    {
+        switch (k)
+        {
+            case SurfaceIndexKind.Mineral: return new Color(1.00f, 0.68f, 0.22f, 1f);   // bright orange
+            case SurfaceIndexKind.Heat:    return new Color(1.00f, 0.30f, 0.20f, 1f);   // bright red
+            case SurfaceIndexKind.Fertile: return new Color(0.48f, 1.00f, 0.38f, 1f);   // bright green
+            case SurfaceIndexKind.Wind:    return new Color(0.88f, 0.52f, 1.00f, 1f);   // bright purple
+            case SurfaceIndexKind.Solar:   return new Color(1.00f, 0.97f, 0.42f, 1f);   // bright yellow
+            case SurfaceIndexKind.Water:   return new Color(0.38f, 0.76f, 1.00f, 1f);   // bright blue
+            default:                       return new Color(1f, 1f, 1f, 1f);
+        }
     }
 
     // Minerals you can see from orbit; everything else needs someone on the ground.
