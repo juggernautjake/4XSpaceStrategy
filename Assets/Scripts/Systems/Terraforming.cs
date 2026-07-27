@@ -542,7 +542,19 @@ public static class TerraformDiagnosis
             });
 
         // ---- Living soil ----
-        if (NeedsBiosphere(s) && b.type != CelestialBodyType.GasGiant && b.type != CelestialBodyType.OceanPlanet)
+        //
+        // `!b.biosphereActive` IS THE POINT OF THIS LINE, not a refinement of it. NeedsBiosphere asks
+        // about the SPECIES — "would Terrans want living soil here" — and every world answers yes, so on
+        // its own it reported "No biosphere" against worlds that generated with a thriving one. Goreth II
+        // showed it plainly: the survey listed No biosphere as a defect while Microbial Seeding, one
+        // panel below, refused to run because the world "already has an active biosphere". Two readouts
+        // of the same fact disagreeing.
+        //
+        // Tested against the SAME flag Microbial Seeding reads (MicrobialSeedingWarning), because that
+        // is what stops them drifting apart again: the project that fixes this problem and the survey
+        // that reports it now agree by construction rather than by both being maintained correctly.
+        if (NeedsBiosphere(s) && !b.biosphereActive
+            && b.type != CelestialBodyType.GasGiant && b.type != CelestialBodyType.OceanPlanet)
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.NoBiosphere,

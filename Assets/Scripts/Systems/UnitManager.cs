@@ -1016,39 +1016,81 @@ public class UnitManager : MonoBehaviour
         return false;
     }
 
+    // ============================================================================================
+    // THE SHIP HAS ARRIVED — NOW THE PLAYER PICKS THE SPOT
+    //
+    // This used to be the whole of founding a colony: it set the flag, made the population, and dropped
+    // the grounded hull on whatever tile FindSpot happened to return. The world's first and most
+    // permanent structure was sited by a function whose only rule is "the first place it fits".
+    //
+    // It is now split in two. This half establishes the CLAIM — the world is yours, revealed, no longer
+    // being claimed — and then hands off to ColonyLanding, which opens the surface in Build Mode with the
+    // colony ship on the cursor. FinishColonyLanding below is the other half, and it does not run until
+    // the player has chosen where the ship comes down.
+    //
+    // NOTHING HERE MAKES THE WORLD SETTLED. `settled` is what says people live on a world, and until the
+    // hull is on the ground nobody does. Keeping it false until then is what makes the ship abandonable:
+    // close the window and you have a claimed, empty world and a colony ship still in orbit, which is
+    // exactly the state you were in a moment ago.
+    // ============================================================================================
     void FoundColony(Unit u, CelestialBody b)
     {
         b.owner = FactionManager.Player;
-        b.settled = true;               // people live here now — see Claim.cs
         b.claimingFaction = null;
         b.visited = true;
         b.explorationProgress = Mathf.Max(b.explorationProgress, 1f);   // owning fully reveals it
+        b.claimProgress = Colony.ClaimProgress(b);
+        u.AddExperience(XpColonize);
+
+        RevealBodyVisual(b);
+        RefreshOwnerRing(b);
+        OnUnitsChanged?.Invoke();
+
+        // Hand the landing to the player. The ship stays in orbit and stays selectable until the site is
+        // chosen — see ColonyLanding.
+        ColonyLanding.Begin(b, u);
+
+        SimpleAudio.Instance?.PlayNotify(NotifKind.Victory);
+        NotificationManager.Instance?.Push($"{b.name} is yours — choose a landing site",
+            "The colony ship is in orbit and waiting. Open the surface and place it where you want the " +
+            "colony to grow: everything you build on this world will spread out from that spot.",
+            () => PlanetViewWindow.Instance?.ShowFor(b, PlanetViewWindow.Tab.Build), NotifKind.Victory);
+
+        PlanetViewWindow.Instance?.ShowFor(b, PlanetViewWindow.Tab.Build);
+    }
+
+    /// The other half: the player chose a tile and the grounded hull is standing on it.
+    ///
+    /// Called only by ColonyLanding.Complete, which is called only when a ColonyShipBase is successfully
+    /// placed. Everything that makes a world a COLONY rather than merely a claim lives here.
+    public void FinishColonyLanding(CelestialBody b, Unit ship)
+    {
+        if (b == null) return;
+
+        b.owner = FactionManager.Player;
+        b.settled = true;               // people live here now — see Claim.cs
         b.cities = 1;
         // A beachhead, not a city: the colony ship's complement, scaled by how the species breeds.
         b.population = Population.ColonyStart(b, SpeciesManager.Current);
         if (!b.buildings.Contains((int)BuildingType.City)) b.buildings.Add((int)BuildingType.City);
         b.claimProgress = Colony.ClaimProgress(b);
-        u.AddExperience(XpColonize);
 
-        RevealBodyVisual(b);
-
-        // The ship doesn't just evaporate: it lands and BECOMES the colony's first seat of government.
-        // The grounded hull is a real structure on the surface grid, and stays the world's capitol
-        // until you can afford to build a proper one around it.
-        if (SurfaceBuildManager.FindSpot(b, SurfaceBuildingType.ColonyShipBase, out int bx, out int by))
-            SurfaceBuildManager.ForcePlace(b, SurfaceBuildingType.ColonyShipBase, bx, by, 0);
-
-        // Consume the colony ship — it becomes the city.
-        if (b.units != null) b.units.Remove(u);
-        units.Remove(u);
-        if (UnitSelection.IsSelected(u)) UnitSelection.Clear();
+        // Consume the colony ship — it IS the building now.
+        if (ship != null)
+        {
+            if (b.units != null) b.units.Remove(ship);
+            units.Remove(ship);
+            if (UnitSelection.IsSelected(ship)) UnitSelection.Clear();
+        }
 
         SimpleAudio.Instance?.PlayNotify(NotifKind.Victory);
-        NotificationManager.Instance?.Push($"City founded on {b.name}!",
-            $"{FactionManager.Player.name} settled {b.name}. The colony ship became your first city — build it up and develop the world to fully establish it.",
+        NotificationManager.Instance?.Push($"Colony founded on {b.name}!",
+            $"{FactionManager.Player.name} settled {b.name}. The colony ship is now the world's seat of " +
+            "government — upgrade it to a Planet Capitol when you can afford one.",
             FlyTo(b), NotifKind.Victory);
         RefreshOwnerRing(b);
         OnUnitsChanged?.Invoke();
+        PlanetViewWindow.Instance?.RefreshIfShowing(b);
     }
 
     void RefreshOwnerRing(CelestialBody b)

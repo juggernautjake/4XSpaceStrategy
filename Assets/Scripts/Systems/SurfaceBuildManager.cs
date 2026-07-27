@@ -81,7 +81,14 @@ public static class SurfaceBuildManager
         if (b.owner != FactionManager.Player) { why = "this world isn't yours — claim it first"; return false; }
         if (!b.Surveyed) { why = "survey this world first"; return false; }
 
-        if (!b.settled && !GameMode.DevMode)
+        // A COLONY SHIP LANDING IS THE EXCEPTION TO TWO RULES HERE, and it has to be, because it is the
+        // event that makes them true. The world is not settled — placing this hull is what settles it —
+        // and the class is normally unbuildable further down precisely so a player cannot conjure one
+        // from the build menu. While a landing is genuinely pending on THIS world, that one placement of
+        // that one class is exactly what the game is asking the player for. See ColonyLanding.
+        bool landing = ColonyLanding.AwaitingOn(b) && t == SurfaceBuildingType.ColonyShipBase;
+
+        if (!b.settled && !landing && !GameMode.DevMode)
         {
             why = b.habitability >= Colony.FoundThreshold
                 ? "nobody lives here yet — settle it with a colony ship"
@@ -119,7 +126,7 @@ public static class SurfaceBuildManager
 
         if (t == SurfaceBuildingType.PlanetCapitol)
         { why = "upgrade this world's Colony Ship Base into a capitol instead"; return false; }
-        if (t == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode)
+        if (t == SurfaceBuildingType.ColonyShipBase && !landing && !GameMode.DevMode)
         { why = "a colony ship becomes this when it settles a world"; return false; }
         if (CityGrowth.IsSettlement(t) && !GameMode.DevMode)
         { why = "settlements grow on their own as the colony's population rises"; return false; }
@@ -138,11 +145,16 @@ public static class SurfaceBuildManager
         if (b.owner != FactionManager.Player) { why = "this world isn't yours — claim it first"; return false; }
         if (!b.Surveyed) { why = "survey this world first"; return false; }
 
+        // The landing exception, exactly as in CanPlaceType above — see the note there. Both methods
+        // carry the same gates, so both need it; a landing legal in one and refused by the other would
+        // show the player a placeable ghost that the click then silently declines to place.
+        bool landing = ColonyLanding.AwaitingOn(b) && t == SurfaceBuildingType.ColonyShipBase;
+
         // SETTLED, not merely owned. Infrastructure needs people to build and run it, and a claim is a
         // flag on a rock — the home world's moons are yours from turn one and have nobody on them.
         // Checking ownership alone let you cover an airless moon in farms and factories staffed by
         // nobody, which is the same hole that gave those moons free cities.
-        if (!b.settled && !GameMode.DevMode)
+        if (!b.settled && !landing && !GameMode.DevMode)
         {
             why = b.habitability >= Colony.FoundThreshold
                 ? "nobody lives here yet — settle it with a colony ship"
@@ -176,7 +188,7 @@ public static class SurfaceBuildManager
         // directly would leave the grounded ship sitting next to it with nothing to do.
         if (t == SurfaceBuildingType.PlanetCapitol)
         { why = "upgrade this world's Colony Ship Base into a capitol instead"; return false; }
-        if (t == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode)
+        if (t == SurfaceBuildingType.ColonyShipBase && !landing && !GameMode.DevMode)
         { why = "a colony ship becomes this when it settles a world"; return false; }
 
         // Settlements/towns/cities are GROWN by the population (CityGrowth), never placed. You get one

@@ -431,27 +431,37 @@ public class ColonyManager : MonoBehaviour
         // of the game asks for a colony ship and 40% habitability to found a city; this gave one away for
         // owning the rock. That's why moons had cities on them.
         if (!b.settled) return;
-        // Output scales with the workforce. Tuned against the population UNIT scale (1 = 100,000), so a
-        // one-million homeworld (10) starts near 0.9x and a large city world climbs toward ~2x.
-        float popMult = 0.5f + b.population / 25f;
-        popMult = Mathf.Min(popMult, 2.5f);   // diminishing returns; a megacity isn't 50x a town
-        float oreRich = 1f + OreGenerator.OresOnBody(b).Count * 0.15f;
+        // The workforce multiplier and the ore-richness bonus that used to live here went with the
+        // abstract buildings they scaled — see the block below. Surface structures scale on their own
+        // siting efficiency instead, which is a number the player chose when they drew the building.
 
+        // ============================================================================================
+        // RESOURCE INCOME COMES FROM THINGS THAT PHYSICALLY EXIST — NOTHING ELSE
+        //
+        // The abstract colony buildings (BuildingType.Farm / Mine / PowerPlant / ResearchCenter) used to
+        // pay metal, energy, water and research here, per second, forever, for a list entry. Nothing was
+        // standing anywhere: no footprint on the grid, no siting, no efficiency, no power draw, and no
+        // way for the player to see or lose it. A world's economy could be entirely invisible.
+        //
+        // That is now DEAD. Every resource a planet earns comes from a structure drawn on its surface
+        // (SurfaceBuildManager.TickOutput, scaled by how well it was sited) or from an orbital station
+        // over it. If you want metal, there is a mine on the map and you can point at it.
+        //
+        // POPULATION GROWTH IS NOT RESOURCE INCOME and is deliberately still read from this list. It is
+        // the one thing here that is not a resource, and zeroing it would stall a freshly landed colony
+        // at zero people with no way to grow the workforce that builds the buildings that would fix it —
+        // the exact feedback trap the power system's notes warn about. Housing proper comes from the
+        // surface too (habitats, city blocks, the grown settlements), and those are added below.
+        //
+        // `oreRich` and the Industry ore-yield bonus move WITH the mines, to SurfaceBuildManager.
+        // ============================================================================================
         float growth = 0f;
         foreach (int id in b.buildings)
-        {
-            var info = BuildingDatabase.Get((BuildingType)id);
-            // Mines benefit from researched Industry tech (ore-yield bonus).
-            float mine = id == (int)BuildingType.Mine ? oreRich * TechEffects.OreYieldMult : 1f;
-            if (info.metalPerSec > 0f) PlayerEconomy.Add(ResourceType.Metal, info.metalPerSec * popMult * mine * dt);
-            if (info.energyPerSec > 0f) PlayerEconomy.Add(ResourceType.Energy, info.energyPerSec * popMult * dt);
-            if (info.waterPerSec > 0f) PlayerEconomy.Add(ResourceType.Water, info.waterPerSec * popMult * dt);
-            researchAccum += info.researchPerSec * popMult * TechEffects.ResearchRateMult * dt;   // Science tech speeds research
-            growth += info.popGrowthPerSec;
-        }
-        // Structures physically placed on the surface grid produce on top of the abstract colony
-        // buildings, each scaled by how well it was SITED (see SurfaceBuildManager.EfficiencyAt) —
-        // a mine on a rich seam earns its keep, one on dead rock never will.
+            growth += BuildingDatabase.Get((BuildingType)id).popGrowthPerSec;
+
+        // Structures physically placed on the surface grid, each scaled by how well it was SITED (see
+        // SurfaceBuildManager.EfficiencyAt) — a mine on a rich seam earns its keep, one on dead rock
+        // never will. This is now the ONLY source of surface resource income.
         SurfaceBuildManager.TickOutput(b, dt);
 
         // Construction advances on the same colony step, so build time runs on the GAME clock — a paused

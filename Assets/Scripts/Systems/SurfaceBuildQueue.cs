@@ -99,23 +99,41 @@ public static class SurfaceBuildQueue
 
     /// Start building a drawn footprint. The cost is taken up front, exactly as the shipyard does.
     public static SurfaceBuildJob Enqueue(CelestialBody b, SurfaceBuildingType t, List<Vector2Int> cells)
+        => Enqueue(b, t, cells, out _);
+
+    /// As above, reporting WHY a footprint was refused so the build UI can say so.
+    ///
+    /// The reason matters more here than it does for a fixed footprint. A tetromino either fits or it
+    /// visibly doesn't; a drawn one can fail for reasons that are invisible on the map — too few tiles
+    /// for this class, or a block that looks joined but meets only at a corner. Silently declining to
+    /// build reads as the button being broken.
+    public static SurfaceBuildJob Enqueue(CelestialBody b, SurfaceBuildingType t, List<Vector2Int> cells,
+                                          out string why)
     {
-        if (b == null || cells == null || cells.Count == 0) return null;
+        why = null;
+        if (b == null || cells == null || cells.Count == 0) { why = "nothing drawn"; return null; }
 
         var info = SurfaceBuildingDatabase.Get(t);
-        if (info == null) return null;
+        if (info == null) { why = "unknown building"; return null; }
 
         // EVERY GATE CanPlace APPLIES, APPLIES HERE TOO. Drawing changes which ground a building
         // occupies, not whether the empire is allowed to build it — without this a painted footprint
         // dodged tech requirements, uniqueness, ownership and the classes that are grown or upgraded
         // into rather than placed.
-        if (!SurfaceBuildManager.CanPlaceType(b, t, out _)) return null;
+        if (!SurfaceBuildManager.CanPlaceType(b, t, out why)) return null;
+
+        // THE SHAPE ITSELF: minimum tiles, orthogonal connectivity, and the square/rectangle families.
+        // Checked here rather than only in the UI because this is the chokepoint every drawn building
+        // passes through — the UI preview should refuse first and usually does, but a rule enforced only
+        // in the preview is a rule that a second entry point silently skips.
+        if (!BuildShapeRules.Validate(info, cells, out why)) return null;
 
         // Nor may two queued jobs claim the same ground. `Occupied` only knows about buildings that are
         // already standing, so without this both jobs are charged and whichever finishes second is
         // refunded and thrown away — the player pays twice to build once.
         var pending = PendingCells(b);
-        foreach (var c in cells) if (pending.Contains(c)) return null;
+        foreach (var c in cells)
+            if (pending.Contains(c)) { why = "another queued build already claims that ground"; return null; }
 
         int tiles = cells.Count;
         float mult = BuildScaling.CostMultiplier(tiles);
@@ -124,7 +142,11 @@ public static class SurfaceBuildQueue
         // exactly as it discounts a placed one.
         int cm = Mathf.RoundToInt(ColonyManager.DiscCost(info.costMetal) * mult);
         int ce = Mathf.RoundToInt(ColonyManager.DiscCost(info.costEnergy) * mult);
-        if (!GameMode.DevMode && !PlayerEconomy.Spend(cm, ce)) return null;
+        if (!GameMode.DevMode && !PlayerEconomy.Spend(cm, ce))
+        {
+            why = $"not enough resources — {cm} metal and {ce} energy for {tiles} tiles";
+            return null;
+        }
 
         var job = new SurfaceBuildJob
         {

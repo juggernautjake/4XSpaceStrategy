@@ -187,17 +187,22 @@ public class ColonyWindow : MonoBehaviour
             }
         }
 
-        // Owned world without a city yet (e.g. a home moon): let the player found one — once it's
-        // habitable enough (terraform first if not). This is how birthright worlds get settled.
-        if (mgr != null && b.owner == FactionManager.Player && !b.buildings.Contains((int)BuildingType.City))
-        {
-            bool canCity = mgr.CanEstablishCity(b, out string cityWhy);
-            var cityBtn = UIFactory.Button(buildList,
-                canCity ? $"Establish City  ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {ColonyManager.CityBuildTime:F0}s)"
-                        : $"Establish City — {cityWhy}",
-                () => { if (mgr.StartEstablishCity(b)) { lastBuildSig = ""; RebuildBuildings(); } }, 30);
-            cityBtn.interactable = canCity;
-        }
+        // ============================================================================================
+        // "ESTABLISH CITY" IS GONE, DELIBERATELY.
+        //
+        // It bought a colony for metal and energy: a world became settled, gained a population and a
+        // city, and NOTHING WAS PLACED ON THE SURFACE. That is a second, cheaper route past the whole
+        // colonisation system — no colony ship, no landing site, no building standing anywhere — and it
+        // meant the surface grid was optional on any world you already owned. The home world's moons
+        // were the clearest case: yours by birthright from turn one, so a button away from being cities.
+        //
+        // The only way to settle a world now is to send a colony ship and land it somewhere you chose.
+        // See ColonyLanding and UnitManager.FoundColony.
+        //
+        // ColonyManager.CanEstablishCity / StartEstablishCity survive for now because saves in flight
+        // may hold a queued establishCity job that still has to be able to finish and drain. Nothing
+        // offers a NEW one. They are marked deprecated at their definitions.
+        // ============================================================================================
 
         // Shipyard tier + upgrade. The headline perk of a tier is BUILD POWER: how many hulls this yard
         // can hold on the stocks at once, pooled with every other yard you own.
@@ -238,19 +243,30 @@ public class ColonyWindow : MonoBehaviour
             }
         }
 
-        foreach (BuildingType t in System.Enum.GetValues(typeof(BuildingType)))
-        {
-            if (t == BuildingType.City) continue;
-            var info = BuildingDatabase.Get(t);
-            bool can = mgr != null && mgr.CanBuild(b, t, out string reason);
-            string why = "";
-            if (!can && mgr != null) mgr.CanBuild(b, t, out why);
-            string label = can
-                ? $"Build {info.name}  ({info.costMetal}m {info.costEnergy}e, {info.buildTime:F0}s)"
-                : $"{info.name} — {(b.buildings.Contains((int)t) ? "built" : why)}";
-            var btn = UIFactory.Button(buildList, label, () => { if (mgr != null && mgr.StartBuilding(b, t)) { lastBuildSig = ""; RebuildBuildings(); } }, 30);
-            btn.interactable = can;
-        }
+        // ============================================================================================
+        // THE ABSTRACT BUILDING MENU IS GONE — BUILD THE REAL THING ON THE SURFACE
+        //
+        // This offered Farm, Mine, Power Plant, Research Centre and Shipyard as list entries: you paid,
+        // waited, and a word was added to `b.buildings`. Nothing stood anywhere on the world.
+        //
+        // Those entries now produce NO resources (see ColonyManager.TickColony), because every resource a
+        // planet earns has to come from a structure you can point at on the surface or from a station in
+        // orbit. Leaving the menu up would therefore be strictly worse than deleting it — it would sell
+        // the player a building that costs metal, takes time, and does nothing at all.
+        //
+        // Each of them has a real counterpart on the surface grid, which is where they are built now:
+        //   Farm            -> Farmland            (drawn, 4 tiles minimum)
+        //   Mine            -> Mine                (drawn, 3 tiles minimum)
+        //   Power Plant     -> any of the plants in the Electrical category
+        //   Research Centre -> Research Centre     (drawn, 6 tiles minimum) or a Research Outpost
+        //   Shipyard        -> Shipyard            (a fixed 3x3)
+        //
+        // The two UPGRADE ladders above this — shipyard tier and lab tier — are untouched. They are not
+        // abstract buildings; they are tiers on a world that already has the real structure standing.
+        UIFactory.Label(buildList,
+            "<color=#9FB4C8>Farms, mines, power and laboratories are built on the world's surface — " +
+            "open Planet View and draw them on the grid.</color>",
+            UITheme.SmallSize, UITheme.SubText, 34);
     }
 
     void OnDestroy()

@@ -18,7 +18,10 @@ public enum SurfaceBuildingType
     // Grown by the population itself, never placed (see CityGrowth)
     Settlement, Town, City,
     // The power grid (see PowerGrid.cs)
-    PowerNode, Capacitor, CombustionPlant, SteamTurbine, FissionReactor, FusionReactor
+    PowerNode, Capacitor, CombustionPlant, SteamTurbine, FissionReactor, FusionReactor,
+    // The proper laboratory, above the Research Outpost. Appended, like everything else here, because
+    // the ordinals are in every save.
+    ResearchCenter
 }
 
 // What a structure is FOR. The build menu is a row of coloured tabs over this, so a long catalogue stays
@@ -103,7 +106,22 @@ public class SurfaceBuildingInfo
     public string description;
 
     // Footprint cells, relative to the building's origin, before rotation.
+    //
+    // Still authored for EVERY class, including the ones the player now draws freely. It is the shape a
+    // Fixed building is, the shape CityGrowth places programmatically, the thumbnail the build tray
+    // draws, and the fallback footprint for every building saved before drawing existed. What it stopped
+    // being is the only footprint a player can have.
     public Vector2Int[] shape;
+
+    // ---- How this class is drawn ----
+    //
+    // The fewest tiles it can be built with, and what family of shape it has to be. See BuildShapeRules,
+    // which is where both are enforced; these are just the authored numbers.
+    //
+    // The default is a 1-tile Free building, which is the permissive case, so anything added later that
+    // forgets to set them is buildable rather than silently impossible to place.
+    public int minTiles = 1;
+    public BuildDrawMode drawMode = BuildDrawMode.Free;
 
     // One per world (a capitol, a shipyard). Upgrades replace rather than stack.
     public bool uniquePerWorld = false;
@@ -395,6 +413,21 @@ public static class SurfaceBuildingDatabase
             S(0, 0, 0, 1, 0, 2, 1, 2), SurfaceIndexKind.None, 80, 70, 20f, new Color(0.45f, 0.85f, 1.00f))
         { researchPerSec = 0.6f };
 
+        // The real laboratory. The Research Outpost above it is a field station — this is the building
+        // you put down when a world is meant to be a science world, and it is drawn rather than fixed so
+        // that a world CAN be committed to research the way another is committed to farming.
+        //
+        // Sited on nothing in particular (SurfaceIndexKind.None): unlike a mine or a farm, what a lab
+        // needs is people and power, not ground. Its draw is the highest of any non-military building
+        // for exactly that reason.
+        var lab = new SurfaceBuildingInfo(SurfaceBuildingType.ResearchCenter, SurfaceBuildingCategory.Science,
+            "Research Centre",
+            "A full research campus — laboratories, test halls and the people to staff them. Produces far more than a Research Outpost and scales with every tile you give it, but it is hungry for power and takes real time to build. Terrain-agnostic: what a laboratory needs is electricity and a population, not good ground.",
+            S(0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1), SurfaceIndexKind.None, 160, 130, 28f,
+            new Color(0.55f, 0.90f, 1.00f))
+        { researchPerSec = 1.8f };
+        _all[(int)SurfaceBuildingType.ResearchCenter] = lab;
+
         // Big square — needs real space cleared for it.
         _all[(int)SurfaceBuildingType.Spaceport] = new SurfaceBuildingInfo(SurfaceBuildingType.Spaceport, SurfaceBuildingCategory.Military, "Spaceport",
             "Ground-to-orbit traffic. Big, flat and hungry for space — plan the city around it.",
@@ -427,7 +460,15 @@ public static class SurfaceBuildingDatabase
         var yard = new SurfaceBuildingInfo(SurfaceBuildingType.SurfaceShipyard, SurfaceBuildingCategory.Military,
             "Shipyard",
             "Ground-based slipways and their orbital tether. Placing one gives this world a level-1 shipyard, adding its build power to your empire's pool; upgrade its tier from the world's Production tab. One per world.",
-            S(0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1, 0, 2, 1, 2), SurfaceIndexKind.None, 140, 100, 28f,
+            // A FULL 3x3. This was a 3x3 with one corner missing (8 tiles), which made it the one
+            // "big square" building that wasn't square. Now it matches the spaceport it sits beside and
+            // the Fixed shape rule that says it is nine tiles.
+            //
+            // NOTE FOR EXISTING SAVES: a shipyard standing in a save written before this occupies the
+            // old 8 tiles, and loading it will claim the ninth. Nothing re-validates footprints on load,
+            // so if something was already built on that corner the two will overlap visually until one
+            // is demolished. Only affects worlds that had a shipyard AND had built into that exact cell.
+            S(0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1, 0, 2, 1, 2, 2, 2), SurfaceIndexKind.None, 140, 100, 28f,
             new Color(0.65f, 0.80f, 1.00f));
         yard.uniquePerWorld = true;
         _all[(int)SurfaceBuildingType.SurfaceShipyard] = yard;
@@ -616,6 +657,7 @@ public static class SurfaceBuildingDatabase
         Draw(SurfaceBuildingType.Spaceport, 1.5f);
         Draw(SurfaceBuildingType.Refinery, 1.4f);
         Draw(SurfaceBuildingType.ResearchOutpost, 1.2f);
+        Draw(SurfaceBuildingType.ResearchCenter, 2.2f);   // the hungriest thing on a science world
         Draw(SurfaceBuildingType.Mine, 0.8f);
         Draw(SurfaceBuildingType.Farm, 0.4f);
 
@@ -643,6 +685,80 @@ public static class SurfaceBuildingDatabase
         Require(SurfaceBuildingType.SteamTurbine, 0.15f,
             "Needs water to raise steam with. A desert has nothing to boil.");
 
+        // ============================================================================================
+        // HOW EACH CLASS IS DRAWN
+        //
+        // The whole shape spec, in one table, because that is how it will be re-tuned: by reading down
+        // the list and asking "is a 4-tile minimum right for a farm", not by opening twenty constructors.
+        // BuildShapeRules enforces every line of it; this is only the data.
+        //
+        // The rule of thumb behind the minimums: the number is the smallest footprint at which the thing
+        // is recognisably itself. A 3-tile mine is a working; a 1-tile mine is a hole. A 5-tile factory
+        // is a factory floor. They rise with how much plant the real building implies, which is why the
+        // reactors and the hydro dam sit at 4 and a turbine hall sits at 2.
+        // ============================================================================================
+
+        // ---- Free-drawn: paint as many tiles as you can afford, at or above the minimum ----
+        //
+        // These are the resource generators, and they are the reason the mechanic exists: a farm that
+        // is not feeding the colony gets more tiles painted onto its edge, and stays ONE farm.
+        Drawn(SurfaceBuildingType.Farm, BuildDrawMode.Free, 4);
+        Drawn(SurfaceBuildingType.Mine, BuildDrawMode.Free, 3);
+        Drawn(SurfaceBuildingType.Factory, BuildDrawMode.Free, 5);
+        Drawn(SurfaceBuildingType.Refinery, BuildDrawMode.Free, 4);
+
+        Drawn(SurfaceBuildingType.Capacitor, BuildDrawMode.Free, 2);
+        Drawn(SurfaceBuildingType.PowerDistribution, BuildDrawMode.Free, 3);
+        Drawn(SurfaceBuildingType.CombustionPlant, BuildDrawMode.Free, 3);
+        Drawn(SurfaceBuildingType.HydroPlant, BuildDrawMode.Free, 4);
+        Drawn(SurfaceBuildingType.WindFarm, BuildDrawMode.Free, 2);
+        Drawn(SurfaceBuildingType.SteamTurbine, BuildDrawMode.Free, 2);
+        Drawn(SurfaceBuildingType.SolarArray, BuildDrawMode.Free, 3);
+        Drawn(SurfaceBuildingType.GeothermalPlant, BuildDrawMode.Free, 4);
+        Drawn(SurfaceBuildingType.FissionReactor, BuildDrawMode.Free, 4);
+
+        // Not in the brief, set to match their neighbours rather than left at the permissive default of
+        // 1 — a 1-tile habitat block or laboratory would be the cheapest output in the game per tile and
+        // would undercut everything above. Flagged as a guess: these are the two numbers to change first
+        // if the balance reads wrong.
+        Drawn(SurfaceBuildingType.Habitat, BuildDrawMode.Free, 2);
+        Drawn(SurfaceBuildingType.ResearchOutpost, BuildDrawMode.Free, 2);
+
+        // The campus: a real commitment, so a real minimum. Free-drawn on purpose — "add three more
+        // tiles to the lab" is the science equivalent of adding tiles to a farm.
+        Drawn(SurfaceBuildingType.ResearchCenter, BuildDrawMode.Free, 6);
+
+        // ---- Square: drag a corner, the far corner follows as a square ----
+        Drawn(SurfaceBuildingType.FusionReactor, BuildDrawMode.Square, 4);   // 2x2 at minimum
+
+        // ---- Rectangle, at least 2 wide in both directions ----
+        // 2x8 and 10x2 are both fine; 1x9 is not. See BuildShapeRules.Rectangle.
+        Drawn(SurfaceBuildingType.StorageDepot, BuildDrawMode.Rectangle, 4);
+
+        // ---- Fixed: the authored footprint, and no drawing at all ----
+        Drawn(SurfaceBuildingType.Spaceport, BuildDrawMode.Fixed, 9);        // 3x3
+        Drawn(SurfaceBuildingType.SurfaceShipyard, BuildDrawMode.Fixed, 9);  // 3x3
+        Drawn(SurfaceBuildingType.PlanetCapitol, BuildDrawMode.Fixed, 4);    // 2x2
+        Drawn(SurfaceBuildingType.ColonyShipBase, BuildDrawMode.Fixed, 4);   // 2x2
+
+        // ---- The relay, which has its own control entirely ----
+        // One tile per pylon; a DRAG lays a spaced chain of them. See BuildShapeRules.NodeChain.
+        Drawn(SurfaceBuildingType.PowerNode, BuildDrawMode.NodeChain, 1);
+
+        // The grown settlements (Settlement / Town / City) are deliberately absent. CityGrowth places
+        // them programmatically at their authored shapes and the player never draws one, so a minimum
+        // would be a rule with nothing to enforce it against — and a harmful one, since CityGrowth's
+        // 2-tile settlement would fail a check it never asked to take.
+
+        // Fixed footprints must actually BE their authored footprint, or the shape rule and the shape
+        // disagree and every placement of that class fails validation the player cannot fix. Data error,
+        // so it fails loudly at startup like the power invariant below.
+        foreach (var info in _all)
+            if (info != null && info.drawMode == BuildDrawMode.Fixed
+                && info.shape != null && info.shape.Length != info.minTiles)
+                Debug.LogError($"SurfaceBuildingDatabase: {info.name} is Fixed with minTiles={info.minTiles} " +
+                               $"but its authored shape is {info.shape.Length} tiles. They must match.");
+
         // The invariant from the power block above, enforced rather than trusted: a plant that made
         // power but lit no ground would pour its output into a grid that doesn't exist, and the loss
         // would be silent. Fail loudly at startup instead — this is a data error, not a game state.
@@ -650,6 +766,15 @@ public static class SurfaceBuildingDatabase
             if (info != null && info.energyPerSec > 0f && info.powerRange <= 0f)
                 Debug.LogError($"SurfaceBuildingDatabase: {info.name} generates {info.energyPerSec}/s but has no " +
                                $"powerRange, so its output has no grid to land in. Give it Project(...).");
+    }
+
+    /// How this class is drawn, and the fewest tiles it may be built with. See BuildShapeRules.
+    static void Drawn(SurfaceBuildingType t, BuildDrawMode mode, int minTiles)
+    {
+        var info = _all[(int)t];
+        if (info == null) return;
+        info.drawMode = mode;
+        info.minTiles = Mathf.Max(1, minTiles);
     }
 
     static void Require(SurfaceBuildingType t, float minIndex, string why)

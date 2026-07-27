@@ -85,6 +85,15 @@ public class PlanetViewWindow : MonoBehaviour
             case Tab.Build:
                 if (!body.Surveyed) { why = "survey this world first"; return false; }
                 if (body.owner != FactionManager.Player) { why = "claim this world first"; return false; }
+
+                // THE ONE CASE WHERE BUILD OPENS ON AN UNSETTLED WORLD, and the reason the rule below it
+                // has an exception at all. A colony ship in orbit waiting for a landing site needs this
+                // tab to place itself, and it cannot make the world settled first — placing the hull is
+                // what settles it (UnitManager.FinishColonyLanding). Without this the tab that the
+                // landing REQUIRES is greyed out with "nobody lives here to build anything", which is
+                // true and completely unhelpful.
+                if (ColonyLanding.AwaitingOn(body)) return true;
+
                 if (!body.settled)
                 {
                     why = body.habitability >= Colony.FoundThreshold
@@ -615,6 +624,18 @@ public class PlanetViewWindow : MonoBehaviour
         // build list on a world nobody lives on.
         if (openOn.HasValue && TabAvailable(openOn.Value, out _)) tab = openOn.Value;
         else if (!TabAvailable(tab, out _)) tab = Tab.Overview;
+
+        // A COLONY SHIP WAITING FOR A LANDING SITE OPENS WITH ITSELF ALREADY IN HAND.
+        //
+        // The whole point of the flow is "here is your world, put the ship somewhere" — making the player
+        // find the Build tab and hunt for a building they cannot normally select would turn the one
+        // decision into a scavenger hunt. Set AFTER the tab resolution above so it cannot be undone by it.
+        if (ColonyLanding.AwaitingOn(b))
+        {
+            tab = Tab.Build;
+            selected = SurfaceBuildingType.ColonyShipBase;
+            rotation = 0;
+        }
         // Open showing the WHOLE world, centred — the zoom of the last planet you looked at means
         // nothing on this one.
         tilePx = 0f;            // ApplyMapSize resolves this to the fit-everything zoom
@@ -1171,6 +1192,9 @@ public class PlanetViewWindow : MonoBehaviour
         PollMapZoom();
         PollMapPan();
         PollMoonZoomPan();
+        // AFTER PollHover, which is what resolves `hoverCell` from the cursor — the drag reads that cell
+        // every frame, so running first would draw one frame behind the mouse for the whole gesture.
+        PollBuildDraw();
         PollClickAway();
 
         // The confirm panel is anchored to a map cell, so it has to be re-placed whenever the map moves
@@ -1246,7 +1270,52 @@ public class PlanetViewWindow : MonoBehaviour
                 {
                     var info = SurfaceBuildingDatabase.Get(selected.Value);
                     var sb = new System.Text.StringBuilder();
-                    sb.Append($"<b>{info.name}</b> · rot {rotation * 90}° <size=10><color=#9FB4C8>(R / right-click rotates · Esc cancels · middle-drag pans)</color></size>");
+
+                    // ---- MID-DRAG: the size and the bill, live ----
+                    //
+                    // What it will cost is the one thing that cannot be worked out by looking at the map,
+                    // and it is the number that decides how far to keep dragging. Shown while the button
+                    // is still down, because afterwards it is too late to want a smaller farm.
+                    if (drawing && drawCells.Count > 0)
+                    {
+                        int tiles = drawCells.Count;
+                        if (info.drawMode == BuildDrawMode.NodeChain)
+                        {
+                            sb.Append($"<b>{info.name}</b> — <b>{tiles}</b> pylon{(tiles == 1 ? "" : "s")}");
+                            sb.Append($" <size=10><color=#9FB4C8>· spaced to stay on one grid · release to build</color></size>");
+                        }
+                        else
+                        {
+                            float mult = BuildScaling.CostMultiplier(tiles);
+                            int cm = Mathf.RoundToInt(ColonyManager.DiscCost(info.costMetal) * mult);
+                            int ce = Mathf.RoundToInt(ColonyManager.DiscCost(info.costEnergy) * mult);
+                            sb.Append($"<b>{info.name}</b> — <b>{tiles}</b> tile{(tiles == 1 ? "" : "s")}");
+                            sb.Append($"  <color=#9FB4C8>{cm}m {ce}e · {info.buildTime * mult * TechEffects.BuildTimeMult:F0}s</color>");
+                            sb.Append($"  <color=#8FD0FF>x{BuildScaling.OutputMultiplier(tiles):0.0} output</color>");
+                        }
+
+                        sb.Append(string.IsNullOrEmpty(drawWhy)
+                            ? "\n<color=#4DFF6E>Release to build</color>"
+                            : $"\n<color=#FF6659>{drawWhy}</color>");
+                        statusText.text = sb.ToString();
+                        break;
+                    }
+
+                    sb.Append($"<b>{info.name}</b>");
+
+                    // The verb differs by class, so the hint has to. Telling a farm's player to
+                    // right-click-rotate is telling them about a control that does nothing here.
+                    if (IsDrawn(info))
+                    {
+                        string how =
+                            info.drawMode == BuildDrawMode.NodeChain ? "press and drag to lay a run of pylons"
+                          : info.drawMode == BuildDrawMode.Square ? $"press and drag out a square (min {MinSideFor(info)}x{MinSideFor(info)})"
+                          : info.drawMode == BuildDrawMode.Rectangle ? "press and drag out a rectangle (min 2 wide both ways)"
+                          : $"press and drag to draw it (min {info.minTiles} tiles)";
+                        sb.Append($" <size=10><color=#9FB4C8>· {how} · Esc cancels</color></size>");
+                    }
+                    else
+                        sb.Append($" · rot {rotation * 90}° <size=10><color=#9FB4C8>(R / right-click rotates · Esc cancels · middle-drag pans)</color></size>");
 
                     if (hoverCell.x >= 0)
                     {
@@ -1266,9 +1335,15 @@ public class PlanetViewWindow : MonoBehaviour
                             sb.Append($" <size=10><color=#9FB4C8>· better than {pct * 100f:F0}% of this world</color></size>");
                         }
 
-                        sb.Append(hoverValid
-                            ? "   <color=#4DFF6E>Left-click to build</color>"
-                            : $"   <color=#FF6659>{HoverWhy()}</color>");
+                        // A drawn class has nothing to say about a single hovered cell yet — the shape
+                        // does not exist until the drag does, and "Left-click to build" would be a
+                        // straight lie about a control that starts a drag rather than building anything.
+                        if (IsDrawn(info))
+                            sb.Append("   <color=#4DFF6E>Press and drag</color>");
+                        else
+                            sb.Append(hoverValid
+                                ? "   <color=#4DFF6E>Left-click to build</color>"
+                                : $"   <color=#FF6659>{HoverWhy()}</color>");
                     }
                     else if (!string.IsNullOrEmpty(info.siteRequirement))
                         sb.Append($"\n<color=#C9A94D>{info.siteRequirement}</color>");
@@ -2892,9 +2967,27 @@ public class PlanetViewWindow : MonoBehaviour
         SliderRow("Water Level", "dry world <-> even the peaks drowned", 0f, 1f,
             PlanetTerrainGenerator.WaterLevelFromSeaLevel(p.SeaLevelOrNeutral),
             v => SetTerrain(5, PlanetTerrainGenerator.SeaLevelFromWaterLevel(v)));
-        SliderRow("Elevation range", "flat world <-> deep basins and high peaks",
-            PlanetTerrainGenerator.ElevationMin, PlanetTerrainGenerator.ElevationMax, p.elevation,
-            v => SetTerrain(1, v));
+        // ---- The two SURFACE-RELIEF sliders ----
+        //
+        // Elevation range and Ruggedness both describe the shape of solid ground — basins, peaks, how
+        // broken the mountain country is — and a gas giant has no solid ground for them to describe.
+        // TerraformDiagnosis says so in as many words on the same world ("A gas giant: there is no ground
+        // to stand on"), so offering sliders that sculpt its terrain contradicts the game's own reading of
+        // what the body is.
+        //
+        // Hidden rather than disabled: a greyed-out control still asserts the axis exists and is merely
+        // unavailable right now. These do not apply to this class of body at all, which is a different
+        // statement, and the honest way to make it is for them not to be there.
+        //
+        // Deliberately NOT extended to the other sliders. Atmosphere, Temperature and Feature scale all
+        // remain meaningful on a gas giant — it is very much made of atmosphere at a temperature, and the
+        // cloud bands the surface renderer draws are laid out by `scale`. Only relief is meaningless.
+        bool hasSolidSurface = body.type != CelestialBodyType.GasGiant;
+
+        if (hasSolidSurface)
+            SliderRow("Elevation range", "flat world <-> deep basins and high peaks",
+                PlanetTerrainGenerator.ElevationMin, PlanetTerrainGenerator.ElevationMax, p.elevation,
+                v => SetTerrain(1, v));
 
         // Dev Mode lets you paint plant life on ANY world (the whole Terrain tab is a Dev sandbox), so the
         // slider is freed there — otherwise it stays gated on a genuinely habitable, biosphere-active world.
@@ -2969,7 +3062,10 @@ public class PlanetViewWindow : MonoBehaviour
         // touch. Ridge is the mountain-building field: the classifiers test it directly (`ridge > 0.8` is
         // Mountains on most world types), so raising it converts more of the map to peaks and lowering it
         // flattens the world toward plains.
-        SliderRow("Ruggedness", "smooth ground <-> broken, jagged mountain country", 0.3f, 2.5f, p.ridge, v => SetTerrain(4, v));
+        // Gated with Elevation range above, and for the same reason — see `hasSolidSurface`. Ridge is the
+        // mountain-building field; there are no mountains on a body with no ground.
+        if (hasSolidSurface)
+            SliderRow("Ruggedness", "smooth ground <-> broken, jagged mountain country", 0.3f, 2.5f, p.ridge, v => SetTerrain(4, v));
 
         Header("SEED");
         var seed = Card();
@@ -3889,11 +3985,25 @@ public class PlanetViewWindow : MonoBehaviour
         // Re-check rather than trust the check from when the panel opened. Between then and now the
         // economy has ticked, another world may have spent the metal, and organic growth may have put a
         // settlement on the very cell being asked about.
+        // Captured BEFORE the placement, because placing it is what ends the landing — asking
+        // afterwards would always say no and the ship would never be consumed.
+        bool wasLanding = ColonyLanding.AwaitingOn(body)
+                       && pendingType.Value == SurfaceBuildingType.ColonyShipBase;
+
         if (SurfaceBuildManager.CanPlace(body, pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation, out _) &&
             SurfaceBuildManager.Place(body, pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation))
         {
             lastSig = null;   // the built list and the map both changed
             SimpleAudio.Instance?.PlayComplete();
+
+            // THE HULL IS DOWN — the world becomes a colony and the ship in orbit is consumed.
+            // Only after a placement that actually SUCCEEDED, so a refused landing leaves the ship
+            // exactly where it was rather than deleting it for a building that never went up.
+            if (wasLanding)
+            {
+                ColonyLanding.Complete();
+                selected = null;          // stop holding the piece; the landing is over
+            }
         }
         else SimpleAudio.Instance?.PlayTick();
 
@@ -4147,12 +4257,32 @@ public class PlanetViewWindow : MonoBehaviour
         //
         // It's still distinguishable from a placed structure, just not by hue: a ghost has no black
         // outline, and a placed one does.
+        // ---- Mid-drag: show exactly what is being drawn ----
+        //
+        // The live footprint, coloured by whether it would actually be accepted. This is the feedback the
+        // whole gesture depends on — a square that has not yet reached its 2x2 minimum, or a paint that
+        // has jumped a diagonal and split in two, reads as red while you are still holding the button,
+        // which is the only moment the player can still fix it.
+        if (drawing && drawCells.Count > 0)
+        {
+            Color dc = string.IsNullOrEmpty(drawWhy) ? Vivid(info.color) : new Color(1f, 0.25f, 0.2f, 0.85f);
+            foreach (var cell in drawCells) AddCellQuad(ghostLayer, cell.x, cell.y, dc);
+            return;
+        }
+
         if (hoverCell.x >= 0)
         {
             // Vivid when it fits, red when it doesn't, so validity is obvious before you click.
             Color c = hoverValid ? Vivid(info.color) : new Color(1f, 0.25f, 0.2f, 0.85f);
-            foreach (var cell in SurfaceBuildingDatabase.Footprint(selected.Value, hoverCell.x, hoverCell.y, rotation))
-                AddCellQuad(ghostLayer, cell.x, cell.y, c);
+
+            // A DRAWN class has no authored footprint worth previewing — a farm's stored 2x3 is not what
+            // you are about to build, it is only the fallback for saves older than drawing. Showing it
+            // would promise a shape the drag does not produce, so the idle ghost is a single-cell brush:
+            // "press here and drag". The drag itself takes over the instant the button goes down.
+            if (IsDrawn(info)) AddCellQuad(ghostLayer, hoverCell.x, hoverCell.y, c);
+            else
+                foreach (var cell in SurfaceBuildingDatabase.Footprint(selected.Value, hoverCell.x, hoverCell.y, rotation))
+                    AddCellQuad(ghostLayer, cell.x, cell.y, c);
         }
         else
         {
@@ -4344,6 +4474,201 @@ public class PlanetViewWindow : MonoBehaviour
 
     bool panDragged;
 
+    // ============================================================================================
+    // DRAWING A BUILDING
+    //
+    // Most structures are no longer a fixed tetromino you stamp down — you press on the grid and DRAW the
+    // footprint, and everything about the building scales with how much you drew (BuildScaling). What a
+    // drag means depends on the class, and BuildShapeRules owns all four answers:
+    //
+    //   Free        paint. Every cell the cursor crosses joins the footprint. This is the farm you extend
+    //               by four tiles because the colony is hungry.
+    //   Square      the anchor is one corner and the square grows toward the cursor: 2x2, 3x3, 4x4.
+    //   Rectangle   same, but any filled box at least 2 wide in both directions.
+    //   NodeChain   lay a RUN of power pylons toward the cursor, auto-spaced to stay on one grid.
+    //   Fixed       no drag at all. Falls through to the old click-and-confirm path below.
+    //
+    // WHY A DRAG AND NOT A SEQUENCE OF CLICKS. The whole appeal of the mechanic is gestural — you sweep
+    // out a farm the size you want and let go. Clicking tile by tile would make a ten-tile building ten
+    // decisions instead of one, and would make the power-pole chain (the control this is modelled on)
+    // pointless, since its entire purpose is covering distance in a single motion.
+    //
+    // Left-drag is free to mean this because PollMapPan turns left-panning OFF while a piece is held
+    // (`leftPans`), so there is no gesture conflict to resolve.
+    // ============================================================================================
+
+    bool drawing;
+    Vector2Int drawAnchor = new Vector2Int(-1, -1);
+
+    /// The footprint currently proposed by the drag. Ordered, because for a Free paint the FIRST cell is
+    /// the origin the building will remember (PlacedBuilding.SetDrawnShape).
+    readonly List<Vector2Int> drawCells = new List<Vector2Int>();
+
+    /// Set membership for the Free paint, so re-crossing a tile doesn't add it twice.
+    readonly HashSet<Vector2Int> drawSet = new HashSet<Vector2Int>();
+
+    /// Why the current drag would be refused, or null. Shown live so the player knows before releasing.
+    string drawWhy;
+
+    /// Does this class use the drag at all?
+    static bool IsDrawn(SurfaceBuildingInfo info)
+        => info != null && info.drawMode != BuildDrawMode.Fixed;
+
+    /// The shortest side a square building may have, from its tile minimum.
+    static int MinSideFor(SurfaceBuildingInfo info)
+        => Mathf.Max(1, Mathf.CeilToInt(Mathf.Sqrt(Mathf.Max(1, info.minTiles))));
+
+    void PollBuildDraw()
+    {
+        // A confirm dialog is up, or nothing is held: no drag. Any in-flight one is abandoned rather
+        // than left latched, or the next press would resume a gesture the player has forgotten about.
+        if (tab != Tab.Build || !selected.HasValue || pendingType.HasValue) { EndDraw(); return; }
+
+        var info = SurfaceBuildingDatabase.Get(selected.Value);
+        if (!IsDrawn(info)) { EndDraw(); return; }
+
+        // ---- Begin ----
+        if (!drawing)
+        {
+            if (!Input.GetMouseButtonDown(0)) return;
+            if (hoverCell.x < 0) return;                 // not over the host map
+            if (OverFloatingMapControl()) return;        // the zoom bar / confirm float over the map
+
+            drawing = true;
+            drawAnchor = hoverCell;
+            drawSet.Clear(); drawCells.Clear();
+            RecomputeDraw(info);
+            return;
+        }
+
+        // ---- Continue ----
+        if (Input.GetMouseButton(0)) { RecomputeDraw(info); return; }
+
+        // ---- Release ----
+        CommitDraw(info);
+    }
+
+    /// Rebuild the proposed footprint from the anchor and wherever the cursor is now.
+    void RecomputeDraw(SurfaceBuildingInfo info)
+    {
+        var cursor = hoverCell.x >= 0 ? hoverCell : drawAnchor;
+
+        switch (info.drawMode)
+        {
+            case BuildDrawMode.Free:
+                // PAINT, so the drag accumulates rather than replacing. Only the cell under the cursor is
+                // added — no line-filling between frames — because a fast sweep that auto-filled the gaps
+                // would silently buy tiles the player never actually dragged over.
+                if (hoverCell.x >= 0 && drawSet.Add(hoverCell)) drawCells.Add(hoverCell);
+                break;
+
+            case BuildDrawMode.Square:
+                Replace(BuildShapeRules.SquareFrom(drawAnchor, cursor, MinSideFor(info)));
+                break;
+
+            case BuildDrawMode.Rectangle:
+                // 2 in both directions is the rule this mode exists for — no 1-wide ribbons.
+                Replace(BuildShapeRules.RectFrom(drawAnchor, cursor, 2, 2));
+                break;
+
+            case BuildDrawMode.NodeChain:
+                Replace(BuildShapeRules.NodeChain(drawAnchor, cursor, info.powerRange));
+                break;
+        }
+
+        // Live validity, so the ghost can go red and the side panel can say why BEFORE the player commits
+        // to a footprint they have been carefully dragging out for three seconds.
+        //
+        // GROUND IS CHECKED PER CELL, NOT WITH CanPlace. CanPlace tests a type's AUTHORED footprint at an
+        // origin — asking it about each drawn cell of a farm would test the farm's stored 2x3 shape at
+        // every one of them, which is neither what is being built nor anywhere near the right tiles.
+        // CellBuildable is the per-tile question ("is this ground, is it dry enough for this class"), and
+        // Occupied answers the other half.
+        drawWhy = null;
+
+        if (info.drawMode == BuildDrawMode.NodeChain)
+        {
+            // A chain is many separate one-tile buildings, not one footprint, so the shape rules do not
+            // apply to it as a set. A pylon's authored footprint IS a single cell, so CanPlace is exactly
+            // right here — and it carries the world-level gates (tech, ownership) with it.
+            //
+            // THE CHAIN IS VALID IF ANY PYLON CAN GO UP, not if all of them can. CommitDraw deliberately
+            // skips the ones on bad ground and raises the rest — you dragged across a lake and expect
+            // poles on both shores — so reddening the whole run because one pylon landed in water would
+            // contradict what releasing actually does.
+            string last = null;
+            bool any = false;
+            foreach (var c in drawCells)
+                if (SurfaceBuildManager.CanPlace(body, selected.Value, c.x, c.y, 0, out last)) { any = true; break; }
+            if (!any) drawWhy = last ?? "nowhere along that line will take a pylon";
+            return;
+        }
+
+        if (!SurfaceBuildManager.CanPlaceType(body, selected.Value, out drawWhy)) return;
+        if (!BuildShapeRules.Validate(info, drawCells, out drawWhy)) return;
+
+        var occupied = SurfaceBuildManager.Occupied(body);
+        foreach (var c in drawCells)
+        {
+            if (!SurfaceBuildManager.CellBuildable(body, info, c.x, c.y, out drawWhy)) return;
+            if (occupied.Contains(c)) { drawWhy = "something is already standing there"; return; }
+        }
+    }
+
+    void Replace(List<Vector2Int> cells)
+    {
+        drawCells.Clear(); drawSet.Clear();
+        foreach (var c in cells) if (drawSet.Add(c)) drawCells.Add(c);
+    }
+
+    void CommitDraw(SurfaceBuildingInfo info)
+    {
+        var cells = new List<Vector2Int>(drawCells);
+        var type = selected.Value;
+        EndDraw();
+
+        if (cells.Count == 0) return;
+
+        // A CHAIN IS N BUILDINGS, NOT ONE. Every other mode draws a single structure's footprint; the
+        // node chain lays a row of independent pylons, each its own relay that can be destroyed on its
+        // own and break the chain in half. So they are placed one at a time, and a pylon that lands on
+        // bad ground is simply skipped rather than failing the whole run — the player dragged across a
+        // lake and expects the poles either side of it to still go up.
+        if (info.drawMode == BuildDrawMode.NodeChain)
+        {
+            int placed = 0;
+            foreach (var c in cells)
+                if (SurfaceBuildManager.CanPlace(body, type, c.x, c.y, 0, out _)
+                    && SurfaceBuildManager.Place(body, type, c.x, c.y, 0)) placed++;
+
+            if (placed > 0) { lastSig = null; SimpleAudio.Instance?.PlayComplete(); }
+            else SimpleAudio.Instance?.PlayTick();
+            return;
+        }
+
+        // Everything else goes through the build QUEUE, which is what charges for it, scales its cost and
+        // time by the tile count, reserves its Labor, and re-validates the shape (SurfaceBuildQueue).
+        if (SurfaceBuildQueue.Enqueue(body, type, cells, out string why) != null)
+        {
+            lastSig = null;
+            SimpleAudio.Instance?.PlayComplete();
+        }
+        else
+        {
+            SimpleAudio.Instance?.PlayTick();
+            if (!string.IsNullOrEmpty(why))
+                NotificationManager.Instance?.Push($"Can't build that {info.name.ToLower()}", why, null, NotifKind.Danger);
+        }
+    }
+
+    void EndDraw()
+    {
+        drawing = false;
+        drawAnchor = new Vector2Int(-1, -1);
+        drawCells.Clear(); drawSet.Clear();
+        drawWhy = null;
+    }
+
     // Click outside the window to dismiss it.
     //
     // Only a click that lands on NO UI at all counts: clicking another window is working with that
@@ -4470,6 +4795,13 @@ public class PlanetViewWindow : MonoBehaviour
         // do on a stray click.
         if (tab == Tab.Build && selected.HasValue)
         {
+            // DRAWN CLASSES ARE THE DRAG'S BUSINESS, NOT THIS METHOD'S. A press-and-release over one cell
+            // reaches both PollBuildDraw and here, and without this the drag would commit the footprint
+            // while this simultaneously opened a confirm dialog for the type's AUTHORED shape — two
+            // different buildings from one click. Fixed classes still use the click-and-confirm path,
+            // which is the whole of their placement.
+            if (IsDrawn(SurfaceBuildingDatabase.Get(selected.Value))) return;
+
             if (!SurfaceBuildManager.CanPlace(body, selected.Value, x, y, rotation, out _)) return;
             AskPlace(x, y);
             return;
