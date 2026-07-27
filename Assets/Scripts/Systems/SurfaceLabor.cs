@@ -88,7 +88,7 @@ public static class SurfaceLabor
     /// What is currently held by projects under way on this world.
     public static float Used(CelestialBody b)
     {
-        var q = SurfaceBuildQueue.For(b);
+        var q = SurfaceBuildQueue.Peek(b);
         if (q == null) return 0f;
 
         float used = 0f;

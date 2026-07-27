@@ -61,7 +61,16 @@ public static class SurfaceBuildQueue
         return list;
     }
 
-    public static int Count(CelestialBody b) => For(b)?.Count ?? 0;
+    /// This world's queue WITHOUT creating one, or null if it has never had a job.
+    ///
+    /// `For` inserts an empty list for whatever world it is handed, which is right for the enqueue path
+    /// and wrong for the read-only ones: the map draws its ghosts and the view window rebuilds its
+    /// signature every frame, on whichever world the player is looking at, and most of those worlds will
+    /// never build anything. Asking through here keeps the dictionary to worlds that have actually built.
+    public static List<SurfaceBuildJob> Peek(CelestialBody b)
+        => b != null && queues.TryGetValue(b, out var list) ? list : null;
+
+    public static int Count(CelestialBody b) => Peek(b)?.Count ?? 0;
 
     /// Ground already claimed by jobs that have not finished yet.
     ///
@@ -72,12 +81,24 @@ public static class SurfaceBuildQueue
     public static HashSet<Vector2Int> PendingCells(CelestialBody b)
     {
         var set = new HashSet<Vector2Int>();
-        var list = For(b);
+        var list = Peek(b);
         if (list == null) return set;
         foreach (var job in list)
             if (job?.cells != null)
                 foreach (var c in job.cells) set.Add(c);
         return set;
+    }
+
+    /// The job whose footprint covers this cell, or null. The hover readout's half of PendingCells:
+    /// that answers "is this ground spoken for", this answers "by what, and how far along".
+    public static SurfaceBuildJob JobAt(CelestialBody b, int x, int y)
+    {
+        var list = Peek(b);
+        if (list == null) return null;
+        var cell = new Vector2Int(x, y);
+        foreach (var job in list)
+            if (job?.cells != null && job.cells.Contains(cell)) return job;
+        return null;
     }
 
     /// Give back everything every in-flight job paid, and drop them.
@@ -166,6 +187,45 @@ public static class SurfaceBuildQueue
         return job;
     }
 
+    // ============================================================================================
+    // WHAT A JOB IS ACTUALLY GETTING, RIGHT NOW
+    //
+    // Tick hands Labor out from the top of the queue, so a job's real rate depends on every job ABOVE
+    // it — which is exactly the thing a player staring at a crawling build cannot work out for
+    // themselves. These two replay that allocation so the Build tab can say "3 of 5 Labor, ~2m left"
+    // instead of showing a bar that mysteriously moves at a different speed for each row.
+    //
+    // Deliberately a replay of Tick's loop rather than a number cached during it: a cached one would be
+    // a frame stale at best, and simply wrong on the frame a job above this one is cancelled or paused —
+    // the two moments the player is most likely to be looking.
+    // ============================================================================================
+
+    /// Labor this job is receiving this instant, given everything ahead of it in the queue.
+    public static float LaborGranted(CelestialBody b, SurfaceBuildJob job)
+    {
+        var list = Peek(b);
+        if (list == null || job == null || job.paused) return 0f;
+
+        float free = SurfaceLabor.Max(b);
+        foreach (var other in list)
+        {
+            if (other == null || other.paused) continue;
+            float granted = Mathf.Min(other.labor, Mathf.Max(0f, free));
+            free -= granted;
+            if (other == job) return granted;
+        }
+        return 0f;
+    }
+
+    /// Seconds of game clock until this job completes at its CURRENT rate. Infinity for a paused job —
+    /// it is not slow, it is stopped, and quoting it a finishing time would be a lie.
+    public static float Eta(CelestialBody b, SurfaceBuildJob job)
+    {
+        if (job == null) return 0f;
+        if (job.paused) return float.PositiveInfinity;
+        return job.Remaining * BuildScaling.TimeFactorFor(job.labor, LaborGranted(b, job));
+    }
+
     public static void SetPaused(CelestialBody b, SurfaceBuildJob job, bool paused)
     {
         if (job == null || job.paused == paused) return;
@@ -204,7 +264,7 @@ public static class SurfaceBuildQueue
     /// other timed thing in this game already does.
     public static void Tick(CelestialBody b, float dt)
     {
-        var list = For(b);
+        var list = Peek(b);
         if (list == null || list.Count == 0) return;
 
         // Labor is allocated FROM THE TOP. That is what makes queue order mean something: the first job

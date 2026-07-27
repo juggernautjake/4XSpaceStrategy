@@ -201,10 +201,20 @@ public static class SurfaceBuildManager
         { why = "this world already has a shipyard — upgrade its tier from the Production tab"; return false; }
 
         var occupied = Occupied(b);
+
+        // Ground a QUEUED job is holding is not free either, even though nothing stands on it yet.
+        // `Occupied` only knows about buildings that exist, which is the right answer for it and the
+        // wrong one here: a half-built factory's site is spoken for. Without this a fixed-footprint
+        // structure — a spaceport, a shipyard — could be dropped straight on top of a construction site,
+        // and the drawn building underneath it would reach completion, find its ground taken and refund
+        // itself. The player would have watched a build run to 100% and then evaporate.
+        var pending = SurfaceBuildQueue.PendingCells(b);
+
         foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, rotation))
         {
             if (!CellBuildable(b, info, c.x, c.y, out why)) return false;
             if (occupied.Contains(c)) { why = "something is already built here"; return false; }
+            if (pending.Contains(c)) { why = "another project is already going up here"; return false; }
         }
 
         // SITING REQUIREMENT. Some things aren't merely inefficient on the wrong ground, they're

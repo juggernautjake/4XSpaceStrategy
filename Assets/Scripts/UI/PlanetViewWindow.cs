@@ -271,6 +271,23 @@ public class PlanetViewWindow : MonoBehaviour
     Vector2Int hoverCell = new Vector2Int(-1, -1);
     bool hoverValid;
 
+    /// Is `hoverCell` a cell that exists on the world this window is showing RIGHT NOW?
+    ///
+    /// Every read of hoverCell has to go through this rather than the old `hoverCell.x >= 0`, because
+    /// "the cursor was over a cell" and "that cell is still on the map" are different questions. PollHover
+    /// clamps the cell it stores, so it is always valid for the surface it was read from — and then the
+    /// surface underneath it changes without the cursor moving:
+    ///
+    ///   the window is pointed at another world (a moon tab, a different planet), whose grid is smaller;
+    ///   the surface is regenerated at a different resolution from the Survey tab.
+    ///
+    /// Either leaves a cell from a 128-wide map indexing a 64-wide one, and `tiles[x, y]` throws — once
+    /// per frame, from a live text callback, which is how a stale hover turns into a console full of
+    /// IndexOutOfRangeException rather than a single visible glitch.
+    bool HasHoverCell => body != null && body.surface != null && body.surface.tiles != null
+                      && hoverCell.x >= 0 && hoverCell.y >= 0
+                      && hoverCell.x < body.surface.width && hoverCell.y < body.surface.height;
+
     // Survey-mode state.
     SurfaceIndexKind activeIndex = SurfaceIndexKind.None;
     // The Power grid is now a Survey overlay rather than its own tab: this flag is the "showing the power
@@ -614,6 +631,11 @@ public class PlanetViewWindow : MonoBehaviour
     {
         body = b;
         selected = null; rotation = 0;
+        // The cursor has not moved, but the map under it has been replaced. A cell remembered from the
+        // last world is either out of bounds on this one — the readouts index tiles[x, y] directly — or,
+        // worse, in bounds and quietly describing the wrong ground until the mouse next moves.
+        hoverCell = new Vector2Int(-1, -1);
+        hoverValid = false;
         showPowerOverlay = false;   // a fresh world opens on the plain map, not the last world's power view
         showTectonicsOverlay = false;   // ...nor the last world's tectonics view (also a survey-gated overlay)
         CancelPlace();          // a confirm from the last world means nothing on this one
@@ -1158,6 +1180,24 @@ public class PlanetViewWindow : MonoBehaviour
             foreach (var p in body.placedBuildings) sb.Append(p.type).Append(':').Append(p.level).Append(',');
         }
         else sb.Append(0);
+
+        // The build queue's SHAPE — how many jobs, of what, in what order. Confirming, cancelling,
+        // reordering or completing a job all change the rows in the queue panel AND the ghosts on the
+        // map, and both are structure rather than text, so both have to be rebuilt when this moves.
+        //
+        // Deliberately WITHOUT progress or pause state: elapsed changes every frame, and putting it here
+        // would rebuild the entire side panel several times a second — the exact strobe the LiveSet
+        // exists to prevent. Progress is live text and a live bar; pause is a live button caption.
+        sb.Append('|');
+        var queue = SurfaceBuildQueue.Peek(body);
+        if (queue != null)
+        {
+            sb.Append(queue.Count).Append(':');
+            foreach (var job in queue)
+                if (job != null) sb.Append((int)job.type).Append('.').Append(job.Tiles).Append(',');
+        }
+        else sb.Append(0);
+
         return sb.ToString();
     }
 
@@ -1218,6 +1258,11 @@ public class PlanetViewWindow : MonoBehaviour
             DrawSelectionMarker();
         }
         AnimateMarker();
+
+        // The construction ghosts pulse and fill in as their jobs progress. Animated in place, like the
+        // marker above and for the same reason: rebuilding the piece layer to move a build's opacity
+        // would tear down and recreate every quad on the map several times a second.
+        AnimateConstruction();
 
         // Rotate the held piece 90° — before it snaps to the grid and after. Handled here rather than on
         // the map so it works the moment you pick a building up, wherever the cursor happens to be.
@@ -1317,7 +1362,7 @@ public class PlanetViewWindow : MonoBehaviour
                     else
                         sb.Append($" · rot {rotation * 90}° <size=10><color=#9FB4C8>(R / right-click rotates · Esc cancels · middle-drag pans)</color></size>");
 
-                    if (hoverCell.x >= 0)
+                    if (HasHoverCell)
                     {
                         // PREDICTED YIELD at whatever the cursor is over — the honest number, so hovering
                         // a hot spot visibly out-earns hovering cold rock, on every world.
@@ -1398,7 +1443,7 @@ public class PlanetViewWindow : MonoBehaviour
                             sur.Append("<color=#F5F58C>■</color> grid   <color=#4DC8FF>■</color> plants & relays");
                             sur.Append($"   ·   <b>{gen:0.0}</b> made, <b>{draw:0.0}</b> drawn, ");
                             sur.Append($"<color=#{hex}><b>{(gen - draw >= 0f ? "+" : "")}{gen - draw:0.0}/s</b></color>");
-                            if (hoverCell.x >= 0)
+                            if (HasHoverCell)
                             {
                                 var n = PowerGrid.NetAt(body, hoverCell.x, hoverCell.y);
                                 sur.Append($"\n<color=#9FB4C8>({hoverCell.x},{hoverCell.y})</color> ");
@@ -1425,7 +1470,7 @@ public class PlanetViewWindow : MonoBehaviour
 
     string HoverWhy()
     {
-        if (!selected.HasValue || hoverCell.x < 0) return "";
+        if (!selected.HasValue || !HasHoverCell) return "";
         SurfaceBuildManager.CanPlace(body, selected.Value, hoverCell.x, hoverCell.y, rotation, out string why);
         return why ?? "";
     }
@@ -2037,12 +2082,18 @@ public class PlanetViewWindow : MonoBehaviour
     // ---------------- BUILD ----------------
     void BuildBuildPanel()
     {
-        Header("STRUCTURES");
         if (body.owner != FactionManager.Player)
-        { Note("You can only build on worlds you own. Colonize this world first."); return; }
+        { Header("STRUCTURES"); Note("You can only build on worlds you own. Colonize this world first."); return; }
         if (!body.Surveyed)
-        { Note("Survey this world before developing it."); return; }
+        { Header("STRUCTURES"); Note("Survey this world before developing it."); return; }
 
+        // THE QUEUE COMES FIRST, above the catalogue. What this world is already building is both more
+        // urgent than what it could build — it is spending the Labor and holding the ground — and the
+        // thing the player has come back to the tab to check on. Below the tray it would be under a
+        // scroll, on a panel whose length depends on which category tab happens to be selected.
+        BuildQueuePanel();
+
+        Header("STRUCTURES");
         Note("Click a structure to pick it up, then click the map to place it. <b>Right-click rotates.</b> Esc cancels. Footprints interlock — pack them tightly.");
 
         // A ROW OF COLOURED TABS, not one long list with headings.
@@ -2076,6 +2127,172 @@ public class PlanetViewWindow : MonoBehaviour
         // stands on this world, and hiding four-fifths of it behind whichever tab you happen to be on
         // would make "what have I actually built here?" unanswerable without six clicks.
         BuildInfrastructurePanel();
+    }
+
+    // ============================================================================================
+    // THE BUILD QUEUE
+    //
+    // Everything this world is currently putting up: how far along it is, what is holding it back, and
+    // the two controls that matter — pause and cancel.
+    //
+    // It exists because a build now takes TIME. Confirming one used to be the end of the interaction and
+    // is now the start of one, and without this panel the player has no way to answer any of the
+    // questions that follow: how long, why so slow, and can I have my metal back. The map's ghosts
+    // (DrawConstructionGhosts) say WHERE; this says WHEN.
+    //
+    // Shaped like the shipyard's stocks on purpose — a list of rows, each a bar and a cancel — because
+    // that is the queue the player has already learned.
+    // ============================================================================================
+    void BuildQueuePanel()
+    {
+        var jobs = SurfaceBuildQueue.Peek(body);
+        if (jobs == null || jobs.Count == 0) return;   // no heading over an empty list; the tray moves up
+
+        Header($"UNDER CONSTRUCTION ({jobs.Count})");
+
+        // THE POOL EVERY ROW BELOW IS COMPETING FOR. Without it, "3 of 5 Labor" on a row is a fraction
+        // with no denominator anywhere on screen, and a queue where everything crawls looks broken
+        // rather than over-committed.
+        var pool = UIFactory.WrapText(sidePanel, "", UITheme.SmallSize, UITheme.SubText);
+        live.Text(pool, () =>
+        {
+            float max = SurfaceLabor.Max(body), used = SurfaceLabor.Used(body);
+            string hex = ColorUtility.ToHtmlStringRGB(used > max + 0.01f ? UITheme.Warn : UITheme.SubText);
+            string over = used > max + 0.01f
+                ? " <size=10>· over-committed, so everything here is stretched</size>"
+                : "";
+            return $"<color=#{hex}><b>{used:0.#} / {max:0.#} Labor</b> in use</color>{over}   " +
+                   $"<size=10>Labor is handed out from the top — the first job gets the workforce it wants.</size>";
+        });
+
+        // Copied before iterating: a cancel from one of these rows removes from the live list, and the
+        // rows are built once and then live-updated, so the loop must not be walking the same list a
+        // click could mutate.
+        foreach (var job in new List<SurfaceBuildJob>(jobs)) BuildQueueCard(job);
+    }
+
+    void BuildQueueCard(SurfaceBuildJob job)
+    {
+        var info = SurfaceBuildingDatabase.Get(job.type);
+        var card = Card();
+
+        var title = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
+        live.Text(title, () =>
+        {
+            // The POSITION is read live rather than captured from the build loop, because the reorder
+            // buttons below can change it without rebuilding the panel — a "#3" frozen at draw time
+            // would still say #3 on a job the player had just promoted to the top.
+            var list = SurfaceBuildQueue.Peek(body);
+            int at = list != null ? list.IndexOf(job) + 1 : 0;
+            string hex = ColorUtility.ToHtmlStringRGB(info.color);
+            string state = job.paused ? "  <color=#FFBF4D>PAUSED</color>" : "";
+            return $"<color=#9FB4C8>#{at}</color> <b><color=#{hex}>{info.name}</color></b>" +
+                   $"  <size=10><color=#9FB4C8>{job.Tiles} tiles</color></size>{state}";
+        });
+
+        Bar(card, () =>
+        {
+            float granted = SurfaceBuildQueue.LaborGranted(body, job);
+            bool starved = !job.paused && granted < job.labor - 0.01f;
+            Color c = job.paused ? UITheme.SubText : starved ? UITheme.Warn : UITheme.Good;
+            return (job.Progress, $"{job.Progress * 100f:F0}%  ·  {EtaText(job)}", c);
+        });
+
+        var detail = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.SubText);
+        live.Text(detail, () =>
+        {
+            if (job.paused)
+                return "<color=#FFBF4D>Held.</color> <size=10>Its workforce is free for the jobs below it, " +
+                       "and the ground it is standing on is still reserved.</size>";
+
+            float granted = SurfaceBuildQueue.LaborGranted(body, job);
+            if (granted < job.labor - 0.01f)
+            {
+                float factor = BuildScaling.TimeFactorFor(job.labor, granted);
+                return $"<color=#FFBF4D>{granted:0.#} of {job.labor:0.#} Labor</color> — " +
+                       $"<size=10>running at {100f / factor:F0}% speed. Free some up by pausing or " +
+                       $"cancelling a job above it, or build housing and depots.</size>";
+            }
+            return $"{job.labor:0.#} Labor  <size=10>· fully staffed</size>";
+        });
+
+        // ---- Controls ----
+        // Two rows, not one. The panel is a quarter of the window wide and the cancel button carries a
+        // refund figure ("Cancel — 240m 150e back"), which cannot share a line with three other controls
+        // without every label being clipped to two characters.
+        //
+        // Priority sits ABOVE cancel deliberately: when a job is starving something more important,
+        // promoting the important one is the cheap answer and abandoning this one is the expensive one.
+        // Burying the cheap answer under the destructive one would be the wrong way round.
+        //
+        // WORDS, NOT ARROW GLYPHS. The Geometric Shapes block isn't in the LiberationSans atlas this
+        // project ships (see RefreshConfirmPanel), so an arrow renders as a tofu box.
+        var row = UIFactory.NewUI(card, "QueueRow");
+        UIFactory.AddLayout(row, 22);
+        var h = row.AddComponent<HorizontalLayoutGroup>();
+        h.spacing = 3;
+        h.childControlWidth = true; h.childControlHeight = true;
+        h.childForceExpandWidth = true; h.childForceExpandHeight = false;
+
+        var up = UIFactory.Button(row.transform, "Up", () => { SurfaceBuildQueue.Reorder(body, job, -1); lastSig = null; }, 20f);
+        UIFactory.Tooltip(up.gameObject, "Move up the queue. Labor is handed out from the top, so the " +
+                                         "higher a job sits the more of the workforce it gets.");
+        live.Button(up, () =>
+        {
+            var list = SurfaceBuildQueue.Peek(body);
+            return (list != null && list.IndexOf(job) > 0, "Up");
+        });
+
+        var down = UIFactory.Button(row.transform, "Down", () => { SurfaceBuildQueue.Reorder(body, job, 1); lastSig = null; }, 20f);
+        UIFactory.Tooltip(down.gameObject, "Move down the queue — everything above it takes its Labor first.");
+        live.Button(down, () =>
+        {
+            var list = SurfaceBuildQueue.Peek(body);
+            int at = list != null ? list.IndexOf(job) : -1;
+            return (at >= 0 && at < list.Count - 1, "Down");
+        });
+
+        // Hold keeps the progress and the ground and gives the workforce back. The caption is live rather
+        // than rebuilt, so the button doesn't vanish and reappear under the cursor as it toggles.
+        var hold = UIFactory.Button(row.transform, "", () => SurfaceBuildQueue.SetPaused(body, job, !job.paused), 20f);
+        UIFactory.Tooltip(hold.gameObject,
+            "Hold this project. It keeps everything built so far and its ground stays reserved, but it " +
+            "hands its workforce back so something else can use it.");
+        live.Button(hold, () => (true, job.paused ? "Resume" : "Hold"));
+
+        // CANCEL REFUNDS IN FULL, and says the figure on the button, because a queue you are afraid to
+        // cancel out of is a queue that punishes experimenting with a layout. It gives back exactly what
+        // was PAID (SurfaceBuildQueue.Cancel), never a re-derived price — a refund at today's cost would
+        // turn the queue into somewhere to park metal across an Industry research.
+        var cancel = UIFactory.Button(card, "", () =>
+        {
+            SurfaceBuildQueue.Cancel(body, job);
+            lastSig = null;   // the row goes, and so do its ghosts on the map
+        }, 22f);
+        UIFactory.Tooltip(cancel.gameObject,
+            "Abandon this project. Everything paid for it comes straight back and the ground it was " +
+            "holding is free to build on again. The work already done is lost.");
+        live.Button(cancel, () => (true,
+            job.metalPaid > 0 || job.energyPaid > 0
+                ? $"Cancel — {job.metalPaid}m {job.energyPaid}e back"
+                : "Cancel"));
+    }
+
+    /// "~2m 10s left", on the game clock the build actually runs on.
+    ///
+    /// Quoted at the CURRENT rate, which is why it can jump when a job above this one finishes: the
+    /// alternative — a figure computed as if the queue were empty — would be a promise the queue has no
+    /// intention of keeping, and would read as the timer being broken.
+    string EtaText(SurfaceBuildJob job)
+    {
+        if (job.paused) return "held";
+        if (job.Progress >= 1f) return "finishing";
+
+        float s = SurfaceBuildQueue.Eta(body, job);
+        if (float.IsInfinity(s) || float.IsNaN(s)) return "held";
+        if (s < 1f) return "finishing";
+        if (s < 60f) return $"~{s:0}s left";
+        return $"~{Mathf.FloorToInt(s / 60f)}m {Mathf.FloorToInt(s % 60f):00}s left";
     }
 
     /// Whether a structure is offered in the build tray at all. The capitol and the grounded colony ship
@@ -3187,6 +3404,13 @@ public class PlanetViewWindow : MonoBehaviour
         body.surface = PlanetTerrainGenerator.GenerateSurface(body);
         OreGenerator.Populate(body);
 
+        // The grid the cursor was over no longer exists — and a regenerated surface can come back at a
+        // different resolution, so the remembered cell may not even be a cell any more. Dropped here
+        // rather than left for the next mouse move, because the readouts refresh every frame and the
+        // mouse may never move again.
+        hoverCell = new Vector2Int(-1, -1);
+        hoverValid = false;
+
         // Every derived read of the surface has to be dropped, or the map shows a new world scored
         // against the old one's statistics.
         SurfaceIndex.InvalidateStats(body);
@@ -3234,7 +3458,7 @@ public class PlanetViewWindow : MonoBehaviour
         t.gameObject.AddComponent<LayoutElement>().minHeight = reservedLines * 16f;
         live.Text(t, () =>
         {
-            if (hoverCell.x < 0 || body.surface == null) return "<color=#9FB4C8>Hover the map.</color>";
+            if (!HasHoverCell) return "<color=#9FB4C8>Hover the map.</color>";
             var tile = body.surface.tiles[hoverCell.x, hoverCell.y];
             var sb = new System.Text.StringBuilder();
             sb.AppendLine($"<b>({hoverCell.x}, {hoverCell.y})</b> — {tile.type}");
@@ -3923,6 +4147,10 @@ public class PlanetViewWindow : MonoBehaviour
             if (m.pieces != null)
                 for (int i = m.pieces.childCount - 1; i >= 0; i--) Destroy(m.pieces.GetChild(i).gameObject);
 
+        // The animated ghosts live in the layer that was just emptied, so their list has to be dropped
+        // with them or AnimateConstruction spends every frame walking references to destroyed quads.
+        constructionQuads.Clear();
+
         if (body?.surface == null) return;
 
         foreach (var p in SurfaceBuildManager.On(body))
@@ -3948,7 +4176,107 @@ public class PlanetViewWindow : MonoBehaviour
             }
         }
 
+        DrawConstructionGhosts();
+
         SyncWrapMirrors();
+    }
+
+    // ============================================================================================
+    // CONSTRUCTION GHOSTS — the ground a queued build has already claimed
+    //
+    // A confirmed build takes real time, and until this the map showed absolutely nothing for it: you
+    // drew a six-tile farm, paid for it, and the world looked exactly as it had a second earlier. The
+    // ground was reserved (SurfaceBuildQueue.PendingCells refuses a second job on it) but the only
+    // evidence was a refusal when you tried to build there again. So the tiles a job holds are drawn as
+    // a translucent shell of the building that is coming.
+    //
+    // READS AS UNFINISHED, THREE WAYS, because "faint version of a building" alone would just look like
+    // a building drawn wrong:
+    //
+    //   IT BREATHES        a slow pulse in alpha — nothing else on this map moves, so movement means work
+    //   IT FILLS IN        opacity rises with progress, so a site at 90% is nearly solid and one just
+    //                      confirmed is a whisper. The map answers "how far along?" without the panel.
+    //   ITS OUTLINE IS ITS OWN COLOUR, not the black every standing structure carries. That black line
+    //                      is what makes a placed building look planted; withholding it is what makes
+    //                      this one look pencilled in.
+    //
+    // A PAUSED job holds still and dims. It is not slow, it is stopped, and a paused site that kept
+    // breathing at the same rate as a working one would say the opposite of what the pause button did.
+    // ============================================================================================
+
+    /// One ghost quad and the job it belongs to, so the animation can read that job's live progress
+    /// rather than baking a brightness in at draw time and freezing it there until the next rebuild.
+    struct ConstructionQuad
+    {
+        public Image img;
+        public SurfaceBuildJob job;
+    }
+    readonly List<ConstructionQuad> constructionQuads = new List<ConstructionQuad>();
+
+    void DrawConstructionGhosts()
+    {
+        var jobs = SurfaceBuildQueue.Peek(body);
+        if (jobs == null || jobs.Count == 0) return;
+
+        foreach (var job in jobs)
+        {
+            if (job?.cells == null || job.cells.Count == 0) continue;
+            var info = SurfaceBuildingDatabase.Get(job.type);
+            if (info == null) continue;
+
+            // The colour the finished building will be, so the ghost is recognisably THAT structure —
+            // you can tell the queued reactor from the queued farm without reading a word. Alpha is set
+            // per frame by AnimateConstruction; this is only the starting value for the first frame.
+            var fill = Vivid(info.color);
+            fill.a = 0.3f;
+
+            // The outline sits well above the fill's alpha: a shell that fades toward nothing still has
+            // a crisp edge, so the FOOTPRINT — which is the thing the player needs to plan around — is
+            // legible even when the site has barely started.
+            var edge = Vivid(info.color);
+            edge.a = 0.85f;
+
+            foreach (var cell in job.cells)
+                constructionQuads.Add(new ConstructionQuad { img = AddCellQuad(pieceLayer, cell.x, cell.y, fill), job = job });
+            OutlineFootprint(pieceLayer, job.cells, edge);
+
+            // Onto the wrap mirrors as well, for the same reason the buildings go there: a site that
+            // vanishes as it crosses the seam looks like a cancelled project.
+            foreach (var m in mirrors)
+            {
+                if (m.pieces == null) continue;
+                foreach (var cell in job.cells)
+                    constructionQuads.Add(new ConstructionQuad { img = AddCellQuad(m.pieces, cell.x, cell.y, fill), job = job });
+                OutlineFootprint(m.pieces, job.cells, edge);
+            }
+        }
+    }
+
+    /// The breath and the fill-in, per frame. Cheap: an alpha write per ghost cell, and only when it
+    /// actually changed — writing a Graphic's colour dirties its mesh, and these sit on the same canvas
+    /// as everything else in the window.
+    void AnimateConstruction()
+    {
+        if (constructionQuads.Count == 0) return;
+
+        float breath = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * 2.2f);
+
+        for (int i = 0; i < constructionQuads.Count; i++)
+        {
+            var q = constructionQuads[i];
+            if (q.img == null || q.job == null) continue;
+
+            // A held job sits at a flat, dim alpha with no breath in it at all: still, and visibly
+            // stalled, however far along it happens to be.
+            float a = q.job.paused
+                ? 0.16f
+                : Mathf.Lerp(0.20f, 0.60f, Mathf.Clamp01(q.job.Progress)) + 0.08f * breath;
+
+            var c = q.img.color;
+            if (Mathf.Abs(c.a - a) < 0.004f) continue;
+            c.a = a;
+            q.img.color = c;
+        }
     }
 
     // ---- Confirm before building ----
@@ -4084,17 +4412,21 @@ public class PlanetViewWindow : MonoBehaviour
     //
     // Thickness is in PIXELS, not in cells, so it stays a hairline at every zoom. In cells it would
     // vanish when zoomed out and become a fat black border when zoomed in.
-    void OutlineFootprint(RectTransform layer, List<Vector2Int> cells)
+    ///
+    /// `edge` overrides the colour. A standing building outlines in black — that black line is what
+    /// separates it from the ground — while a construction site outlines in its own hue, so the two
+    /// never read as the same kind of thing even at a glance.
+    void OutlineFootprint(RectTransform layer, List<Vector2Int> cells, Color? edge = null)
     {
         if (cells == null || cells.Count == 0) return;
 
         var set = new HashSet<Vector2Int>(cells);
         foreach (var cell in cells)
         {
-            if (!set.Contains(cell + Vector2Int.up))    AddEdgeQuad(layer, cell.x, cell.y, 0);
-            if (!set.Contains(cell + Vector2Int.right)) AddEdgeQuad(layer, cell.x, cell.y, 1);
-            if (!set.Contains(cell + Vector2Int.down))  AddEdgeQuad(layer, cell.x, cell.y, 2);
-            if (!set.Contains(cell + Vector2Int.left))  AddEdgeQuad(layer, cell.x, cell.y, 3);
+            if (!set.Contains(cell + Vector2Int.up))    AddEdgeQuad(layer, cell.x, cell.y, 0, edge);
+            if (!set.Contains(cell + Vector2Int.right)) AddEdgeQuad(layer, cell.x, cell.y, 1, edge);
+            if (!set.Contains(cell + Vector2Int.down))  AddEdgeQuad(layer, cell.x, cell.y, 2, edge);
+            if (!set.Contains(cell + Vector2Int.left))  AddEdgeQuad(layer, cell.x, cell.y, 3, edge);
         }
     }
 
@@ -4104,7 +4436,7 @@ public class PlanetViewWindow : MonoBehaviour
 
     /// One edge of one cell. dir: 0=top, 1=right, 2=bottom, 3=left. Drawn INSIDE the cell, so the
     /// outline never encroaches on the neighbouring tile's ground.
-    void AddEdgeQuad(RectTransform layer, int x, int y, int dir)
+    void AddEdgeQuad(RectTransform layer, int x, int y, int dir, Color? edge = null)
     {
         if (body?.surface == null) return;
         int w = body.surface.width, h = body.surface.height;
@@ -4112,7 +4444,7 @@ public class PlanetViewWindow : MonoBehaviour
         float l = x / (float)w, r = (x + 1) / (float)w;
         float b = y / (float)h, t = (y + 1) / (float)h;
 
-        var q = UIFactory.Panel(layer, "o", Color.black);
+        var q = UIFactory.Panel(layer, "o", edge ?? Color.black);
         q.raycastTarget = false;
         var rt = q.rectTransform;
 
@@ -4270,7 +4602,7 @@ public class PlanetViewWindow : MonoBehaviour
             return;
         }
 
-        if (hoverCell.x >= 0)
+        if (HasHoverCell)
         {
             // Vivid when it fits, red when it doesn't, so validity is obvious before you click.
             Color c = hoverValid ? Vivid(info.color) : new Color(1f, 0.25f, 0.2f, 0.85f);
@@ -4311,9 +4643,11 @@ public class PlanetViewWindow : MonoBehaviour
     }
 
     // Grid cell -> a quad anchored in the map's normalized space, so it scales with the window.
-    void AddCellQuad(RectTransform layer, int x, int y, Color c)
+    /// Returns the quad it made, so a caller that wants to keep animating it (the construction ghosts,
+    /// which breathe) can hold onto it instead of hunting it back out of the layer's children.
+    Image AddCellQuad(RectTransform layer, int x, int y, Color c)
     {
-        if (body?.surface == null) return;
+        if (body?.surface == null) return null;
         int w = body.surface.width, h = body.surface.height;
         var q = UIFactory.Panel(layer, "c", c);
         q.raycastTarget = false;
@@ -4322,6 +4656,7 @@ public class PlanetViewWindow : MonoBehaviour
         rt.anchorMax = new Vector2((x + 1) / (float)w, (y + 1) / (float)h);
         rt.offsetMin = new Vector2(0.5f, 0.5f);
         rt.offsetMax = new Vector2(-0.5f, -0.5f);
+        return q;
     }
 
     // ---- Hover ----
@@ -4531,7 +4866,7 @@ public class PlanetViewWindow : MonoBehaviour
         if (!drawing)
         {
             if (!Input.GetMouseButtonDown(0)) return;
-            if (hoverCell.x < 0) return;                 // not over the host map
+            if (!HasHoverCell) return;                   // not over the host map
             if (OverFloatingMapControl()) return;        // the zoom bar / confirm float over the map
 
             drawing = true;
@@ -4551,7 +4886,7 @@ public class PlanetViewWindow : MonoBehaviour
     /// Rebuild the proposed footprint from the anchor and wherever the cursor is now.
     void RecomputeDraw(SurfaceBuildingInfo info)
     {
-        var cursor = hoverCell.x >= 0 ? hoverCell : drawAnchor;
+        var cursor = HasHoverCell ? hoverCell : drawAnchor;
 
         switch (info.drawMode)
         {
@@ -4559,7 +4894,7 @@ public class PlanetViewWindow : MonoBehaviour
                 // PAINT, so the drag accumulates rather than replacing. Only the cell under the cursor is
                 // added — no line-filling between frames — because a fast sweep that auto-filled the gaps
                 // would silently buy tiles the player never actually dragged over.
-                if (hoverCell.x >= 0 && drawSet.Add(hoverCell)) drawCells.Add(hoverCell);
+                if (HasHoverCell && drawSet.Add(hoverCell)) drawCells.Add(hoverCell);
                 break;
 
             case BuildDrawMode.Square:
@@ -4608,10 +4943,18 @@ public class PlanetViewWindow : MonoBehaviour
         if (!BuildShapeRules.Validate(info, drawCells, out drawWhy)) return;
 
         var occupied = SurfaceBuildManager.Occupied(body);
+
+        // GROUND A QUEUED JOB HAS ALREADY CLAIMED COUNTS AS TAKEN, even though nothing stands on it yet.
+        // Enqueue refuses an overlap outright, so without this the drag paints green over a construction
+        // site and then silently declines on release — the one moment the player has no idea what they
+        // did wrong. Now the footprint reddens while they are still dragging, over ghosts they can see.
+        var pending = SurfaceBuildQueue.PendingCells(body);
+
         foreach (var c in drawCells)
         {
             if (!SurfaceBuildManager.CellBuildable(body, info, c.x, c.y, out drawWhy)) return;
             if (occupied.Contains(c)) { drawWhy = "something is already standing there"; return; }
+            if (pending.Contains(c)) { drawWhy = "another project is already going up there"; return; }
         }
     }
 
@@ -4773,12 +5116,25 @@ public class PlanetViewWindow : MonoBehaviour
         string tempHex = ColorUtility.ToHtmlStringRGB(PlanetTemperature.GradientColor(celsius));
         sb.Append($"\n<color=#{tempHex}>{PlanetTemperature.Label(celsius)}</color>");
 
+        // A construction site names itself. The ghost on the map says a structure is coming and roughly
+        // how far along it is; this is where you find out WHICH structure without going to the panel and
+        // matching colours by eye.
+        var job = SurfaceBuildQueue.JobAt(b, x, y);
+        if (job != null)
+        {
+            var jinfo = SurfaceBuildingDatabase.Get(job.type);
+            string jhex = ColorUtility.ToHtmlStringRGB(Vivid(jinfo.color));
+            sb.Append(job.paused
+                ? $"\n<color=#{jhex}>{jinfo.name}</color> <color=#FFBF4D>— held at {job.Progress * 100f:F0}%</color>"
+                : $"\n<color=#{jhex}>{jinfo.name}</color> — under construction, {job.Progress * 100f:F0}%");
+        }
+
         return sb.ToString();
     }
 
     void RecomputeHoverValidity()
     {
-        hoverValid = selected.HasValue && hoverCell.x >= 0 &&
+        hoverValid = selected.HasValue && HasHoverCell &&
                      SurfaceBuildManager.CanPlace(body, selected.Value, hoverCell.x, hoverCell.y, rotation, out _);
     }
 
