@@ -3841,9 +3841,11 @@ public class PlanetViewWindow : MonoBehaviour
 
         Header("INDEX OVERLAYS");
         Note("Each overlay paints the grid with where a kind of building actually belongs. Survey a world to read its minerals; a deep survey by a research ship unlocks the rest.");
-        Note($"<color=#9FB4C8>Only ground worth building on is drawn: this world's <b>best {SurfaceIndex.TopBand * 100f:F0}%</b> " +
-             $"for that index, brightest and outlined, plus the rest of its better half where that clears " +
-             $"<b>{SurfaceIndex.ShowFloor * 100f:F0}%</b>. Everywhere blank is somewhere not to put it.</color>");
+        Note($"<color=#9FB4C8>Nothing under <b>{SurfaceIndex.ShowFloor * 100f:F0}%</b> is drawn, and nothing under " +
+             $"<b>{SurfaceIndex.ShowFloor * 100f:F0}%</b> yields anything or can be built on — a world's resources sit in a " +
+             $"few patches rather than spread thinly over all of it. Every <b>{SurfaceIndex.BandStep * 100f:F0}%</b> above that " +
+             $"is a brighter step with its own outline, so the best ground is the innermost, brightest ring. " +
+             $"Zoom in near the cursor for the exact numbers.</color>");
 
         AddIndexToggle(SurfaceIndexKind.None, "None (plain terrain)");
         foreach (var k in SurfaceIndex.All) AddIndexToggle(k, null);
@@ -3909,19 +3911,35 @@ public class PlanetViewWindow : MonoBehaviour
 
         if (k != SurfaceIndexKind.None)
         {
-            // The legend IS the map. It draws Highlight rather than the raw ramp, so the strip runs
-            // through exactly the colours the overlay can produce — and it stops where the overlay stops,
-            // with the last two cells carrying the outline colour that marks a patch's edge. A legend
-            // showing a range of colours the map no longer paints would be worse than no legend.
-            var strip = UIFactory.NewUI(card, "Ramp"); UIFactory.AddLayout(strip, 10);
+            // THE LEGEND IS THE MAP, one cell per band. It draws Highlight and Outline at exactly the
+            // band values the overlay uses, so the strip is a sample of the real thing rather than an
+            // approximation of it — and it stops where the overlay stops, because a legend showing
+            // colours the map no longer paints is worse than no legend.
+            //
+            // Each cell carries its band's own outline down its right-hand edge, which is what the map
+            // does at the boundary between two bands. Read left to right it is 70s, 80s, 90s, 100.
+            int steps = Mathf.Max(1, Mathf.RoundToInt((1f - SurfaceIndex.ShowFloor) / SurfaceIndex.BandStep));
+            var strip = UIFactory.NewUI(card, "Ramp"); UIFactory.AddLayout(strip, 14);
             var srt = strip.GetComponent<RectTransform>();
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < steps; i++)
             {
-                var q = UIFactory.Panel(srt, "s", i == 9 ? SurfaceIndex.Outline(k) : SurfaceIndex.Highlight(k, i / 8f));
-                q.raycastTarget = false;
-                var qrt = q.rectTransform;
-                qrt.anchorMin = new Vector2(i / 10f, 0); qrt.anchorMax = new Vector2((i + 1) / 10f, 1);
+                float t = steps > 1 ? i / (float)(steps - 1) : 1f;
+                var cell = UIFactory.Panel(srt, "s", SurfaceIndex.Highlight(k, t));
+                cell.raycastTarget = false;
+                var qrt = cell.rectTransform;
+                qrt.anchorMin = new Vector2(i / (float)steps, 0); qrt.anchorMax = new Vector2((i + 1) / (float)steps, 1);
                 qrt.offsetMin = Vector2.zero; qrt.offsetMax = Vector2.zero;
+
+                var line = UIFactory.Panel(qrt, "edge", SurfaceIndex.Outline(k, t));
+                line.raycastTarget = false;
+                var lrt = line.rectTransform;
+                lrt.anchorMin = new Vector2(0.86f, 0f); lrt.anchorMax = Vector2.one;
+                lrt.offsetMin = Vector2.zero; lrt.offsetMax = Vector2.zero;
+
+                var lab = UIFactory.Text(qrt, $"{(SurfaceIndex.ShowFloor + i * SurfaceIndex.BandStep) * 100f:F0}",
+                                         9, new Color(0f, 0f, 0f, 0.75f), TextAlignmentOptions.Center);
+                lab.raycastTarget = false;
+                UIFactory.Stretch(lab.rectTransform);
             }
             Note(card, SurfaceIndex.Describe(k));
         }
@@ -4329,16 +4347,22 @@ public class PlanetViewWindow : MonoBehaviour
 
         // Resolved for every tile FIRST, because the outline pass has to ask about neighbours — and
         // asking Shown again per neighbour would re-sample the terrain noise four more times per tile.
+        // `step` is the tile's 10% band, -1 for ground the index does not reach at all.
         var fill = new Color32[w * h];
-        var lit = new bool[w * h];
+        var edgeOf = new Color32[w * h];
+        var step = new int[w * h];
+        int steps = Mathf.Max(1, Mathf.RoundToInt((1f - SurfaceIndex.ShowFloor) / SurfaceIndex.BandStep));
+        for (int i = 0; i < step.Length; i++) step[i] = -1;
+
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
                 int i = y * w + x;
                 float v = SurfaceIndex.Get(body, kind, x, y);
                 if (!SurfaceIndex.ShownFor(body, kind, v, out float t)) continue;
-                lit[i] = true;
+                step[i] = Mathf.Clamp(Mathf.RoundToInt(t * (steps - 1)), 0, steps - 1);
                 fill[i] = SurfaceIndex.Highlight(kind, t);
+                edgeOf[i] = SurfaceIndex.Outline(kind, t);
 
                 // NAMED ORE DEPOSITS, on the mineral map only, and the one thing here that is a find
                 // rather than a field: drawn in the ore's own colour at near-full strength so a seam
@@ -4356,21 +4380,36 @@ public class PlanetViewWindow : MonoBehaviour
             }
 
         var px = new Color32[tw * th];   // zeroed = fully transparent, which is what "not shown" means
-        Color32 edge = SurfaceIndex.Outline(kind);
 
+        // ============================================================================================
+        // EVERY BAND GETS ITS OWN EDGE, so the contours NEST
+        //
+        // The outline test used to be "is my neighbour unlit", which drew one line round the whole
+        // highlighted region and said nothing about its inside: a 95% core and a 72% fringe came out as
+        // one shape with one border, and the only way to tell them apart was to zoom in far enough for
+        // the numbers to appear. Now a tile draws an edge against any neighbour in a LOWER band — unlit
+        // ground being the lowest of all — so the 90s patch is ringed inside the 80s patch, which is
+        // ringed inside the 70s. The quality distribution reads from across the map: aim for the
+        // innermost ring, and zoom in only to confirm the exact number.
+        //
+        // The HIGHER band draws the line, never the lower one, so a bright ring sits inside its own
+        // bright ground rather than eating a tile of the weaker ground beside it.
+        // ============================================================================================
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
-                if (!lit[y * w + x]) continue;
-                Color32 c = fill[y * w + x];
+                int i = y * w + x;
+                int me = step[i];
+                if (me < 0) continue;
+                Color32 c = fill[i], edge = edgeOf[i];
 
                 // LONGITUDE WRAPS and latitude does not, exactly as the map itself does: a patch running
                 // over the date line is one patch and must not be outlined down the seam, while a patch
                 // that reaches the pole row genuinely ends there.
-                bool openL = !lit[y * w + ((x - 1 + w) % w)];
-                bool openR = !lit[y * w + ((x + 1) % w)];
-                bool openD = y == 0 || !lit[(y - 1) * w + x];
-                bool openU = y == h - 1 || !lit[(y + 1) * w + x];
+                bool openL = step[y * w + ((x - 1 + w) % w)] < me;
+                bool openR = step[y * w + ((x + 1) % w)] < me;
+                bool openD = y == 0 || step[(y - 1) * w + x] < me;
+                bool openU = y == h - 1 || step[(y + 1) * w + x] < me;
 
                 for (int sy = 0; sy < sub; sy++)
                     for (int sx = 0; sx < sub; sx++)

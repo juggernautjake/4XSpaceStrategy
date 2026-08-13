@@ -754,6 +754,24 @@ public static class PlanetTerrainGenerator
     // `mult` is the per-field frequency multiplier (elevation 1, ridge 2.2, fine detail 6 …). It has to be
     // folded into the PERIOD as well as the coordinate, or a field sampled at 2.2x the base frequency
     // would tile every 1/2.2 of the map and produce a repeating pattern rather than one seamless wrap.
+    /// A seamless 0..1 noise field over a world's whole surface, for anything OUTSIDE this file that
+    /// needs one — the survey indexes' hotspot fields, principally.
+    ///
+    /// `cells` is roughly how many blobs fit around the equator, which is the number a caller actually
+    /// wants to reason about: 3 gives a handful of continent-sized patches, 20 gives a fine scatter. The
+    /// 2:1 map aspect is applied here so a blob comes out round rather than stretched, and the wrap goes
+    /// through the same WrapU every terrain field uses, so a patch crossing the date line is one patch.
+    ///
+    /// EXPOSED RATHER THAN COPIED. A second seamless-noise implementation living next door would drift
+    /// from this one, and the two would then disagree about where the seam is — which is exactly the class
+    /// of bug WrapU exists to make impossible.
+    public static float WorldNoise(CelestialBody body, float u, float v, float cells, float salt, int octaves)
+    {
+        float seed = body != null ? body.terrainSeed : 0f;
+        float span = Mathf.Max(0.5f, cells);
+        return Mathf.Clamp01(WrapU(u, span, 1f, v * span * 0.5f, seed + salt, seed * 1.7f + salt, octaves));
+    }
+
     static float WrapU(float u, float baseSpanX, float mult, float y, float offX, float offY, int octaves)
     {
         float period = baseSpanX * mult;

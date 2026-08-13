@@ -312,7 +312,7 @@ public static class SurfaceBuildManager
         var cells = SurfaceBuildingDatabase.Footprint(t, x, y, rotation);
         if (cells.Count == 0) return 0f;
         float sum = 0f;
-        foreach (var c in cells) sum += SurfaceIndex.Get(b, info.index, c.x, c.y);
+        foreach (var c in cells) sum += SurfaceIndex.Productive(SurfaceIndex.Get(b, info.index, c.x, c.y));
         return Mathf.Clamp01(sum / cells.Count);
     }
 
@@ -462,7 +462,7 @@ public static class SurfaceBuildManager
         if (info.index != SurfaceIndexKind.None)
         {
             float sum = 0f;
-            foreach (var c in cells) sum += SurfaceIndex.Get(b, info.index, c.x, c.y);
+            foreach (var c in cells) sum += SurfaceIndex.Productive(SurfaceIndex.Get(b, info.index, c.x, c.y));
             eff = Mathf.Clamp01(cells.Count > 0 ? sum / cells.Count : 0f);
         }
 
@@ -635,7 +635,7 @@ public static class SurfaceBuildManager
         if (info.index != SurfaceIndexKind.None)
         {
             float sum = 0f;
-            foreach (var c in cells) sum += SurfaceIndex.Get(b, info.index, c.x, c.y);
+            foreach (var c in cells) sum += SurfaceIndex.Productive(SurfaceIndex.Get(b, info.index, c.x, c.y));
             newEff = Mathf.Clamp01(sum / cells.Count);
         }
 
@@ -1126,7 +1126,7 @@ public static class SurfaceBuildManager
                 if (info.index != SurfaceIndexKind.None)
                 {
                     float sum = 0f;
-                    foreach (var c in piece) sum += SurfaceIndex.Get(b, info.index, c.x, c.y);
+                    foreach (var c in piece) sum += SurfaceIndex.Productive(SurfaceIndex.Get(b, info.index, c.x, c.y));
                     eff = Mathf.Clamp01(sum / piece.Count);
                 }
 
