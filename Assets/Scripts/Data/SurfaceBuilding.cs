@@ -480,7 +480,7 @@ public static class SurfaceBuildingDatabase
         // Hydro — the one thing that WANTS water, and needs relief to drop it through.
         var hydro = new SurfaceBuildingInfo(SurfaceBuildingType.HydroPlant, SurfaceBuildingCategory.Electrical,
             "Hydro Plant",
-            "A dam and turbine hall. Needs flowing water with somewhere to fall — a river or a coast WITH relief. A flat open sea has no head to work with and won't do.",
+            "A dam and turbine hall. Wants a lot of water within reach and some relief to drop it through — check the Hydro Index. A big lake or sea supplies the land around it for a long way inland, so this does not have to sit on the waterline.",
             S(0, 0, 1, 0, 2, 0, 2, 1), SurfaceIndexKind.Water, 80, 35, 18f, new Color(0.35f, 0.75f, 1.00f));
         hydro.energyPerSec = 2.1f;
         _all[(int)SurfaceBuildingType.HydroPlant] = hydro;
@@ -555,7 +555,7 @@ public static class SurfaceBuildingDatabase
         // Domino.
         var steam = new SurfaceBuildingInfo(SurfaceBuildingType.SteamTurbine, SurfaceBuildingCategory.Electrical,
             "Steam Turbine",
-            "A boiler hall and turbine. Needs water to raise steam with, so it wants a river or a coast — check the Hydro Index. Solid, unglamorous, moderate power anywhere wet.",
+            "A boiler hall and turbine. Needs water within reach to raise steam with — check the Hydro Index, which now carries inland from every lake and sea rather than stopping at the shore. Solid, unglamorous, moderate power anywhere the water reaches.",
             S(0, 0, 0, 1), SurfaceIndexKind.Water, 70, 30, 16f, new Color(0.80f, 0.82f, 0.86f));
         steam.energyPerSec = 1.8f;
         _all[(int)SurfaceBuildingType.SteamTurbine] = steam;
@@ -689,11 +689,11 @@ public static class SurfaceBuildingDatabase
         Require(SurfaceBuildingType.WindFarm, 0.25f,
             "Needs exposure — ridgelines, coasts, open steppe. Sheltered forest and canyon floors are still.");
         Require(SurfaceBuildingType.HydroPlant, 0.3f,
-            "Needs flowing water and relief for it to fall through.");
+            "Needs real water within reach — a substantial lake or sea, not a puddle. It does not have to stand on the shore.");
         Require(SurfaceBuildingType.CombustionPlant, 0.12f,
             "Needs something under it worth burning. Bare ice and open ocean have no fuel in them.");
         Require(SurfaceBuildingType.SteamTurbine, 0.15f,
-            "Needs water to raise steam with. A desert has nothing to boil.");
+            "Needs water within reach to raise steam with. A desert has nothing to boil — but a coast supplies a long way inland, so this need not be crammed onto the beach.");
 
         // ============================================================================================
         // HOW EACH CLASS IS DRAWN

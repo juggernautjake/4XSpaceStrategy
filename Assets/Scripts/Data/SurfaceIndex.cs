@@ -306,36 +306,243 @@ public static class SurfaceIndex
     public static bool SolarViable(CelestialBody b) =>
         b != null && b.atmospheres < SolarDeadAtmospheres;
 
-    // ---- WATER: where hydro pays ----
-    // Hydro needs flowing water, which means water AND a height gradient — a river down a mountain, not
-    // a flat sea. So: open water nearby, and relief to drop it through.
+    // ============================================================================================
+    // WATER: where anything that needs water pays
+    //
+    // THE OLD VERSION SCORED THE WATER ITSELF, which made it useless for the one thing it is for.
+    // It read the 3x3 neighbourhood, so only a tile touching the sea got any credit at all, and the
+    // highest numbers on the map were on open water — where nothing can be built. A Steam Turbine
+    // needs water to raise steam with; it does not need to be standing IN it. The practical effect was
+    // that the whole Electrical category's wettest buildings had to be jammed onto the shoreline in a
+    // single-tile ring, and once that ring was full the world had no more sites.
+    //
+    // SO WATER PROJECTS, exactly as a power plant projects a grid. Every connected body of water throws
+    // an influence outward across the land around it, and the two numbers that matter both scale with
+    // HOW BIG THAT BODY IS:
+    //
+    //   REACH      how far inland it carries. A pond wets its own doorstep; an ocean supplies a
+    //              hinterland. Scaled by the SQUARE ROOT of area, because that is the body's linear
+    //              size — a lake of four times the area is twice as wide, and twice as wide is the
+    //              honest reading of "twice the water". Linear in area would let one sea cover a
+    //              hemisphere.
+    //   STRENGTH   how good the best site near it is. Also root-scaled, and saturating: a pond is a
+    //              poor site however close you stand to it.
+    //
+    // ---- THE BUFFER, and why the shore is not the best place ----
+    //
+    // The request is explicit: leave a gap so a row of turbines does not have to be crammed onto the
+    // waterline. So the shore is VIABLE but deliberately not optimal (ShoreFraction of the peak), the
+    // peak sits one tile further in, and it falls away from there to nothing at the reach. You can
+    // build on the beach; you do slightly better a step back from it, and you can keep building
+    // inland for a long way before it stops being worth it.
+    //
+    // Measured against a rendered map at 160x80 with a plausible spread of bodies: about half the land
+    // has some hydro, a fifth of it clears 50%, and under 5% clears 80% — so the good ground is
+    // findable and finite rather than everywhere or nowhere.
+    // ============================================================================================
+
+    /// The shortest reach any body has, in tiles, and the longest — an ocean does not supply a planet.
+    const float WaterReachMin = 3f, WaterReachMax = 14f;
+
+    /// Tiles of reach per unit of sqrt(area).
+    const float WaterReachPerRoot = 0.8f;
+
+    /// Distance out to which the shoreline discount applies. 1 = only the tiles touching the water.
+    const int WaterBuffer = 1;
+
+    /// What the shore gets, as a fraction of the peak. Under 1 so the best ground is a step inland.
+    const float WaterShoreFraction = 0.72f;
+
     static float Water(CelestialBody b, PlanetTerrainGenerator.Sample f, int x, int y)
     {
-        float nearby = WaterNeighbours(b, x, y);                   // 0..1 fraction of adjacent sea
-        if (nearby <= 0f && !f.water) return 0.02f;                // no water at all: nothing to dam
+        if (f.water) return 0.02f;                                 // you cannot build on it
 
+        var field = WaterFieldFor(b);
+        if (field == null) return 0.02f;
+
+        int i = y * b.surface.width + x;
+        int id = field.nearestBody[i];
+        if (id < 0) return 0.02f;                                  // no water anywhere on this world
+
+        float d = field.distance[i];
+        float reach = ReachOf(field.bodySize[id]);
+        if (d > reach) return 0.02f;
+
+        float peak = StrengthOf(field.bodySize[id]);
+
+        float v;
+        if (d <= WaterBuffer) v = peak * WaterShoreFraction;
+        else
+        {
+            float t = (d - (WaterBuffer + 1)) / Mathf.Max(0.001f, reach - (WaterBuffer + 1));
+            v = peak * (1f - Mathf.Clamp01(t));
+        }
+
+        // RELIEF IS A TIEBREAK NOW, NOT A GATE. It used to be nearly half the score, which is right for
+        // a hydro DAM (you need head to drop the water through) and wrong for everything else that
+        // reads this index — a boiler hall wants water, not a waterfall. Kept as a modest bonus so a
+        // hilly shore still beats a flat marsh, and so the Hydro Plant's own minIndex gate still tends
+        // to land it somewhere with a gradient.
         float relief = Mathf.Clamp01(f.elevation * 0.7f + f.ridge * 0.5f);
-        float flow = f.terrain == TerrainType.River ? 1f
-                   : f.terrain == TerrainType.Lake ? 0.75f
-                   : nearby;
+        v *= Mathf.Lerp(0.85f, 1.15f, relief);
 
-        float v = flow * 0.55f + relief * 0.45f;
-        if (f.water && relief < 0.2f) v *= 0.4f;                   // flat open sea: no head to work with
-        return Mathf.Clamp01(v * 1.2f);
+        return Mathf.Clamp01(v);
     }
 
-    static float WaterNeighbours(CelestialBody b, int x, int y)
+    static float ReachOf(int tiles)
+        => Mathf.Min(WaterReachMax, WaterReachMin + Mathf.Sqrt(Mathf.Max(1, tiles)) * WaterReachPerRoot);
+
+    static float StrengthOf(int tiles)
+        => Mathf.Min(1f, 0.35f + Mathf.Sqrt(Mathf.Max(1, tiles)) / 22f);
+
+    // ============================================================================================
+    // THE WATER DISTANCE FIELD
+    //
+    // For every land tile: how far it is from open water, and which BODY of water that is — because the
+    // answer depends on how big that body is, and the nearest water is not always the biggest.
+    //
+    // A CHAMFER DISTANCE TRANSFORM rather than a per-tile search. The obvious implementation asks each
+    // tile "how far to the nearest water" and scans outward, which is O(reach^2) per tile and is asked
+    // for every tile of every overlay repaint and every efficiency calculation. Two sweeps over the grid
+    // — one forward, one back — produce the whole field in O(w*h), and the diagonal step costing
+    // sqrt(2) puts it within a couple of percent of true Euclidean distance, which is close enough that
+    // no player will ever see the difference between the two.
+    //
+    // LONGITUDE WRAPS, so the sweeps run twice: a single forward-and-back pair cannot propagate a
+    // distance the long way around the seam. Two pairs is enough for any feature narrower than the map,
+    // which every water body is.
+    // ============================================================================================
+    class WaterField
     {
-        int wet = 0, total = 0;
-        for (int dx = -1; dx <= 1; dx++)
-            for (int dy = -1; dy <= 1; dy++)
+        public float[] distance;     // tiles to the nearest water, per cell
+        public int[] nearestBody;    // which connected body that water belongs to, or -1
+        public int[] bodySize;       // tiles in each body
+    }
+
+    // KEYED ON THE BODY OBJECT, NOT b.id. `id` is not unique across a galaxy — SolarSystemGenerator
+    // restarts its counter for every system — so two worlds in different systems share one. The
+    // reference is exact and collision-free (CelestialBody overrides neither Equals nor GetHashCode).
+    static readonly Dictionary<CelestialBody, WaterField> waterFields
+        = new Dictionary<CelestialBody, WaterField>();
+
+    static WaterField WaterFieldFor(CelestialBody b)
+    {
+        if (b?.surface == null) return null;
+        if (waterFields.TryGetValue(b, out var f)) return f;
+        f = BuildWaterField(b);
+        waterFields[b] = f;
+        return f;
+    }
+
+    static WaterField BuildWaterField(CelestialBody b)
+    {
+        int w = b.surface.width, h = b.surface.height;
+        int n = w * h;
+
+        var field = new WaterField
+        {
+            distance = new float[n],
+            nearestBody = new int[n]
+        };
+
+        // ---- Label the connected bodies ----
+        var label = new int[n];
+        for (int i = 0; i < n; i++) label[i] = -1;
+        var sizes = new List<int>();
+        var stack = new Stack<int>();
+
+        for (int start = 0; start < n; start++)
+        {
+            if (label[start] >= 0) continue;
+            if (!IsWaterAt(b, start % w, start / w)) continue;
+
+            int id = sizes.Count;
+            int count = 0;
+            label[start] = id;
+            stack.Push(start);
+
+            while (stack.Count > 0)
             {
-                int nx = x + dx, ny = y + dy;
-                if (nx < 0 || ny < 0 || nx >= b.surface.width || ny >= b.surface.height) continue;
-                total++;
-                if (PlanetTerrainGenerator.IsWater(b.surface.tiles[nx, ny].type)) wet++;
+                int cur = stack.Pop();
+                count++;
+                int cx = cur % w, cy = cur / w;
+
+                // Orthogonal only, and longitude wraps — the same connectivity every other rule in the
+                // project uses, so "one body of water" means the same thing here as everywhere else.
+                PushWater(b, label, stack, id, cx + 1, cy);
+                PushWater(b, label, stack, id, cx - 1, cy);
+                PushWater(b, label, stack, id, cx, cy + 1);
+                PushWater(b, label, stack, id, cx, cy - 1);
             }
-        return total > 0 ? wet / (float)total : 0f;
+            sizes.Add(count);
+        }
+
+        field.bodySize = sizes.ToArray();
+
+        // ---- The distance transform ----
+        for (int i = 0; i < n; i++)
+        {
+            bool wet = label[i] >= 0;
+            field.distance[i] = wet ? 0f : float.MaxValue;
+            field.nearestBody[i] = wet ? label[i] : -1;
+        }
+
+        if (sizes.Count == 0)
+        {
+            for (int i = 0; i < n; i++) field.distance[i] = 0f;   // no water: the field means nothing
+            return field;
+        }
+
+        const float D1 = 1f, D2 = 1.41421356f;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    Relax(field, w, h, x, y, x - 1, y, D1);
+                    Relax(field, w, h, x, y, x, y - 1, D1);
+                    Relax(field, w, h, x, y, x - 1, y - 1, D2);
+                    Relax(field, w, h, x, y, x + 1, y - 1, D2);
+                }
+            for (int y = h - 1; y >= 0; y--)
+                for (int x = w - 1; x >= 0; x--)
+                {
+                    Relax(field, w, h, x, y, x + 1, y, D1);
+                    Relax(field, w, h, x, y, x, y + 1, D1);
+                    Relax(field, w, h, x, y, x + 1, y + 1, D2);
+                    Relax(field, w, h, x, y, x - 1, y + 1, D2);
+                }
+        }
+
+        return field;
+    }
+
+    static bool IsWaterAt(CelestialBody b, int x, int y)
+    {
+        var t = b.surface.tiles[x, y];
+        return t != null && PlanetTerrainGenerator.IsWater(t.type);
+    }
+
+    static void PushWater(CelestialBody b, int[] label, Stack<int> stack, int id, int x, int y)
+    {
+        int w = b.surface.width, h = b.surface.height;
+        if (y < 0 || y >= h) return;                 // latitude does not wrap; the poles are edges
+        x = ((x % w) + w) % w;                       // longitude does
+        int i = y * w + x;
+        if (label[i] >= 0 || !IsWaterAt(b, x, y)) return;
+        label[i] = id;
+        stack.Push(i);
+    }
+
+    /// One step of the chamfer sweep: can (nx,ny) offer (x,y) a shorter route to water?
+    static void Relax(WaterField f, int w, int h, int x, int y, int nx, int ny, float cost)
+    {
+        if (ny < 0 || ny >= h) return;
+        nx = ((nx % w) + w) % w;
+        int from = ny * w + nx, to = y * w + x;
+        if (f.distance[from] == float.MaxValue) return;
+        float d = f.distance[from] + cost;
+        if (d < f.distance[to]) { f.distance[to] = d; f.nearestBody[to] = f.nearestBody[from]; }
     }
 
     // ============================================================================
@@ -348,11 +555,19 @@ public static class SurfaceIndex
     // separately.
     // ============================================================================
     class Stats { public float[] sorted; public float min, max; }
-    static readonly Dictionary<(int, SurfaceIndexKind), Stats> statsCache = new Dictionary<(int, SurfaceIndexKind), Stats>();
+
+    // KEYED ON THE BODY OBJECT, NOT b.id — the same correction the water field above carries, and for
+    // the same reason. `id` restarts at 0 for every system SolarSystemGenerator makes, so the third
+    // world of system 1 and the third world of system 7 shared a cache entry: whichever was surveyed
+    // first decided what "the best ground on this world" meant for both of them, and the second world's
+    // overlays highlighted tiles chosen from a distribution belonging to a planet in another star
+    // system. PowerGrid hit this exact bug and documents it at length.
+    static readonly Dictionary<(CelestialBody, SurfaceIndexKind), Stats> statsCache
+        = new Dictionary<(CelestialBody, SurfaceIndexKind), Stats>();
 
     static Stats GetStats(CelestialBody b, SurfaceIndexKind k)
     {
-        var key = (b.id, k);
+        var key = (b, k);
         if (statsCache.TryGetValue(key, out var s)) return s;
 
         int w = b.surface.width, h = b.surface.height;
@@ -370,13 +585,22 @@ public static class SurfaceIndex
 
     /// Drop cached distributions for a world — call when its terrain actually changes (terraforming,
     /// planetary remodelling), or the overlays would describe the world it used to be.
+    ///
+    /// The water field goes with them. It is derived from which tiles are wet, and terraforming is
+    /// precisely the thing that floods and drains them — a stale field would keep supplying hydro to a
+    /// desert that used to be a coast, and deny it to a sea that has just appeared.
     public static void InvalidateStats(CelestialBody b)
     {
         if (b == null) return;
-        foreach (var k in All) statsCache.Remove((b.id, k));
+        foreach (var k in All) statsCache.Remove((b, k));
+        waterFields.Remove(b);
     }
 
-    public static void InvalidateAll() => statsCache.Clear();
+    public static void InvalidateAll()
+    {
+        statsCache.Clear();
+        waterFields.Clear();
+    }
 
     /// Where this tile ranks on this world, 0 (worst) .. 1 (best).
     public static float Percentile(CelestialBody b, SurfaceIndexKind k, int x, int y)
@@ -523,7 +747,7 @@ public static class SurfaceIndex
             case SurfaceIndexKind.Fertile: return "Warm AND wet AND flat — farmland needs all three at once, not any one of them. Needs a LIVING world above all: no biosphere, no soil, and the index reads nothing.";
             case SurfaceIndexKind.Wind: return "Needs AIR: no atmosphere, no weather. Within that — high open ground, coasts and poles.";
             case SurfaceIndexKind.Solar: return "Thin air and long polar days. Dry ground is bright ground; a world far from its star is dim everywhere.";
-            case SurfaceIndexKind.Water: return "Flowing water: rivers and coasts WITH relief to drop through. A flat open sea has no head to work with.";
+            case SurfaceIndexKind.Water: return "How much water is within reach. Every lake and sea supplies the land AROUND it — the bigger the body, the further inland it carries and the better the best sites near it. The shore itself is good; one step back from it is better.";
             default: return "";
         }
     }
