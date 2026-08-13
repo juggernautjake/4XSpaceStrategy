@@ -312,6 +312,7 @@ public class PlanetViewWindow : MonoBehaviour
     Texture2D powerTex;
     float powerRepaintIn;   // see Update: the power overlay repaints on a timer, not every frame
     Color[] powerPx;        // reused scratch for that repaint — see RefreshPowerOverlay
+    bool[] powerLit;        // ...and which tiles any grid reaches, for the edge pass
 
     // Selection marker (see DrawSelectionMarker / AnimateMarker).
     RectTransform markerLayer;
@@ -1355,8 +1356,14 @@ public class PlanetViewWindow : MonoBehaviour
             ClearGhost();
             ClearLayer(placementLayer);
             ClearLayer(placementHud);
-            ClearYieldIcons();
         }
+
+        // THE NUMBERS FOLLOW THE CURSOR, on Survey as much as on Build. They used to be a Placement Mode
+        // fixture, so surveying a world — the one activity that is entirely about reading these figures —
+        // showed colours and no numbers at all, and you had to pick up a building you did not want in
+        // order to read the ground. Called out here rather than inside DrawPlacement for exactly that
+        // reason: it is not a placement decoration any more.
+        RefreshYieldIcons();
         RefreshPlacePanel();
         RefreshDemolishPanel();
 
@@ -4471,6 +4478,12 @@ public class PlanetViewWindow : MonoBehaviour
         var dull = new Color(0.02f, 0.03f, 0.06f, 0.62f);
         for (int i = 0; i < px.Length; i++) px[i] = dull;
 
+        // Which tiles any grid lights, kept so the edge pass below can find the outside of the lit
+        // region. Reused across repaints for the same reason `powerPx` is — this runs several times a
+        // second for as long as the tab is open.
+        if (powerLit == null || powerLit.Length != w * h) powerLit = new bool[w * h];
+        System.Array.Clear(powerLit, 0, powerLit.Length);
+
         foreach (var net in PowerGrid.Nets(body))
         {
             // A failing grid is drawn in a sicklier, dimmer yellow than a healthy one, so "which of
@@ -4492,8 +4505,43 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 if (c.x < 0 || c.y < 0 || c.x >= w || c.y >= h) continue;
                 px[c.y * w + c.x] = lit;
+                powerLit[c.y * w + c.x] = true;
             }
         }
+
+        // ============================================================================================
+        // THE GRID'S EDGE, IN A LIGHTER YELLOW
+        //
+        // The yellow coverage is a translucent wash, and a translucent wash over terrain has no boundary
+        // you can point at: you can see roughly where the power is and not where it STOPS, which is the
+        // only question the overlay is really asked. Worse, the wash is a reach radius, so its edge is
+        // exactly the thing the player is trying to plan a pylon against.
+        //
+        // So every lit tile with an unlit side neighbour is redrawn in a paler, more opaque version of
+        // its own grid's colour — paler rather than a fixed white, so a failing grid's rim stays grey and
+        // a healthy one's stays yellow and the two are still told apart at the edge as well as in the
+        // middle. The lit set is shared across grids on purpose: where two grids' coverage touches they
+        // are ONE grid by definition (PowerGrid's whole rule), and drawing a rim down the middle of a
+        // single grid would say the opposite.
+        // ============================================================================================
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int i = y * w + x;
+                if (!powerLit[i]) continue;
+
+                // Longitude wraps, latitude does not — the pole rows genuinely are the end of the map,
+                // and a grid reaching one has its edge there.
+                bool open = !powerLit[y * w + ((x - 1 + w) % w)]
+                         || !powerLit[y * w + ((x + 1) % w)]
+                         || y == 0 || !powerLit[(y - 1) * w + x]
+                         || y == h - 1 || !powerLit[(y + 1) * w + x];
+                if (!open) continue;
+
+                var c = px[i];
+                px[i] = new Color(Mathf.Lerp(c.r, 1f, 0.55f), Mathf.Lerp(c.g, 1f, 0.6f),
+                                  Mathf.Lerp(c.b, 0.55f, 0.5f), Mathf.Min(1f, c.a + 0.34f));
+            }
 
         // Sources and relays go on last so they always read on top of their own light.
         var electricBlue = new Color(0.25f, 0.72f, 1.00f, 0.85f);
@@ -5222,41 +5270,41 @@ public class PlanetViewWindow : MonoBehaviour
     // ============================================================================================
     // WHAT PLACEMENT MODE PUTS ON THE MAP
     //
-    // Four things, and they answer four different questions the player is holding at once:
+    // Three things, and they answer three different questions the player is holding at once:
     //
     //   GUIDANCE GRIDS   "where may the next tile go?" — a translucent wash over every legal neighbour,
     //                    updated as the shape grows. Cells with a building already on them are simply
     //                    absent, which is how the map says "not there" without drawing a refusal.
-    //   YIELD ICONS      "is this ground any good?" — the driving index, as a number, on every tile that
-    //                    scores well enough to be worth siting on. Only while placing; the instant the
-    //                    mode ends they go, because a map permanently covered in numbers is unreadable.
     //   THE COUNTER      "am I big enough yet?" — n/min over the middle of the shape, red then green.
     //   THE REFUSAL      "why did nothing happen?" — at the tile the player just tried, fading out.
     //
-    // ALL FOUR ARE REBUILT EVERY FRAME, which is affordable because all four are bounded by what is on
-    // screen rather than by the size of the world: the guidance is at most four cells per painted tile,
-    // and the yield icons are culled to the visible viewport before a single label is made (see
-    // DrawYieldIcons — an uncapped version of this made 30,000 TMP objects on a big world and froze).
+    // The yield numbers used to be a fourth. They belong to the CURSOR rather than to this mode — they
+    // are up on the Survey tab too now — so Update owns them; see RefreshYieldIcons.
+    //
+    // ALL THREE ARE REBUILT EVERY FRAME, which is affordable because all three are bounded by the drawn
+    // shape rather than by the size of the world: the guidance is at most four cells per painted tile.
     // ============================================================================================
     void DrawPlacement()
     {
         ClearLayer(placementLayer);
         ClearLayer(placementHud);
 
-        if (body?.surface == null) { ClearYieldIcons(); return; }
+        if (body?.surface == null) return;
 
         // Demolition draws on the same layer and is mutually exclusive with placement — you cannot be
         // putting something down and taking something up at the same time.
-        if (BuildDemolition.IsFor(body)) { ClearYieldIcons(); DrawDemolition(); return; }
+        if (BuildDemolition.IsFor(body)) { DrawDemolition(); return; }
 
-        if (!BuildPlacement.IsFor(body)) { ClearYieldIcons(); return; }
+        if (!BuildPlacement.IsFor(body)) return;
 
         DrawGuidanceGrids();
         DrawSizeCounter();
         DrawRefusal();
 
-        // NOT rebuilt every frame, unlike the three above — see RefreshYieldIcons.
-        RefreshYieldIcons();
+        // The yield numbers are NOT drawn from here any more. They belong to the cursor rather than to
+        // Placement Mode — they are up on the Survey tab too — so Update owns them, and clearing them on
+        // every frame this method took an early return would have reset their signature and rebuilt every
+        // label every frame, which is the exact cost the signature exists to avoid.
     }
 
     void ClearLayer(RectTransform layer)
@@ -5370,41 +5418,41 @@ public class PlanetViewWindow : MonoBehaviour
     }
 
     // ============================================================================================
-    // THE TEMPORARY TILE YIELDS
+    // THE TILE YIELDS — a block around the cursor, not a wall over the map
     //
-    // While Placement Mode is open, every tile worth siting on shows what it would actually give this
-    // structure — the driving index as a percentage. This is the bit that turns the overlay from a
-    // picture into a decision: the colours say "this patch is good", the numbers say HOW good and let
-    // you choose between two patches that look the same.
+    // Every tile near the pointer shows what the index actually reads there. This is what turns the
+    // overlay from a picture into a decision: the bands say "this patch is better than that one", the
+    // numbers say by how much.
     //
-    // FOUR THINGS KEEP THIS FROM BEING RUINOUS, and all four are necessary:
+    // IT USED TO COVER THE WHOLE VIEWPORT, and that was the wrong shape for the job in two ways. It cost
+    // hundreds of TMP objects, which is a stall you can watch on a big world at high zoom — the reported
+    // lag. And it was unreadable anyway: a screen of two-digit numbers is not a survey, it is noise, and
+    // you cannot pick a site out of it. You read numbers about the tile you are pointing at and its
+    // immediate neighbours, so that is what is drawn — a block four tiles out in every direction, which
+    // is enough to cover any footprint in the game and its surroundings, and about eighty labels at the
+    // very most instead of several hundred.
     //
-    //   ONLY WHAT IS ON SCREEN. The cells are derived from the viewport rect, not from the world, so the
-    //   cost is bounded by the window rather than by the planet.
-    //   ONLY WHEN THE TILES ARE BIG ENOUGH. Below about 22 pixels a percentage does not fit in a cell
-    //   and would render as an unreadable smear over the whole map, so it is simply not drawn — zoom in
-    //   and the numbers appear.
-    //   ONLY GROUND THE OVERLAY ALREADY LIT. SurfaceIndex.Shown is the same test the index map uses, so
-    //   a number appears exactly where there is colour under it and the two can never disagree.
-    //   ONLY WHEN SOMETHING MOVED. This is the important one. Everything else in Placement Mode is a
-    //   handful of quads and is rebuilt per frame without noticing; this is potentially hundreds of TMP
-    //   objects, and rebuilding those every frame is not "a bit expensive", it is a stall you can watch.
-    //   So it is keyed on what it actually depends on — the structure, the visible cell range, and the
-    //   zoom — and skipped entirely on the frames where none of those changed, which is nearly all of
-    //   them. SurfaceIndex.Get re-samples the terrain noise field per call, so the loop that builds them
-    //   is not cheap either.
+    // THREE THINGS STILL GATE IT:
+    //
+    //   ONLY WHEN THE TILES ARE BIG ENOUGH. Below about 22 pixels a percentage does not fit in a cell,
+    //   so it is simply not drawn — zoom in and the numbers appear.
+    //   ONLY GROUND THE OVERLAY LIT. SurfaceIndex.Shown is the same test the index map uses, so a number
+    //   appears exactly where there is colour under it and the two can never disagree.
+    //   ONLY WHEN SOMETHING MOVED. Keyed on the index, the hovered cell and the zoom, and skipped on the
+    //   frames where none of those changed — which, while the mouse is still, is all of them.
+    //   SurfaceIndex.Get re-samples the terrain noise field per call, so the loop is not free either.
+    //
+    // ON SURVEY AS WELL AS BUILD. Surveying a world is the activity that is entirely about reading these
+    // figures, and it was the one place they never appeared: you had to pick up a building you did not
+    // want in order to read the ground under it.
     // ============================================================================================
 
     /// Below this many pixels per tile the yield numbers are suppressed — they would not fit.
     const float YieldIconMinTilePx = 22f;
 
-    /// A ceiling on how many numbers may be on screen at once.
-    ///
-    /// The viewport-and-zoom limits above already bound this to a few hundred in practice, but "in
-    /// practice" depends on a viewport size and a zoom floor that someone will change. Past this many
-    /// the map is unreadable anyway — a wall of two-digit numbers is not a survey, it is noise — so
-    /// stopping is both the cheap answer and the right-looking one.
-    const int YieldIconMax = 400;
+    /// How far out from the hovered tile the numbers reach, in tiles. Four gives a 9x9 block: big enough
+    /// to hold any footprint in the game with room around it, small enough to read at a glance.
+    const int YieldIconRadius = 4;
 
     RectTransform yieldLayer;
     string yieldSig;
@@ -5415,35 +5463,44 @@ public class PlanetViewWindow : MonoBehaviour
         yieldSig = null;
     }
 
+    /// Which index the numbers should be about: the held structure's on Build, the chosen overlay's on
+    /// Survey. One place, so the numbers can never be about a different map than the colours under them.
+    SurfaceIndexKind YieldIndex()
+    {
+        if (tab == Tab.Build)
+        {
+            var info = BuildPlacement.IsFor(body) ? BuildPlacement.Info
+                     : selected.HasValue ? SurfaceBuildingDatabase.Get(selected.Value) : null;
+            return info?.index ?? SurfaceIndexKind.None;
+        }
+        if (tab == Tab.Survey && !showTectonicsOverlay) return activeIndex;
+        return SurfaceIndexKind.None;
+    }
+
     void RefreshYieldIcons()
     {
-        var info = BuildPlacement.Info;
+        var kind = YieldIndex();
 
-        if (info == null || info.index == SurfaceIndexKind.None
-            || !SurfaceIndex.Unlocked(body, info.index))   // not surveyed: nothing honest to show
+        if (body?.surface == null || kind == SurfaceIndexKind.None
+            || !SurfaceIndex.Unlocked(body, kind)      // not surveyed: nothing honest to show
+            || !HasHoverCell)                          // nothing to centre on
         { ClearYieldIcons(); return; }
 
         int w = body.surface.width, h = body.surface.height;
         float tileW = mapRT.rect.width / w, tileH = mapRT.rect.height / h;
         if (Mathf.Min(tileW, tileH) < YieldIconMinTilePx) { ClearYieldIcons(); return; }
 
-        // Which cells the viewport is actually showing. mapRT is far larger than the window and is
-        // scrolled by mapPan (it is centre-anchored, so its local origin is its middle), and this
-        // inverts that: the viewport's own rect, expressed in cells.
-        var vp = hostViewport.rect;
-        float leftInMap = vp.xMin - mapPan.x + mapRT.rect.width * 0.5f;
-        float botInMap = vp.yMin - mapPan.y + mapRT.rect.height * 0.5f;
-
-        int x0 = Mathf.Max(0, Mathf.FloorToInt(leftInMap / tileW) - 1);
-        int y0 = Mathf.Max(0, Mathf.FloorToInt(botInMap / tileH) - 1);
-        int x1 = Mathf.Min(w - 1, Mathf.CeilToInt((leftInMap + vp.width) / tileW) + 1);
-        int y1 = Mathf.Min(h - 1, Mathf.CeilToInt((botInMap + vp.height) / tileH) + 1);
-        if (x1 < x0 || y1 < y0) { ClearYieldIcons(); return; }
+        // The block, clipped to the map. Latitude does not wrap, so the block simply runs out at the
+        // poles rather than folding over — there is no tile on the other side of the top row.
+        int x0 = hoverCell.x - YieldIconRadius, x1 = hoverCell.x + YieldIconRadius;
+        int y0 = Mathf.Max(0, hoverCell.y - YieldIconRadius);
+        int y1 = Mathf.Min(h - 1, hoverCell.y + YieldIconRadius);
+        if (y1 < y0) { ClearYieldIcons(); return; }
 
         // Everything the drawn output depends on. The tile size is bucketed to whole pixels because it
         // moves continuously while zooming and the labels only need to be re-laid out when a cell
         // actually changes size on screen — anchored positions rescale themselves.
-        string sig = $"{info.type}|{x0},{y0},{x1},{y1}|{Mathf.RoundToInt(tileW)}";
+        string sig = $"{kind}|{hoverCell.x},{hoverCell.y}|{Mathf.RoundToInt(tileW)}";
         if (sig == yieldSig && yieldLayer != null) return;
         yieldSig = sig;
 
@@ -5456,20 +5513,21 @@ public class PlanetViewWindow : MonoBehaviour
         }
         ClearLayer(yieldLayer);
 
-        var outline = SurfaceIndex.Outline(info.index);
-        int made = 0;
-
-        for (int y = y0; y <= y1 && made < YieldIconMax; y++)
-            for (int x = x0; x <= x1 && made < YieldIconMax; x++)
+        for (int y = y0; y <= y1; y++)
+            for (int gx = x0; gx <= x1; gx++)
             {
-                float v = SurfaceIndex.Get(body, info.index, x, y);
-                if (!SurfaceIndex.ShownFor(body, info.index, v, out float t)) continue;
+                // LONGITUDE WRAPS, so a block straddling the date line carries on round rather than
+                // stopping dead — the same rule the map itself draws by.
+                int x = ((gx % w) + w) % w;
 
-                // The best ground gets the index's full outline colour at full strength; merely good
-                // ground gets it dimmed. Same two bands the overlay paints, so the numbers and the
-                // colours are one reading rather than two.
-                bool top = t >= 0.75f;
-                var col = top ? outline : new Color(outline.r, outline.g, outline.b, 0.72f);
+                float v = SurfaceIndex.Get(body, kind, x, y);
+                if (!SurfaceIndex.ShownFor(body, kind, v, out float t)) continue;
+
+                // Coloured by the tile's own band, in that band's outline colour — so a number is the
+                // same brightness as the ring drawn around the ground it is standing on, and the two
+                // readings reinforce each other instead of competing.
+                var col = SurfaceIndex.Outline(kind, t);
+                bool top = t >= 0.999f;
 
                 var go = UIFactory.NewUI(yieldLayer, "Y");
                 var label = UIFactory.Text(go.transform, top ? $"<b>{v * 100f:F0}</b>" : $"{v * 100f:F0}",
@@ -5485,7 +5543,6 @@ public class PlanetViewWindow : MonoBehaviour
                 rt.anchorMax = new Vector2((x + 1) / (float)w, (y + 1) / (float)h);
                 rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
                 UIFactory.Stretch(label.rectTransform);
-                made++;
             }
     }
 
