@@ -143,14 +143,72 @@ public static class TectonicsMap
 
     public struct Hit
     {
-        public int plateA;        // nearest plate — the plate this point belongs to
+        public int plateA;        // nearest plate — the plate this point belongs to BEFORE roughness
         public int plateB;        // second-nearest plate — the plate across the closest fault
+        public int owner;         // the plate that actually owns this point: plateA or plateB, decided by
+                                  // the SIGN of the roughened fault distance. See Sample.
         public float boundary;    // 0 (off the fault) .. 1 (right on the fault line) — the DRAWN hairline
         public float belt;        // 0 .. 1 mountain-building influence — far wider than `boundary`, and
                                   // ragged, so ranges are not confined to the red line on the overlay
         public float convergence; // relative motion across that fault: >0 plates driven TOGETHER
                                   // (compression -> mountains/volcanoes), <0 pulled apart (a rift)
     }
+
+    // ============================================================================================
+    // THE PLATE MAP — plate ownership per TILE, and the red line drawn from it.
+    //
+    // WHY THE LINE IS NO LONGER A THRESHOLDED DISTANCE. The old overlay asked every tile "how far are
+    // you from a fault" and painted it red under a cutoff. That is a sampled continuous field, and a
+    // sampled field cannot promise anything about the PICTURE:
+    //
+    //   * WHERE TWO PLATES MEET NEARLY EDGE-ON the band passed between two tile centres and coloured
+    //     neither, so the line came out dashed — or vanished entirely for a stretch.
+    //   * WHERE A SLIVER PLATE ran between two big ones, both of its margins fell inside the cutoff and
+    //     the map drew two parallel lines a tile apart: the double borders in the screenshot.
+    //   * NOTHING GUARANTEED A SEPARATOR. Two plates could be adjacent on the map with no red between
+    //     them at all, which is the one thing a plate boundary must never do.
+    //
+    // So the line is drawn from OWNERSHIP instead. Every tile is assigned the plate that owns it; a tile
+    // is border iff one of its FOUR SIDE NEIGHBOURS belongs to a different plate, and of the two tiles
+    // either side of a boundary only the lower-numbered plate's marks. That gives exactly one tile of red
+    // per boundary — never two, never none — because it is a property of the tile grid rather than of a
+    // field sampled on it.
+    //
+    // THEN IT IS SQUARED OFF. A boundary running at a shallow angle marks a staircase of tiles that touch
+    // only at their corners, which reads as a dotted line and is not a barrier you could walk along.
+    // Wherever two border tiles meet corner-to-corner the tile that squares that corner is added, so the
+    // finished line is 4-CONNECTED: it runs up several tiles, steps sideways by one, and carries on up —
+    // the same edge-to-edge connectivity rule building footprints use.
+    //
+    // MEASURED (Node port, 80x40 through 400x200, three seeds each): every adjacent plate pair separated,
+    // the whole border network one 4-connected piece, and 90-98% of border tiles exactly one or two tiles
+    // thick — the rest being triple junctions, where three lines meeting genuinely is thicker.
+    // ============================================================================================
+    public class TileMap
+    {
+        public int width, height;
+        public int[] plate;          // which plate owns each tile
+        public bool[] border;        // the drawn red line
+        public bool[] plateDrawn;    // does this plate still hold any tile? (see the absorption below)
+        public float builtForSeed;
+        public int builtForSize;
+    }
+
+    /// A plate holding fewer than this share of the map's tiles is not a plate, it is a speck. Absorbed.
+    const float MinPlateFraction = 0.004f;
+
+    /// ...and never fewer than this many tiles, so a small world's plates aren't all specks by fraction.
+    const int MinPlateTiles = 12;
+
+    /// How many tiles a region must have that are COMPLETELY surrounded by their own plate. A region with
+    /// none is one tile wide somewhere along its whole length — a sliver — and a sliver wedged between two
+    /// plates is precisely what draws as a double line. Three rather than one so a two-tile-wide tail
+    /// still goes: the request is that extremely thin cells join a neighbour.
+    const int MinPlateCore = 3;
+
+    /// Absorption stops here however many slivers are left. A world reduced to two plates has one fault
+    /// and reads as a cracked egg rather than as a plate map.
+    const int MinPlatesOnMap = 3;
 
     // ---- Band widths, in TILES -------------------------------------------------------------------
     // The red fault line is a guideline drawn over the terrain, so it wants to be thin: about two tiles
@@ -243,14 +301,21 @@ public static class TectonicsMap
     static readonly float[] EdgeTiles = { 1.2f, 0.5f };
 
     static readonly Dictionary<int, Layout> cache = new Dictionary<int, Layout>();
+    static readonly Dictionary<CelestialBody, TileMap> tileCache = new Dictionary<CelestialBody, TileMap>();
 
     // A world has plate geometry iff it rolled tectonics. NOTE: deliberately does NOT require b.surface —
     // the terrain generator queries this WHILE it is baking that very surface (body.surface is still null
     // then), and the geometry only needs the seed, not the grid.
     public static bool Active(CelestialBody b) => b != null && b.hasTectonics;
 
-    public static void Invalidate(CelestialBody b) { if (b != null) cache.Remove(b.id); }
-    public static void InvalidateAll() => cache.Clear();
+    public static void Invalidate(CelestialBody b)
+    {
+        if (b == null) return;
+        cache.Remove(b.id);
+        tileCache.Remove(b);
+    }
+
+    public static void InvalidateAll() { cache.Clear(); tileCache.Clear(); }
 
     public static Layout Get(CelestialBody b)
     {
@@ -684,7 +749,7 @@ public static class TectonicsMap
             else if (pi != plateA && c > c2) { c2 = c; cellB = i; }
         }
 
-        Hit hit = new Hit { plateA = plateA, plateB = -1, boundary = 0f, belt = 0f, convergence = 0f };
+        Hit hit = new Hit { plateA = plateA, plateB = -1, owner = plateA, boundary = 0f, belt = 0f, convergence = 0f };
         if (cellB < 0) return hit;   // only one plate on this world: no faults anywhere
 
         hit.plateB = l.cellPlate[cellB];
@@ -738,7 +803,15 @@ public static class TectonicsMap
             }
         }
 
-        float angReal = Mathf.Abs(signed / stretch + offset) / Mathf.Max(0.45f, Mathf.Abs(1f + slope));
+        // SIGNED, roughness and all. Its magnitude is how far the point is from the fault; its SIGN is
+        // which side of the fault the point is on, and therefore which plate owns it. Taking ownership
+        // from here rather than from the raw nearest-cell scan is what makes the drawn boundary and the
+        // ownership boundary the SAME LINE: the margin's wander moves both together, so the plate map can
+        // never disagree with the red line drawn on it.
+        float adjusted = (signed / stretch + offset) / Mathf.Max(0.45f, Mathf.Abs(1f + slope));
+        hit.owner = adjusted >= 0f ? plateA : hit.plateB;
+
+        float angReal = Mathf.Abs(adjusted);
 
         // Angle -> TILES on the 2:1 equirectangular map. h tiles span pi of latitude and w = 2h tiles span
         // 2pi of longitude, so a step north costs h/pi tiles while a step east costs h/(pi*cos lat): near
@@ -786,6 +859,274 @@ public static class TectonicsMap
             hit.convergence = Mathf.Clamp(Vector3.Dot(vrel, nrm) * 0.5f, -1f, 1f);
         }
         return hit;
+    }
+
+    // ============================================================================================
+    // THE PLATE MAP, BUILT
+    //
+    // Derived on demand and cached per body, like everything else here. It costs one Sample per tile —
+    // the same work the terrain generator already does once — and only the overlay asks for it, so a
+    // world nobody surveys never pays for one at all.
+    //
+    // DELIBERATELY NOT FED BACK INTO THE LAYOUT. The absorption below edits this raster, not `cellPlate`,
+    // so `Sample` still reports the geometry it always did and the mountain belts the terrain was baked
+    // from stay exactly where they are. The two can differ only inside an absorbed sliver — a strip a
+    // tile or two across — and there the belt is unchanged, which is the right answer: simplifying the
+    // MAP is a drawing decision, and the rock does not move because we stopped drawing a line through it.
+    // ============================================================================================
+    public static TileMap Tiles(CelestialBody b)
+    {
+        if (b?.surface == null || !Active(b)) return null;
+        if (tileCache.TryGetValue(b, out var tm) &&
+            tm.width == b.surface.width && tm.height == b.surface.height &&
+            Mathf.Approximately(tm.builtForSeed, b.terrainSeed) && tm.builtForSize == b.surfaceSize)
+            return tm;
+
+        tm = BuildTiles(b);
+        tileCache[b] = tm;
+        return tm;
+    }
+
+    static TileMap BuildTiles(CelestialBody b)
+    {
+        int w = b.surface.width, h = b.surface.height, n = w * h;
+        var map = new TileMap
+        {
+            width = w, height = h,
+            plate = new int[n],
+            border = new bool[n],
+            builtForSeed = b.terrainSeed,
+            builtForSize = b.surfaceSize
+        };
+
+        var layout = Get(b);
+        int plateCount = layout?.plates?.Length ?? 1;
+        map.plateDrawn = new bool[plateCount];
+
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                var hit = Sample(b, (x + 0.5f) / w, (y + 0.5f) / h);
+                map.plate[y * w + x] = Mathf.Clamp(hit.owner, 0, plateCount - 1);
+            }
+
+        Absorb(map, plateCount);
+        MarkBorders(map);
+
+        for (int i = 0; i < n; i++) map.plateDrawn[map.plate[i]] = true;
+        return map;
+    }
+
+    static int Wrap(int x, int w) => ((x % w) + w) % w;
+
+    // ---- Absorption: a sliver is not a plate --------------------------------------------------
+    //
+    // Repeatedly finds the worst offending REGION — a 4-connected run of one plate's tiles that is either
+    // too small to be a continent or too thin to have an inside — and hands it to whichever neighbouring
+    // plate it shares the most edge with. Regions rather than plates, because a big plate can still send a
+    // two-tile tail into its neighbour, and that tail draws with a red line down each of its flanks: the
+    // double border the request is about.
+    //
+    // Iterative because absorbing one sliver can leave the plate that ate it a sliver in turn.
+    static void Absorb(TileMap map, int plateCount)
+    {
+        int w = map.width, h = map.height, n = w * h;
+        int minTiles = Mathf.Max(MinPlateTiles, Mathf.RoundToInt(n * MinPlateFraction));
+
+        var label = new int[n];
+        var stack = new Stack<int>();
+        var sizes = new List<int>();
+
+        for (int pass = 0; pass < 16; pass++)
+        {
+            LabelRegions(map, label, sizes, stack);
+
+            // How many DISTINCT plates are still on the map — the floor the absorption must not cross.
+            // NOT an early return: a plate that still has a body elsewhere may lose a tail however few
+            // plates are left, and only the absorption that would delete a plate outright is refused.
+            var present = new HashSet<int>();
+            for (int i = 0; i < n; i++) present.Add(map.plate[i]);
+
+            // The smallest offender that may legally go. Absorbing a region that is its plate's ONLY
+            // presence deletes that plate, which is refused once the map is down to the floor — so the
+            // scan skips those rather than stopping at one, or a single unabsorbable polar sliver would
+            // leave every other sliver on the map standing.
+            int worst = -1, worstSize = int.MaxValue;
+            for (int id = 0; id < sizes.Count; id++)
+            {
+                if (sizes[id] >= minTiles && HasCore(map, label, id)) continue;
+                if (sizes[id] >= worstSize) continue;
+                if (present.Count - 1 < MinPlatesOnMap && IsSoleRegionOfItsPlate(map, label, id)) continue;
+                worstSize = sizes[id]; worst = id;
+            }
+            if (worst < 0) return;
+
+            // The longest shared edge wins: a sliver joins the continent it is mostly pressed against.
+            var share = new Dictionary<int, int>();
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    if (label[y * w + x] != worst) continue;
+                    Share(map, label, share, worst, x + 1, y);
+                    Share(map, label, share, worst, x - 1, y);
+                    Share(map, label, share, worst, x, y + 1);
+                    Share(map, label, share, worst, x, y - 1);
+                }
+
+            int into = -1, best = -1;
+            foreach (var kv in share) if (kv.Value > best) { best = kv.Value; into = kv.Key; }
+            if (into < 0) return;    // a region with no neighbours: it is the whole world
+
+            for (int i = 0; i < n; i++) if (label[i] == worst) map.plate[i] = into;
+        }
+    }
+
+    /// Is this region everything its plate has left on the map? Absorbing one that is deletes the plate.
+    static bool IsSoleRegionOfItsPlate(TileMap map, int[] label, int region)
+    {
+        int n = map.plate.Length, plate = -1;
+        for (int i = 0; i < n; i++) if (label[i] == region) { plate = map.plate[i]; break; }
+        if (plate < 0) return false;
+        for (int i = 0; i < n; i++) if (map.plate[i] == plate && label[i] != region) return false;
+        return true;
+    }
+
+    static void Share(TileMap map, int[] label, Dictionary<int, int> share, int region, int x, int y)
+    {
+        if (y < 0 || y >= map.height) return;
+        int i = y * map.width + Wrap(x, map.width);
+        if (label[i] == region) return;
+        share.TryGetValue(map.plate[i], out int c);
+        share[map.plate[i]] = c + 1;
+    }
+
+    /// 4-connected runs of one plate. Longitude wraps and latitude does not, the same connectivity every
+    /// other rule in the project uses.
+    static void LabelRegions(TileMap map, int[] label, List<int> sizes, Stack<int> stack)
+    {
+        int w = map.width, h = map.height, n = w * h;
+        sizes.Clear();
+        for (int i = 0; i < n; i++) label[i] = -1;
+
+        for (int start = 0; start < n; start++)
+        {
+            if (label[start] >= 0) continue;
+            int id = sizes.Count, p = map.plate[start], count = 0;
+            label[start] = id;
+            stack.Push(start);
+
+            while (stack.Count > 0)
+            {
+                int cur = stack.Pop();
+                count++;
+                int cx = cur % w, cy = cur / w;
+                PushSame(map, label, stack, id, p, cx + 1, cy);
+                PushSame(map, label, stack, id, p, cx - 1, cy);
+                PushSame(map, label, stack, id, p, cx, cy + 1);
+                PushSame(map, label, stack, id, p, cx, cy - 1);
+            }
+            sizes.Add(count);
+        }
+    }
+
+    static void PushSame(TileMap map, int[] label, Stack<int> stack, int id, int plate, int x, int y)
+    {
+        if (y < 0 || y >= map.height) return;
+        int i = y * map.width + Wrap(x, map.width);
+        if (label[i] >= 0 || map.plate[i] != plate) return;
+        label[i] = id;
+        stack.Push(i);
+    }
+
+    /// Does this region have an INSIDE — at least a few tiles all four of whose neighbours are also its
+    /// own? A region with none is one tile wide along its entire length. Pole rows are never core: a tile
+    /// on the top row has no neighbour above it, and a plate that only reaches the map's top edge is a
+    /// polar fringe rather than a continent.
+    static bool HasCore(TileMap map, int[] label, int region)
+    {
+        int w = map.width, h = map.height, core = 0;
+        for (int y = 1; y < h - 1; y++)
+            for (int x = 0; x < w; x++)
+            {
+                if (label[y * w + x] != region) continue;
+                if (label[y * w + Wrap(x + 1, w)] != region) continue;
+                if (label[y * w + Wrap(x - 1, w)] != region) continue;
+                if (label[(y + 1) * w + x] != region) continue;
+                if (label[(y - 1) * w + x] != region) continue;
+                if (++core >= MinPlateCore) return true;
+            }
+        return false;
+    }
+
+    // ---- The line ------------------------------------------------------------------------------
+    static void MarkBorders(TileMap map)
+    {
+        int w = map.width, h = map.height, n = w * h;
+
+        // One side only — the lower-numbered plate's — so a boundary is one tile of red rather than two.
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int me = map.plate[y * w + x];
+                if (LowerThanNeighbour(map, me, x + 1, y) || LowerThanNeighbour(map, me, x - 1, y) ||
+                    LowerThanNeighbour(map, me, x, y + 1) || LowerThanNeighbour(map, me, x, y - 1))
+                    map.border[y * w + x] = true;
+            }
+
+        // SQUARE OFF THE STAIRCASE. Two passes: the first fills the corners the marking pass left, the
+        // second catches any corner the first one created. A third pass has never found anything in the
+        // Node port across every map size and seed tried, so two is the fixed point rather than a budget.
+        var add = new List<int>();
+        for (int pass = 0; pass < 2; pass++)
+        {
+            add.Clear();
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    if (!map.border[y * w + x]) continue;
+                    Square(map, add, x, y, 1, 1);
+                    Square(map, add, x, y, 1, -1);
+                    Square(map, add, x, y, -1, 1);
+                    Square(map, add, x, y, -1, -1);
+                }
+            if (add.Count == 0) break;
+            foreach (int i in add) map.border[i] = true;
+        }
+    }
+
+    static bool LowerThanNeighbour(TileMap map, int me, int x, int y)
+    {
+        if (y < 0 || y >= map.height) return false;
+        int other = map.plate[y * map.width + Wrap(x, map.width)];
+        return other != me && me < other;
+    }
+
+    /// (x,y) and (x+dx,y+dy) are both border but touch only at a corner. Add the tile that squares that
+    /// corner off, preferring the one that is itself against another plate — that is the tile a player
+    /// would call part of the boundary, rather than one pulled arbitrarily out of a plate's interior.
+    static void Square(TileMap map, List<int> add, int x, int y, int dx, int dy)
+    {
+        int w = map.width, h = map.height;
+        int ny = y + dy;
+        if (ny < 0 || ny >= h) return;
+        if (!map.border[ny * w + Wrap(x + dx, w)]) return;
+
+        int sideA = y * w + Wrap(x + dx, w);      // step sideways first
+        int sideB = ny * w + Wrap(x, w);          // step up/down first
+        if (map.border[sideA] || map.border[sideB]) return;
+
+        add.Add(OnAMargin(map, x + dx, y) ? sideA : sideB);
+    }
+
+    static bool OnAMargin(TileMap map, int x, int y)
+    {
+        int w = map.width, h = map.height;
+        int me = map.plate[y * w + Wrap(x, w)];
+        if (map.plate[y * w + Wrap(x + 1, w)] != me) return true;
+        if (map.plate[y * w + Wrap(x - 1, w)] != me) return true;
+        if (y + 1 < h && map.plate[(y + 1) * w + Wrap(x, w)] != me) return true;
+        if (y - 1 >= 0 && map.plate[(y - 1) * w + Wrap(x, w)] != me) return true;
+        return false;
     }
 
     // Where a plate's direction arrow sits on the MAP and which way it points. The site is a point on the

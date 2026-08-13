@@ -4595,21 +4595,25 @@ public class PlanetViewWindow : MonoBehaviour
         EnsureOverlayTex(w, h);
 
         var wash  = new Color(0.86f, 0.89f, 0.93f, 0.30f);   // translucent white plate wash
-        var fault = new Color(0.95f, 0.16f, 0.16f, 0.92f);   // red fault line
+        var fault = new Color(0.95f, 0.16f, 0.16f, 0.98f);   // solid red plate border
 
+        // READ OFF THE PLATE MAP, not off a sampled distance field. TectonicsMap.Tiles has already decided
+        // which plate owns every tile and which tiles carry the line, and it guarantees the three things a
+        // thresholded band could not: exactly one tile of red between any two plates, never two; a line
+        // that is never dashed or missing; and a line that is 4-CONNECTED, stepping sideways one tile at a
+        // time as it climbs, rather than a staircase of corner-touching dots. See the header there.
+        var map = TectonicsMap.Tiles(body);
         var px = new Color[w * h];
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-            {
-                float u = (x + 0.5f) / w, v = (y + 0.5f) / h;
-                float boundary = TectonicsMap.Sample(body, u, v).boundary;
-                // `boundary` is already the drawn hairline — nonzero exactly within TectonicsMap's fault
-                // half-width, which is calibrated in TILES — so the test is simply "inside the band". It
-                // used to threshold at 0.55 against a proximity that was not a distance at all, which is
-                // how a fault could bloom into a wedge covering a quarter of the map. The band comes out
-                // ~1-3 cells wide, widening only where three plates meet and two boundaries overlap.
-                px[y * w + x] = boundary > 0f ? fault : wash;
-            }
+
+        if (map == null || map.width != w || map.height != h)
+        {
+            for (int i = 0; i < px.Length; i++) px[i] = wash;
+        }
+        else
+        {
+            for (int i = 0; i < px.Length; i++) px[i] = map.border[i] ? fault : wash;
+        }
+
         overlayTex.SetPixels(px);
         overlayTex.Apply();
         overlayImage.texture = overlayTex;
@@ -4625,8 +4629,16 @@ public class PlanetViewWindow : MonoBehaviour
         var layout = TectonicsMap.Get(body);
         if (layout?.plates == null) return;
 
+        // A plate the absorption pass took off the map has no arrow. It has no ground either — an arrow
+        // over somebody else's continent, pushing a plate that is no longer drawn anywhere, is the map
+        // annotating a thing that is not on it.
+        var tiles = TectonicsMap.Tiles(body);
+
         foreach (var plate in layout.plates)
         {
+            if (tiles?.plateDrawn != null && plate.id < tiles.plateDrawn.Length && !tiles.plateDrawn[plate.id])
+                continue;
+
             TectonicsMap.ArrowOnMap(plate, out float u, out float v, out Vector2 dir, out float strength);
             if (dir.sqrMagnitude < 1e-6f) continue;
 
