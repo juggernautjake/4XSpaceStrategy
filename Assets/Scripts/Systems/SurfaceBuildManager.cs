@@ -459,6 +459,244 @@ public static class SurfaceBuildManager
         return p;
     }
 
+    // ============================================================================================
+    // TWO OF THE SAME THING, TOUCHING, ARE ONE THING
+    //
+    // Draw a farm onto the edge of a farm and you have one farm, not two farms that happen to be
+    // adjacent. That is the rule, and it is worth being precise about why it is a rule rather than a
+    // convenience.
+    //
+    // WITHOUT IT the surface fills up with records. A player who extends their farmland four times ends
+    // up with five PlacedBuildings, five entries in the built-here list, five efficiency figures to read
+    // and compare, five things to select, and five separate applications of every per-building rule the
+    // game has. The map shows one continuous field and the data says five farms. Every future feature
+    // that asks a question about "a building" — an adjacency bonus, an upkeep, a worker requirement —
+    // then has to decide which of those five it means, and there is no right answer.
+    //
+    // WITH IT, "one building" means what it looks like on the map, and extending is a first-class action
+    // rather than a workaround.
+    //
+    // ---- WHAT MERGING ACTUALLY DOES TO THE NUMBERS ----
+    //
+    // EFFICIENCY IS AREA-WEIGHTED, not averaged and not replaced. A twenty-tile farm at 80% that gains
+    // two tiles of 20% ground should barely move (to ~74%), and a two-tile farm at 80% that gains twenty
+    // tiles of 20% ground should collapse (to ~25%). A plain average of the two figures gives 50% in
+    // both cases, which is wrong in opposite directions and would make extending a good building onto
+    // poor ground a catastrophe while extending a bad one onto good ground a free fix.
+    //
+    // THE LEVEL AND CONDITION ARE THE SURVIVOR'S. New tiles join an existing structure; they do not
+    // upgrade it and they do not repair it. A level-3 farm that grows stays level 3.
+    //
+    // CHAIN MERGES ARE HANDLED. A drawn strip can bridge two standing farms that were not touching each
+    // other, and then all three are one building — so this absorbs EVERY same-type neighbour of the
+    // final shape, not just the one the player was aiming at.
+    // ============================================================================================
+
+    /// Every standing building of type `t` that touches any of `cells` edge-to-edge.
+    public static List<PlacedBuilding> AdjacentSameType(CelestialBody b, SurfaceBuildingType t,
+                                                        IEnumerable<Vector2Int> cells)
+    {
+        var found = new List<PlacedBuilding>();
+        if (b == null || cells == null) return found;
+
+        // The neighbourhood of the drawn shape, built once. Asking "is any cell of that building next to
+        // any cell of my shape" the other way round is O(shape x building) per building; this is O(shape)
+        // once and then O(building) per building.
+        var near = new HashSet<Vector2Int>();
+        foreach (var c in cells)
+        {
+            near.Add(c + Vector2Int.up);
+            near.Add(c + Vector2Int.down);
+            near.Add(c + Vector2Int.left);
+            near.Add(c + Vector2Int.right);
+        }
+
+        foreach (var p in On(b))
+        {
+            if (p.Type != t) continue;
+            foreach (var c in SurfaceBuildingDatabase.Footprint(p))
+                if (near.Contains(c)) { found.Add(p); break; }
+        }
+        return found;
+    }
+
+    /// Can this class merge at all?
+    ///
+    /// ONLY FREE-DRAWN CLASSES, which is a stronger rule than it first looks and is forced by the shape
+    /// families. A merged footprint is the union of two shapes, and a union is not generally a member of
+    /// the family either of them belonged to:
+    ///
+    ///   SQUARE      a 3x3 reactor with two tiles stuck on the side is not a square. Offering the merge
+    ///               would mean either breaking the class's own shape rule or refusing the extension
+    ///               after the player had drawn it — and "you may extend this, but only in ways that
+    ///               happen to remain a perfect square" is not a rule anyone can hold in their head.
+    ///   RECTANGLE   the same, for the same reason.
+    ///   FIXED       a 3x3 spaceport that is now 3x3 plus a lump is not a spaceport.
+    ///   NODECHAIN   a pylon is a mast. Two pylons side by side are two relays, and fusing them into one
+    ///               two-tile relay would silently halve a chain's node count and its reach.
+    ///
+    /// Free is exactly the family with no shape constraint beyond "one connected piece", which a union
+    /// of two touching connected pieces always is. So the merge is closed over Free and over nothing
+    /// else — and Free is the resource-generator case the whole extend-your-farm idea is about anyway.
+    ///
+    /// The GROWN settlements are excluded separately: CityGrowth places them one at a time and fusing
+    /// them would turn a spreading town into a single enormous "Settlement" record whose next growth
+    /// tick has nothing recognisable to upgrade. The unique classes, because there is only ever one.
+    public static bool CanMerge(SurfaceBuildingType t)
+    {
+        var info = SurfaceBuildingDatabase.Get(t);
+        if (info == null) return false;
+        if (info.uniquePerWorld) return false;
+        if (info.drawMode != BuildDrawMode.Free) return false;
+        if (CityGrowth.IsSettlement(t)) return false;
+        return true;
+    }
+
+    /// Fold `cells` — and every same-type building they touch — into one structure, and return it.
+    ///
+    /// `into` is the building the player aimed at, if they were expanding a specific one; null lets the
+    /// adjacency search pick. Either way the SURVIVOR is the largest participant, so the merged building
+    /// keeps the identity of the thing that most of it already was.
+    public static PlacedBuilding AbsorbInto(CelestialBody b, SurfaceBuildingType t,
+                                            List<Vector2Int> cells, PlacedBuilding into)
+    {
+        if (b?.surface == null || cells == null || cells.Count == 0) return null;
+
+        var neighbours = AdjacentSameType(b, t, cells);
+
+        // The building the player was pointing at counts even if the final shape drifted away from it —
+        // but only if it is still standing and really is adjacent, which AdjacentSameType has just
+        // decided. A stale `into` (demolished mid-build) simply drops out here.
+        if (into != null && !neighbours.Contains(into)) into = null;
+
+        if (neighbours.Count == 0) return null;   // nothing to merge with; caller places a new building
+
+        // The survivor: the biggest, so the merged record inherits the identity of the bulk of itself.
+        // Ties broken by the first in the list, which is stable because On(b) is a stable list.
+        PlacedBuilding keep = into;
+        foreach (var p in neighbours)
+            if (keep == null || p.TileCount > keep.TileCount) keep = p;
+
+        // ---- Gather every cell the merged building will occupy ----
+        var merged = new List<Vector2Int>();
+        var seen = new HashSet<Vector2Int>();
+
+        // The survivor's own cells first, so its origin stays its origin (SetDrawnShape takes the first
+        // cell as the origin, and everything that draws a marker or reads a position uses it).
+        foreach (var c in SurfaceBuildingDatabase.Footprint(keep))
+            if (seen.Add(c)) merged.Add(c);
+
+        // Area-weighted efficiency, accumulated as (efficiency x tiles) over every participant.
+        float effWeighted = keep.efficiency * keep.TileCount;
+        int effTiles = keep.TileCount;
+
+        foreach (var p in neighbours)
+        {
+            if (p == keep) continue;
+            foreach (var c in SurfaceBuildingDatabase.Footprint(p))
+                if (seen.Add(c)) merged.Add(c);
+            effWeighted += p.efficiency * p.TileCount;
+            effTiles += p.TileCount;
+
+            // BANKED CHARGE MOVES WITH THE TILES. Two capacitor banks merging into one is the same
+            // hardware in the same place — deleting the absorbed one's charge would mean a player who
+            // joined up their bank storage watched a chunk of their reserve vanish for tidying. Clamped
+            // below, because the survivor's capacity may be smaller than the sum of the two banks.
+            keep.stored += p.stored;
+
+            b.placedBuildings.Remove(p);
+        }
+
+        // The newly drawn cells, with their own efficiency read from the ground they sit on.
+        var info = SurfaceBuildingDatabase.Get(t);
+        float newEff = 1f;
+        if (info.index != SurfaceIndexKind.None)
+        {
+            float sum = 0f;
+            foreach (var c in cells) sum += SurfaceIndex.Get(b, info.index, c.x, c.y);
+            newEff = Mathf.Clamp01(sum / cells.Count);
+        }
+
+        int added = 0;
+        foreach (var c in cells) if (seen.Add(c)) { merged.Add(c); added++; }
+        effWeighted += newEff * added;
+        effTiles += added;
+
+        keep.SetDrawnShape(merged);
+        keep.efficiency = effTiles > 0 ? Mathf.Clamp01(effWeighted / effTiles) : keep.efficiency;
+
+        // The charge carried over from absorbed banks, capped at what the survivor can actually hold.
+        // (Zero for everything that is not a capacitor, so this is a no-op for every other class.)
+        float cap = keep.Info.powerStorage * keep.LevelMult;
+        if (keep.stored > cap) keep.stored = cap;
+
+        foreach (var c in merged)
+            if (InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = true;
+
+        // The merged building is bigger, so it generates, draws and reaches differently — and the
+        // buildings that were absorbed are gone, which on its own can change the grid's topology.
+        PowerGrid.Invalidate();
+        SurfaceLabor.Invalidate();
+        SyncFacilityTiers(b);
+
+        // The selection may have been pointing at one of the records that no longer exists.
+        SurfaceSelection.Validate();
+
+        return keep;
+    }
+
+    /// Where a NEW building of this type could be grown onto something already standing.
+    ///
+    /// Every empty, buildable cell touching a same-type structure — the "you may extend this one instead
+    /// of starting another" highlight that appears the moment a class is picked in the build tray. It is
+    /// the same question Placement Mode's guidance grids answer once you have started drawing, asked
+    /// before you have started.
+    public static HashSet<Vector2Int> ExpansionSites(CelestialBody b, SurfaceBuildingType t)
+    {
+        var sites = new HashSet<Vector2Int>();
+        if (b?.surface == null || !CanMerge(t)) return sites;
+
+        var info = SurfaceBuildingDatabase.Get(t);
+        var occupied = Occupied(b);
+        var pending = SurfaceBuildQueue.PendingCells(b);
+
+        foreach (var p in On(b))
+        {
+            if (p.Type != t) continue;
+            foreach (var c in SurfaceBuildingDatabase.Footprint(p))
+            {
+                TryExpansionSite(b, info, c + Vector2Int.up, occupied, pending, sites);
+                TryExpansionSite(b, info, c + Vector2Int.down, occupied, pending, sites);
+                TryExpansionSite(b, info, c + Vector2Int.left, occupied, pending, sites);
+                TryExpansionSite(b, info, c + Vector2Int.right, occupied, pending, sites);
+            }
+        }
+        return sites;
+    }
+
+    static void TryExpansionSite(CelestialBody b, SurfaceBuildingInfo info, Vector2Int c,
+                                 HashSet<Vector2Int> occupied, HashSet<Vector2Int> pending,
+                                 HashSet<Vector2Int> into)
+    {
+        if (!InBounds(b, c.x, c.y)) return;
+        if (occupied.Contains(c) || pending.Contains(c)) return;
+        if (!CellBuildable(b, info, c.x, c.y, out _)) return;
+        into.Add(c);
+    }
+
+    /// The standing building of type `t` that this cell would extend, or null.
+    /// Used to turn a click on an expansion site into an expansion of the right structure.
+    public static PlacedBuilding ExpansionTargetAt(CelestialBody b, SurfaceBuildingType t, Vector2Int cell)
+    {
+        if (!CanMerge(t)) return null;
+        var touching = AdjacentSameType(b, t, new[] { cell });
+        // The biggest, matching AbsorbInto's survivor rule — so the building the player is told they are
+        // extending is the one the merge will actually keep.
+        PlacedBuilding best = null;
+        foreach (var p in touching) if (best == null || p.TileCount > best.TileCount) best = p;
+        return best;
+    }
+
     /// Place a structure with no cost and no checks. Used when the game itself puts something down —
     /// a colony ship grounding itself as the new colony's base.
     public static bool ForcePlace(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation)

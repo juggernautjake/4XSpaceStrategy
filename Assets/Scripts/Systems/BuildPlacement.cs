@@ -69,11 +69,20 @@ public static class BuildPlacement
 
     public static int MinTiles => Active ? Mathf.Max(1, Info.minTiles) : 1;
 
-    /// Tiles painted against tiles needed, as the floating counter reads it. CLAMPED at the minimum on
-    /// purpose — the spec asks for 3/3 to stay 3/3 once it is met, not to become 7/3. Past the minimum
-    /// the number has stopped being a target and would only read as an error.
-    public static int CounterShown => Mathf.Min(Tiles, MinTiles);
-    public static bool MeetsMinimum => Tiles >= MinTiles;
+    /// How big the BUILDING will be, which is not the same as how many tiles have been painted.
+    ///
+    /// An extension of a twenty-tile farm is one tile of drawing and a twenty-one-tile farm. Every rule
+    /// about size — the minimum, the counter, whether Confirm is allowed — is about the building, so
+    /// they all read this rather than Tiles. Measuring the minimum against the painted tiles instead
+    /// would demand four NEW tiles to add anything at all to a farm that is already twenty, which is a
+    /// rule with no reason behind it.
+    public static int MergedTiles => Tiles + (Expanding != null ? Expanding.TileCount : 0);
+
+    /// Tiles against tiles needed, as the floating counter reads it. CLAMPED at the minimum on purpose —
+    /// the spec asks for 3/3 to stay 3/3 once it is met, not to become 7/3. Past the minimum the number
+    /// has stopped being a target and would only read as an error.
+    public static int CounterShown => Mathf.Min(MergedTiles, MinTiles);
+    public static bool MeetsMinimum => MergedTiles >= MinTiles;
 
     // ---- The refusal label ----
     // What the player last tried that could not be done, where they tried it, and how long it stays up.
@@ -125,6 +134,7 @@ public static class BuildPlacement
         cells.Clear();
         set.Clear();
         guidanceStale = true;
+        expansionStale = true;
         ClearRefusal();
     }
 
@@ -146,7 +156,11 @@ public static class BuildPlacement
     {
         cells.Clear();
         set.Clear();
+        // The extension target went with the tiles. Keeping it would leave the session insisting the
+        // next tile must touch a building the player has just walked away from.
+        Expanding = null;
         guidanceStale = true;
+        expansionStale = true;
         ClearRefusal();
     }
 
@@ -214,6 +228,19 @@ public static class BuildPlacement
             Refuse(cell, Shortfall(shortMetal, shortEnergy));
             return false;
         }
+
+        // ---- THE FIRST TILE DECIDES WHETHER THIS IS AN EXTENSION ----
+        //
+        // Painting onto the edge of a standing farm makes this session an extension OF that farm, which
+        // is what lets the guidance grids reach along the existing building from the very next tile and
+        // what decides the survivor when the merge happens.
+        //
+        // Picked up automatically rather than requiring the player to choose a mode first. They already
+        // said what they meant by putting the tile there, and the merge at completion would happen
+        // either way (SurfaceBuildQueue.Complete) — so a session that did not notice would only differ
+        // by showing worse guidance on the way to the same building.
+        if (Tiles == 0 && Expanding == null)
+            Expanding = SurfaceBuildManager.ExpansionTargetAt(Body, Type, cell);
 
         cells.Add(cell);
         set.Add(cell);
@@ -367,6 +394,45 @@ public static class BuildPlacement
     // reported by its own channel (AtResourceCeiling, and the label on the attempted tile), which says
     // WHY; an empty map says nothing.
     // ============================================================================================
+    // ============================================================================================
+    // WHERE YOU COULD EXTEND SOMETHING YOU ALREADY HAVE
+    //
+    // Shown the moment a class is picked, BEFORE a single tile is drawn: every empty buildable cell
+    // touching a structure of that same class. It is the offer the merge rule implies — "there is a farm
+    // over there and you could make it bigger instead of starting a new one" — and without it the offer
+    // is invisible and the player only discovers merging by accident.
+    //
+    // Distinct from Guidance() on purpose, and drawn in a different colour: guidance is "the next tile
+    // of the thing you are drawing may go here", this is "the thing you are ABOUT to draw could join
+    // that". They are answers to different questions and collapsing them would make a world with one
+    // farm on it light up around that farm as though the player had already started drawing there.
+    // ============================================================================================
+    static readonly HashSet<Vector2Int> expansionSites = new HashSet<Vector2Int>();
+    static bool expansionStale = true;
+    static int expansionBuildingCount = -1;
+
+    public static HashSet<Vector2Int> ExpansionSites()
+    {
+        if (!Active || Body == null) { expansionSites.Clear(); return expansionSites; }
+
+        // Only offered before drawing starts. Once there are tiles down, Guidance() is the live answer
+        // and this would be a second, contradictory highlight over the same map.
+        if (Tiles > 0) { expansionSites.Clear(); return expansionSites; }
+
+        // Recomputed when the world's building list changes under it — a queued extension completing is
+        // exactly the case that adds new sites while this session is still open. Counting buildings is a
+        // weak test (a demolish plus a build in one frame is invisible to it) but it is O(1) and the
+        // consequence of missing one is a stale highlight for a frame, not a wrong build.
+        int n = SurfaceBuildManager.On(Body).Count;
+        if (!expansionStale && n == expansionBuildingCount) return expansionSites;
+        expansionStale = false;
+        expansionBuildingCount = n;
+
+        expansionSites.Clear();
+        foreach (var c in SurfaceBuildManager.ExpansionSites(Body, Type)) expansionSites.Add(c);
+        return expansionSites;
+    }
+
     public static HashSet<Vector2Int> Guidance()
     {
         if (!guidanceStale) return guidance;
@@ -435,16 +501,34 @@ public static class BuildPlacement
 
         if (!MeetsMinimum)
         {
-            why = $"{info.name} needs at least {MinTiles} tiles — {Tiles} drawn";
+            why = $"{info.name} needs at least {MinTiles} tiles — {MergedTiles} drawn";
             return false;
         }
 
         if (!SurfaceBuildManager.CanPlaceType(Body, Type, out why)) return false;
 
-        // The shape families (square, rectangle, connectivity, no duplicates). The brush cannot produce
-        // an illegal shape, but SetBox can produce a box that is legal as a box and short of the class
-        // minimum, and an expansion's cells are only half of the eventual building.
-        if (!BuildShapeRules.Validate(info, new List<Vector2Int>(cells), out why)) return false;
+        // ---- THE SHAPE RULES ARE ASKED OF THE FINISHED BUILDING, NOT OF THE NEW TILES ----
+        //
+        // For a fresh structure those are the same set. For an EXTENSION they are not, in two ways that
+        // both matter:
+        //
+        //   The new tiles need not be connected to EACH OTHER. Paint two tiles onto opposite sides of a
+        //   farm and the brush is perfectly happy — each touches the farm, which is the rule — but the
+        //   two of them as a set are two pieces. Validating the new cells alone would refuse a shape
+        //   the brush had just spent the whole session telling the player was legal.
+        //
+        //   The minimum is about the building, as above.
+        //
+        // Merging is restricted to Free classes (SurfaceBuildManager.CanMerge), whose only shape rule is
+        // "one connected piece" — and a union of two touching connected pieces always is one. So this
+        // check passes by construction for a legal extension, and is here to catch the cases where it
+        // would not: a stale Expanding pointing at a building that has moved or gone.
+        var shape = new List<Vector2Int>(cells);
+        if (Expanding != null)
+            foreach (var c in SurfaceBuildingDatabase.Footprint(Expanding))
+                if (!set.Contains(c)) shape.Add(c);
+
+        if (!BuildShapeRules.Validate(info, shape, out why)) return false;
 
         var occupied = SurfaceBuildManager.Occupied(Body);
         var pending = SurfaceBuildQueue.PendingCells(Body);
@@ -474,12 +558,11 @@ public static class BuildPlacement
         var expand = Expanding;
         var painted = new List<Vector2Int>(cells);
 
-        var job = SurfaceBuildQueue.Enqueue(b, t, painted, out why);
+        // The merge target goes in with the job rather than being attached afterwards: Enqueue validates
+        // the SHAPE, and for an extension the shape is the new cells plus the building being extended.
+        // Setting it after the fact would mean the validation had already run against the wrong set.
+        var job = SurfaceBuildQueue.Enqueue(b, t, painted, expand, out why);
         if (job == null) return false;
-
-        // An expansion records what it is joining, so the completed job merges into that building rather
-        // than standing next to it. See SurfaceBuildManager's merge rules.
-        job.mergeInto = expand;
 
         Cancel();
         return true;

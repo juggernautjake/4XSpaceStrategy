@@ -1581,6 +1581,13 @@ public class PlanetViewWindow : MonoBehaviour
               : info.drawMode == BuildDrawMode.Rectangle ? "press and drag out a rectangle (min 2 wide both ways)"
               : $"press and drag to draw it — at least {info.minTiles} tiles, edge to edge";
             sb.Append($"  <size=10><color=#9FB4C8>{how}</color></size>");
+
+            // The offer the merge rule makes, said out loud. The coloured cells around a standing farm
+            // are meaningless if nobody has told the player what they are.
+            int sites = BuildPlacement.IsFor(body) ? BuildPlacement.ExpansionSites().Count : 0;
+            if (sites > 0)
+                sb.Append($"  <size=10><color=#{hex}>•</color><color=#9FB4C8> the tinted ground is where you " +
+                          $"could extend a {info.name.ToLower()} you already have, instead of starting another</color></size>");
         }
         else
         {
@@ -1656,6 +1663,22 @@ public class PlanetViewWindow : MonoBehaviour
         string yield = SurfaceBuildManager.PredictedYield(body, selected.Value, x, y, 0);
         if (!string.IsNullOrEmpty(yield) && yield != "no direct output")
             sb.Append($"\n<size=10><color=#9FB4C8>per tile here:</color></size> <b>{yield}</b>");
+
+        // ---- Would this join something already standing? ----
+        //
+        // Said BEFORE the first tile as well as after, because "this will become part of that farm
+        // rather than a new one" changes the decision: the merged building's efficiency is area-weighted
+        // across both, so extending a good farm onto poor ground drags it down and the player deserves
+        // to know that at the moment they are choosing where to start.
+        var joining = BuildPlacement.Expanding
+                   ?? SurfaceBuildManager.ExpansionTargetAt(body, selected.Value, new Vector2Int(x, y));
+        if (joining != null)
+        {
+            string jhex = ColorUtility.ToHtmlStringRGB(SurfaceBuildManager.EfficiencyColor(joining.efficiency));
+            sb.Append($"\n<color=#4DFF6E>Joins the {joining.Info.name.ToLower()} here</color> " +
+                      $"<size=10><color=#9FB4C8>({joining.TileCount} tiles, " +
+                      $"<color=#{jhex}>{joining.efficiency * 100f:F0}% sited</color>)</color></size>");
+        }
 
         // ---- The building as drawn so far ----
         if (BuildPlacement.IsFor(body) && BuildPlacement.Tiles > 0)
@@ -4962,6 +4985,25 @@ public class PlanetViewWindow : MonoBehaviour
     /// and painting it in the building's hue made a half-drawn farm look twice the size it was.
     void DrawGuidanceGrids()
     {
+        // ---- Before a tile is drawn: where you could EXTEND something you already have ----
+        //
+        // In the structure's own colour, not the neutral white the guidance uses, because it is a
+        // statement about a specific existing building rather than about the ground: "that farm down
+        // there could be bigger". The two must not read as the same highlight — see
+        // BuildPlacement.ExpansionSites.
+        if (BuildPlacement.Tiles == 0)
+        {
+            var sites = BuildPlacement.ExpansionSites();
+            if (sites.Count > 0)
+            {
+                var info = BuildPlacement.Info;
+                var ec = Vivid(info.color);
+                ec.a = 0.30f;
+                foreach (var cell in sites) AddCellQuad(placementLayer, cell.x, cell.y, ec);
+            }
+            return;
+        }
+
         var guide = BuildPlacement.Guidance();
         if (guide.Count == 0) return;
 
@@ -5225,7 +5267,16 @@ public class PlanetViewWindow : MonoBehaviour
         string hex = ColorUtility.ToHtmlStringRGB(Vivid(info.color));
         float mult = BuildScaling.CostMultiplier(tiles);
         var sb = new System.Text.StringBuilder();
-        sb.Append($"<color=#{hex}>•</color> <b>{info.name}</b> — {tiles} tile{(tiles == 1 ? "" : "s")}\n");
+
+        // An extension names what it is joining and what the merged building will be, because the size
+        // and cost above describe only the NEW tiles — the thing that will be standing afterwards is
+        // bigger than the shape on screen, and confirming without knowing that is confirming blind.
+        var join = BuildPlacement.Expanding;
+        if (join != null)
+            sb.Append($"<color=#{hex}>•</color> Extend <b>{info.name}</b> — " +
+                      $"{join.TileCount} + {tiles} = <b>{join.TileCount + tiles}</b> tiles\n");
+        else
+            sb.Append($"<color=#{hex}>•</color> <b>{info.name}</b> — {tiles} tile{(tiles == 1 ? "" : "s")}\n");
         sb.Append($"<size=10><color=#9FB4C8>{m} metal · {e} energy · " +
                   $"{info.buildTime * mult * TechEffects.BuildTimeMult:F0}s · " +
                   $"x{BuildScaling.OutputMultiplier(tiles):0.0} output</color></size>");

@@ -140,12 +140,29 @@ public static class SurfaceBuildQueue
     /// build reads as the button being broken.
     public static SurfaceBuildJob Enqueue(CelestialBody b, SurfaceBuildingType t, List<Vector2Int> cells,
                                           out string why)
+        => Enqueue(b, t, cells, null, out why);
+
+    /// As above, for a job that EXTENDS a standing building rather than founding a new one.
+    ///
+    /// `mergeInto` changes what "the shape" means here. The cells are only the new tiles; the building
+    /// that results is those plus the one being extended, and the shape rules — the tile minimum above
+    /// all — are about the building. Without this a one-tile extension of a twenty-tile farm would be
+    /// refused for being one tile, which is a refusal about a building that will never exist.
+    public static SurfaceBuildJob Enqueue(CelestialBody b, SurfaceBuildingType t, List<Vector2Int> cells,
+                                          PlacedBuilding mergeInto, out string why)
     {
         why = null;
         if (b == null || cells == null || cells.Count == 0) { why = "nothing drawn"; return null; }
 
         var info = SurfaceBuildingDatabase.Get(t);
         if (info == null) { why = "unknown building"; return null; }
+
+        // A merge target that is no longer standing is not a merge target. Dropped rather than refused:
+        // the cells are still perfectly buildable on their own, so the honest outcome is a new building
+        // where the extension would have been, not a job the player cannot place at all.
+        if (mergeInto != null &&
+            (!SurfaceBuildManager.CanMerge(t) || !SurfaceBuildManager.On(b).Contains(mergeInto)))
+            mergeInto = null;
 
         // EVERY GATE CanPlace APPLIES, APPLIES HERE TOO. Drawing changes which ground a building
         // occupies, not whether the empire is allowed to build it — without this a painted footprint
@@ -157,7 +174,18 @@ public static class SurfaceBuildQueue
         // Checked here rather than only in the UI because this is the chokepoint every drawn building
         // passes through — the UI preview should refuse first and usually does, but a rule enforced only
         // in the preview is a rule that a second entry point silently skips.
-        if (!BuildShapeRules.Validate(info, cells, out why)) return null;
+        //
+        // Asked of the FINISHED building: for an extension that is the new cells plus the ones already
+        // standing. See the note on `mergeInto` above.
+        var shape = cells;
+        if (mergeInto != null)
+        {
+            var have = new HashSet<Vector2Int>(cells);
+            shape = new List<Vector2Int>(cells);
+            foreach (var c in SurfaceBuildingDatabase.Footprint(mergeInto))
+                if (have.Add(c)) shape.Add(c);
+        }
+        if (!BuildShapeRules.Validate(info, shape, out why)) return null;
 
         // Nor may two queued jobs claim the same ground. `Occupied` only knows about buildings that are
         // already standing, so without this both jobs are charged and whichever finishes second is
@@ -182,6 +210,7 @@ public static class SurfaceBuildQueue
         var job = new SurfaceBuildJob
         {
             type = t,
+            mergeInto = mergeInto,
             cells = new List<Vector2Int>(cells),
             // Build time scales on the SAME curve as cost — a bigger building is more work, not just a
             // bigger bill. This is the real brake on a mega-structure: while it goes up, nothing else
@@ -324,13 +353,38 @@ public static class SurfaceBuildQueue
     /// The building actually goes up.
     static void Complete(CelestialBody b, SurfaceBuildJob job)
     {
+        string name = SurfaceBuildingDatabase.Get(job.type)?.name ?? "Structure";
+
+        // ---- MERGE FIRST, PLACE SECOND ----
+        //
+        // If the finished cells touch a standing building of the same type, they join it rather than
+        // becoming a second one beside it (see SurfaceBuildManager.AbsorbInto for why that is a rule and
+        // not a convenience). Asked HERE, at completion, rather than trusted from queue time: the
+        // building the player was extending may have been demolished, or flattened by an earthquake,
+        // while its own extension was still going up.
+        //
+        // Note that this runs whether or not the player DELIBERATELY extended something. Drawing a farm
+        // that happens to touch another farm produces one farm either way — the map shows one field, so
+        // the data has to say one field. `mergeInto` only records which building they aimed at, which
+        // decides the survivor when several are touching.
+        if (SurfaceBuildManager.CanMerge(job.type))
+        {
+            var absorbed = SurfaceBuildManager.AbsorbInto(b, job.type, job.cells, job.mergeInto);
+            if (absorbed != null)
+            {
+                SurfaceLabor.Invalidate();
+                NotificationManager.Instance?.Push($"{name} extended",
+                    $"{job.Tiles} tiles added on {b.name} — now {absorbed.TileCount} tiles, " +
+                    $"{absorbed.efficiency * 100f:F0}% sited.", null, NotifKind.Info);
+                return;
+            }
+        }
+
         // Placed free: the cost was taken when the job was queued. Paying again at completion would
         // charge twice for one building, which is the kind of thing nobody notices until an economy is
         // mysteriously tight.
         var placed = SurfaceBuildManager.PlaceDrawn(b, job.type, job.cells);
         SurfaceLabor.Invalidate();
-
-        string name = SurfaceBuildingDatabase.Get(job.type)?.name ?? "Structure";
 
         if (placed != null)
         {
