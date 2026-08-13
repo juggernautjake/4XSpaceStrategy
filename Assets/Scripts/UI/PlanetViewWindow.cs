@@ -4500,6 +4500,16 @@ public class PlanetViewWindow : MonoBehaviour
     // ============================================================================================
     RectTransform nodeLinkLayer;
 
+    // WHICH pylons are joined, cached; WHERE those joins are on screen, per frame.
+    //
+    // The two change on completely different clocks and separating them matters. The link list is an
+    // O(relays^2) scan with a dictionary lookup per pair, and it only moves when a building does — but
+    // the QUADS are measured in map pixels and have to be re-laid every time the map is zoomed or
+    // panned. Rebuilding the list every frame to satisfy the quads would put a quadratic scan on the
+    // frame budget for a set of wires that had not changed.
+    List<PowerGrid.NodeLink> nodeLinks = new List<PowerGrid.NodeLink>();
+    float nodeLinkRefreshIn;
+
     void DrawNodeLinks(bool show)
     {
         if (nodeLinkLayer == null)
@@ -4513,16 +4523,33 @@ public class PlanetViewWindow : MonoBehaviour
 
         for (int i = nodeLinkLayer.childCount - 1; i >= 0; i--) Destroy(nodeLinkLayer.GetChild(i).gameObject);
         nodeLinkLayer.gameObject.SetActive(show);
-        if (!show || body?.surface == null) return;
+        if (!show || body?.surface == null) { nodeLinks.Clear(); return; }
+
+        // On the same cadence as the power overlay's repaint, and for the same reason: it follows a
+        // number that drifts, and a quarter-second of lag on a wire appearing is invisible.
+        nodeLinkRefreshIn -= Time.unscaledDeltaTime;
+        if (nodeLinkRefreshIn <= 0f || nodeLinks == null)
+        {
+            nodeLinkRefreshIn = 0.25f;
+            nodeLinks = PowerGrid.NodeLinks(body);
+        }
 
         int w = body.surface.width, h = body.surface.height;
         float tileW = mapRT.rect.width / w, tileH = mapRT.rect.height / h;
 
-        // The same electric blue RefreshPowerOverlay paints the relays themselves in.
-        var wire = new Color(0.25f, 0.72f, 1.00f, 0.95f);
+        var nets = PowerGrid.Nets(body);
 
-        foreach (var link in PowerGrid.NodeLinks(body))
+        foreach (var link in nodeLinks)
         {
+            // The same electric blue RefreshPowerOverlay paints the relays themselves in — dulled to
+            // the grey it paints a FAILED grid in when this span is carrying nothing. A chain that is
+            // intact but dead should not look identical to one delivering power; the yellow underneath
+            // it already says so, and the wire agreeing costs one lookup.
+            var net = link.net >= 1 && link.net <= nets.Count ? nets[link.net - 1] : null;
+            var wire = net != null && net.Failed
+                ? new Color(0.42f, 0.45f, 0.50f, 0.85f)
+                : new Color(0.25f, 0.72f, 1.00f, 0.95f);
+
             // Cell centres, in the map's local space (origin at its middle, which is what anchoring at
             // 0.5,0.5 and offsetting by an anchoredPosition means).
             Vector2 a = new Vector2((link.a.x + 0.5f - w * 0.5f) * tileW, (link.a.y + 0.5f - h * 0.5f) * tileH);
