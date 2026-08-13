@@ -955,6 +955,226 @@ public static class SurfaceBuildManager
         }
     }
 
+    // ============================================================================================
+    // TAKING TILES OFF A BUILDING
+    //
+    // Demolition used to be all-or-nothing: a building came down whole. Now that a building can be
+    // twenty tiles the player drew and extended over an hour, that is far too blunt — the useful verb is
+    // "take those four tiles back", not "lose the farm".
+    //
+    // WHICH MAKES SPLITTING POSSIBLE, and splitting is the interesting case. Remove the waist of an
+    // hourglass-shaped farm and what is left is two farms that do not touch. There is no honest way to
+    // keep calling that one building: its footprint would be disconnected, which every other rule in
+    // this file forbids, and the merge rule that produced it in the first place says two pieces that do
+    // not touch are two buildings.
+    //
+    // So a split really does produce several buildings — and because that is a consequence the player
+    // cannot see coming from the tiles they clicked, the UI asks a second time before doing it (see
+    // PlanetViewWindow's demolition confirm). This file's job is to make the outcome PREDICTABLE:
+    // WouldSplitInto answers the question before the fact, using exactly the same flood fill the
+    // demolition itself uses, so the number in the warning is the number of buildings you get.
+    // ============================================================================================
+
+    /// The connected pieces `cells` would fall into, moving only edge-to-edge. One piece = no split.
+    public static List<List<Vector2Int>> ConnectedPieces(IEnumerable<Vector2Int> cells)
+    {
+        var remaining = new HashSet<Vector2Int>(cells);
+        var pieces = new List<List<Vector2Int>>();
+
+        while (remaining.Count > 0)
+        {
+            Vector2Int start = default;
+            foreach (var c in remaining) { start = c; break; }
+
+            var piece = new List<Vector2Int>();
+            var stack = new Stack<Vector2Int>();
+            stack.Push(start);
+            remaining.Remove(start);
+
+            while (stack.Count > 0)
+            {
+                var cur = stack.Pop();
+                piece.Add(cur);
+                TryPop(remaining, stack, cur + Vector2Int.up);
+                TryPop(remaining, stack, cur + Vector2Int.down);
+                TryPop(remaining, stack, cur + Vector2Int.left);
+                TryPop(remaining, stack, cur + Vector2Int.right);
+            }
+            pieces.Add(piece);
+        }
+        return pieces;
+    }
+
+    static void TryPop(HashSet<Vector2Int> remaining, Stack<Vector2Int> stack, Vector2Int c)
+    {
+        if (remaining.Remove(c)) stack.Push(c);
+    }
+
+    /// How many separate buildings `p` would become if `removing` were taken off it.
+    ///
+    /// 0 means nothing would be left — the whole structure comes down. 1 is the ordinary case. 2 or more
+    /// is the split the player has to be warned about.
+    public static int WouldSplitInto(PlacedBuilding p, HashSet<Vector2Int> removing)
+    {
+        if (p == null) return 0;
+        var left = new List<Vector2Int>();
+        foreach (var c in SurfaceBuildingDatabase.Footprint(p))
+            if (removing == null || !removing.Contains(c)) left.Add(c);
+        if (left.Count == 0) return 0;
+        return ConnectedPieces(left).Count;
+    }
+
+    /// Take `removing` off the buildings it covers, splitting or destroying them as the geometry demands.
+    ///
+    /// Returns how many tiles actually came down, so the caller can refund and report honestly.
+    ///
+    /// REFUNDS ARE PER TILE, at the same 60% a whole teardown gives back. A building's price scales
+    /// super-linearly with its size (BuildScaling.CostMultiplier), so refunding a fixed fraction of the
+    /// authored cost per tile would pay back the cheap first tile's price for a tile that was bought at
+    /// the expensive end of the curve. Instead the refund is the DIFFERENCE between what the building
+    /// costs at its current size and what it costs at its new one, which is exactly the marginal price
+    /// of the tiles being removed and cannot be farmed in either direction.
+    public static int DemolishCells(CelestialBody b, HashSet<Vector2Int> removing, bool refund = true)
+    {
+        if (b?.surface == null || removing == null || removing.Count == 0) return 0;
+
+        // Which buildings are touched, resolved up front: the loop below mutates b.placedBuildings.
+        var touched = new List<PlacedBuilding>();
+        foreach (var p in On(b))
+        {
+            foreach (var c in SurfaceBuildingDatabase.Footprint(p))
+                if (removing.Contains(c)) { touched.Add(p); break; }
+        }
+        if (touched.Count == 0) return 0;
+
+        int removed = 0;
+        float refundMetal = 0f, refundEnergy = 0f;
+
+        foreach (var p in touched)
+        {
+            var own = SurfaceBuildingDatabase.Footprint(p);
+            var keep = new List<Vector2Int>();
+            int lost = 0;
+            foreach (var c in own)
+                if (removing.Contains(c)) lost++;
+                else keep.Add(c);
+
+            if (lost == 0) continue;
+            removed += lost;
+
+            var info = p.Info;
+            if (refund && !GameMode.DevMode)
+            {
+                float before = BuildScaling.CostMultiplier(own.Count);
+                float after = keep.Count > 0 ? BuildScaling.CostMultiplier(keep.Count) : 0f;
+                float delta = Mathf.Max(0f, before - after);
+                refundMetal += ColonyManager.DiscCost(info.costMetal) * delta * DemolishRefund;
+                refundEnergy += ColonyManager.DiscCost(info.costEnergy) * delta * DemolishRefund;
+            }
+
+            // Free the ground either way.
+            foreach (var c in own)
+                if (removing.Contains(c) && InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = false;
+
+            if (keep.Count == 0)
+            {
+                // Nothing left: the structure is gone. Demolish() rather than a bare Remove, so the
+                // facility tiers, the power grid and the shipyard pool all learn about it — but with
+                // refund:false, because this method has already accounted for every tile.
+                Demolish(b, p, refund: false);
+                continue;
+            }
+
+            var pieces = ConnectedPieces(keep);
+
+            // The largest surviving piece stays THIS building — same record, so its level, condition,
+            // banked charge and its place in every list are preserved. Anything else becomes a new
+            // structure of the same class, inheriting the level and condition but starting fresh as its
+            // own record, which is what a piece that no longer touches the original actually is.
+            pieces.Sort((x, y) => y.Count.CompareTo(x.Count));
+
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                var piece = pieces[i];
+
+                // Efficiency is re-read from the ground each piece actually sits on rather than
+                // inherited. The old figure was the average over a footprint that no longer exists, and
+                // the whole point of splitting is that the pieces are in different places.
+                float eff = 1f;
+                if (info.index != SurfaceIndexKind.None)
+                {
+                    float sum = 0f;
+                    foreach (var c in piece) sum += SurfaceIndex.Get(b, info.index, c.x, c.y);
+                    eff = Mathf.Clamp01(sum / piece.Count);
+                }
+
+                if (i == 0)
+                {
+                    p.SetDrawnShape(piece);
+                    p.efficiency = eff;
+                    float cap = info.powerStorage * p.LevelMult;
+                    if (p.stored > cap) p.stored = cap;      // a smaller bank holds less
+                }
+                else
+                {
+                    var split = new PlacedBuilding
+                    {
+                        type = p.type,
+                        rotation = 0,
+                        efficiency = eff,
+                        level = p.level,
+                        health = p.health
+                    };
+                    split.SetDrawnShape(piece);
+                    b.placedBuildings.Add(split);
+                }
+            }
+        }
+
+        if (refund && !GameMode.DevMode)
+        {
+            PlayerEconomy.Add(ResourceType.Metal, refundMetal);
+            PlayerEconomy.Add(ResourceType.Energy, refundEnergy);
+        }
+
+        PowerGrid.Invalidate();
+        SurfaceLabor.Invalidate();
+        SyncFacilityTiers(b);
+        SurfaceSelection.Validate();
+        return removed;
+    }
+
+    /// What a voluntary teardown gives back, as a fraction of what was paid. The materials are still
+    /// standing there; you just don't get all of them back off a demolition site.
+    public const float DemolishRefund = 0.6f;
+
+    /// What tearing `removing` off this world would refund. Quoted on the confirm panel, and derived by
+    /// the same arithmetic DemolishCells uses so the figure shown is the figure paid.
+    public static void DemolishRefundFor(CelestialBody b, HashSet<Vector2Int> removing,
+                                         out int metal, out int energy)
+    {
+        metal = energy = 0;
+        if (b == null || removing == null || removing.Count == 0 || GameMode.DevMode) return;
+
+        float m = 0f, e = 0f;
+        foreach (var p in On(b))
+        {
+            var own = SurfaceBuildingDatabase.Footprint(p);
+            int lost = 0;
+            foreach (var c in own) if (removing.Contains(c)) lost++;
+            if (lost == 0) continue;
+
+            var info = p.Info;
+            float before = BuildScaling.CostMultiplier(own.Count);
+            float after = own.Count - lost > 0 ? BuildScaling.CostMultiplier(own.Count - lost) : 0f;
+            float delta = Mathf.Max(0f, before - after);
+            m += ColonyManager.DiscCost(info.costMetal) * delta * DemolishRefund;
+            e += ColonyManager.DiscCost(info.costEnergy) * delta * DemolishRefund;
+        }
+        metal = Mathf.RoundToInt(m);
+        energy = Mathf.RoundToInt(e);
+    }
+
     static bool InBounds(CelestialBody b, int x, int y)
         => b?.surface != null && x >= 0 && y >= 0 && x < b.surface.width && y < b.surface.height;
 

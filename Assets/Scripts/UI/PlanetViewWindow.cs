@@ -623,6 +623,7 @@ public class PlanetViewWindow : MonoBehaviour
         if (powerTex != null) Destroy(powerTex);
         if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
         BuildPlacement.Cancel();   // static state must not outlive the window that drives it
+        BuildDemolition.Cancel();
     }
 
     // A single selection no longer throws the full-screen viewer open — that clutters the map. It just
@@ -642,8 +643,10 @@ public class PlanetViewWindow : MonoBehaviour
         if (root != null) root.SetActive(false);
         MapHoverPanel.Instance.Hide();
         // The window is the only way out of Placement Mode, so closing it has to end the session — a
-        // session left open would keep answering IsFor() for a window nobody can see.
+        // session left open would keep answering IsFor() for a window nobody can see. Same for the
+        // demolition selection, which would otherwise still be armed the next time the window opened.
         BuildPlacement.Cancel();
+        BuildDemolition.Cancel();
     }
 
     public void ShowFor(CelestialBody b) => ShowFor(b, null);
@@ -667,6 +670,7 @@ public class PlanetViewWindow : MonoBehaviour
         // coordinates, so carrying it over would draw a shape on this world at cells that mean nothing
         // here — and Confirm would then try to build it.
         BuildPlacement.Cancel();
+        BuildDemolition.Cancel();   // ...and neither does a selection of the last world's tiles
         lastSig = null;
 
         // The tab you were on may not exist for THIS world — Build on your capital, then click a
@@ -1169,6 +1173,10 @@ public class PlanetViewWindow : MonoBehaviour
         var sb = new System.Text.StringBuilder();
         sb.Append(body.id).Append('|').Append((int)tab).Append('|');
         sb.Append(selected.HasValue ? (int)selected.Value : -1).Append('|');
+        // Demolition Mode reshapes the Build panel — the mode button's caption, the instruction under
+        // the heading — so entering or leaving it has to rebuild the side panel. Without this the tray
+        // would still be telling you to click a structure to pick it up while the map was in demolition.
+        sb.Append(BuildDemolition.IsFor(body) ? 1 : 0).Append('|');
         sb.Append((int)activeIndex).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(showTectonicsOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
 
         // The Overview and Orbit tabs fold in the colony/shipyard structure, so their SHAPE changes when
@@ -1263,6 +1271,7 @@ public class PlanetViewWindow : MonoBehaviour
         // AFTER PollHover, which is what resolves `hoverCell` from the cursor — the drag reads that cell
         // every frame, so running first would draw one frame behind the mouse for the whole gesture.
         PollBuildDraw();
+        PollDemolish();
         PollClickAway();
 
         // The confirm panel is anchored to a map cell, so it has to be re-placed whenever the map moves
@@ -1328,6 +1337,15 @@ public class PlanetViewWindow : MonoBehaviour
             selected = null; CancelPlace(); BuildPlacement.Cancel(); lastSig = null; ClearGhost();
         }
 
+        // Escape backs out of demolition the same way Cancel does — question first, then the mode.
+        if (tab == Tab.Build && BuildDemolition.IsFor(body) && Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (BuildDemolition.AwaitingSplitConfirm) BuildDemolition.CancelSplitConfirm();
+            else if (BuildDemolition.Tiles > 0) BuildDemolition.ClearShape();
+            else ExitDemolition();
+            return;
+        }
+
         if (tab == Tab.Build) { DrawGhost(); DrawPlacement(); }
         else
         {
@@ -1340,6 +1358,7 @@ public class PlanetViewWindow : MonoBehaviour
             ClearYieldIcons();
         }
         RefreshPlacePanel();
+        RefreshDemolishPanel();
 
         // The power overlay's colour tracks each grid's LIVE supply, so it has to be repainted as the
         // economy moves rather than only when the window rebuilds. A few times a second is plenty: it's
@@ -1359,7 +1378,10 @@ public class PlanetViewWindow : MonoBehaviour
         switch (tab)
         {
             case Tab.Build:
-                if (!selected.HasValue)
+                if (BuildDemolition.IsFor(body))
+                    statusText.text = DemolitionModeBanner();
+
+                else if (!selected.HasValue)
                     statusText.text = "<color=#9FB4C8>Pick a structure on the right, then click the map to site it — you'll be asked to confirm. " +
                                       "Right-click rotates. Esc cancels.  ·  Scroll to zoom · drag the map to pan.</color>";
 
@@ -1620,6 +1642,36 @@ public class PlanetViewWindow : MonoBehaviour
         return sb.ToString();
     }
 
+    /// The demolition equivalent of PlacementModeBanner.
+    string DemolitionModeBanner()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<color=#FF6659><b>DEMOLITION MODE</b></color>");
+
+        int tiles = BuildDemolition.Tiles;
+        if (tiles == 0)
+        {
+            sb.Append("  <size=10><color=#9FB4C8>left-drag over built tiles to select them · " +
+                      "right-drag to un-select · nothing comes down until you confirm</color></size>");
+            sb.Append("\n<size=10><color=#9FB4C8>Esc leaves the mode</color></size>");
+            return sb.ToString();
+        }
+
+        BuildDemolition.Refund(out int m, out int e);
+        BuildDemolition.SplitSummary(out int split, out int extra);
+        int destroyed = BuildDemolition.WouldDestroy();
+
+        sb.Append($"  <b>{tiles} tile{(tiles == 1 ? "" : "s")}</b> selected");
+        sb.Append($" <color=#9FB4C8>· {m}m {e}e back</color>");
+        if (destroyed > 0)
+            sb.Append($"  <color=#FFBF4D>{destroyed} structure{(destroyed == 1 ? "" : "s")} removed outright</color>");
+        if (split > 0)
+            sb.Append($"  <color=#FFBF4D>{split} will split into {split + extra}</color>");
+
+        sb.Append("\n<size=10><color=#9FB4C8>Esc clears the selection · Esc again leaves the mode</color></size>");
+        return sb.ToString();
+    }
+
     // ============================================================================================
     // WHAT THE CURSOR WINDOW SAYS WHILE PLACING
     //
@@ -1706,6 +1758,46 @@ public class PlanetViewWindow : MonoBehaviour
         return sb.ToString();
     }
 
+    /// The cursor window in Demolition Mode: what is under the mouse, and what taking it would do.
+    string DemolitionHoverText(int x, int y)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(TileHoverText(body, x, y));
+
+        var hit = SurfaceBuildManager.At(body, x, y);
+        if (hit == null)
+            sb.Append("\n<size=10><color=#9FB4C8>nothing built here</color></size>");
+        else
+        {
+            var info = hit.Info;
+            string hex = ColorUtility.ToHtmlStringRGB(Vivid(info.color));
+            sb.Append($"\n<color=#{hex}>•</color> <b>{info.name}</b> " +
+                      $"<size=10><color=#9FB4C8>Lv{hit.level} · {hit.TileCount} tiles</color></size>");
+
+            // WHAT REMOVING THIS TILE ALONE WOULD DO — the live version of the split warning, so the
+            // player can see a cut coming while they are still choosing where to make it rather than
+            // being told about it by a dialog after the fact.
+            var probe = new HashSet<Vector2Int>(BuildDemolition.Cells) { new Vector2Int(x, y) };
+            int pieces = SurfaceBuildManager.WouldSplitInto(hit, probe);
+            if (pieces == 0)
+                sb.Append("\n<color=#FFBF4D>Taking this removes the whole structure</color>");
+            else if (pieces > 1)
+                sb.Append($"\n<color=#FFBF4D>Taking this splits it into {pieces}</color>");
+        }
+
+        int tiles = BuildDemolition.Tiles;
+        if (tiles > 0)
+        {
+            BuildDemolition.Refund(out int m, out int e);
+            sb.Append($"\n<color=#FF6659><b>{tiles} tile{(tiles == 1 ? "" : "s")} selected</b></color>" +
+                      $" <color=#9FB4C8>· {m}m {e}e back</color>");
+        }
+        else
+            sb.Append("\n<size=10><color=#9FB4C8>Left-drag to select · right-drag to un-select</color></size>");
+
+        return sb.ToString();
+    }
+
     string HoverWhy()
     {
         if (!selected.HasValue || !HasHoverCell) return "";
@@ -1758,7 +1850,8 @@ public class PlanetViewWindow : MonoBehaviour
                 // a player who wants to go and check the Survey map should not have to hunt for the exit
                 // first. Leaving CANCELS instead, which costs nothing (nothing is spent until Confirm)
                 // and cannot strand anyone in a mode.
-                if (captured != Tab.Build) { selected = null; CancelPlace(); BuildPlacement.Cancel(); }
+                if (captured != Tab.Build)
+                { selected = null; CancelPlace(); BuildPlacement.Cancel(); BuildDemolition.Cancel(); }
                 lastSig = null;
             }, 22);
             btn.interactable = open;
@@ -2351,8 +2444,31 @@ public class PlanetViewWindow : MonoBehaviour
         // scroll, on a panel whose length depends on which category tab happens to be selected.
         BuildQueuePanel();
 
+        // ---- The two modes, side by side ----
+        //
+        // Demolition is a MODE, like placement, rather than a button on each building's row — because
+        // what it operates on is tiles rather than buildings, and "take those four tiles back" has
+        // nowhere to live in a per-building list. The per-building Demolish buttons are still there and
+        // still work; they now open this mode with that building already selected.
+        var modeRow = UIFactory.NewUI(sidePanel, "ModeRow");
+        UIFactory.AddLayout(modeRow, 24);
+        var mh = modeRow.AddComponent<HorizontalLayoutGroup>();
+        mh.spacing = 4;
+        mh.childControlWidth = true; mh.childControlHeight = true;
+        mh.childForceExpandWidth = true; mh.childForceExpandHeight = true;
+
+        bool demo = BuildDemolition.IsFor(body);
+        var demoBtn = UIFactory.Button(modeRow.transform, demo ? "Stop demolishing" : "Demolish...",
+            () => { if (BuildDemolition.IsFor(body)) ExitDemolition(); else EnterDemolition(); }, 22);
+        UIFactory.Tooltip(demoBtn.gameObject,
+            "Paint over built tiles to take them back. Left-drag selects, right-drag un-selects, and " +
+            "nothing comes down until you confirm. Removing the middle of a building splits it into " +
+            "separate ones — you'll be asked again before that happens.");
+
         Header("STRUCTURES");
-        Note("Click a structure to pick it up, then click the map to place it. <b>Right-click rotates.</b> Esc cancels. Footprints interlock — pack them tightly.");
+        Note(demo
+            ? "<color=#FF6659><b>Demolition mode.</b></color> Left-drag over built tiles to select them, right-drag to un-select. Confirm below the selection."
+            : "Click a structure to pick it up, then draw it on the map. Esc cancels. Footprints interlock — pack them tightly.");
 
         // A ROW OF COLOURED TABS, not one long list with headings.
         //
@@ -2705,6 +2821,7 @@ public class PlanetViewWindow : MonoBehaviour
                 bool wasHeld = selected.HasValue && selected.Value == t;
                 CancelPlace();            // picking a different structure abandons the pending question
                 BuildPlacement.Cancel();  // ...and any half-drawn footprint of the last one
+                BuildDemolition.Cancel(); // picking something to BUILD is leaving demolition mode
 
                 if (wasHeld) selected = null;
                 else
@@ -2783,9 +2900,12 @@ public class PlanetViewWindow : MonoBehaviour
                 });
             }
 
-            UIFactory.Button(card, "Demolish (60% back)", () =>
+            // Opens Demolition Mode with this building selected — see the note on the other Demolish
+            // button, in BuildInfraRow.
+            UIFactory.Button(card, $"Demolish ({SurfaceBuildManager.DemolishRefund * 100f:F0}% back)", () =>
             {
-                SurfaceBuildManager.Demolish(body, cap);
+                EnterDemolition();
+                BuildDemolition.PaintWhole(cap);
                 lastSig = null;
             }, 22);
         }
@@ -2951,9 +3071,17 @@ public class PlanetViewWindow : MonoBehaviour
             return (can, can ? $"Upgrade -> Lv{cap.level + 1} ({m}m {e}e)" : $"Upgrade — {why}");
         });
 
+        // DEMOLISH OPENS THE MODE with this building already selected, rather than tearing it down on
+        // the spot. Two reasons, and the second is the one that matters:
+        //
+        //   A twenty-tile farm is not an all-or-nothing proposition any more. The useful verb is "take
+        //   those four tiles back", and a button that can only mean "lose the farm" cannot express it.
+        //   And the removal is shown on the MAP before it happens, which is where the consequences are —
+        //   what it will split, what it will strand off the power grid, what it frees up.
         UIFactory.Button(row.transform, "Demolish", () =>
         {
-            SurfaceBuildManager.Demolish(body, cap);
+            EnterDemolition();
+            BuildDemolition.PaintWhole(cap);
             lastSig = null;
         }, 20);
     }
@@ -4964,7 +5092,13 @@ public class PlanetViewWindow : MonoBehaviour
         ClearLayer(placementLayer);
         ClearLayer(placementHud);
 
-        if (!BuildPlacement.IsFor(body) || body?.surface == null) { ClearYieldIcons(); return; }
+        if (body?.surface == null) { ClearYieldIcons(); return; }
+
+        // Demolition draws on the same layer and is mutually exclusive with placement — you cannot be
+        // putting something down and taking something up at the same time.
+        if (BuildDemolition.IsFor(body)) { ClearYieldIcons(); DrawDemolition(); return; }
+
+        if (!BuildPlacement.IsFor(body)) { ClearYieldIcons(); return; }
 
         DrawGuidanceGrids();
         DrawSizeCounter();
@@ -5356,6 +5490,248 @@ public class PlanetViewWindow : MonoBehaviour
         placePanel.SetAsLastSibling();   // above the zoom bar, which is also a child of the viewport
     }
 
+    // ============================================================================================
+    // DEMOLITION MODE
+    //
+    // The same interaction as Placement Mode, run backwards: enter the mode, paint tiles, a panel
+    // appears under what you painted, nothing happens until you confirm. Everything below is the drawing
+    // and the panel; every rule lives in BuildDemolition and SurfaceBuildManager.DemolishCells.
+    //
+    // The one thing this adds that placement does not have is the SECOND question, asked when the
+    // removal would split a building into pieces that no longer touch. That is the only outcome the
+    // player cannot read off the tiles they clicked, so it is the only one worth interrupting for.
+    // ============================================================================================
+
+    void EnterDemolition()
+    {
+        tab = Tab.Build;
+        selected = null;              // demolishing and placing are different modes; you cannot be in both
+        CancelPlace();
+        BuildPlacement.Cancel();
+        BuildDemolition.Begin(body);
+        lastSig = null;
+    }
+
+    void ExitDemolition()
+    {
+        BuildDemolition.Cancel();
+        lastSig = null;
+    }
+
+    /// The drag, mirroring PollBuildDraw. Left paints, right erases.
+    void PollDemolish()
+    {
+        if (!BuildDemolition.IsFor(body) || tab != Tab.Build) { demolishing = false; return; }
+
+        // The split question is a modal moment: the panel is asking about exactly the tiles that are
+        // selected, and letting the brush keep running underneath it would change the question while it
+        // was on screen.
+        if (BuildDemolition.AwaitingSplitConfirm) { demolishing = false; return; }
+
+        bool paint = Input.GetMouseButton(0);
+        bool erase = Input.GetMouseButton(1);
+        if (!paint && !erase) { demolishing = false; return; }
+
+        if (!demolishing)
+        {
+            if (!Input.GetMouseButtonDown(0) && !Input.GetMouseButtonDown(1)) return;
+            if (!HasHoverCell) return;
+            if (OverFloatingMapControl()) return;
+            demolishing = true;
+        }
+
+        if (!HasHoverCell) return;
+        if (erase) BuildDemolition.Unpaint(hoverCell);
+        else BuildDemolition.Paint(hoverCell);
+    }
+
+    bool demolishing;
+
+    /// The selection, in demolition red, plus a wash over every OTHER cell of a building it touches — so
+    /// "these four tiles" and "the farm those four tiles are part of" are both visible at once. Without
+    /// the wash, the extent of what you are cutting into is invisible and the split warning arrives from
+    /// nowhere.
+    void DrawDemolition()
+    {
+        if (!BuildDemolition.IsFor(body) || body?.surface == null) return;
+
+        var red = new Color(1.00f, 0.24f, 0.20f, 0.85f);
+        var context = new Color(1.00f, 0.55f, 0.35f, 0.20f);
+
+        foreach (var p in BuildDemolition.Affected())
+            foreach (var c in SurfaceBuildingDatabase.Footprint(p))
+                if (!BuildDemolition.HasCell(c)) AddCellQuad(placementLayer, c.x, c.y, context);
+
+        foreach (var c in BuildDemolition.Cells) AddCellQuad(placementLayer, c.x, c.y, red);
+
+        // The brush, so it is clear the mode is live even over ground with nothing on it.
+        if (HasHoverCell && !BuildDemolition.HasCell(hoverCell)
+            && SurfaceBuildManager.At(body, hoverCell.x, hoverCell.y) != null)
+            AddCellQuad(placementLayer, hoverCell.x, hoverCell.y, new Color(1f, 0.4f, 0.3f, 0.45f));
+    }
+
+    RectTransform demolishPanel;
+    TMP_Text demolishText;
+    Button demolishConfirmBtn;
+
+    void RefreshDemolishPanel()
+    {
+        bool want = BuildDemolition.IsFor(body) && BuildDemolition.Tiles > 0 && tab == Tab.Build;
+        if (!want)
+        {
+            if (demolishPanel != null) demolishPanel.gameObject.SetActive(false);
+            return;
+        }
+
+        BuildDemolishPanel();
+        demolishPanel.gameObject.SetActive(true);
+
+        BuildDemolition.Refund(out int m, out int e);
+        BuildDemolition.SplitSummary(out int split, out int extra);
+        int destroyed = BuildDemolition.WouldDestroy();
+        int tiles = BuildDemolition.Tiles;
+        bool asking = BuildDemolition.AwaitingSplitConfirm;
+
+        var sb = new System.Text.StringBuilder();
+
+        if (asking)
+        {
+            // THE SECOND QUESTION. Phrased as the consequence rather than as a warning label: the player
+            // does not need to be told this is dangerous, they need to be told what they will have
+            // afterwards, because "you will have 3 farms instead of 1" is a thing they can decide about.
+            sb.Append("<color=#FFBF4D><b>This will split a building.</b></color>\n");
+            sb.Append($"<size=10><color=#9FB4C8>{split} structure{(split == 1 ? "" : "s")} will come apart into " +
+                      $"{split + extra} separate one{(split + extra == 1 ? "" : "s")}, each with its own " +
+                      $"efficiency and its own entry in the list. They will not re-join — buildings only " +
+                      $"merge when they are built touching.</color></size>");
+        }
+        else
+        {
+            sb.Append($"<color=#FF6659>•</color> Demolish <b>{tiles} tile{(tiles == 1 ? "" : "s")}</b>\n");
+            sb.Append($"<size=10><color=#9FB4C8>{m} metal · {e} energy back</color></size>");
+            if (destroyed > 0)
+                sb.Append($"\n<size=10><color=#FFBF4D>{destroyed} structure{(destroyed == 1 ? "" : "s")} " +
+                          $"removed completely</color></size>");
+            if (split > 0)
+                sb.Append($"\n<size=10><color=#FFBF4D>{split} will be split apart — you'll be asked again" +
+                          $"</color></size>");
+        }
+
+        demolishText.text = sb.ToString();
+
+        var lbl = demolishConfirmBtn.GetComponentInChildren<TMP_Text>();
+        if (lbl != null) lbl.text = asking ? "Split it" : "Confirm";
+
+        PositionDemolishPanel();
+    }
+
+    void PositionDemolishPanel()
+    {
+        if (demolishPanel == null || body?.surface == null || BuildDemolition.Tiles == 0) return;
+
+        int minX = int.MaxValue, maxX = int.MinValue, minY = int.MaxValue;
+        foreach (var c in BuildDemolition.Cells)
+        {
+            if (c.x < minX) minX = c.x;
+            if (c.x > maxX) maxX = c.x;
+            if (c.y < minY) minY = c.y;
+        }
+
+        int w = body.surface.width, h = body.surface.height;
+        float u = (minX + maxX + 1) * 0.5f / w;
+        float v = minY / (float)h;
+
+        Vector2 inMap = new Vector2((u - 0.5f) * mapRT.rect.width, (v - 0.5f) * mapRT.rect.height);
+        float halfH = demolishPanel.sizeDelta.y * 0.5f;
+        Vector2 pos = inMap + mapPan + new Vector2(0f, -halfH - 10f);
+
+        var vp = hostViewport.rect;
+        float hw = demolishPanel.sizeDelta.x * 0.5f;
+        pos.x = Mathf.Clamp(pos.x, vp.xMin + hw, vp.xMax - hw);
+        pos.y = Mathf.Clamp(pos.y, vp.yMin + halfH, vp.yMax - halfH);
+
+        demolishPanel.anchorMin = demolishPanel.anchorMax = new Vector2(0.5f, 0.5f);
+        demolishPanel.pivot = new Vector2(0.5f, 0.5f);
+        demolishPanel.anchoredPosition = pos;
+    }
+
+    void BuildDemolishPanel()
+    {
+        if (demolishPanel != null) { demolishPanel.SetAsLastSibling(); return; }
+
+        demolishPanel = UIFactory.NewUI(hostViewport, "ConfirmDemolish").GetComponent<RectTransform>();
+        demolishPanel.sizeDelta = new Vector2(240, 92);
+        var bg = demolishPanel.gameObject.AddComponent<Image>();
+        bg.color = new Color(0.12f, 0.05f, 0.05f, 0.97f);
+        var outline = demolishPanel.gameObject.AddComponent<Outline>();
+        outline.effectColor = UITheme.Bad;
+        outline.effectDistance = new Vector2(1.2f, -1.2f);
+
+        var v = demolishPanel.gameObject.AddComponent<VerticalLayoutGroup>();
+        v.padding = new RectOffset(6, 6, 5, 5); v.spacing = 4;
+        v.childControlWidth = true; v.childControlHeight = true;
+        v.childForceExpandWidth = true; v.childForceExpandHeight = false;
+
+        demolishText = UIFactory.Text(demolishPanel, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
+        var tle = demolishText.gameObject.AddComponent<LayoutElement>();
+        tle.preferredHeight = 58f;
+
+        var row = UIFactory.NewUI(demolishPanel, "Row");
+        UIFactory.AddLayout(row, 22);
+        var hl = row.AddComponent<HorizontalLayoutGroup>();
+        hl.spacing = 4;
+        hl.childControlWidth = true; hl.childControlHeight = true;
+        hl.childForceExpandWidth = true; hl.childForceExpandHeight = true;
+
+        demolishConfirmBtn = UIFactory.Button(row.transform, "Confirm", DoConfirmDemolition, 20);
+        UIFactory.Button(row.transform, "Cancel", DoCancelDemolition, 20);
+
+        demolishPanel.SetAsLastSibling();
+    }
+
+    void DoConfirmDemolition()
+    {
+        // Confirm returns false BOTH when it merely raised the split question and when it genuinely
+        // failed, which is why the state is asked rather than the return value: the two need different
+        // sounds and only one of them is a refusal.
+        bool asking = BuildDemolition.AwaitingSplitConfirm;
+        bool done = BuildDemolition.Confirm(out string why);
+
+        if (done)
+        {
+            lastSig = null;
+            SimpleAudio.Instance?.PlayComplete();
+            return;
+        }
+
+        if (BuildDemolition.AwaitingSplitConfirm && !asking)
+        {
+            SimpleAudio.Instance?.PlayTick();   // the question, not a refusal
+            return;
+        }
+
+        SimpleAudio.Instance?.PlayTick();
+        if (!string.IsNullOrEmpty(why))
+            NotificationManager.Instance?.Push("Can't demolish that", why, null, NotifKind.Danger);
+    }
+
+    /// Cancel backs out ONE step: out of the split question first, and only then out of the mode.
+    ///
+    /// The same one-step-at-a-time rule Escape follows during placement, and for the same reason —
+    /// answering "no, not like that" to the split question should not also throw away the selection the
+    /// player spent a drag making.
+    void DoCancelDemolition()
+    {
+        if (BuildDemolition.AwaitingSplitConfirm)
+        {
+            BuildDemolition.CancelSplitConfirm();
+            SimpleAudio.Instance?.PlayTick();
+            return;
+        }
+        ExitDemolition();
+        SimpleAudio.Instance?.PlayTick();
+    }
+
     void DoConfirmPlacement()
     {
         if (BuildPlacement.Confirm(out string why))
@@ -5523,7 +5899,12 @@ public class PlanetViewWindow : MonoBehaviour
 
         // Left-drag is off while a piece is held — there, a left press is placing a building, and
         // dragging the ground out from under it is the last thing anyone wants.
-        bool leftPans = !selected.HasValue;
+        //
+        // ...and off in Demolition Mode for exactly the same reason. That mode holds no piece, so the
+        // `selected` test alone let left-drag pan the map instead of selecting tiles: the one gesture
+        // the mode is built around would have scrolled the world instead. Middle-drag still pans in
+        // both modes, which is how you reposition without leaving what you are doing.
+        bool leftPans = !selected.HasValue && !BuildDemolition.IsFor(body);
 
         if (!panning &&
             ((leftPans && Input.GetMouseButtonDown(0)) || Input.GetMouseButtonDown(2)) &&
@@ -5847,6 +6228,8 @@ public class PlanetViewWindow : MonoBehaviour
             // of at the bottom of the window": one panel, already anchored to the cursor, told to say
             // something more useful while a structure is in hand.
             if (OverFloatingMapControl()) MapHoverPanel.Instance.Hide();
+            else if (tab == Tab.Build && BuildDemolition.IsFor(body))
+                MapHoverPanel.Instance.ShowAtCursor(DemolitionHoverText(x, y));
             else if (tab == Tab.Build && selected.HasValue
                      && UsesPlacementSession(SurfaceBuildingDatabase.Get(selected.Value)))
                 MapHoverPanel.Instance.ShowAtCursor(PlacementHoverText(x, y));
@@ -5873,6 +6256,8 @@ public class PlanetViewWindow : MonoBehaviour
         // button, and the building would grow by one on the way to being confirmed.
         if (placePanel != null && placePanel.gameObject.activeInHierarchy &&
             RectTransformUtility.RectangleContainsScreenPoint(placePanel, p, null)) return true;
+        if (demolishPanel != null && demolishPanel.gameObject.activeInHierarchy &&
+            RectTransformUtility.RectangleContainsScreenPoint(demolishPanel, p, null)) return true;
         return false;
     }
 
@@ -5926,6 +6311,11 @@ public class PlanetViewWindow : MonoBehaviour
         // without this, every drag of the map would also select (or deselect) whatever was under where
         // you grabbed it.
         if (panDragged) return;
+
+        // In Demolition Mode the click has already been handled by the brush (PollDemolish). Selecting
+        // the building underneath as well would move the marker to something the player is in the middle
+        // of taking down, and then Validate would clear it the moment they confirmed.
+        if (tab == Tab.Build && BuildDemolition.IsFor(body)) return;
 
         // Holding a piece? The click ASKS to place it — it doesn't place it. Building costs resources
         // and permanently occupies ground on a grid where siting decides yield, so it's not something to
