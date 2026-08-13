@@ -83,12 +83,34 @@ public class MapHoverPanel : MonoBehaviour
 
     /// Rich-text content, positioned with its bottom-left corner at the mouse plus a slight rightward
     /// offset. Call every frame the hover target is still active; call Hide() the moment it isn't.
+    ///
+    /// KEPT ON SCREEN, which it did not have to be while it was two or three lines. It carries the whole
+    /// per-tile index readout now — the tile's name, its temperature, and a line per index that reaches
+    /// it — so near the top of the window it grew straight off the top edge and the numbers it exists to
+    /// show were the ones cut off. Where it will not fit above the cursor it flips to hang BELOW it, and
+    /// where it will not fit to the right it flips to the left, which is what every tooltip that has to
+    /// live at a pointer ends up doing.
     public void ShowAtCursor(string richText)
     {
         label.text = richText;
         panel.gameObject.SetActive(true);
         panel.SetAsLastSibling();
-        panel.position = Input.mousePosition + (Vector3)CursorOffset;
+
+        // The size is driven by the ContentSizeFitter and is therefore a frame behind unless the layout
+        // is settled first — and a frame behind is exactly wrong here, because the flip decision is made
+        // from the size. Without this the panel flips on the frame AFTER it overflowed, which reads as a
+        // twitch every time the cursor crosses the threshold.
+        LayoutRebuilder.ForceRebuildLayoutImmediate(panel);
+
+        Vector2 size = panel.rect.size;
+        Vector2 at = (Vector2)Input.mousePosition + CursorOffset;
+
+        // Above the cursor by default; below it when there is no room above. The flip is a whole
+        // panel-height plus the offset so the cursor never ends up inside its own tooltip either way.
+        if (at.y + size.y > Screen.height) at.y = Mathf.Max(0f, Input.mousePosition.y - CursorOffset.y - size.y);
+        if (at.x + size.x > Screen.width) at.x = Mathf.Max(0f, Input.mousePosition.x - CursorOffset.x - size.x);
+
+        panel.position = new Vector3(at.x, at.y, 0f);
     }
 
     public void Hide()

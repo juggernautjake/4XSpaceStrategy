@@ -1701,7 +1701,7 @@ public class PlanetViewWindow : MonoBehaviour
         var info = SurfaceBuildingDatabase.Get(selected.Value);
         var sb = new System.Text.StringBuilder();
 
-        sb.Append(TileHoverText(body, x, y));
+        sb.Append(TileHoverText(body, x, y, info.index));
 
         // ---- This tile, for this building ----
         if (info.index != SurfaceIndexKind.None)
@@ -3865,50 +3865,12 @@ public class PlanetViewWindow : MonoBehaviour
         if (body.owner == FactionManager.Player && body.settled)
             BuildPowerPanel();
 
-        // Read the exact numbers under the cursor — the overlay shows you the region, this confirms it.
-        Header("UNDER THE CURSOR");
-        var card = Card();
-        var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.Text);
-        // Reserve enough height for the FULLY-populated readout (tile position/type, ore, and one line per
-        // index) up front, so this section always occupies its space in the scroll list. Otherwise it's an
-        // empty one-liner until you hover a tile, at which point it suddenly grows and pushes the real
-        // content down BELOW the visible area — where you can't tell there's anything to scroll to. Reserving
-        // it makes the scroll range include it at all times, so it's reachable the moment it fills in.
-        int reservedLines = System.Enum.GetValues(typeof(SurfaceIndexKind)).Length + 2;  // indexes + pos/type + ore
-        t.gameObject.AddComponent<LayoutElement>().minHeight = reservedLines * 16f;
-        live.Text(t, () =>
-        {
-            if (!HasHoverCell) return "<color=#9FB4C8>Hover the map.</color>";
-            var tile = body.surface.tiles[hoverCell.x, hoverCell.y];
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"<b>({hoverCell.x}, {hoverCell.y})</b> — {tile.type}");
-            if (tile.HasOre && ResearchManager.IsDiscovered(tile.ore))
-                sb.AppendLine($"<color=#8FD0FF>Ore: {OreDatabase.Get(tile.ore).displayName}</color> ({tile.oreRichness * 100f:F0}% rich)");
-            // ONLY WHAT THE MAP IS DRAWING HERE, on exactly the map's own rule (SurfaceIndex.Shown): this
-            // world's best quarter for an index, plus anything else at 50% or better. A tile that is a
-            // poor site for all six now says so by listing none of them, which is a far clearer answer
-            // than six lines of single-digit percentages — that readout invited the player to weigh a 9%
-            // against an 11% as though either were a reason to build somewhere.
-            //
-            // Locked indexes are still listed. That is not a fact about this tile, it is a fact about
-            // your research, and silence there would read as "nothing here" rather than "you cannot see
-            // this yet".
-            int listed = 0;
-            foreach (SurfaceIndexKind k in System.Enum.GetValues(typeof(SurfaceIndexKind)))
-            {
-                if (k == SurfaceIndexKind.None) continue;
-                if (!SurfaceIndex.Unlocked(body, k)) { sb.AppendLine($"<color=#5A6A7A>{SurfaceIndex.Name(k)}: locked</color>"); continue; }
-                float v = SurfaceIndex.Get(body, k, hoverCell.x, hoverCell.y);
-                if (!SurfaceIndex.ShownFor(body, k, v, out float t)) continue;
-                listed++;
-                string hex = ColorUtility.ToHtmlStringRGB(SurfaceIndex.Highlight(k, t));
-                string best = t >= 0.75f ? "  <size=10><color=#9FB4C8>· best quarter of this world</color></size>" : "";
-                sb.AppendLine($"{SurfaceIndex.Name(k)}: <color=#{hex}><b>{v * 100f:F0}%</b></color>{best}");
-            }
-            if (listed == 0)
-                sb.AppendLine("<color=#5A6A7A><i>Nothing worth siting on here.</i></color>");
-            return sb.ToString();
-        });
+        // THE PER-TILE READOUT IS NOT HERE ANY MORE. It moved to the window anchored to the cursor,
+        // under the tile's name and temperature — see AppendIndexReadout. It was always a readout about
+        // wherever the pointer is, and putting it in a side panel meant reading it cost a look away from
+        // the tile and a look back, by which time the number was no longer about anywhere in particular.
+        Note("<color=#9FB4C8>Point at the map and the tile's own figures appear beside the cursor, " +
+             "under its name and temperature. Zoom in and the numbers appear on the tiles around it too.</color>");
     }
 
     void AddIndexToggle(SurfaceIndexKind k, string labelOverride)
@@ -6534,7 +6496,10 @@ public class PlanetViewWindow : MonoBehaviour
 
     // Tile readout for ANY body's surface (the main planet or an open moon), so a moon map's tiles show
     // the same biome / ore / temperature info the main map does.
-    string TileHoverText(CelestialBody b, int x, int y)
+    /// `except` drops one index from the readout — the one the caller is about to report in more detail
+    /// itself. While placing, the held structure's index gets its own line with an efficiency label and a
+    /// percentile on it, and printing the plain figure directly above that is the same fact twice.
+    string TileHoverText(CelestialBody b, int x, int y, SurfaceIndexKind except = SurfaceIndexKind.None)
     {
         var tile = b.surface.tiles[x, y];
         string typeHex = ColorUtility.ToHtmlStringRGB(TerrainColorMap.Get(tile.type));
@@ -6547,6 +6512,8 @@ public class PlanetViewWindow : MonoBehaviour
         float celsius = PlanetTemperature.CelsiusAt(b, y);
         string tempHex = ColorUtility.ToHtmlStringRGB(PlanetTemperature.GradientColor(celsius));
         sb.Append($"\n<color=#{tempHex}>{PlanetTemperature.Label(celsius)}</color>");
+
+        AppendIndexReadout(sb, b, x, y, except);
 
         // A construction site names itself. The ghost on the map says a structure is coming and roughly
         // how far along it is; this is where you find out WHICH structure without going to the panel and
@@ -6562,6 +6529,48 @@ public class PlanetViewWindow : MonoBehaviour
         }
 
         return sb.ToString();
+    }
+
+    // ============================================================================================
+    // THE INDEX READOUT, UNDER THE TILE TITLE
+    //
+    // This used to live at the bottom of the Survey side panel, under a heading called UNDER THE CURSOR,
+    // and it was in the wrong place for the one thing it is for. Reading it meant looking away from the
+    // tile you were pointing at, across to a panel on the other side of the window, and then back — and
+    // in that round trip the number you had just read stopped being about anywhere in particular. A
+    // readout about the cursor belongs AT the cursor, under the tile's name and its temperature, where
+    // the eye already is.
+    //
+    // It follows the same rule as everything else: a tile that no index reaches says so in one line,
+    // rather than listing six single-digit percentages and inviting the player to weigh a 9% against an
+    // 11% as though either were a reason to build somewhere.
+    //
+    // Locked indexes are still named. That is a fact about your RESEARCH rather than about this tile,
+    // and silence would read as "nothing here" when it means "you cannot see this yet".
+    // ============================================================================================
+    void AppendIndexReadout(System.Text.StringBuilder sb, CelestialBody b, int x, int y, SurfaceIndexKind except)
+    {
+        if (b?.surface == null) return;
+
+        int listed = 0, locked = 0;
+        foreach (var k in SurfaceIndex.All)
+        {
+            if (k == except) continue;
+            if (!SurfaceIndex.Unlocked(b, k)) { locked++; continue; }
+
+            float v = SurfaceIndex.Get(b, k, x, y);
+            if (!SurfaceIndex.ShownFor(b, k, v, out float t)) continue;
+
+            listed++;
+            string hex = ColorUtility.ToHtmlStringRGB(SurfaceIndex.Outline(k, t));
+            sb.Append($"\n<size=11><color=#{hex}>{SurfaceIndex.ShortName(k)} <b>{v * 100f:F0}%</b></color></size>");
+        }
+
+        if (listed == 0)
+            sb.Append("\n<size=10><color=#5A6A7A><i>no resource here</i></color></size>");
+
+        if (locked > 0)
+            sb.Append($"\n<size=10><color=#5A6A7A>{locked} more index{(locked == 1 ? "" : "es")} not yet surveyed</color></size>");
     }
 
     void RecomputeHoverValidity()
