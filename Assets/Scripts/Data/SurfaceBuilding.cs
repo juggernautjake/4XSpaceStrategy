@@ -523,11 +523,15 @@ public static class SurfaceBuildingDatabase
         // relays you're allowed one of is not a grid.
 
         // The relay. No output of its own; its entire job is REACH. Seven tiles of it, which is what
-        // turns two cities' separate grids into one grid, or carries a reactor's output to the mining
-        // country on the far side of a mountain.
+        // carries a reactor's output to the mining country on the far side of a mountain.
+        //
+        // IT MUST BE PLANTED IN POWER. A pylon can only go on ground the grid already reaches, or
+        // against a building that already has power (PowerGrid.CanPlantNodeAt) — it EXTENDS a grid, and
+        // one dropped in empty desert extends nothing. Before that rule, two relays fourteen tiles apart
+        // in the middle of nowhere were a working grid with no plant within a continent of them.
         var node = new SurfaceBuildingInfo(SurfaceBuildingType.PowerNode, SurfaceBuildingCategory.Electrical,
             "Power Node",
-            "A relay pylon. Makes no power at all — it CARRIES it, seven tiles in every direction. Chain them and two isolated grids become one; lose the node in the middle of the chain and they are two again. The cheapest tile on this list and the one that decides the shape of everything else.",
+            "A relay pylon. Makes no power at all — it CARRIES it, seven tiles in every direction. Must be planted where there is already power: on ground the grid reaches, or against a building that has some. Chain them out from a plant and the grid follows; lose one in the middle of the chain and everything past it goes dark. The cheapest tile on this list and the one that decides the shape of everything else.",
             S(0, 0), SurfaceIndexKind.None, 30, 20, 8f, new Color(0.30f, 0.75f, 1.00f));
         node.powerRange = 7f;
         _all[(int)SurfaceBuildingType.PowerNode] = node;
@@ -546,7 +550,6 @@ public static class SurfaceBuildingDatabase
             "Burns whatever is under it — coal, peat, timber. Primitive, dirty and cheap, and it will light a young colony's first grid on ground that could never support a reactor. Wants something worth burning: it reads the Mineral Index.",
             S(0, 0, 0, 1, 1, 0), SurfaceIndexKind.Mineral, 40, 10, 10f, new Color(0.75f, 0.45f, 0.25f));
         comb.energyPerSec = 1.0f;
-        comb.powerRange = 1.5f;
         _all[(int)SurfaceBuildingType.CombustionPlant] = comb;
 
         // Domino.
@@ -555,7 +558,6 @@ public static class SurfaceBuildingDatabase
             "A boiler hall and turbine. Needs water to raise steam with, so it wants a river or a coast — check the Hydro Index. Solid, unglamorous, moderate power anywhere wet.",
             S(0, 0, 0, 1), SurfaceIndexKind.Water, 70, 30, 16f, new Color(0.80f, 0.82f, 0.86f));
         steam.energyPerSec = 1.8f;
-        steam.powerRange = 1.5f;
         _all[(int)SurfaceBuildingType.SteamTurbine] = steam;
 
         // Z-tetromino.
@@ -564,7 +566,6 @@ public static class SurfaceBuildingDatabase
             "A pressurised-water pile. Doesn't care what it sits on and doesn't care about the weather — the first generator that makes a grid genuinely reliable rather than merely present.",
             S(0, 1, 1, 1, 1, 0, 2, 0), SurfaceIndexKind.None, 120, 80, 22f, new Color(0.55f, 0.95f, 0.45f));
         fission.energyPerSec = 2.4f;
-        fission.powerRange = 1.5f;
         fission.requiredTech = "F1";
         _all[(int)SurfaceBuildingType.FissionReactor] = fission;
 
@@ -574,26 +575,43 @@ public static class SurfaceBuildingDatabase
             "The real thing. Terrain-independent, weather-independent, and worth more than any two other plants on this list put together. Expensive enough that where you put it — and what you wire it to — matters.",
             S(0, 0, 1, 0, 0, 1, 1, 1), SurfaceIndexKind.None, 200, 150, 30f, new Color(0.60f, 0.85f, 1.00f));
         fusion.energyPerSec = 4.0f;
-        fusion.powerRange = 1.5f;
         fusion.requiredTech = "F2";
         _all[(int)SurfaceBuildingType.FusionReactor] = fusion;
 
-        // ---- Power: who makes it, who moves it, who eats it ----
+        // ============================================================================================
+        // POWER: WHO MAKES IT, WHO MOVES IT, WHO EATS IT
         //
-        // GENERATORS light their own footprint and the ring around it (range 1.5 reaches the diagonals
-        // too). That's deliberately a very short reach: a plant powers what's built AROUND it, and
-        // getting its output anywhere else is what Power Nodes are for.
+        // ONLY GENERATORS PROJECT A GRID beyond their own footprint (PowerGrid.Projects), so powerRange
+        // on anything that does not generate is now meaningless — a capacitor lights its own tiles
+        // because it is ON the grid, not because of a number here. The one exception is the Power Node,
+        // whose whole job is to relay.
         //
-        // INVARIANT: everything with energyPerSec > 0 must also have powerRange > 0, or its output
-        // would have no grid to land in. Enforced below rather than left to whoever adds the next plant.
-        Project(SurfaceBuildingType.GeothermalPlant, 1.5f);
-        Project(SurfaceBuildingType.SolarArray, 1.5f);
-        Project(SurfaceBuildingType.WindFarm, 1.5f);
-        Project(SurfaceBuildingType.HydroPlant, 1.5f);
+        // GENERATOR REACH, and why it went up. It was a flat 1.5 for every plant, which reaches the
+        // eight surrounding tiles and nothing else — so a reactor powered the ring it was standing in
+        // and every single connection past that was a pylon. That made the node chain not a tool but a
+        // tax: you could not put a plant near your industry and have it work, you had to wire it.
+        //
+        // Now it scales with what kind of plant it is, and the ordering is the plant's own scale rather
+        // than its output: a combustion shed serves a village, a reactor serves a district. Tier
+        // multiplies it further (PowerGrid.CoverageOf applies LevelMult), so a level-3 fusion plant
+        // reaches about seven tiles and genuinely is the thing you build a city around.
+        //
+        // INVARIANT: everything with energyPerSec > 0 must also have powerRange > 0, or its output would
+        // have no grid to land in. Enforced below rather than left to whoever adds the next plant.
+        Project(SurfaceBuildingType.CombustionPlant, 2f);      // a shed with a chimney
+        Project(SurfaceBuildingType.SteamTurbine, 2.5f);
+        Project(SurfaceBuildingType.WindFarm, 2.5f);
+        Project(SurfaceBuildingType.SolarArray, 2.5f);
+        Project(SurfaceBuildingType.GeothermalPlant, 3f);
+        Project(SurfaceBuildingType.HydroPlant, 3f);           // a dam is a piece of regional infrastructure
+        Project(SurfaceBuildingType.FissionReactor, 3.5f);
+        Project(SurfaceBuildingType.FusionReactor, 4f);        // the one you plan a continent around
 
-        // The switchyard was already the "pack your plants tightly" building. Now it relays as well —
-        // modestly, three tiles, so it's a local tidy-up rather than a substitute for a node chain.
-        Project(SurfaceBuildingType.PowerDistribution, 3f);
+        // The switchyard is NOT a generator and no longer projects at all. It kept a 3-tile relay from
+        // when everything with a range projected, and that made it a cheap node you could chain — which
+        // is not what it is for. Its job is the adjacency bonus: pack your plants against it and they
+        // all run better. It still conducts, like every other building on the grid.
+        Project(SurfaceBuildingType.PowerDistribution, 0f);
 
         // THE SEATS OF GOVERNMENT GENERATE, BUT THEY LIGHT ONLY THEIR OWN DOORSTEP.
         //

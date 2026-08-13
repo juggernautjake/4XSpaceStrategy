@@ -234,48 +234,59 @@ public static class BuildShapeRules
     // reaching across a continent one gesture instead of forty clicks at a spacing the player has to
     // work out by eye.
     //
-    // THE SPACING IS THE INTERESTING NUMBER. Two projectors are on the same grid when their lit ground
-    // OVERLAPS (PowerGrid), and a node lights `powerRange` tiles in every direction, so two nodes stay
-    // joined while they are at most 2 * powerRange apart. We step at slightly under that — see
-    // ChainSafety — because the span rarely divides evenly and a chain that is one tile too long
-    // somewhere in the middle is two grids, silently, which is exactly the failure the player cannot see.
+    // THE SPACING IS THE INTERESTING NUMBER, AND IT HALVED.
     //
-    // The step is measured along the DOMINANT axis and the line is walked with the same integer
-    // interpolation a Bresenham run would use, so a diagonal drag lays a diagonal chain rather than an
-    // L-shaped one.
+    // It used to be 2 * powerRange, because the old connection rule was "two projectors are one grid
+    // when their lit ground OVERLAPS" — two discs of radius r touch at 2r apart. That rule is gone. A
+    // relay now has to STAND ON ground that already has power (PowerGrid.CanPlantNodeAt), so the next
+    // pylon must be inside the previous pylon's disc rather than merely tangent to it: at most r apart,
+    // not 2r. Left at the old spacing, every chain longer than one span would lay a row of masts that
+    // each refused to connect to the one behind it.
+    //
+    // Backed off by ChainSafety on top of that, because the span rarely divides evenly and a chain one
+    // tile too long somewhere in the middle is a chain that stops there, silently — exactly the failure
+    // the player cannot see.
+    //
+    // MEASURED IN TRUE DISTANCE, not along the dominant axis. The old version stepped by whole cells of
+    // the longer axis, which on a 45-degree drag makes the real gap between consecutive pylons sqrt(2)
+    // times the step — so a chain that was correctly spaced when dragged north came out 41% too long
+    // when dragged north-east, and broke. Dividing the segment into equal EUCLIDEAN parts costs one
+    // square root and is right at every angle.
     // ============================================================================================
 
-    /// How much of the theoretical maximum reach a chain actually uses. Under 1 on purpose.
-    public const float ChainSafety = 0.9f;
+    /// How much of a relay's reach a chain actually uses between masts. Under 1 on purpose.
+    public const float ChainSafety = 0.85f;
 
-    /// Lay a chain of node positions from `anchor` toward `cursor`, spaced to stay on one grid.
+    /// Lay a chain of node positions from `anchor` toward `cursor`, spaced so each stands in the last
+    /// one's light.
     ///
-    /// Always includes the anchor, so a click with no drag is simply a single pylon.
+    /// Always includes the anchor, so a click with no drag is simply a single pylon, and always includes
+    /// the far end, because the one thing this control promises is reach to where you dragged.
     public static List<Vector2Int> NodeChain(Vector2Int anchor, Vector2Int cursor, float powerRange)
     {
         var outCells = new List<Vector2Int> { anchor };
 
-        int dx = cursor.x - anchor.x, dy = cursor.y - anchor.y;
-        int span = Mathf.Max(Mathf.Abs(dx), Mathf.Abs(dy));
-        if (span <= 0) return outCells;
+        float dx = cursor.x - anchor.x, dy = cursor.y - anchor.y;
+        float total = Mathf.Sqrt(dx * dx + dy * dy);
+        if (total < 0.5f) return outCells;
 
-        // Two nodes hold together while their lit discs overlap: at most 2*range apart, backed off by
-        // ChainSafety. Floored at 1 so a zero-range node still advances and this cannot spin.
-        int step = Mathf.Max(1, Mathf.FloorToInt(2f * Mathf.Max(0.5f, powerRange) * ChainSafety));
+        float maxGap = Mathf.Max(1f, powerRange * ChainSafety);
 
-        for (int d = step; d <= span; d += step)
+        // Equal parts, each no longer than maxGap. Ceil, so the LAST segment is short rather than long —
+        // rounding the other way would put one over-length gap at the end of every chain.
+        int parts = Mathf.Max(1, Mathf.CeilToInt(total / maxGap));
+
+        for (int i = 1; i <= parts; i++)
         {
-            float t = d / (float)span;
-            outCells.Add(new Vector2Int(
+            float t = i / (float)parts;
+            var cell = new Vector2Int(
                 anchor.x + Mathf.RoundToInt(dx * t),
-                anchor.y + Mathf.RoundToInt(dy * t)));
-        }
+                anchor.y + Mathf.RoundToInt(dy * t));
 
-        // The far end always gets a pylon, even when the span does not divide evenly by the step —
-        // otherwise a drag ending just past the last node stops short of where the player pointed, and
-        // the one thing this control promises is reach to where you dragged.
-        var last = new Vector2Int(cursor.x, cursor.y);
-        if (outCells[outCells.Count - 1] != last) outCells.Add(last);
+            // Rounding to the grid can land two consecutive points on the same cell for a very short
+            // drag; a duplicate would be a second pylon on an occupied tile, refused at placement.
+            if (cell != outCells[outCells.Count - 1]) outCells.Add(cell);
+        }
 
         return outCells;
     }

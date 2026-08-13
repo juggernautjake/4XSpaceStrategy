@@ -1370,6 +1370,12 @@ public class PlanetViewWindow : MonoBehaviour
             if (powerRepaintIn <= 0f) { powerRepaintIn = 0.25f; RefreshPowerOverlay(); }
         }
 
+        // The pylon-to-pylon lines, every frame while the grid is up. Unlike the overlay texture — which
+        // is anchored in the map's normalised space and rescales itself — these are quads whose LENGTH
+        // is in map pixels, so they have to be re-measured whenever the map is zoomed or panned. There
+        // are a handful of them, and the ghost layer already rebuilds far more than this per frame.
+        DrawNodeLinks(PowerOverlayActive && body.surface != null);
+
         UpdateStatus();
     }
 
@@ -2810,7 +2816,7 @@ public class PlanetViewWindow : MonoBehaviour
                 var pw = new System.Text.StringBuilder();
                 if (info.energyPerSec > 0f) pw.Append($" · <color=#F5F58C>+{info.energyPerSec:0.0} power</color>");
                 if (info.powerDraw > 0f) pw.Append($" · <color=#FFBF4D>-{info.powerDraw:0.0} power</color>");
-                if (info.powerRange > 0f) pw.Append($" · <color=#4DC8FF>lights {info.powerRange:0.#}</color>");
+                if (PowerGrid.Projects(info)) pw.Append($" · <color=#4DC8FF>lights {info.powerRange:0.#}</color>");
                 if (info.powerStorage > 0f) pw.Append($" · <color=#4DC8FF>banks {info.powerStorage:0}</color>");
 
                 return $"<color=#{hex}>{m} metal · {e} energy</color> · {info.Cells} tiles · {idx}{pw}";
@@ -4223,6 +4229,9 @@ public class PlanetViewWindow : MonoBehaviour
             powerOverlayImage.gameObject.SetActive(wantPower);
             if (wantPower) RefreshPowerOverlay();
         }
+        // The transmission lines are NOT drawn here. They are quads measured in map pixels, so they have
+        // to be re-laid whenever the map is zoomed or panned — which does not rebuild the overlay. See
+        // the call in Update.
 
         // Two different overlays share one texture:
         //  BUILD  — holding a structure raises THAT STRUCTURE'S OWN INDEX, so a farm shows the Fertile
@@ -4451,7 +4460,10 @@ public class PlanetViewWindow : MonoBehaviour
         var electricBlue = new Color(0.25f, 0.72f, 1.00f, 0.85f);
         foreach (var p in SurfaceBuildManager.On(body))
         {
-            if (p.Info.powerRange <= 0f && p.Info.powerStorage <= 0f) continue;
+            // The blue "this is infrastructure" mark goes on what MAKES or MOVES or BANKS power. Read
+            // through Projects rather than off powerRange, so a switchyard that no longer lights ground
+            // stops being drawn as though it did.
+            if (!PowerGrid.Projects(p.Info) && p.Info.powerStorage <= 0f) continue;
             foreach (var c in SurfaceBuildingDatabase.Footprint(p))
             {
                 if (c.x < 0 || c.y < 0 || c.x >= w || c.y >= h) continue;
@@ -4472,6 +4484,67 @@ public class PlanetViewWindow : MonoBehaviour
         powerTex.Apply();
         if (powerOverlayImage != null) powerOverlayImage.texture = powerTex;
     }
+
+    // ============================================================================================
+    // THE TRANSMISSION LINES
+    //
+    // Electric blue, pylon to pylon, in the Power overlay — the same blue the plants and relays are
+    // drawn in, because it is the same thing: the infrastructure, as opposed to the yellow ground it
+    // lights. A chain of relays used to read as a row of unrelated dots, and whether any two of them
+    // were actually carrying power to each other was invisible.
+    //
+    // Drawn as ROTATED QUADS on their own layer rather than into the overlay texture. The texture is one
+    // texel per tile, so a diagonal line in it would be a staircase of whole cells — unreadable at the
+    // zoom levels where the chain matters, and it would also stamp over the yellow it is supposed to sit
+    // on top of. A quad is a straight line at any angle and any zoom, and its thickness stays in pixels.
+    // ============================================================================================
+    RectTransform nodeLinkLayer;
+
+    void DrawNodeLinks(bool show)
+    {
+        if (nodeLinkLayer == null)
+        {
+            if (!show) return;
+            nodeLinkLayer = UIFactory.NewUI(mapRT, "NodeLinks").GetComponent<RectTransform>();
+            UIFactory.Stretch(nodeLinkLayer);
+            var img = nodeLinkLayer.gameObject.AddComponent<Image>();
+            img.color = new Color(0, 0, 0, 0); img.raycastTarget = false;
+        }
+
+        for (int i = nodeLinkLayer.childCount - 1; i >= 0; i--) Destroy(nodeLinkLayer.GetChild(i).gameObject);
+        nodeLinkLayer.gameObject.SetActive(show);
+        if (!show || body?.surface == null) return;
+
+        int w = body.surface.width, h = body.surface.height;
+        float tileW = mapRT.rect.width / w, tileH = mapRT.rect.height / h;
+
+        // The same electric blue RefreshPowerOverlay paints the relays themselves in.
+        var wire = new Color(0.25f, 0.72f, 1.00f, 0.95f);
+
+        foreach (var link in PowerGrid.NodeLinks(body))
+        {
+            // Cell centres, in the map's local space (origin at its middle, which is what anchoring at
+            // 0.5,0.5 and offsetting by an anchoredPosition means).
+            Vector2 a = new Vector2((link.a.x + 0.5f - w * 0.5f) * tileW, (link.a.y + 0.5f - h * 0.5f) * tileH);
+            Vector2 bb = new Vector2((link.b.x + 0.5f - w * 0.5f) * tileW, (link.b.y + 0.5f - h * 0.5f) * tileH);
+
+            Vector2 d = bb - a;
+            float len = d.magnitude;
+            if (len < 0.01f) continue;
+
+            var q = UIFactory.Panel(nodeLinkLayer, "wire", wire);
+            q.raycastTarget = false;
+            var rt = q.rectTransform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(len, NodeLinkPx);
+            rt.anchoredPosition = (a + bb) * 0.5f;
+            rt.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg);
+        }
+    }
+
+    /// Wire thickness, in screen pixels — like the building outlines, so it stays a line at every zoom.
+    const float NodeLinkPx = 2.5f;
 
     void EnsureOverlayTex(int w, int h)
     {
@@ -6106,15 +6179,73 @@ public class PlanetViewWindow : MonoBehaviour
         if (cells.Count == 0) return;
 
         // A CHAIN IS N BUILDINGS, NOT ONE. Each pylon is its own relay that can be destroyed on its own
-        // and break the chain in half, so they are placed one at a time, and one that lands on bad
+        // and break the chain in half, so they are queued one at a time, and one that lands on bad
         // ground is skipped rather than failing the whole run.
-        int placed = 0;
-        foreach (var c in cells)
-            if (SurfaceBuildManager.CanPlace(body, type, c.x, c.y, 0, out _)
-                && SurfaceBuildManager.Place(body, type, c.x, c.y, 0)) placed++;
+        //
+        // QUEUED, NOT PLACED. These used to go up the instant the button was released — the only
+        // structure in the game that appeared out of nothing. A pylon is cheap, not free of effort, and
+        // an instant one made the relay the answer to every power problem because it was the only
+        // building with no delay attached. Now it takes its eight seconds like everything else, which
+        // also means a long chain across a continent is a real commitment of time and Labor.
+        //
+        // ---- THE CHAIN VALIDATES AGAINST ITSELF ----
+        //
+        // A pylon may only be planted where there is already power. Applied naively to a queued chain
+        // that rule refuses everything past the first one, because the pylons ahead do not exist yet and
+        // the grid they will make does not either — so a drag across a continent would lay exactly one
+        // mast and the control would be pointless.
+        //
+        // So the run is walked IN ORDER and each pylon is accepted if the grid reaches it OR a pylon
+        // already accepted in this same run does. That is the same rule, applied to the chain as the
+        // player is committing to it: the first mast has to start from real power, and every one after
+        // it hangs off the one before. A drag that begins in empty desert still lays nothing.
+        //
+        // The reach test uses the pylon's own powerRange at tier 1, which is what a newly built one will
+        // have. Being conservative here is correct — quoting an upgraded reach for a mast that has not
+        // been upgraded would let a chain be committed that then fails to connect.
+        int queued = 0;
+        string firstWhy = null;
+        var one = new List<Vector2Int>(1) { Vector2Int.zero };
+        var accepted = new List<Vector2Int>();
+        float reach = info.powerRange;
+        float reach2 = reach * reach;
 
-        if (placed > 0) { lastSig = null; SimpleAudio.Instance?.PlayComplete(); }
-        else SimpleAudio.Instance?.PlayTick();
+        foreach (var c in cells)
+        {
+            // The ordinary ground checks — in bounds, dry, clear, affordable, and the node rule.
+            bool ok = SurfaceBuildManager.CanPlace(body, type, c.x, c.y, 0, out string why);
+
+            // ...but a refusal that is ONLY about power is forgiven when the pylon behind it will
+            // supply it. Anything else (water, occupied ground, no metal) still refuses.
+            if (!ok && WithinReach(accepted, c, reach2)
+                && SurfaceBuildManager.CanPlace(body, type, c.x, c.y, 0, out _, ignoreNodePower: true))
+                ok = true;
+
+            if (!ok) { firstWhy = firstWhy ?? why; continue; }
+
+            one[0] = c;
+            if (SurfaceBuildQueue.Enqueue(body, type, one, out why) != null) { queued++; accepted.Add(c); }
+            else firstWhy = firstWhy ?? why;
+        }
+
+        if (queued > 0) { lastSig = null; SimpleAudio.Instance?.PlayComplete(); }
+        else
+        {
+            SimpleAudio.Instance?.PlayTick();
+            if (!string.IsNullOrEmpty(firstWhy))
+                NotificationManager.Instance?.Push("Can't run pylons there", firstWhy, null, NotifKind.Danger);
+        }
+    }
+
+    /// Is `c` inside the relay reach of any pylon already accepted in this run?
+    static bool WithinReach(List<Vector2Int> accepted, Vector2Int c, float reach2)
+    {
+        foreach (var a in accepted)
+        {
+            float dx = a.x - c.x, dy = a.y - c.y;
+            if (dx * dx + dy * dy <= reach2) return true;
+        }
+        return false;
     }
 
     void EndDraw()

@@ -144,6 +144,17 @@ public static class SurfaceBuildManager
     }
 
     public static bool CanPlace(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation, out string why)
+        => CanPlace(b, t, x, y, rotation, out why, false);
+
+    /// As above, with the option to skip the "a relay must start from power" gate.
+    ///
+    /// Exactly one caller passes true: the node-chain drag, which is committing a RUN of pylons where
+    /// each is supplied by the one before it. Those pylons do not exist yet, so the live grid cannot
+    /// answer for them and the chain has to vouch for itself (see PlanetViewWindow's CommitDraw). Every
+    /// other gate still applies — the exemption is narrow on purpose, because a general "skip the
+    /// checks" flag is how a placement path quietly stops enforcing anything.
+    public static bool CanPlace(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation,
+                                out string why, bool ignoreNodePower)
     {
         why = null;
         var info = SurfaceBuildingDatabase.Get(t);
@@ -199,6 +210,14 @@ public static class SurfaceBuildManager
         // A world's shipyard already exists (the capital's birthright yard, say) — don't allow a second.
         if (t == SurfaceBuildingType.SurfaceShipyard && b.shipyardLevel >= 1)
         { why = "this world already has a shipyard — upgrade its tier from the Production tab"; return false; }
+
+        // A RELAY HAS TO START FROM POWER. Checked here, per placement, rather than in CanPlaceType,
+        // because unlike every other gate in that method this one is about the SPOT rather than about
+        // the world: a node is perfectly buildable on this planet, just not in that particular desert.
+        // See PowerGrid.CanPlantNodeAt.
+        if (t == SurfaceBuildingType.PowerNode && !ignoreNodePower && !GameMode.DevMode &&
+            !PowerGrid.CanPlantNodeAt(b, SurfaceBuildingDatabase.Footprint(t, x, y, rotation), out why))
+            return false;
 
         var occupied = Occupied(b);
 
@@ -261,7 +280,10 @@ public static class SurfaceBuildManager
         // The lookup walks the whole FOOTPRINT, exactly as the real connection rule does. Asking about
         // the origin cell alone would tell you "no grid here" for a four-tile plant whose origin sits
         // one tile off the light — and then power it fully the moment you placed it anyway.
-        if (info.powerRange > 0f) parts.Add($"lights {info.powerRange:0.#} tiles");
+        // Only if it actually PROJECTS. powerRange survives on classes that no longer light anything
+        // beyond their own footprint, and quoting "lights 3 tiles" for a switchyard that lights none
+        // would be the card contradicting the map.
+        if (PowerGrid.Projects(info)) parts.Add($"lights {info.powerRange:0.#} tiles");
         if (info.powerDraw > 0f || info.powerStorage > 0f)
         {
             var net = PowerGrid.NetForFootprint(b, t, x, y, rotation);

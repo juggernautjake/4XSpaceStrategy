@@ -6,27 +6,50 @@ using UnityEngine;
 //
 // Energy used to be a stockpile and nothing else: a plant added to it, anything anywhere could spend
 // it, and where you put the plant never mattered. This makes power LOCAL. A generator lights the ground
-// around itself; a Power Node relays that reach seven tiles further; anything standing on lit ground
-// runs properly, and anything off it limps along on its own back-up plant.
+// around itself; a Power Node relays that reach further; anything standing on lit ground runs properly,
+// and anything off it limps along on its own back-up plant.
 //
-// ---- What a grid IS ----
-// A grid is a CONNECTED COMPONENT OF PROJECTORS. A projector is anything that lights ground:
+// ---- WHO LIGHTS GROUND, AND WHO ONLY CARRIES IT ----
 //
-//   GENERATOR     — lights its own footprint and the ring immediately around it, and feeds the grid.
-//   POWER NODE    — a 1x1 relay with a wide circular reach and no output of its own. The thing you
-//                   chain across a continent to join two cities together.
-//   SWITCHYARD    — Power Distribution: a modest relay that also boosts the plants it touches.
-//   THE CAPITOL   — the colony's founding reactor, but it lights only its own doorstep (one tile),
-//                   so reaching anywhere else is what the rest of the Electrical category is for.
+// This is the distinction the whole file now turns on, and it used to not exist.
 //
-// Two projectors are in the same grid when the ground they light OVERLAPS. That single rule is the
-// whole system, and every behaviour in the spec falls out of it:
+//   A GENERATOR PROJECTS. It lights its own footprint and a disc around it, and the disc is generous
+//   now — two to four tiles depending on what kind of plant it is and what tier it has reached. That
+//   projection is what founds a grid: without a plant, nothing anywhere is lit.
 //
-//   - Chain nodes between two cities and the two grids BECOME one grid. Nothing merges them; they were
-//     never separate once their light overlapped.
-//   - Blow a node out of the middle of that chain and they are two grids again. Nothing splits them.
-//   - Drop a generator inside an existing grid and it contributes to that grid rather than starting its
-//     own — again, not because anything checked, but because its light overlaps.
+//   EVERYTHING ELSE ONLY CONDUCTS. A farm, a factory, a capacitor, a relay: each lights its OWN
+//   footprint and nothing beyond it, and only while it is itself connected. So a building on the grid
+//   passes power through itself to whatever is built against it, and a line of factories walks the
+//   supply along without a single pylon — but no non-generator ever throws light onto empty ground.
+//
+//   A POWER NODE is the exception that proves it, and it is deliberately awkward: it projects a wide
+//   disc like a plant, but ONLY once it is itself connected. See the note on the two passes below.
+//
+// The old rule was one line — "two projectors are in the same grid when the ground they light
+// overlaps" — and it was elegant and wrong in one specific, exploitable way: a chain of Power Nodes
+// standing in empty desert, touching nothing, was a grid. Two such chains whose discs happened to
+// overlap were one grid. Nothing had to be connected to anything; the projections alone did it, and a
+// node dropped anywhere on the map with another node within fourteen tiles was instantly wired in.
+//
+// ---- WHAT A GRID IS NOW ----
+//
+// A grid is still a connected component, but of a graph whose EDGES are contact rather than overlap:
+//
+//   Two buildings are joined when their footprints TOUCH edge-to-edge, or when one of them is a
+//   GENERATOR (or a connected node) whose projected disc covers a cell of the other.
+//
+// So power flows out of a plant, across the ground it lights, and then THROUGH the buildings it
+// reaches, into whatever those touch. A node extends that reach, but only from inside it.
+//
+// Every behaviour still falls out of the connectivity rather than being maintained:
+//
+//   - Chain nodes from a city out to a mine and the two are one grid, because each node in the chain
+//     is lit by the one behind it, back to a plant.
+//   - Blow a node out of the middle and everything past it goes dark. Nothing splits them; the chain
+//     simply no longer reaches.
+//   - Drop a generator inside an existing grid and it contributes to that grid rather than starting
+//     its own.
+//   - Drop a node in the desert and it does nothing at all, which is the point.
 //
 // ---- Why this is DERIVED and not MAINTAINED ----
 // Merge-on-connect and split-on-destroy are where everyone writes the bugs. The split case needs a
@@ -156,22 +179,44 @@ public static class PowerGrid
     public static void Invalidate() { cache.Clear(); ownerCache.Clear(); cacheFrame = -1; }
 
     // ---- Coverage ----
-    /// The tiles one projector lights: everything within its range of any cell of its own footprint.
-    /// Range is Euclidean and measured cell-centre to cell-centre, so a node's reach is a DISC — the
-    /// spec's "circularly around it" — rather than the square a Chebyshev range would give.
+
+    /// Does this class throw light onto ground OUTSIDE its own footprint?
+    ///
+    /// Only generators, and the relay whose entire purpose is to be one. This is the rule that replaced
+    /// "anything with a powerRange projects": a capacitor, a switchyard and a farm all have reasons to
+    /// be ON the grid and no business creating one, and letting them project meant a bank of capacitors
+    /// in the desert lit fourteen tiles of nothing.
+    public static bool Projects(SurfaceBuildingInfo info)
+        => info != null && info.powerRange > 0f
+        && (info.energyPerSec > 0f || info.type == SurfaceBuildingType.PowerNode);
+
+    /// The tiles one building lights.
+    ///
+    /// For a generator (or a connected node) that is a DISC of `powerRange` around every cell of its
+    /// footprint — Euclidean and measured cell-centre to cell-centre, so the reach is round rather than
+    /// the square a Chebyshev range would give.
+    ///
+    /// For EVERYTHING ELSE it is exactly its own footprint. That is not a degenerate case, it is the
+    /// pass-through rule: a building standing on the grid conducts, so its own tiles are lit and
+    /// anything built against them is reached — but nothing spills onto bare ground.
     public static HashSet<Vector2Int> CoverageOf(CelestialBody b, PlacedBuilding p)
     {
         var set = new HashSet<Vector2Int>();
-        float r = p.Info.powerRange;
-        if (r <= 0f || b?.surface == null) return set;
+        if (b?.surface == null || p == null) return set;
 
-        // A node's reach grows with its tech level: a level-3 relay genuinely covers more ground, which
-        // is what makes upgrading one worth doing instead of building a second.
-        r *= p.LevelMult;
+        var cells = SurfaceBuildingDatabase.Footprint(p);
+        foreach (var c in cells)
+            if (c.x >= 0 && c.y >= 0 && c.x < b.surface.width && c.y < b.surface.height) set.Add(c);
+
+        if (!Projects(p.Info)) return set;
+
+        // A projector's reach grows with its tech level: a level-3 relay genuinely covers more ground,
+        // which is what makes upgrading one worth doing instead of building a second.
+        float r = p.Info.powerRange * p.LevelMult;
         int ri = Mathf.CeilToInt(r);
         float r2 = r * r;
 
-        foreach (var cell in SurfaceBuildingDatabase.Footprint(p))
+        foreach (var cell in cells)
             for (int dy = -ri; dy <= ri; dy++)
                 for (int dx = -ri; dx <= ri; dx++)
                 {
@@ -183,37 +228,127 @@ public static class PowerGrid
         return set;
     }
 
-    // ---- Derivation ----
+    // ============================================================================================
+    // DERIVATION — grow outward from the plants, twice
+    //
+    // The old derivation was a union-find over everything that had a powerRange, joined wherever two
+    // discs overlapped. It could not express the rule this now needs, for a reason worth stating: union-
+    // find has no notion of a SOURCE. Every participant is symmetric, so "these two nodes are joined
+    // because their light overlaps" and "this node is joined because a plant reaches it" are the same
+    // statement to it, and there is no way to say that the second is required for the first.
+    //
+    // So this is a flood fill from the generators instead, and it runs TWICE:
+    //
+    //   PASS 1 grows the grid using only what is definitely energised — the plants' discs, and then
+    //          contact through the buildings those discs reach. Nodes joined during this pass are
+    //          CONNECTED, and being connected is what switches their own projection on.
+    //   PASS 2 re-runs the same fill with those nodes now projecting, which reaches further buildings,
+    //          which may energise further nodes...
+    //
+    // ...so it repeats until nothing new lights up. That fixed point is exactly the node chain: each
+    // pylon is lit by the one behind it, back to a plant, and a pylon that never gets lit never lights
+    // anything. A chain in the empty desert stays dark however long it is, which is the whole point.
+    //
+    // Every round only ever ADDS unions, so the set of live nodes grows monotonically and the loop
+    // converges — in at most one round per node, and in practice in two or three. Bounded anyway,
+    // because a grid derivation that failed to terminate would hang the game rather than look wrong.
+    //
+    // ---- WHAT COUNTS AS AN EDGE ----
+    //
+    //   SHARED COVERAGE   two buildings that light the same cell are joined. This is the old rule, kept,
+    //                     and it is what makes two reactors standing side by side one grid rather than
+    //                     two — their discs overlap over ground neither of them occupies. What CHANGED
+    //                     is which buildings have coverage beyond their own tiles at all.
+    //   CONTACT           two buildings whose footprints touch edge-to-edge are joined. This is new, and
+    //                     it is the pass-through rule: a building on the grid conducts, so a line of
+    //                     factories carries the supply along without a pylon.
+    //
+    // A COMPONENT IS A GRID ONLY IF IT CONTAINS A PLANT. That one line is what kills the relay chain in
+    // the desert: those nodes are perfectly well connected to each other and to nothing that generates,
+    // so they form a component with no plant in it and simply are not a grid.
+    // ============================================================================================
     static List<PowerNet> Compute(CelestialBody b, out Dictionary<PlacedBuilding, PowerNet> ownerByBuilding)
     {
         var nets = new List<PowerNet>();
         ownerByBuilding = new Dictionary<PlacedBuilding, PowerNet>();
 
-        var projectors = new List<PlacedBuilding>();
-        foreach (var p in SurfaceBuildManager.On(b))
-            if (p.Info.powerRange > 0f) projectors.Add(p);
-        if (projectors.Count == 0) return nets;
+        var all = SurfaceBuildManager.On(b);
+        if (all.Count == 0) return nets;
 
-        var cov = new List<HashSet<Vector2Int>>(projectors.Count);
-        foreach (var p in projectors) cov.Add(CoverageOf(b, p));
+        // Every building's own tiles, and a cell -> building index so contact is a lookup rather than a
+        // comparison of every footprint against every other.
+        int n = all.Count;
+        var own = new List<List<Vector2Int>>(n);
+        var cellOwner = new Dictionary<Vector2Int, int>();
+        var generators = new List<int>();
 
-        // Union-find over projectors, joined by any tile two of them both light. Walking the cells once
-        // and unioning on collision is what makes "their light overlaps" transitive: if A meets B on one
-        // tile and B meets C on another, all three end up in one component without anyone comparing A to
-        // C. That transitivity IS the node chain.
-        var parent = new int[projectors.Count];
-        for (int i = 0; i < parent.Length; i++) parent[i] = i;
-        var claimed = new Dictionary<Vector2Int, int>();
-        for (int i = 0; i < projectors.Count; i++)
-            foreach (var c in cov[i])
-            {
-                if (claimed.TryGetValue(c, out int j)) Union(parent, i, j);
-                else claimed[c] = i;
-            }
+        for (int i = 0; i < n; i++)
+        {
+            var cells = SurfaceBuildingDatabase.Footprint(all[i]);
+            own.Add(cells);
+            foreach (var c in cells) cellOwner[c] = i;
+            if (all[i].Info.energyPerSec > 0f && all[i].Info.powerRange > 0f) generators.Add(i);
+        }
 
-        // Component root -> net.
+        // NO PLANT, NO GRID — the whole world at once, before doing any work for it.
+        if (generators.Count == 0) return nets;
+
+        // Union-find over BUILDINGS now, rather than over projectors. Joining two buildings is the
+        // primitive; what the passes below decide is which joins exist.
+        var parent = new int[n];
+
+        // Which NODES are energised, and so are projecting. Grows across rounds; never shrinks, because
+        // rounds only add unions.
+        var liveNodes = new HashSet<int>();
+        var energised = new HashSet<int>();
+
+        for (int round = 0; round <= n; round++)
+        {
+            for (int i = 0; i < n; i++) parent[i] = i;
+
+            // ---- Edge kind 1: shared coverage ----
+            // A cell claimed twice joins its two claimants. Transitive by construction: if A meets B on
+            // one tile and B meets C on another, all three are one component without anyone comparing A
+            // to C.
+            var claimed = new Dictionary<Vector2Int, int>();
+            for (int i = 0; i < n; i++)
+                foreach (var c in CoverageFor(b, all[i], liveNodes.Contains(i)))
+                {
+                    if (claimed.TryGetValue(c, out int j)) Union(parent, i, j);
+                    else claimed[c] = i;
+                }
+
+            // ---- Edge kind 2: contact ----
+            for (int i = 0; i < n; i++)
+                foreach (var c in own[i])
+                {
+                    TryContact(cellOwner, parent, i, c + Vector2Int.up);
+                    TryContact(cellOwner, parent, i, c + Vector2Int.down);
+                    TryContact(cellOwner, parent, i, c + Vector2Int.left);
+                    TryContact(cellOwner, parent, i, c + Vector2Int.right);
+                }
+
+            // ---- Which components have a plant in them? Those, and only those, are grids. ----
+            var powered = new HashSet<int>();
+            foreach (int g in generators) powered.Add(Find(parent, g));
+
+            energised.Clear();
+            for (int i = 0; i < n; i++)
+                if (powered.Contains(Find(parent, i))) energised.Add(i);
+
+            // ---- Did any new node light up? If not, this is the fixed point. ----
+            bool grew = false;
+            for (int i = 0; i < n; i++)
+                if (all[i].Info.type == SurfaceBuildingType.PowerNode
+                    && energised.Contains(i) && liveNodes.Add(i)) grew = true;
+            if (!grew) break;
+        }
+
+        // ---- Turn the components into nets ----
         var byRoot = new Dictionary<int, PowerNet>();
-        for (int i = 0; i < projectors.Count; i++)
+        var netOf = new PowerNet[n];
+
+        foreach (int i in energised)
         {
             int root = Find(parent, i);
             if (!byRoot.TryGetValue(root, out var net))
@@ -222,9 +357,20 @@ public static class PowerGrid
                 byRoot[root] = net;
                 nets.Add(net);
             }
-            net.projectors.Add(projectors[i]);
-            net.coverage.UnionWith(cov[i]);
+            netOf[i] = net;
+            net.projectors.Add(all[i]);
+
+            // COVERAGE IS WHAT THE GRID LIGHTS, which for a non-projector is its own footprint. That is
+            // the "buildings receiving power highlight their own tiles in the Power overlay" behaviour,
+            // and it falls out of the coverage rule rather than being drawn as a special case.
+            //
+            // A node contributes its disc only if it is actually live — the same CoverageFor the
+            // derivation used, so what the overlay paints yellow is exactly the ground the connectivity
+            // was computed from. Anything else would be a map that disagrees with the simulation.
+            net.coverage.UnionWith(CoverageFor(b, all[i], liveNodes.Contains(i)));
         }
+
+        if (nets.Count == 0) return nets;
 
         // NUMBER THEM DETERMINISTICALLY, by their topmost-leftmost lit tile. The derivation above walks
         // the building list, so numbering in discovery order would mean demolishing something early in
@@ -234,17 +380,12 @@ public static class PowerGrid
         nets.Sort((x, y) => Anchor(x, w).CompareTo(Anchor(y, w)));
         for (int i = 0; i < nets.Count; i++) nets[i].index = i + 1;
 
-        // Which grid owns each lit tile. Unambiguous by construction: two grids can't share a tile, or
-        // the union-find above would have made them one grid.
-        var ownerOf = new Dictionary<Vector2Int, PowerNet>();
-        foreach (var net in nets)
-            foreach (var c in net.coverage) ownerOf[c] = net;
-
         // Hang every building off the grid that reaches it.
-        foreach (var p in SurfaceBuildManager.On(b))
+        for (int i = 0; i < n; i++)
         {
-            var net = NetCovering(ownerOf, p);
+            var net = netOf[i];
             if (net == null) continue;
+            var p = all[i];
             ownerByBuilding[p] = net;
             var info = p.Info;
 
@@ -283,14 +424,31 @@ public static class PowerGrid
         return best;
     }
 
-    static PowerNet NetCovering(Dictionary<Vector2Int, PowerNet> ownerOf, PlacedBuilding p)
+    /// What this building lights, given whether it is a node that is currently live.
+    ///
+    /// The derivation and the overlay both go through this, so the ground the grid was computed from is
+    /// exactly the ground the map paints. A node's disc is conditional — a pylon whose chain has been
+    /// cut behind it is a building on the grid, not a relay — and CoverageOf cannot know that on its
+    /// own, because "is this node connected" is the very thing the derivation is working out.
+    static HashSet<Vector2Int> CoverageFor(CelestialBody b, PlacedBuilding p, bool nodeIsLive)
     {
-        // ANY cell of the footprint is enough. A plant with one corner on the grid is wired in — asking
-        // for the whole footprint would make big buildings mysteriously harder to connect than small
-        // ones, for no reason the player could see.
-        foreach (var c in SurfaceBuildingDatabase.Footprint(p))
-            if (ownerOf.TryGetValue(c, out var net)) return net;
-        return null;
+        bool isNode = p.Info.type == SurfaceBuildingType.PowerNode;
+        if (isNode && !nodeIsLive)
+        {
+            // Its own tiles only: it conducts if something reaches it, and projects nothing.
+            var set = new HashSet<Vector2Int>();
+            foreach (var c in SurfaceBuildingDatabase.Footprint(p))
+                if (c.x >= 0 && c.y >= 0 && c.x < b.surface.width && c.y < b.surface.height) set.Add(c);
+            return set;
+        }
+        return CoverageOf(b, p);
+    }
+
+    /// If `c` belongs to another building, join the two. This is the pass-through rule: contact
+    /// conducts, whether or not either building generates anything.
+    static void TryContact(Dictionary<Vector2Int, int> cellOwner, int[] parent, int from, Vector2Int c)
+    {
+        if (cellOwner.TryGetValue(c, out int other) && other != from) Union(parent, from, other);
     }
 
     static int Find(int[] parent, int i)
@@ -324,16 +482,130 @@ public static class PowerGrid
 
     /// The grid a structure WOULD join if it were placed here — the placement preview's question.
     ///
-    /// Must agree with NetCovering, which accepts any cell of the footprint. Testing only the origin
-    /// cell (the obvious shortcut) would tell a player "no grid here" for a four-tile plant whose origin
-    /// happens to sit one tile off the light, and then power it fully the moment they placed it anyway.
+    /// ANY cell of the footprint is enough, matching the derivation. Testing only the origin cell (the
+    /// obvious shortcut) would tell a player "no grid here" for a four-tile plant whose origin happens
+    /// to sit one tile off the light, and then power it fully the moment they placed it anyway.
     public static PowerNet NetForFootprint(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation)
+        => NetForCells(b, SurfaceBuildingDatabase.Footprint(t, x, y, rotation));
+
+    /// As above, for a drawn footprint.
+    public static PowerNet NetForCells(CelestialBody b, IEnumerable<Vector2Int> cells)
     {
-        foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, rotation))
+        if (cells == null) return null;
+        foreach (var c in cells)
         {
             var net = NetAt(b, c.x, c.y);
             if (net != null) return net;
         }
+        return null;
+    }
+
+    // ============================================================================================
+    // WHERE A RELAY MAY BE PLANTED
+    //
+    // A Power Node is the one building whose placement is gated on the grid rather than on the ground,
+    // and it has to be: its entire function is to EXTEND a grid, and a relay that can be planted in
+    // empty desert is not extending anything — under the old rules two such relays fourteen tiles apart
+    // were a functioning grid with no plant anywhere near them.
+    //
+    // TWO WAYS TO QUALIFY, and the second matters as much as the first:
+    //
+    //   ON LIT GROUND. A cell the grid already reaches — the yellow in the overlay. This is the ordinary
+    //   case: you walk a chain outward, each pylon planted at the edge of what the last one lit.
+    //
+    //   TOUCHING A POWERED BUILDING. Because a building on the grid conducts (see the header), the tile
+    //   against a powered factory is a legitimate place to start a chain even though the factory itself
+    //   throws no light onto it. Without this the rule would be "you may only build a relay where you
+    //   already have a relay", and a city block full of powered industry would somehow be an invalid
+    //   place to begin.
+    // ============================================================================================
+    public static bool CanPlantNodeAt(CelestialBody b, IEnumerable<Vector2Int> cells, out string why)
+    {
+        why = null;
+        if (b?.surface == null || cells == null) { why = "no ground here"; return false; }
+
+        foreach (var c in cells)
+        {
+            // On the grid already.
+            if (NetAt(b, c.x, c.y) != null) return true;
+
+            // Or against something that is on it.
+            if (PoweredNeighbour(b, c) != null) return true;
+        }
+
+        why = "a relay has to start from power — put it on lit ground, or against a building that " +
+              "already has some";
+        return false;
+    }
+
+    // ============================================================================================
+    // THE LINES BETWEEN PYLONS
+    //
+    // A chain of relays reads as a row of unrelated blue dots. Whether two of them are actually carrying
+    // power to each other — the one thing a chain is for — is invisible: it depends on their reach and
+    // their tiers, which are numbers on a card, and the yellow puddles they light are the same colour
+    // whether they are one grid or five.
+    //
+    // So the overlay draws the connection. A pair of relays ON THE SAME GRID and within reach of each
+    // other gets a line, and the line means exactly what it looks like: power flows along it.
+    //
+    // WITHIN REACH OF EACH OTHER, not merely on the same grid. Six pylons around a city are all one
+    // grid; joining every pair of them would draw a cat's cradle that says nothing. The reach test
+    // leaves the actual chain — each mast to its neighbours — which is the shape the player laid down.
+    // ============================================================================================
+    public struct NodeLink
+    {
+        public Vector2Int a, b;
+        public int net;        // which grid, so the overlay can colour a failing chain differently
+    }
+
+    /// Every relay-to-relay connection on this world.
+    public static List<NodeLink> NodeLinks(CelestialBody b)
+    {
+        var links = new List<NodeLink>();
+        if (b?.surface == null) return links;
+
+        // Relays only — a plant is not a pylon and a line from a reactor to a factory would be drawing
+        // the grid's whole adjacency graph rather than its transmission line.
+        var relays = new List<PlacedBuilding>();
+        foreach (var p in SurfaceBuildManager.On(b))
+            if (p.Type == SurfaceBuildingType.PowerNode && NetOf(b, p) != null) relays.Add(p);
+
+        for (int i = 0; i < relays.Count; i++)
+            for (int j = i + 1; j < relays.Count; j++)
+            {
+                var pa = relays[i];
+                var pb = relays[j];
+
+                var na = NetOf(b, pa);
+                if (na == null || na != NetOf(b, pb)) continue;
+
+                // Reach is the LARGER of the two, because a link exists if either can reach the other —
+                // a level-3 mast talking to a level-1 one is still one span of wire.
+                float r = Mathf.Max(pa.Info.powerRange * pa.LevelMult, pb.Info.powerRange * pb.LevelMult);
+
+                var ca = new Vector2Int(pa.x, pa.y);
+                var cb = new Vector2Int(pb.x, pb.y);
+                float dx = ca.x - cb.x, dy = ca.y - cb.y;
+                if (dx * dx + dy * dy > r * r) continue;
+
+                links.Add(new NodeLink { a = ca, b = cb, net = na.index });
+            }
+
+        return links;
+    }
+
+    /// A building on a live grid whose footprint touches this cell, or null.
+    static PlacedBuilding PoweredNeighbour(CelestialBody b, Vector2Int c)
+    {
+        var up = SurfaceBuildManager.At(b, c.x, c.y + 1);
+        if (up != null && NetOf(b, up) != null) return up;
+        var down = SurfaceBuildManager.At(b, c.x, c.y - 1);
+        if (down != null && NetOf(b, down) != null) return down;
+        var left = SurfaceBuildManager.At(b, c.x - 1, c.y);
+        if (left != null && NetOf(b, left) != null) return left;
+        var right = SurfaceBuildManager.At(b, c.x + 1, c.y);
+        if (right != null && NetOf(b, right) != null) return right;
         return null;
     }
 
