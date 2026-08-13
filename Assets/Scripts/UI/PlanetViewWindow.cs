@@ -4289,9 +4289,10 @@ public class PlanetViewWindow : MonoBehaviour
     // ============================================================================================
     // AN INDEX MAP: PATCHES, NOT A WASH
     //
-    // Draws only the ground SurfaceIndex.Shown accepts — this world's best quarter, plus anything else
-    // at 50% or better — and outlines each patch in a brightened version of the index's own colour, so a
-    // good area has a boundary you can aim a footprint at instead of a gradient you have to squint at.
+    // Draws only the ground SurfaceIndex.Shown accepts — everything at or above the 70% floor, and
+    // nothing else — banded every 10%, with each band outlined in a brightened version of the index's own
+    // colour. So a good area has a boundary you can aim a footprint at instead of a gradient you have to
+    // squint at, and a BETTER area inside it has one of its own.
     //
     // THE TEXTURE IS SUPERSAMPLED, a few texels per tile, purely so the outline can be a LINE. At one
     // texel per tile the only way to mark a boundary is to recolour the whole edge tile, which eats the
