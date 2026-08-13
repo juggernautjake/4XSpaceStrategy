@@ -123,6 +123,23 @@ public static class PlanetTerrainGenerator
     // there is no Editor here to calibrate against.
     const float TectonicRidgeGain = 0.6f;
 
+    // How much a plate boundary moves the GROUND ITSELF, as a fraction of the world's relief.
+    //
+    // Ridge and elevation are two different statements and the terrain needs both. `ridge` says the ground
+    // is BROKEN — it is what turns a tile into Mountains or Canyon once it is high enough — but it never
+    // raised the land, so a fault crossing a plain produced rugged lowland and a fault crossing the sea
+    // produced rugged seabed. The ranges followed the fault lines only in the sense that the roughness
+    // did; the CONTOURS were still pure noise, which is why the mountains on a tectonic world looked
+    // scattered rather than folded.
+    //
+    // Now a convergent margin lifts the land and a divergent one drops it, which is the actual mechanism:
+    // two plates driving together have nowhere to put the crust but up, and two pulling apart leave a
+    // trough between them that fills with sea. At 0.22 of the 0..1 relief band a head-on collision lifts
+    // low ground into the highland range and highland into mountains, and a full rift drops a coastal
+    // plain under the waterline — big enough to read as the dominant feature of a tectonic world's map,
+    // small enough that the underlying continents are still the continents the elevation noise drew.
+    const float TectonicUpliftGain = 0.22f;
+
     // Octaves of noise the SURFACE GRID is built from.
     //
     // Six, matching what SurfaceTextureRenderer has always used to draw the detail map. It was four,
@@ -495,6 +512,42 @@ public static class PlanetTerrainGenerator
         float moisture  = WrapU(u, freq * 2f,        1.3f, fy * 1.3f, seed + 31f, seed + 17f,  octaves) * p.moisture;
         float ridge     = WrapU(u, freq * 2f,        2.2f, fy * 2.2f, seed + 91f, seed + 53f,  octaves) * p.ridge;
 
+        // ============================================================================================
+        // PLATE TECTONICS FOLD THE GROUND, not just roughen it
+        //
+        // Read HERE, before anything downstream touches landHeight, because the uplift is part of how high
+        // the ground is and everything that asks that question has to get the same answer: the altitude
+        // cooling below, the classifier's water test, the °C readout, and Sample.elevation itself. Sampled
+        // once — this is the hottest call in world generation.
+        //
+        // `belt`, NOT `boundary`. The red line the Survey overlay draws is a one-to-three tile annotation;
+        // an orogenic belt is a wide, ragged skirt either side of it. Reading the drawn line here would
+        // confine every range to the width of its own map symbol.
+        //
+        // A convergent margin (convergence > 0) does BOTH things a collision does — it lifts the crust and
+        // it breaks it — so it adds to elevation and to ridge together, and a range comes out as high
+        // ground that is also rugged. A divergent one drops the land and thins it: a rift valley, and
+        // where the rift runs low enough, a sea in it. The classifiers test elevation for water BEFORE
+        // ridge, so a drowned fault reads as ocean (Earth's mid-ocean ridges) and only a fault crossing
+        // high ground folds up into mountains.
+        //
+        // Derived per-sample from the body's seed, so it costs no save state and a remodel or reseed
+        // re-derives it — and it is the same TectonicsMap the Survey overlay draws its plate borders from,
+        // so where the map says a margin is, is where the mountains are.
+        // ============================================================================================
+        bool volcanicHotspot = false;
+        if (TectonicsMap.Active(body))
+        {
+            var tec = TectonicsMap.Sample(body, u, v);
+            float press = tec.belt * tec.convergence;          // >0 driven together, <0 pulled apart
+            landHeight += press * TectonicUpliftGain;
+            ridge = Mathf.Clamp(ridge + press * TectonicRidgeGain, 0f, 2f);
+            // Volcanoes cluster where plates DRIVE TOGETHER hardest (subduction). The strongest convergent
+            // boundaries on a tectonically active world get a scattering of volcanoes among their peaks —
+            // so some rocky worlds come out "somewhat volcanic" without being full Volcanic-type worlds.
+            volcanicHotspot = press > 0.72f;
+        }
+
         float lat = Mathf.Abs(v - 0.5f) * 2f;                 // 0 equator, 1 pole
         float heatNoise = WrapU(u, freq * 2f,        0.9f, fy * 0.9f, seed + 11f, seed + 7f,   2);
         // Altitude cools the surface (atmospheric lapse rate): ground high above sea level runs colder than
@@ -554,29 +607,6 @@ public static class PlanetTerrainGenerator
         // reasons that have nothing to do with plant life, so they're deliberately left untouched.
         if (classifyType == CelestialBodyType.RockyPlanet && !body.biosphereActive)
             moisture = Mathf.Min(moisture, 0.1f);
-
-        // Plate tectonics fold mountains up ALONG the fault lines, exactly where the Survey overlay draws
-        // them (both read this one TectonicsMap, so the map and the overlay can never disagree). A
-        // convergent boundary (two plates driving together) adds ridge in proportion to how close the tile
-        // is to the fault AND how hard they collide; a divergent rift subtracts a little. This concentrates
-        // ranges and volcanoes at the boundaries instead of scattering them by noise, on top of the
-        // whole-world ruggedness TectonicsRules.BoostRidge already gave the world. Faults that run under
-        // the sea stay sea — every classifier tests elevation for water BEFORE ridge, so a low, drowned
-        // fault reads as ocean (Earth's mid-ocean ridges), and only a fault crossing high ground becomes a
-        // mountain belt. Derived per-sample, so it costs no save state and a remodel/reseed re-derives it.
-        bool volcanicHotspot = false;
-        if (TectonicsMap.Active(body))
-        {
-            var tec = TectonicsMap.Sample(body, u, v);
-            // `belt`, NOT `boundary`. The red line the Survey overlay draws is a one-to-three tile
-            // annotation; an orogenic belt is a wide, ragged skirt either side of it. Reading the drawn
-            // line here would confine every range to the width of its own map symbol.
-            ridge = Mathf.Clamp(ridge + tec.belt * tec.convergence * TectonicRidgeGain, 0f, 2f);
-            // Volcanoes cluster where plates DRIVE TOGETHER hardest (subduction). The strongest convergent
-            // boundaries on a tectonically active world get a scattering of volcanoes among their peaks —
-            // so some rocky worlds come out "somewhat volcanic" without being full Volcanic-type worlds.
-            volcanicHotspot = tec.belt * tec.convergence > 0.72f;
-        }
 
         // `body.biosphereActive` is threaded in because CORAL IS ALIVE. A reef on a sterile world is the
         // same category error as a forest on one — it was being drawn purely from "shallow and warm",
