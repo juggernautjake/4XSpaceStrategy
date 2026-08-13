@@ -975,6 +975,23 @@ public static class SurfaceIndex
         }
     }
 
+    /// The index's name without the word "Index" on the end — for refusal messages and anywhere else a
+    /// sentence has to read like a sentence. "needs valid Mineral ground" beats "needs valid Mineral
+    /// Index ground".
+    public static string ShortName(SurfaceIndexKind k)
+    {
+        switch (k)
+        {
+            case SurfaceIndexKind.Mineral: return "Mineral";
+            case SurfaceIndexKind.Heat: return "Heat";
+            case SurfaceIndexKind.Fertile: return "Fertile";
+            case SurfaceIndexKind.Wind: return "Weather";
+            case SurfaceIndexKind.Solar: return "Solar";
+            case SurfaceIndexKind.Water: return "Hydro";
+            default: return "";
+        }
+    }
+
     public static string Describe(SurfaceIndexKind k)
     {
         switch (k)

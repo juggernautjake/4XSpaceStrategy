@@ -67,6 +67,42 @@ public static class SurfaceBuildManager
         var tile = b.surface.tiles[x, y];
         if (tile == null) { why = "no ground here"; return false; }
         if (!info.allowsWater && PlanetTerrainGenerator.IsWater(tile.type)) { why = "can't build on water"; return false; }
+
+        // ============================================================================================
+        // A STRUCTURE THAT READS AN INDEX MAY ONLY STAND ON THAT INDEX'S GROUND
+        //
+        // The map highlights where a mine, a farm or a turbine belongs. It used to be ADVICE: you could
+        // draw a mine anywhere and it would stand there at whatever efficiency the ground gave, which
+        // since the 70% floor means it would stand there producing exactly nothing — a building that
+        // cost metal, occupies tiles, draws power and yields zero, with nothing at the moment of
+        // placement to say so. That is not a decision the player made, it is one they were allowed to
+        // make by accident.
+        //
+        // So the highlight is now the RULE, and the two can never drift apart because this asks
+        // SurfaceIndex.Shown — the same question the overlay paints with and the yield numbers print.
+        // If there is colour under the cursor you may build; if there is not, you may not, and the
+        // refusal says which map to go and look at.
+        //
+        // HERE, in the per-cell test, rather than in CanPlace's footprint average, because everything
+        // that reads an index is a DRAWN class: the brush paints tile by tile and has to refuse the tile
+        // under the cursor as it goes, at the tile, rather than letting a shape be drawn across dead
+        // ground and rejecting the whole thing at the end. CanPlace runs every cell through here too, so
+        // the fixed-footprint path is covered by the same rule without a second copy of it.
+        // ============================================================================================
+        if (info.index != SurfaceIndexKind.None && !GameMode.DevMode)
+        {
+            if (!SurfaceIndex.Unlocked(b, info.index))
+            {
+                why = $"{SurfaceIndex.ShortName(info.index)} not surveyed — {SurfaceIndex.LockReason(b, info.index)}";
+                return false;
+            }
+            if (!SurfaceIndex.Shown(b, info.index, x, y, out _))
+            {
+                why = $"need valid {SurfaceIndex.ShortName(info.index)} ground — build on the highlighted patches";
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -236,19 +272,23 @@ public static class SurfaceBuildManager
             if (pending.Contains(c)) { why = "another project is already going up here"; return false; }
         }
 
-        // SITING REQUIREMENT. Some things aren't merely inefficient on the wrong ground, they're
-        // pointless: a geothermal plant on cold rock produces nothing. Checked against the footprint's
-        // averaged index, so a plant half-on a volcano still counts.
+        // SITING REQUIREMENT, and it is now a BACKSTOP rather than the gate. CellBuildable above already
+        // refused every cell that is not on highlighted ground, and the highlight floor (70%) is above
+        // every minIndex any class declares — so on a legal footprint this cannot fire.
+        //
+        // Kept because it is the check that can still say something the per-cell one cannot: that the
+        // WHOLE WORLD is too poor for this class, which is a fact about the planet rather than about the
+        // tile, and is the difference between "move it a bit" and "not here, go and find somewhere else".
         if (info.minIndex > 0f && info.index != SurfaceIndexKind.None && !GameMode.DevMode)
         {
             float here = EfficiencyAt(b, t, x, y, rotation);
             if (here < info.minIndex)
             {
                 float best = SurfaceIndex.Best(b, info.index);
-                why = best >= info.minIndex
-                    ? $"{SurfaceIndex.Name(info.index)} only {here * 100f:F0}% here — needs {info.minIndex * 100f:F0}%. Try the highlighted sites."
-                    : $"{SurfaceIndex.Name(info.index)} only {here * 100f:F0}% here — needs {info.minIndex * 100f:F0}%. " +
-                      $"This world's best is {best * 100f:F0}%: nowhere on it will support one.";
+                why = best >= SurfaceIndex.ShowFloor
+                    ? $"{SurfaceIndex.Name(info.index)} only {here * 100f:F0}% here. Try the highlighted sites."
+                    : $"{SurfaceIndex.Name(info.index)} tops out at {best * 100f:F0}% on this world — " +
+                      $"nowhere on it will support one. Look for a world that highlights this index.";
                 return false;
             }
         }
