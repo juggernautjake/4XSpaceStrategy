@@ -47,12 +47,36 @@ using UnityEngine;
 // scale, which is what pins the drawn line at one to three tiles everywhere, at every map size, at the
 // poles as much as the equator.
 //
+// ---- WHY A PLATE IS SEVERAL VORONOI CELLS AND NOT ONE ----------------------------------------
+//
+// One site per plate gives one Voronoi cell per plate, and a Voronoi cell is CONVEX. Every boundary is
+// then a single bisector arc between two sites, so every plate comes out as a rounded convex blob and
+// the map reads as a sheet of soap bubbles rather than as continents. Adding warp and edge roughness
+// wobbles those arcs but cannot change what they fundamentally are: a plate still has no bays, no
+// peninsulas, no re-entrant corners, because a convex region cannot have them.
+//
+// So the sites are no longer plates. There are now SIX OR SO CELLS PER PLATE, and a plate is a
+// CLUSTER of them, agglomerated by a region-growing pass at layout time. A plate boundary then runs
+// along whichever cell edges happen to lie between two clusters — a chain of several bisector arcs
+// meeting at angles — which is non-convex by construction and reads as a coastline. Leftover cells that
+// no big cluster claimed become the small plates wedged between the continents, which is exactly what
+// a real plate map looks like.
+//
+// THE GROWTH IS COMPETITIVE, and that detail matters. Scoring every (plate, frontier cell) pair and
+// taking the best globally lets one plate that rolls a high jitter keep winning; rendered out, two
+// plates held 67% of the world between them and nine plates were a single cell each. Each plate instead
+// gets a TARGET SIZE up front and the one furthest below its target annexes next, so a plate that has
+// eaten its share stops bidding until the others catch up. Targets are drawn from a curve that skews
+// small, so a world still gets a couple of continents and a scatter of small plates rather than a dozen
+// identical ones.
+//
 // ---- WHY THE MARGINS ARE RAGGED --------------------------------------------------------------
-// Great-circle arcs plus a domain warp gave plates that were CURVED but smooth — soap bubbles, not
-// continents. The roughness that fixes it is not more warp (see the note on EdgeTerms for why that
-// approach is a dead end); it is a small scalar field added to the fault's own signed distance, in
-// TILES, which slides the boundary sideways without touching the space it is drawn in. Sample corrects
-// the band width for that field's gradient, so the line wanders without pinching or fattening.
+// Great-circle arcs plus a domain warp gave plates that were CURVED but smooth. The cell clustering
+// above is what supplies the large-scale irregularity now. On top of it there is still a small scalar
+// field added to the fault's own signed distance, in TILES, which slides the boundary sideways without
+// touching the space it is drawn in; Sample corrects the band width for that field's gradient, so the
+// line wanders without pinching or fattening. The domain warp is kept but weakened — with the cell
+// structure doing the shaping, a strong warp only smears the cell edges back into curves.
 //
 // Two proximity fields come off that one distance, and the difference between them matters:
 //   `boundary` — the hairline: 1 on the fault, 0 about a tile away. This is the red line the Survey
@@ -66,9 +90,12 @@ public static class TectonicsMap
     public class Plate
     {
         public int id;
-        public Vector3 site;     // plate centre as a UNIT VECTOR on the sphere
+        public Vector3 site;     // plate CENTROID as a unit vector — the average of its cells' sites,
+                                 // which is where the overlay puts its arrow. No longer a Voronoi site:
+                                 // a plate is a cluster of cells now and has no single generating point.
         public Vector3 motion;   // push, tangent to the sphere at `site`; magnitude == strength
         public float strength;   // |motion|, 0..1; kept apart so the overlay can size its arrow by it
+        public int cellCount;    // how many Voronoi cells were agglomerated into it
     }
 
     /// One sinusoidal plane wave of the domain warp. Kept as a plain basis rather than a noise lattice
@@ -96,6 +123,12 @@ public static class TectonicsMap
     public class Layout
     {
         public Plate[] plates;
+
+        // THE VORONOI CELLS, which are what Sample actually searches. `cellPlate[i]` is which plate
+        // cell i was agglomerated into — the indirection that turns a cell map into a plate map.
+        public Vector3[] cellSites;
+        public int[] cellPlate;
+
         public WarpTerm[] warp;
         public EdgeTerm[] edge;      // the roughness on the margins themselves
         public float builtForSeed;   // the terrainSeed this was derived from; rebuild if the world reseeds
@@ -138,15 +171,44 @@ public static class TectonicsMap
     // the ridge field reads, roughly seven times the drawn line.
     const float BeltTilesPerHeight = 0.15f, BeltTilesMin = 3f, BeltTilesMax = 26f;
 
+    // ---- The cell layer --------------------------------------------------------------------------
+    //
+    // How many Voronoi cells each plate is made of, on average. This is the number that decides how
+    // ragged a margin is, and it is a genuine trade-off in both directions:
+    //
+    //   TOO FEW and a plate is one or two cells, which is convex again and we are back to bubbles.
+    //   TOO MANY and the boundary becomes a fine dither of tiny steps that reads as noise at map scale
+    //           rather than as a coastline — and Sample's cost is linear in the total, since it scans
+    //           every cell to find the nearest.
+    //
+    // Six was chosen against rendered maps. It roughly doubles Sample's per-call cost against the old
+    // one-site-per-plate version, which is acceptable because the warp arithmetic either side of the
+    // scan is comparable work and was always the bulk of it.
+    const int CellsPerPlate = 6;
+
+    /// How much randomness goes into which frontier cell a plate annexes next. 0 gives compact blobs
+    /// (bubbles again); very high gives long tendrils that do not read as continents. See Agglomerate.
+    const float GrowJitter = 2.5f;
+
+    /// Points sampled on the sphere to discover which cells are neighbours. The exact answer is the
+    /// spherical Delaunay triangulation, which is a convex hull — a great deal of machinery for a graph
+    /// that only has to be approximately right, since a missed edge costs one cell being annexed a step
+    /// later than it might have been.
+    const int AdjacencySamples = 6000;
+
     // ---- Domain warp -----------------------------------------------------------------------------
     // Two bands of plane waves. The coarse band sweeps whole boundaries off the great circles they would
     // otherwise follow; the fine band gives them their wander. Amplitude per term is Gain/|freq|, which
     // fixes each term's GRADIENT at Gain — that is the number that matters, because the gradient is both
-    // how much a boundary bends and how close the warp comes to folding space over on itself. Six terms
-    // at these gains sit comfortably under the fold.
+    // how much a boundary bends and how close the warp comes to folding space over on itself.
+    //
+    // WEAKER THAN IT WAS (0.40/0.45 -> 0.30/0.28). The warp used to be solely responsible for making
+    // boundaries anything other than perfect arcs, and had to be pushed as far as it could go without
+    // folding. The cell clustering does that job now, and a strong warp on top of it only smears the
+    // cell edges — the very thing supplying the shape — back into smooth curves.
     const int CoarseTerms = 3, FineTerms = 3;
-    const float CoarseFreqMin = 2.0f, CoarseFreqMax = 4.0f, CoarseGain = 0.40f;
-    const float FineFreqMin = 6.0f, FineFreqMax = 11.0f, FineGain = 0.45f;
+    const float CoarseFreqMin = 2.0f, CoarseFreqMax = 4.0f, CoarseGain = 0.30f;
+    const float FineFreqMin = 6.0f, FineFreqMax = 13.0f, FineGain = 0.28f;
 
     // The scalar fields that vary the line's width along its length and break a mountain belt into peaks
     // and saddles. Higher frequency than the warp — this is texture, not shape.
@@ -230,14 +292,17 @@ public static class TectonicsMap
         // cut into four continents the size of hemispheres with boundaries long enough to cross the map.
         int n = Mathf.Clamp(4 + Mathf.FloorToInt(hf / 14f) + rng.Next(0, 3), 4, 13);
 
-        // Sites, spread by best-candidate sampling. Uniform random points on a sphere clump, and a clump is
-        // exactly what produces two near-coincident plates with a boundary that runs half way round the
-        // world. Drawing a few candidates and keeping the one furthest from everything already placed
-        // (Mitchell's best-candidate) gives a roughly Poisson-disc spread: plates of comparable size,
-        // boundaries that meet in short segments and honest triple junctions. Five candidates rather than
-        // a dozen — enough to break up the clumps, few enough that the layout doesn't come out regimented.
-        var sites = new List<Vector3>(n);
-        while (sites.Count < n)
+        // ---- The CELLS, not the plates ----
+        //
+        // Spread by best-candidate sampling. Uniform random points on a sphere clump, and clumped cells
+        // make the agglomeration lopsided — one plate of forty tiny cells beside one of two huge ones.
+        // Drawing a few candidates and keeping the one furthest from everything already placed
+        // (Mitchell's best-candidate) gives a roughly Poisson-disc spread: cells of comparable size,
+        // boundaries that meet in short segments and honest triple junctions. Five candidates rather
+        // than a dozen — enough to break up the clumps, few enough that it doesn't come out regimented.
+        int cellCount = n * CellsPerPlate;
+        var sites = new List<Vector3>(cellCount);
+        while (sites.Count < cellCount)
         {
             Vector3 best = Vector3.up;
             float bestSep = -1f;
@@ -251,23 +316,39 @@ public static class TectonicsMap
             sites.Add(best);
         }
 
-        var plates = new Plate[sites.Count];
-        for (int i = 0; i < sites.Count; i++)
+        var cellSites = sites.ToArray();
+        var cellPlate = Agglomerate(cellSites, n, R, seed);
+
+        // ---- The plates, now derived FROM the clusters ----
+        var plates = new Plate[n];
+        for (int i = 0; i < n; i++) plates[i] = new Plate { id = i };
+
+        // A plate's site is the centroid of its cells, normalised back onto the sphere. That is where
+        // the overlay draws its arrow, and it is the point the convergence maths measures relative
+        // motion at — both of which want "the middle of this continent" rather than any one cell.
+        var sum = new Vector3[n];
+        for (int c = 0; c < cellSites.Length; c++)
         {
-            // A push TANGENT to the sphere at the site: a random direction in the local tangent plane.
-            Vector3 s = sites[i];
+            int p = cellPlate[c];
+            sum[p] += cellSites[c];
+            plates[p].cellCount++;
+        }
+
+        for (int i = 0; i < n; i++)
+        {
+            // A cluster whose cells happen to straddle the sphere can sum to near zero; fall back to any
+            // one of its cells rather than normalising a zero vector into a NaN.
+            Vector3 s = sum[i].sqrMagnitude > 1e-6f ? sum[i].normalized : FirstCellOf(cellSites, cellPlate, i);
+            plates[i].site = s;
+
+            // A push TANGENT to the sphere at the centroid: a random direction in the local tangent plane.
             Vector3 up = Mathf.Abs(s.y) > 0.95f ? Vector3.right : Vector3.up;
             Vector3 e = Vector3.Cross(up, s).normalized;
             Vector3 nth = Vector3.Cross(s, e);
             float a = R() * Mathf.PI * 2f;
             float strength = Mathf.Lerp(0.35f, 1f, R());   // no plate is truly motionless
-            plates[i] = new Plate
-            {
-                id = i,
-                site = s,
-                motion = (e * Mathf.Cos(a) + nth * Mathf.Sin(a)) * strength,
-                strength = strength
-            };
+            plates[i].motion = (e * Mathf.Cos(a) + nth * Mathf.Sin(a)) * strength;
+            plates[i].strength = strength;
         }
 
         var warp = new WarpTerm[CoarseTerms + FineTerms + GrainTerms];
@@ -297,6 +378,8 @@ public static class TectonicsMap
         return new Layout
         {
             plates = plates,
+            cellSites = cellSites,
+            cellPlate = cellPlate,
             warp = warp,
             edge = edge,
             builtForSeed = b.terrainSeed,
@@ -309,6 +392,174 @@ public static class TectonicsMap
             // grid can express, so clamping there is exact rather than arbitrary.
             minCos = 0.5f * Mathf.PI / hf
         };
+    }
+
+    // ============================================================================================
+    // CELLS -> PLATES
+    //
+    // Seeded region growing over the cells' adjacency graph. Every cell ends up owned by exactly one
+    // plate, and the plate's outline is whatever the union of its cells happens to look like — which is
+    // the entire point, because that union is not convex and a single Voronoi cell always is.
+    //
+    // Returns cellPlate[i] for every cell.
+    // ============================================================================================
+    static int[] Agglomerate(Vector3[] sites, int plateCount, System.Func<float> R, int seed)
+    {
+        int n = sites.Length;
+        var owner = new int[n];
+        for (int i = 0; i < n; i++) owner[i] = -1;
+
+        var adj = BuildAdjacency(sites, seed);
+
+        // ---- Seeds, spread as far apart among the cells as they can be ----
+        // Taking them at random would sometimes put two plate seeds in adjacent cells, and one of the
+        // two would then be squeezed to a single cell by its neighbour before it could grow at all.
+        var seeds = new int[plateCount];
+        for (int p = 0; p < plateCount; p++)
+        {
+            int best = -1;
+            float bestSep = -1f;
+            for (int j = 0; j < n; j++)
+            {
+                if (owner[j] >= 0) continue;
+                float nearest = float.MaxValue;
+                for (int k = 0; k < p; k++) nearest = Mathf.Min(nearest, 1f - Vector3.Dot(sites[seeds[k]], sites[j]));
+                if (p == 0) nearest = R();               // the first seed can go anywhere
+                if (nearest > bestSep) { bestSep = nearest; best = j; }
+            }
+            if (best < 0) break;                          // fewer cells than plates: shouldn't happen
+            owner[best] = p;
+            seeds[p] = best;
+        }
+
+        // ---- Target sizes ----
+        // Drawn per plate from a curve that skews small, so a world gets a couple of continents and a
+        // scatter of small plates rather than a dozen identical ones. Normalised so they sum to the cell
+        // count, which is what makes "furthest below target" a meaningful comparison between plates.
+        var target = new float[plateCount];
+        float tsum = 0f;
+        for (int p = 0; p < plateCount; p++)
+        {
+            float t = 0.25f + Mathf.Pow(R(), 2.2f) * 3f;
+            target[p] = t;
+            tsum += t;
+        }
+        for (int p = 0; p < plateCount; p++) target[p] = target[p] / Mathf.Max(0.0001f, tsum) * n;
+
+        var size = new int[plateCount];
+        for (int p = 0; p < plateCount; p++) size[p] = 1;
+
+        int remaining = n - plateCount;
+
+        // ---- Grow ----
+        while (remaining > 0)
+        {
+            // The plate furthest below its target annexes next. See the header on why this is not a
+            // global best-pair search.
+            int hungriest = -1;
+            float worst = float.MinValue;
+            for (int p = 0; p < plateCount; p++)
+            {
+                float deficit = target[p] - size[p];
+                if (deficit <= worst) continue;
+                if (!HasFrontier(adj, owner, p)) continue;
+                worst = deficit; hungriest = p;
+            }
+
+            // Nobody can reach anything else — a sampled adjacency graph can miss an edge and strand a
+            // cell. Hand every orphan to whichever plate centre is nearest and stop.
+            if (hungriest < 0)
+            {
+                for (int j = 0; j < n; j++)
+                {
+                    if (owner[j] >= 0) continue;
+                    int bp = 0; float bd = -2f;
+                    for (int p = 0; p < plateCount; p++)
+                    {
+                        float d = Vector3.Dot(sites[seeds[p]], sites[j]);
+                        if (d > bd) { bd = d; bp = p; }
+                    }
+                    owner[j] = bp;
+                }
+                break;
+            }
+
+            // It takes the frontier cell it is most attached to, plus jitter. Always taking the
+            // most-connected one gives compact blobs; taking one at random gives tendrils.
+            int bestCell = -1;
+            float bestScore = float.MinValue;
+            for (int j = 0; j < n; j++)
+            {
+                if (owner[j] >= 0) continue;
+                int touching = 0;
+                foreach (int k in adj[j]) if (owner[k] == hungriest) touching++;
+                if (touching == 0) continue;
+                float score = touching + R() * GrowJitter;
+                if (score > bestScore) { bestScore = score; bestCell = j; }
+            }
+
+            if (bestCell < 0) break;   // HasFrontier said otherwise; defensive
+            owner[bestCell] = hungriest;
+            size[hungriest]++;
+            remaining--;
+        }
+
+        // Anything still unclaimed (a break above) goes to plate 0 rather than staying at -1, which
+        // would index out of the plate array on the first Sample.
+        for (int i = 0; i < n; i++) if (owner[i] < 0) owner[i] = 0;
+        return owner;
+    }
+
+    static bool HasFrontier(List<int>[] adj, int[] owner, int plate)
+    {
+        for (int j = 0; j < owner.Length; j++)
+        {
+            if (owner[j] >= 0) continue;
+            foreach (int k in adj[j]) if (owner[k] == plate) return true;
+        }
+        return false;
+    }
+
+    /// Which cells border which, discovered by sampling the sphere and recording each point's two
+    /// nearest sites. Approximate, and that is fine — see AdjacencySamples.
+    static List<int>[] BuildAdjacency(Vector3[] sites, int seed)
+    {
+        int n = sites.Length;
+        var adj = new List<int>[n];
+        var seen = new HashSet<long>();
+        for (int i = 0; i < n; i++) adj[i] = new List<int>();
+
+        // Its OWN random stream, so changing the sample count cannot shift the plate motions or the
+        // warp — those are drawn from `R` in Build, and a shared stream would make this an invisible
+        // dependency between an implementation detail and every world's geology.
+        var rng = new System.Random(seed ^ 0x5f356495);
+        System.Func<float> S = () => (float)rng.NextDouble();
+
+        for (int s = 0; s < AdjacencySamples; s++)
+        {
+            Vector3 p = RandomDirection(S);
+            int a = -1, b = -1;
+            float c1 = -2f, c2 = -2f;
+            for (int j = 0; j < n; j++)
+            {
+                float c = Vector3.Dot(sites[j], p);
+                if (c > c1) { c2 = c1; b = a; c1 = c; a = j; }
+                else if (c > c2) { c2 = c; b = j; }
+            }
+            if (a < 0 || b < 0) continue;
+
+            long key = a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
+            if (!seen.Add(key)) continue;
+            adj[a].Add(b);
+            adj[b].Add(a);
+        }
+        return adj;
+    }
+
+    static Vector3 FirstCellOf(Vector3[] sites, int[] cellPlate, int plate)
+    {
+        for (int i = 0; i < cellPlate.Length; i++) if (cellPlate[i] == plate) return sites[i];
+        return Vector3.up;
     }
 
     static WarpTerm MakeTerm(System.Func<float> R, float fMin, float fMax, float gain)
@@ -378,6 +629,7 @@ public static class TectonicsMap
     {
         var l = Get(b);
         if (l == null || l.plates == null || l.plates.Length == 0) return default;
+        if (l.cellSites == null || l.cellSites.Length == 0) return default;
 
         // (u,v) is an equirectangular position: u wraps once around, v runs pole to pole. Put it on the
         // sphere, then warp it — everything downstream (which plate owns it, how far it is from the fault)
@@ -393,19 +645,51 @@ public static class TectonicsMap
         float mag = Mathf.Max(1e-5f, raw.magnitude);
         Vector3 q = raw / mag;
 
-        int iA = -1, iB = -1;
+        // ---- THE NEAREST CELL, AND THE NEAREST CELL OF A DIFFERENT PLATE ----
+        //
+        // This is the whole change. It used to be "nearest plate site, second-nearest plate site", so
+        // the boundary was the bisector between two PLATE centres and was therefore a single arc. Now
+        // the fault is the bisector between two CELLS on opposite sides of it — a different pair of
+        // cells as you walk along it, so the margin is a chain of arcs meeting at angles rather than one
+        // smooth curve.
+        //
+        // The second-nearest cell OVERALL is not what is wanted: deep inside a large plate that is
+        // another cell of the SAME plate, and its bisector is an internal cell edge with no geological
+        // meaning — drawing it would put a red line down the middle of every continent.
+        //
+        // ONE PASS, NOT TWO. The obvious implementation scans for the nearest cell, reads its plate, and
+        // scans again for the nearest cell of any other plate. That doubles the cost of the hottest
+        // function in world generation: Sample is called once per tile per survey index (six of them)
+        // and once per tile while baking terrain, so on a 400x200 world it runs the better part of a
+        // million times before the player has looked at anything.
+        //
+        // So both are tracked together. The case that makes this subtle is a new cell that beats the
+        // current best AND belongs to a different plate: the old best then becomes the best
+        // different-plate candidate, and it is correct to overwrite the previous one because the old
+        // best outranks everything else already seen.
+        int cellA = -1, cellB = -1;
+        int plateA = -1;
         float c1 = -2f, c2 = -2f;
-        for (int i = 0; i < l.plates.Length; i++)
+
+        for (int i = 0; i < l.cellSites.Length; i++)
         {
-            float c = Vector3.Dot(l.plates[i].site, q);   // on a unit sphere, nearest == largest dot
-            if (c > c1) { c2 = c1; iB = iA; c1 = c; iA = i; }
-            else if (c > c2) { c2 = c; iB = i; }
+            float c = Vector3.Dot(l.cellSites[i], q);     // on a unit sphere, nearest == largest dot
+            int pi = l.cellPlate[i];
+
+            if (c > c1)
+            {
+                if (cellA >= 0 && pi != plateA) { c2 = c1; cellB = cellA; }
+                c1 = c; cellA = i; plateA = pi;
+            }
+            else if (pi != plateA && c > c2) { c2 = c; cellB = i; }
         }
 
-        Hit hit = new Hit { plateA = iA, plateB = iB, boundary = 0f, belt = 0f, convergence = 0f };
-        if (iB < 0) return hit;   // only one plate: no faults anywhere
+        Hit hit = new Hit { plateA = plateA, plateB = -1, boundary = 0f, belt = 0f, convergence = 0f };
+        if (cellB < 0) return hit;   // only one plate on this world: no faults anywhere
 
-        Vector3 A = l.plates[iA].site, B = l.plates[iB].site;
+        hit.plateB = l.cellPlate[cellB];
+
+        Vector3 A = l.cellSites[cellA], B = l.cellSites[cellB];
 
         // The fault between A and B is the great circle equidistant from both: the plane through the
         // origin with normal m. The angular distance from a point to that circle is asin(q·m) — exact,
@@ -487,13 +771,18 @@ public static class TectonicsMap
         hit.belt = bt * (0.55f + 0.45f * (Grain(l, q, 4.3f) * 0.5f + 0.5f));
 
         // Convergence across that fault: does plate A drive INTO plate B faster than B pulls away? `nrm`
-        // is the tangent at A pointing toward B; project the plates' relative motion onto it. >0 compresses
-        // the boundary (mountains, volcanoes), <0 opens a rift.
+        // is the tangent at A pointing toward B; project the PLATES' relative motion onto it. >0
+        // compresses the boundary (mountains, volcanoes), <0 opens a rift.
+        //
+        // The direction comes from the two CELLS either side of the fault (that is where the boundary
+        // actually is), but the motion comes from the two PLATES those cells belong to — a cell has no
+        // motion of its own, and giving it one would make a single continent's interior shear against
+        // itself along every internal cell edge.
         Vector3 nrm = B - A * Vector3.Dot(A, B);
         if (nrm.sqrMagnitude > 1e-6f)
         {
             nrm.Normalize();
-            Vector3 vrel = l.plates[iA].motion - l.plates[iB].motion;
+            Vector3 vrel = l.plates[hit.plateA].motion - l.plates[hit.plateB].motion;
             hit.convergence = Mathf.Clamp(Vector3.Dot(vrel, nrm) * 0.5f, -1f, 1f);
         }
         return hit;
