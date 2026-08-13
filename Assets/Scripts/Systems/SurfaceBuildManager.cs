@@ -416,6 +416,12 @@ public static class SurfaceBuildManager
         {
             if (p.Type == SurfaceBuildingType.SurfaceShipyard) yard = Mathf.Max(yard, p.level);
             if (p.Type == SurfaceBuildingType.ResearchCenter) lab = Mathf.Max(lab, p.level);
+            // A RESEARCH LAB CARRIES THE FACILITY TOO, at tier 1 and no higher whatever its structure
+            // level. A capital now opens with a Lab rather than a campus, and without this the world
+            // would claim a laboratory tier with nothing on the map answering for it — so demolishing
+            // the Lab would leave the tier standing forever, which is the exact bug the "last one goes"
+            // rule below exists to prevent.
+            else if (p.Type == SurfaceBuildingType.ResearchOutpost) lab = Mathf.Max(lab, 1);
         }
 
         int wasYard = b.shipyardLevel, wasLab = b.researchCenterLevel;
@@ -869,7 +875,221 @@ public static class SurfaceBuildManager
     {
         if (b?.surface == null || !b.settled) return;
         EnsureFacility(b, SurfaceBuildingType.SurfaceShipyard, b.shipyardLevel);
-        EnsureFacility(b, SurfaceBuildingType.ResearchCenter, b.researchCenterLevel);
+
+        // A RESEARCH LAB, NOT THE CAMPUS. The founding laboratory used to be a full Research Centre,
+        // which is the biggest science building in the game and the one a world gets when it is
+        // COMMITTED to research — a colony that has existed for a day owning one set the wrong opening
+        // note, and left nothing for the player to build toward on their own capital. The Lab carries the
+        // same tier-1 facility (see SyncFacilityTiers) so research still starts on turn one; it simply
+        // produces what a field station produces, and the campus is now something you decide on.
+        //
+        // Only if there is no campus already — a loaded save whose capital DID build one keeps it, and
+        // must not be handed a second laboratory on top.
+        if (CountOf(b, SurfaceBuildingType.ResearchCenter) == 0)
+            EnsureFacility(b, SurfaceBuildingType.ResearchOutpost, b.researchCenterLevel);
+    }
+
+    // ============================================================================================
+    // THE STARTING CITY — a seat of government with something actually generating next to it
+    //
+    // A capital used to open as a capitol standing alone, running on the founding reactor built into it
+    // and nothing else. That is a colony, not a city, and it taught the wrong first lesson: the whole
+    // Electrical category, the grid, the reach rule and the pylon chain were things the player met later
+    // by reading a tab, rather than things they woke up owning a working example of.
+    //
+    // So the capital is founded with a plant beside it, chosen by what the ground near it actually
+    // offers — and choosing is the point, because the two candidates read two different index maps:
+    //
+    //   A STEAM TURBINE on nearby Hydro. Preferred, because it is the better plant (1.8/s against 1.0)
+    //   and because water near a capital is the commonest case on a habitable world.
+    //   A COMBUSTION PLANT on nearby Mineral. The fallback, and the right one on a dry world: something
+    //   worth burning under a colony that has no water to raise steam with.
+    //
+    // If the plant lands outside the capitol's own reach, a chain of Power Nodes is laid between them —
+    // so the player's first sight of their world includes a worked example of the one mechanic that
+    // decides the shape of everything they build afterwards.
+    //
+    // EVERY SITE GOES THROUGH THE NORMAL RULES (CellBuildable, which now enforces the index highlight),
+    // so the founding plant is sited on ground the player could have chosen themselves, at an efficiency
+    // the map would have shown them. A world that offers neither hydro nor mineral ground near its
+    // capital simply gets no plant, which is a true statement about that world rather than a failure.
+    // ============================================================================================
+
+    /// How far from the seat a founding plant may be sited. Beyond this it is not "the starting city"
+    /// any more, it is an outpost the player did not ask for on the far side of the map.
+    const int FoundingPlantRadius = 22;
+
+    /// Tiles between pylons when wiring the plant back to the seat. Under the Power Node's own reach of
+    /// 7, so consecutive masts light overlapping ground and are therefore one grid — which is the whole
+    /// connection rule (see PowerGrid), not a margin for error.
+    const int FoundingNodeStride = 5;
+
+    public static void FoundStartingCity(CelestialBody b)
+    {
+        if (b?.surface == null || !b.settled) return;
+
+        var seat = FirstOf(b, SurfaceBuildingType.PlanetCapitol) ?? FirstOf(b, SurfaceBuildingType.ColonyShipBase);
+        if (seat == null) return;
+
+        // Already generating? Then this world has been founded before, or the player has built since.
+        foreach (var p in On(b))
+            if (p.Info.energyPerSec > 0f && p.Type != SurfaceBuildingType.PlanetCapitol
+                && p.Type != SurfaceBuildingType.ColonyShipBase) return;
+
+        Vector2Int at = SeatCell(b, seat);
+
+        var plant = TryFoundPlant(b, SurfaceBuildingType.SteamTurbine, at)
+                 ?? TryFoundPlant(b, SurfaceBuildingType.CombustionPlant, at);
+
+        if (plant == null)
+        {
+            Debug.Log($"FoundStartingCity: {b.name} has no hydro or mineral ground within {FoundingPlantRadius} " +
+                      $"tiles of its capitol — it starts on the capitol's own reactor alone.");
+            return;
+        }
+
+        WireToSeat(b, seat, plant);
+    }
+
+    /// Where the seat IS, for the purpose of measuring "near". The origin cell of a multi-tile footprint
+    /// is a corner, so the centre of its cells is the honest answer — a 3x3 capitol's corner is a tile
+    /// and a half from where the city actually is.
+    static Vector2Int SeatCell(CelestialBody b, PlacedBuilding seat)
+    {
+        var cells = SurfaceBuildingDatabase.Footprint(seat);
+        if (cells == null || cells.Count == 0) return new Vector2Int(seat.x, seat.y);
+        int sx = 0, sy = 0;
+        foreach (var c in cells) { sx += c.x; sy += c.y; }
+        return new Vector2Int(sx / cells.Count, sy / cells.Count);
+    }
+
+    /// Site and build one plant of this class as near the seat as its index allows, or null.
+    static PlacedBuilding TryFoundPlant(CelestialBody b, SurfaceBuildingType t, Vector2Int near)
+    {
+        var cells = FindDrawnSite(b, t, near, FoundingPlantRadius);
+        return cells == null ? null : PlaceDrawn(b, t, cells);
+    }
+
+    /// The nearest legal patch of `minTiles` connected cells for a drawn class.
+    ///
+    /// Rings outward from `near` so the first hit is genuinely the closest, then grows a 4-connected
+    /// blob from that cell by breadth-first search. Edge-to-edge growth rather than any-shape, because
+    /// that is the rule the player's own brush follows (BuildPlacement) — a founding building the player
+    /// could not have drawn themselves would be a special case standing on their map forever.
+    static List<Vector2Int> FindDrawnSite(CelestialBody b, SurfaceBuildingType t, Vector2Int near, int radius)
+    {
+        var info = SurfaceBuildingDatabase.Get(t);
+        if (info == null || b?.surface == null) return null;
+
+        int want = Mathf.Max(1, info.minTiles);
+
+        // Both sets hoisted out of the scan. Occupied and PendingCells each BUILD a fresh HashSet per
+        // call, and the ring search asks about a few thousand cells — rebuilding both per cell would
+        // turn a one-off founding pass into a measurable part of galaxy generation for nothing.
+        var occupied = Occupied(b);
+        var pending = SurfaceBuildQueue.PendingCells(b);
+
+        for (int r = 0; r <= radius; r++)
+            for (int dy = -r; dy <= r; dy++)
+                for (int dx = -r; dx <= r; dx++)
+                {
+                    if (Mathf.Abs(dx) != r && Mathf.Abs(dy) != r) continue;      // the ring only
+                    var start = new Vector2Int(near.x + dx, near.y + dy);
+                    if (!Usable(b, info, occupied, pending, start)) continue;
+
+                    var grown = Grow(b, info, occupied, pending, start, want);
+                    if (grown != null) return grown;
+                }
+        return null;
+    }
+
+    static bool Usable(CelestialBody b, SurfaceBuildingInfo info, HashSet<Vector2Int> occupied,
+                       HashSet<Vector2Int> pending, Vector2Int c)
+        => InBounds(b, c.x, c.y) && !occupied.Contains(c) && !pending.Contains(c)
+           && CellBuildable(b, info, c.x, c.y, out _);
+
+    static List<Vector2Int> Grow(CelestialBody b, SurfaceBuildingInfo info, HashSet<Vector2Int> occupied,
+                                 HashSet<Vector2Int> pending, Vector2Int start, int want)
+    {
+        var taken = new List<Vector2Int> { start };
+        var seen = new HashSet<Vector2Int> { start };
+        var frontier = new Queue<Vector2Int>();
+        frontier.Enqueue(start);
+
+        while (taken.Count < want && frontier.Count > 0)
+        {
+            var cur = frontier.Dequeue();
+            foreach (var n in new[] { new Vector2Int(cur.x + 1, cur.y), new Vector2Int(cur.x - 1, cur.y),
+                                      new Vector2Int(cur.x, cur.y + 1), new Vector2Int(cur.x, cur.y - 1) })
+            {
+                if (taken.Count >= want) break;
+                if (!seen.Add(n)) continue;
+                if (!Usable(b, info, occupied, pending, n)) continue;
+                taken.Add(n);
+                frontier.Enqueue(n);
+            }
+        }
+
+        return taken.Count >= want ? taken : null;
+    }
+
+    /// Lay pylons from the seat toward the plant until the two are on one grid.
+    ///
+    /// Stepping along the straight line between them rather than pathfinding: the reach rule is about
+    /// distance and nothing else, so the shortest route is the right one, and where a step lands
+    /// somewhere unbuildable the nearby-cell search shifts it rather than routing around. Each pylon is
+    /// checked with PowerGrid.CanPlantNodeAt exactly as the player's would be — a founding chain that
+    /// broke the relay rule would be a chain they could not have built and could not repair.
+    static void WireToSeat(CelestialBody b, PlacedBuilding seat, PlacedBuilding plant)
+    {
+        if (SameGrid(b, seat, plant)) return;
+
+        Vector2Int from = SeatCell(b, seat), to = SeatCell(b, plant);
+        var node = SurfaceBuildingDatabase.Get(SurfaceBuildingType.PowerNode);
+
+        float span = Vector2.Distance(from, to);
+        int steps = Mathf.CeilToInt(span / FoundingNodeStride);
+
+        for (int i = 1; i <= steps + 2 && !SameGrid(b, seat, plant); i++)
+        {
+            float f = Mathf.Clamp01(i / (float)Mathf.Max(1, steps));
+            var want = new Vector2Int(Mathf.RoundToInt(Mathf.Lerp(from.x, to.x, f)),
+                                      Mathf.RoundToInt(Mathf.Lerp(from.y, to.y, f)));
+
+            if (!PlantNodeNear(b, node, want)) break;   // nowhere legal left; stop rather than loop
+        }
+
+        if (!SameGrid(b, seat, plant))
+            Debug.Log($"FoundStartingCity: {b.name}'s founding plant could not be wired back to the capitol — " +
+                      $"it runs as its own grid until the player joins them.");
+    }
+
+    /// Plant one pylon at `want`, or at the nearest cell to it that will take one. Returns false when
+    /// nothing within a few tiles qualifies, which is the signal to give up rather than to try further.
+    static bool PlantNodeNear(CelestialBody b, SurfaceBuildingInfo node, Vector2Int want)
+    {
+        var occupied = Occupied(b);
+        var pending = SurfaceBuildQueue.PendingCells(b);
+        for (int r = 0; r <= 3; r++)
+            for (int dy = -r; dy <= r; dy++)
+                for (int dx = -r; dx <= r; dx++)
+                {
+                    if (Mathf.Abs(dx) != r && Mathf.Abs(dy) != r) continue;
+                    var c = new Vector2Int(want.x + dx, want.y + dy);
+                    if (!Usable(b, node, occupied, pending, c)) continue;
+
+                    var cells = new List<Vector2Int> { c };
+                    if (!PowerGrid.CanPlantNodeAt(b, cells, out _)) continue;
+                    if (ForcePlace(b, SurfaceBuildingType.PowerNode, c.x, c.y, 0)) return true;
+                }
+        return false;
+    }
+
+    static bool SameGrid(CelestialBody b, PlacedBuilding a, PlacedBuilding c)
+    {
+        var na = PowerGrid.NetOf(b, a);
+        var nc = PowerGrid.NetOf(b, c);
+        return na != null && nc != null && na.index == nc.index;
     }
 
     static void EnsureFacility(CelestialBody b, SurfaceBuildingType t, int level)

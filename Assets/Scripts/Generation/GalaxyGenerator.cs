@@ -420,6 +420,17 @@ public static class GalaxyGenerator
         // was no shipyard to look at, select, site or lose. See EnsureFoundingFacilities.
         SurfaceBuildManager.EnsureFoundingFacilities(planet);
 
+        // ...and a working power station beside all of it, wired back to the capitol if it did not land
+        // within the capitol's own reach. A capital that opens as one building running on its built-in
+        // reactor is a colony rather than a city, and it leaves the grid — the mechanic that decides the
+        // shape of everything the player builds afterwards — as something they meet later by reading a
+        // tab instead of something they wake up owning a worked example of. See FoundStartingCity.
+        //
+        // NEW GAMES ONLY. The load path repairs a capital that is MISSING a seat or a declared facility,
+        // because those are invariants; a starting plant is not an invariant, it is an opening position,
+        // and handing one to an old save would be a gift rather than a repair.
+        SurfaceBuildManager.FoundStartingCity(planet);
+
         // Extra starting resources by difficulty.
         var keys = new List<ResourceType>(planet.resources.resources.Keys);
         foreach (var k in keys) planet.resources.resources[k] *= GameConfig.HomeResourceBonus;

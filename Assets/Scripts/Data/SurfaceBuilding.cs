@@ -19,8 +19,10 @@ public enum SurfaceBuildingType
     Settlement, Town, City,
     // The power grid (see PowerGrid.cs)
     PowerNode, Capacitor, CombustionPlant, SteamTurbine, FissionReactor, FusionReactor,
-    // The proper laboratory, above the Research Outpost. Appended, like everything else here, because
-    // the ordinals are in every save.
+    // The proper laboratory, above the Research Lab — which is the ResearchOutpost member above. The
+    // display name and the member name deliberately differ: the member's ORDINAL is in every save, so
+    // renaming the type to match a caption would be a save-format change for the sake of a word.
+    // Appended, like everything else here, for the same reason.
     ResearchCenter
 }
 
@@ -406,13 +408,21 @@ public static class SurfaceBuildingDatabase
         { metalPerSec = 1.1f };
 
         // J-tetromino.
-        _all[(int)SurfaceBuildingType.ResearchOutpost] = new SurfaceBuildingInfo(SurfaceBuildingType.ResearchOutpost, SurfaceBuildingCategory.Science, "Research Outpost",
-            "A surface laboratory feeding research to the empire. Terrain-agnostic.",
+        //
+        // NAMED "Research Lab" rather than "Research Outpost". The enum member keeps its old name because
+        // its ORDINAL is in every save and renaming the type would be a save-format change for a caption;
+        // the two are allowed to differ, and the displayed name is the one the player ever sees.
+        //
+        // This is also what a freshly-founded capital starts with — see SurfaceBuildManager's founding
+        // pass. A colony a day old having a full research campus standing on it was the wrong opening
+        // note: the campus is something you commit a world to, not something it wakes up owning.
+        _all[(int)SurfaceBuildingType.ResearchOutpost] = new SurfaceBuildingInfo(SurfaceBuildingType.ResearchOutpost, SurfaceBuildingCategory.Science, "Research Lab",
+            "A working laboratory feeding research to the empire — the building a young colony starts with and the cheapest way to put a new world on the science map. Terrain-agnostic.",
             S(0, 0, 0, 1, 0, 2, 1, 2), SurfaceIndexKind.None, 80, 70, 20f, new Color(0.45f, 0.85f, 1.00f))
         { researchPerSec = 0.6f };
 
-        // The real laboratory. The Research Outpost above it is a field station — this is the building
-        // you put down when a world is meant to be a science world, and it is drawn rather than fixed so
+        // The real laboratory. The Research Lab above it is a field station — this is the building you
+        // put down when a world is meant to be a science world, and it is drawn rather than fixed so
         // that a world CAN be committed to research the way another is committed to farming.
         //
         // Sited on nothing in particular (SurfaceIndexKind.None): unlike a mine or a farm, what a lab
@@ -420,7 +430,7 @@ public static class SurfaceBuildingDatabase
         // for exactly that reason.
         var lab = new SurfaceBuildingInfo(SurfaceBuildingType.ResearchCenter, SurfaceBuildingCategory.Science,
             "Research Centre",
-            "A full research campus — laboratories, test halls and the people to staff them. Produces far more than a Research Outpost and scales with every tile you give it, but it is hungry for power and takes real time to build. Terrain-agnostic: what a laboratory needs is electricity and a population, not good ground.",
+            "A full research campus — laboratories, test halls and the people to staff them. Produces far more than a Research Lab and scales with every tile you give it, but it is hungry for power and takes real time to build. Terrain-agnostic: what a laboratory needs is electricity and a population, not good ground.",
             S(0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1), SurfaceIndexKind.None, 160, 130, 28f,
             new Color(0.55f, 0.90f, 1.00f))
         { researchPerSec = 1.8f };

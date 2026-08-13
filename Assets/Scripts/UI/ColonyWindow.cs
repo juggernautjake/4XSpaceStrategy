@@ -258,7 +258,7 @@ public class ColonyWindow : MonoBehaviour
         //   Farm            -> Farmland            (drawn, 4 tiles minimum)
         //   Mine            -> Mine                (drawn, 3 tiles minimum)
         //   Power Plant     -> any of the plants in the Electrical category
-        //   Research Centre -> Research Centre     (drawn, 6 tiles minimum) or a Research Outpost
+        //   Research Centre -> Research Centre     (drawn, 6 tiles minimum) or a Research Lab
         //   Shipyard        -> Shipyard            (a fixed 3x3)
         //
         // The two UPGRADE ladders above this — shipyard tier and lab tier — are untouched. They are not
