@@ -9,10 +9,17 @@ using UnityEngine;
 // forever; a mine on dead rock is a permanent mistake.
 public static class SurfaceBuildManager
 {
-    // While the surface economy is being tuned, a world may hold only one of each structure. Flip this
-    // off to allow duplicates (the genuinely unique ones — capitol, shipyard — stay capped either way
-    // via SurfaceBuildingInfo.uniquePerWorld).
-    public const bool OneOfEachPerWorld = true;
+    // THERE IS NO LONGER A ONE-OF-EACH CAP.
+    //
+    // A world used to hold exactly one of every structure — a testing measure from before the surface
+    // economy existed, kept behind a `OneOfEachPerWorld` constant. It is gone, and its removal is not a
+    // tuning change so much as the precondition for the whole drawing mechanic: a cap of one makes
+    // "extend the farm you already have" and "site a second mine on the better seam" both impossible,
+    // and it made the adjacency merging in this file unreachable by construction.
+    //
+    // The genuinely unique classes are still unique, via SurfaceBuildingInfo.uniquePerWorld — a second
+    // capitol is wrong for reasons that have nothing to do with economy tuning, and that flag says so
+    // per-class rather than as a blanket rule over everything.
 
     // ---- Queries ----
     public static List<PlacedBuilding> On(CelestialBody b)
@@ -103,7 +110,7 @@ public static class SurfaceBuildManager
             return false;
         }
 
-        if ((info.uniquePerWorld || (OneOfEachPerWorld && !info.allowMultiple)) && CountOf(b, t) > 0)
+        if (info.uniquePerWorld && CountOf(b, t) > 0)
         { why = $"this world already has a {info.name.ToLower()}"; return false; }
 
         // SOLAR IS OFF THE MENU UNDER A THICK SKY.
@@ -172,16 +179,9 @@ public static class SurfaceBuildManager
             return false;
         }
 
-        // ONE OF EACH per world, for now: place a second and it's refused. (Some types — the capitol,
-        // the shipyard — are inherently unique; the rest are capped here while the surface economy is
-        // still being tuned. Relax this by dropping the OneOfEachPerWorld check.)
-        //
-        // Power infrastructure opts out via allowMultiple. A tuning cap on how many mines a world may
-        // have is one thing; applied to relays it would reduce the power grid to a single node and
-        // delete the entire mechanic, so infrastructure meant to be chained is exempt by construction.
-        // Note the shape: uniquePerWorld is absolute and allowMultiple cannot override it, because a
-        // second capitol is wrong for reasons that have nothing to do with economy tuning.
-        if ((info.uniquePerWorld || (OneOfEachPerWorld && !info.allowMultiple)) && CountOf(b, t) > 0)
+        // Only the genuinely unique classes are capped — see the note at the top of this file on why the
+        // blanket one-of-each rule is gone.
+        if (info.uniquePerWorld && CountOf(b, t) > 0)
         { why = $"this world already has a {info.name.ToLower()}"; return false; }
 
         // A Planet Capitol isn't built from scratch: it's what a Colony Ship Base becomes. Placing one
@@ -312,17 +312,92 @@ public static class SurfaceBuildManager
         foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, rotation))
             if (InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = true;
 
-        // A surface shipyard IS the world's shipyard: placing it gives the world tier 1, which is what
-        // adds its build power to the empire pool and lets the Production tab upgrade it from there.
-        if (t == SurfaceBuildingType.SurfaceShipyard)
-        {
-            b.shipyardLevel = Mathf.Max(1, b.shipyardLevel);
-            UnitManager.Instance?.NotifyBuildChanged();
-        }
+        SyncFacilityTiers(b);
 
         SimpleAudio.Instance?.PlayClick();
         return true;
     }
+
+    // ============================================================================================
+    // A WORLD'S SHIPYARD AND LABORATORY TIERS ARE PROPERTIES OF WHAT IS STANDING ON IT
+    //
+    // `shipyardLevel` and `researchCenterLevel` are read all over the game — build power, research
+    // capacity, which hulls may be laid down, how many ore samples a world can study. They used to be
+    // raised by an ABSTRACT facility: a word added to a list by a button, with nothing on the map. That
+    // whole system is gone (see the note in Building.cs), so the tiers now follow the structures.
+    //
+    // ONE PLACE, not four. Place, place-drawn, upgrade and demolish each used to raise or clear the yard
+    // tier by hand, and a fifth call site that forgot would leave a world claiming a shipyard it no
+    // longer has. This is that one place, and it now covers the laboratory too.
+    //
+    // ---- THE TWO LADDERS ARE NOT THE SAME LADDER, and this must not conflate them ----
+    //
+    // A PlacedBuilding's `level` runs 1..3 (PlacedBuilding.MaxLevel) and is the STRUCTURE's tech tier.
+    // A world's shipyardLevel runs 1..5 (Colony.MaxShipyardLevel) and is the FACILITY's tier, upgraded
+    // from the Orbit tab through ColonyManager's own cost table. Copying one into the other would cap a
+    // level-5 yard at 3 and silently delete two upgrades the player paid for.
+    //
+    // So the rule is deliberately weak in one direction and strong in the other:
+    //   A STRUCTURE EXISTS  -> the world has at least tier 1, and at least the structure's own tier.
+    //                          Never lowered, so the facility ladder above 3 is untouched.
+    //   THE LAST ONE GOES   -> the tier is cleared, but only on a world whose tier came from a structure
+    //                          in the first place (see hadSurfaceFacility). A save written before these
+    //                          buildings existed carries the numbers and no structures, and clearing
+    //                          strictly from the map would strip the capital of both on load.
+    // ============================================================================================
+    public static void SyncFacilityTiers(CelestialBody b)
+    {
+        if (b == null) return;
+
+        int yard = 0, lab = 0;
+        foreach (var p in On(b))
+        {
+            if (p.Type == SurfaceBuildingType.SurfaceShipyard) yard = Mathf.Max(yard, p.level);
+            if (p.Type == SurfaceBuildingType.ResearchCenter) lab = Mathf.Max(lab, p.level);
+        }
+
+        int wasYard = b.shipyardLevel, wasLab = b.researchCenterLevel;
+
+        if (yard > 0)
+        {
+            b.shipyardLevel = Mathf.Clamp(Mathf.Max(b.shipyardLevel, yard), 1, Colony.MaxShipyardLevel);
+            NoteSurfaceFacility(b, SurfaceBuildingType.SurfaceShipyard);
+        }
+        else if (HadSurfaceFacility(b, SurfaceBuildingType.SurfaceShipyard)) b.shipyardLevel = 0;
+
+        if (lab > 0)
+        {
+            b.researchCenterLevel = Mathf.Clamp(Mathf.Max(b.researchCenterLevel, lab), 1, Colony.MaxResearchCenterLevel);
+            NoteSurfaceFacility(b, SurfaceBuildingType.ResearchCenter);
+        }
+        else if (HadSurfaceFacility(b, SurfaceBuildingType.ResearchCenter)) b.researchCenterLevel = 0;
+
+        if (b.shipyardLevel != wasYard) UnitManager.Instance?.NotifyBuildChanged();
+        if (b.researchCenterLevel != wasLab) TechManager.NotifyChanged();
+    }
+
+    // Worlds whose tier came from a structure they have since lost. Without this the "leave a declared
+    // tier alone" rule above would also leave a DEMOLISHED one alone, and tearing a shipyard down would
+    // keep its build power in the empire pool forever.
+    //
+    // A HashSet rather than a field on CelestialBody: it is a fact about this session's edits, not about
+    // what the world is, and adding a serialized field to the most over-subscribed type in the project
+    // to record "you used to have a shipyard here" is not worth a save-format change. A world missing
+    // from it on load simply keeps whatever tier the save recorded, which is the correct answer.
+    static readonly HashSet<(CelestialBody, SurfaceBuildingType)> hadSurfaceFacility
+        = new HashSet<(CelestialBody, SurfaceBuildingType)>();
+
+    static bool HadSurfaceFacility(CelestialBody b, SurfaceBuildingType t)
+        => hadSurfaceFacility.Contains((b, t));
+
+    static void NoteSurfaceFacility(CelestialBody b, SurfaceBuildingType t)
+    {
+        if (t == SurfaceBuildingType.SurfaceShipyard || t == SurfaceBuildingType.ResearchCenter)
+            hadSurfaceFacility.Add((b, t));
+    }
+
+    /// Drop the "used to have one" record. Called when the galaxy these worlds belong to is replaced.
+    public static void ForgetFacilityHistory() => hadSurfaceFacility.Clear();
 
     // ============================================================================================
     // PLACE A DRAWN FOOTPRINT
@@ -379,11 +454,7 @@ public static class SurfaceBuildManager
         foreach (var c in cells)
             if (InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = true;
 
-        if (t == SurfaceBuildingType.SurfaceShipyard)
-        {
-            b.shipyardLevel = Mathf.Max(1, b.shipyardLevel);
-            UnitManager.Instance?.NotifyBuildChanged();
-        }
+        SyncFacilityTiers(b);
 
         return p;
     }
@@ -407,6 +478,7 @@ public static class SurfaceBuildManager
         foreach (var c in SurfaceBuildingDatabase.Footprint(t, x, y, rotation))
             if (InBounds(b, c.x, c.y)) b.surface.tiles[c.x, c.y].occupied = true;
         PowerGrid.Invalidate();
+        SyncFacilityTiers(b);
         return true;
     }
 
@@ -472,6 +544,59 @@ public static class SurfaceBuildManager
         return ForcePlace(b, SurfaceBuildingType.PlanetCapitol, x, y, 0);
     }
 
+    // ============================================================================================
+    // A DECLARED FACILITY GETS A REAL BUILDING
+    //
+    // The same invariant EnsureColonySeat enforces for the seat of government, applied to the two
+    // facilities that used to exist only as numbers. The home world is DECLARED to have a shipyard and a
+    // laboratory at generation — that is what lets the player build a ship and research anything on turn
+    // one — and until now neither had a structure anywhere on the map. You could not look at your
+    // capital and see its yard, could not select it, could not lose it, and could not choose where it
+    // sat. The Production tab said "Shipyard: Level 1" and that was the whole of it.
+    //
+    // So: if a world claims a tier and has no structure carrying it, put the structure down. This is not
+    // a grant — it is the missing half of one that already happened — and from here on the world has a
+    // building that can be selected, damaged and demolished like any other, which is the whole point.
+    //
+    // Also the repair path for every save written before this: an old capital loads with its numbers,
+    // gets its yard and campus placed on the first spare ground, and from then on behaves like a world
+    // that built them.
+    //
+    // THE WORLD'S TIER IS NOT TOUCHED. SyncFacilityTiers only ever raises it (see the note there, on why
+    // the 1..3 structure ladder and the 1..5 facility ladder are not the same ladder), so a capital with
+    // a level-4 yard gets a building for it and keeps the 4.
+    public static void EnsureFoundingFacilities(CelestialBody b)
+    {
+        if (b?.surface == null || !b.settled) return;
+        EnsureFacility(b, SurfaceBuildingType.SurfaceShipyard, b.shipyardLevel);
+        EnsureFacility(b, SurfaceBuildingType.ResearchCenter, b.researchCenterLevel);
+    }
+
+    static void EnsureFacility(CelestialBody b, SurfaceBuildingType t, int level)
+    {
+        if (level < 1) return;                 // the world doesn't claim one
+        if (CountOf(b, t) > 0) return;         // ...and if it does, it already has one standing
+
+        if (!FindSpot(b, t, out int x, out int y))
+        {
+            // No room. Unlike the capitol this is not a crisis — the tier stays declared and everything
+            // that reads it keeps working — so this is a warning about a missing MODEL, not about a
+            // broken colony. Said out loud anyway, because "my shipyard has no building" is otherwise
+            // indistinguishable from a bug.
+            Debug.LogWarning($"EnsureFoundingFacilities: no room on {b.name} for its {SurfaceBuildingDatabase.Get(t).name} " +
+                             $"— the world keeps tier {level}, but there is no structure on the map for it.");
+            return;
+        }
+
+        if (!ForcePlace(b, t, x, y, 0)) return;
+
+        // The structure comes up at the closest tier it can express to the world's. A level-5 yard's
+        // building is a level-3 building, because that is the top of the structure ladder — the world
+        // keeps its 5, and the model on the map is simply the biggest one there is.
+        var placed = FirstOf(b, t);
+        if (placed != null) placed.level = Mathf.Clamp(level, 1, PlacedBuilding.MaxLevel);
+    }
+
     // ---- Upgrades ----
     // A Colony Ship Base becomes a Planet Capitol in place: same footprint, so it never has to find
     // room, and the colony visibly graduates from "a parked ship" to "a seat of government".
@@ -535,12 +660,9 @@ public static class SurfaceBuildManager
         // exactly as placing a new node between them would.
         PowerGrid.Invalidate();
 
-        // A shipyard's tier IS the world's shipyard tier — upgrading the structure upgrades the yard.
-        if (p.Type == SurfaceBuildingType.SurfaceShipyard)
-        {
-            b.shipyardLevel = Mathf.Max(b.shipyardLevel, p.level);
-            UnitManager.Instance?.NotifyBuildChanged();
-        }
+        // A shipyard's tier IS the world's shipyard tier, and a campus's is its laboratory tier —
+        // upgrading the structure upgrades the facility.
+        SyncFacilityTiers(b);
 
         SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
         return true;
@@ -583,12 +705,9 @@ public static class SurfaceBuildManager
         // once the derivation runs again, so it must not be allowed to answer from this frame's cache.
         PowerGrid.Invalidate();
 
-        // Tearing down the world's shipyard takes its build power out of the pool with it.
-        if (p.Type == SurfaceBuildingType.SurfaceShipyard && CountOf(b, SurfaceBuildingType.SurfaceShipyard) == 0)
-        {
-            b.shipyardLevel = 0;
-            UnitManager.Instance?.NotifyBuildChanged();
-        }
+        // Tearing down the world's shipyard takes its build power out of the empire pool with it, and
+        // tearing down its campus takes the research capacity. Both fall out of the re-derivation.
+        SyncFacilityTiers(b);
 
         if (refund && !GameMode.DevMode)
         {

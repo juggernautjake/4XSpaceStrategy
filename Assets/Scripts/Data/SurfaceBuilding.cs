@@ -124,14 +124,12 @@ public class SurfaceBuildingInfo
     public BuildDrawMode drawMode = BuildDrawMode.Free;
 
     // One per world (a capitol, a shipyard). Upgrades replace rather than stack.
+    //
+    // This is now the ONLY cap on how many of a class a world may hold. Its counterpart `allowMultiple`
+    // is gone with the blanket one-of-each rule it opted out of (see SurfaceBuildManager) — with no cap
+    // to escape, a flag saying "this one may be built more than once" described the default and read as
+    // though the classes without it were still limited.
     public bool uniquePerWorld = false;
-
-    // Opts OUT of SurfaceBuildManager.OneOfEachPerWorld — you may build as many of these as you like.
-    // The power grid is the reason this exists: a grid whose whole point is chaining relays across a
-    // continent is not a feature if the world is allowed exactly one relay. The blanket one-of-each cap
-    // is an economy-tuning measure, and it cannot be allowed to cap infrastructure that is meant to be
-    // built in quantity. (`uniquePerWorld` still wins — a second capitol is wrong for its own reasons.)
-    public bool allowMultiple = false;
 
     // ---- Power ----
     // How far this structure LIGHTS GROUND, in tiles, measured from any cell of its own footprint.
@@ -532,7 +530,6 @@ public static class SurfaceBuildingDatabase
             "A relay pylon. Makes no power at all — it CARRIES it, seven tiles in every direction. Chain them and two isolated grids become one; lose the node in the middle of the chain and they are two again. The cheapest tile on this list and the one that decides the shape of everything else.",
             S(0, 0), SurfaceIndexKind.None, 30, 20, 8f, new Color(0.30f, 0.75f, 1.00f));
         node.powerRange = 7f;
-        node.allowMultiple = true;
         _all[(int)SurfaceBuildingType.PowerNode] = node;
 
         // The bank. Turns an intermittent grid into a grid you can actually build on.
@@ -541,7 +538,6 @@ public static class SurfaceBuildingDatabase
             "Stores power for the grid it stands on. Surplus charges it; a shortfall drains it. This is what lets a grid running on sun and wind carry a load it cannot meet at every instant — without one, the moment demand passes generation everything on the grid browns out together.",
             S(0, 0, 1, 0, 2, 0), SurfaceIndexKind.None, 60, 40, 12f, new Color(0.45f, 0.90f, 0.95f));
         cap.powerStorage = 240f;
-        cap.allowMultiple = true;
         _all[(int)SurfaceBuildingType.Capacitor] = cap;
 
         // L-tromino, same corner piece as the mine — it's the same industry, really.
@@ -551,7 +547,6 @@ public static class SurfaceBuildingDatabase
             S(0, 0, 0, 1, 1, 0), SurfaceIndexKind.Mineral, 40, 10, 10f, new Color(0.75f, 0.45f, 0.25f));
         comb.energyPerSec = 1.0f;
         comb.powerRange = 1.5f;
-        comb.allowMultiple = true;
         _all[(int)SurfaceBuildingType.CombustionPlant] = comb;
 
         // Domino.
@@ -561,7 +556,6 @@ public static class SurfaceBuildingDatabase
             S(0, 0, 0, 1), SurfaceIndexKind.Water, 70, 30, 16f, new Color(0.80f, 0.82f, 0.86f));
         steam.energyPerSec = 1.8f;
         steam.powerRange = 1.5f;
-        steam.allowMultiple = true;
         _all[(int)SurfaceBuildingType.SteamTurbine] = steam;
 
         // Z-tetromino.
@@ -571,7 +565,6 @@ public static class SurfaceBuildingDatabase
             S(0, 1, 1, 1, 1, 0, 2, 0), SurfaceIndexKind.None, 120, 80, 22f, new Color(0.55f, 0.95f, 0.45f));
         fission.energyPerSec = 2.4f;
         fission.powerRange = 1.5f;
-        fission.allowMultiple = true;
         fission.requiredTech = "F1";
         _all[(int)SurfaceBuildingType.FissionReactor] = fission;
 
@@ -582,7 +575,6 @@ public static class SurfaceBuildingDatabase
             S(0, 0, 1, 0, 0, 1, 1, 1), SurfaceIndexKind.None, 200, 150, 30f, new Color(0.60f, 0.85f, 1.00f));
         fusion.energyPerSec = 4.0f;
         fusion.powerRange = 1.5f;
-        fusion.allowMultiple = true;
         fusion.requiredTech = "F2";
         _all[(int)SurfaceBuildingType.FusionReactor] = fusion;
 

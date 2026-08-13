@@ -167,52 +167,31 @@ public class ColonyManager : MonoBehaviour
     }
 
     // ---- Construction ----
-    public bool IsUnique(BuildingType t) => true;   // one of each per world (keeps colonies readable)
+    // `IsUnique` and `HasFacility` lived here, and both only ever answered questions the abstract
+    // facility system asked. Their surviving job — "does this world already have a shipyard" — is now
+    // read straight off b.shipyardLevel / b.researchCenterLevel, which SurfaceBuildManager derives from
+    // the structures standing on the map (SyncFacilityTiers). Nothing consults the buildings LIST to
+    // decide what a world has any more.
 
-    // A world gets ONE shipyard and ONE research centre — you upgrade the one you have rather than
-    // stacking more. Both track their tier in a level field rather than the buildings list (the capital
-    // starts with a level-1 yard and lab it never "built"), so the level is the real test of existence.
-    // Checking only `buildings` would let you build a second yard on your own home world.
-    public static bool HasFacility(CelestialBody b, BuildingType t)
-    {
-        if (b == null) return false;
-        if (t == BuildingType.Shipyard) return b.shipyardLevel >= 1 || b.buildings.Contains((int)t);
-        if (t == BuildingType.ResearchCenter) return b.researchCenterLevel >= 1 || b.buildings.Contains((int)t);
-        return b.buildings.Contains((int)t);
-    }
-
-    public bool CanBuild(CelestialBody b, BuildingType t, out string reason)
-    {
-        reason = null;
-        if (b == null || b.owner != FactionManager.Player) { reason = "colony not yours"; return false; }
-        if (!b.buildings.Contains((int)BuildingType.City)) { reason = "found a city first"; return false; }
-        if (t == BuildingType.City) { reason = "already the city"; return false; }
-        if (HasFacility(b, t))
-        {
-            reason = t == BuildingType.Shipyard ? "this world already has a shipyard — upgrade it instead"
-                   : t == BuildingType.ResearchCenter ? "this world already has a research centre — upgrade it instead"
-                   : "already built";
-            return false;
-        }
-        if (IsConstructing(b, t)) { reason = "under construction"; return false; }
-        var info = BuildingDatabase.Get(t);
-        int cm = DiscCost(info.costMetal), ce = DiscCost(info.costEnergy);
-        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(cm, ce))
-        { reason = $"need {cm} metal, {ce} energy"; return false; }
-        return true;
-    }
+    // ============================================================================================
+    // THERE IS NO GENERIC "BUILD A FACILITY" PATH ANY MORE
+    //
+    // CanBuild / StartBuilding used to take a BuildingType, spend metal, run a timer and then add the
+    // ordinal to b.buildings. That was the whole of a mine: a word in a list, with nothing standing
+    // anywhere on the world. It predates the surface grid entirely.
+    //
+    // Every class it could build is now a structure the player DRAWS on the surface
+    // (SurfaceBuildQueue.Enqueue -> SurfaceBuildManager.PlaceDrawn), sited on ground they chose, scaled
+    // by how much they drew, visible on the map, selectable, damageable and demolishable.
+    //
+    // What survives in this file is the construction work that has no surface footprint and never did:
+    // FOUNDING A CITY (StartEstablishCity), and the two TIER LADDERS — shipyard and research centre —
+    // which upgrade a structure that already stands rather than conjuring one. Those keep their own
+    // entry points below; the generic one is gone so nothing can accidentally route through it again.
+    // ============================================================================================
 
     // Build costs/times are reduced by researched Industry technologies.
     public static int DiscCost(int c) => Mathf.RoundToInt(c * TechEffects.BuildCostMult);
-
-    public bool StartBuilding(CelestialBody b, BuildingType t)
-    {
-        if (!CanBuild(b, t, out _)) return false;
-        var info = BuildingDatabase.Get(t);
-        if (!GameMode.DevMode && !PlayerEconomy.Spend(DiscCost(info.costMetal), DiscCost(info.costEnergy))) return false;
-        building.Add(new Construction { body = b, type = t, duration = info.buildTime * TechEffects.BuildTimeMult, Label = $"Building {info.name}" });
-        return true;
-    }
 
     // ---- Establishing the first city (used to settle an owned-but-empty world, e.g. a home moon) ----
     public const int CityMetal = 80, CityEnergy = 60;
@@ -401,20 +380,24 @@ public class ColonyManager : MonoBehaviour
                 c.body.cities = Mathf.Max(1, c.body.cities);
                 c.body.population = Mathf.Max(c.body.population, Population.ColonyStart(c.body, SpeciesManager.Current));
                 c.body.claimProgress = Colony.ClaimProgress(c.body);
+                // A world settled THIS way gets no structure from anywhere else — there is no colony
+                // ship to ground into a base (ColonyLanding) and it was never a generated capital
+                // (GalaxyGenerator). Without a seat it would be a settled world carrying no founding
+                // reactor, so every mine and factory on it would run at the unpowered floor from the
+                // moment it was founded, for a reason nothing on screen would explain.
+                SurfaceBuildManager.EnsureColonySeat(c.body);
                 SimpleAudio.Instance?.PlayNotify(NotifKind.Victory);
                 NotificationManager.Instance?.Push($"City founded on {c.body.name}!",
                     "Your settlers established a colony city. Develop the world with mines, farms, shipyards and more.", Fly(c.body), NotifKind.Victory);
             }
+            // NO GENERIC BRANCH. The only Constructions that exist now are the city founding above and
+            // the two tier upgrades; a job that is none of the three is a job nothing can create, so
+            // completing it silently would hide the bug that made it rather than fix it.
             else
             {
-                if (!c.body.buildings.Contains((int)c.type)) c.body.buildings.Add((int)c.type);
-                if (c.type == BuildingType.Shipyard) c.body.shipyardLevel = Mathf.Max(1, c.body.shipyardLevel);
-                if (c.type == BuildingType.ResearchCenter) c.body.researchCenterLevel = Mathf.Max(1, c.body.researchCenterLevel);
-                var info = BuildingDatabase.Get(c.type);
-                SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
-                NotificationManager.Instance?.Push($"{info.name} built on {c.body.name}", info.description, Fly(c.body), NotifKind.Info);
-                if (c.type == BuildingType.Shipyard) UnitManager.Instance?.NotifyBuildChanged();
-                if (c.type == BuildingType.ResearchCenter) TechManager.NotifyChanged();
+                Debug.LogWarning($"ColonyManager: a Construction of type {c.type} completed on {c.body.name}, " +
+                                 $"but the abstract facility build path was retired — nothing was placed. " +
+                                 $"Whatever queued this should be enqueuing a surface structure instead.");
             }
         }
     }

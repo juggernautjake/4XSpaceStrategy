@@ -550,28 +550,19 @@ public partial class InspectorWindow
             });
         }
 
-        foreach (BuildingType t in System.Enum.GetValues(typeof(BuildingType)))
-        {
-            if (t == BuildingType.City) continue;
-            var info = BuildingDatabase.Get(t);
-            var captured = t;
-            // Already present: it's listed under FACILITIES. Uses HasFacility rather than the buildings
-            // list so a world's starting shipyard/lab counts — one of each per world, upgrade not stack.
-            if (ColonyManager.HasFacility(b, t)) continue;
-
-            var card = Card(p);
-            UIFactory.WrapText(card, $"<b>{info.name}</b>", UITheme.SmallSize, UITheme.Text);
-            Note(card, info.description);
-            var group = card.gameObject.AddComponent<CanvasGroup>();
-            var btn = UIFactory.Button(card, "", () => { if (mgr != null && mgr.StartBuilding(b, captured)) lastSig = null; }, 24);
-            live.Button(btn, () =>
-            {
-                if (mgr == null) return (false, "unavailable");
-                bool can = mgr.CanBuild(b, captured, out string why);
-                return (can, can ? $"Build ({ColonyManager.DiscCost(info.costMetal)}m {ColonyManager.DiscCost(info.costEnergy)}e, {info.buildTime * TechEffects.BuildTimeMult:F0}s)"
-                                 : $"Build — {why}");
-            }, group);
-        }
+        // THE ABSTRACT BUILD CARDS ARE GONE.
+        //
+        // This used to list one card per BuildingType — Farm, Mine, Power Plant, Research Centre,
+        // Shipyard — each with a Build button that spent metal, ran a timer, and then added a WORD to a
+        // list. Nothing appeared anywhere on the world. You could not see the mine, point at it, choose
+        // its ground, damage it or tear it down; the whole of it was the line of text it printed.
+        //
+        // Every one of them has a real structure on the surface grid now, drawn where you want it and
+        // scaled by how much you drew. So the cards are replaced by the one control that still means
+        // anything: the way through to the map they are actually built on. (The "Open Planet View"
+        // button above this is that control — this is the sentence explaining why there is nothing else.)
+        Note(p, "Everything else is built on the SURFACE — a mine on a seam, a farm on green ground, a " +
+                "shipyard where there is room for one. Open the Planet View above and draw them on the map.");
     }
 
     // ---------------- Objects ----------------

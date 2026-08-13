@@ -1,33 +1,35 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// What a colony can DO, regardless of which of the two building systems provided it.
+// What a colony can DO — does it have food, power, research, industry, somewhere to live.
 //
-// THE PROBLEM THIS SOLVES
-// A world's infrastructure lives in two lists that didn't know about each other:
-//   * CelestialBody.buildings      — abstract colony facilities (BuildingType.Farm, PowerPlant, ...)
-//     queued from the Production tab and built over time.
-//   * CelestialBody.placedBuildings — concrete structures placed on the surface grid (SurfaceBuildingType
-//     .Farm, .SolarArray, ...) in the Planet View.
-// They model the same ideas twice. A Farm exists in both; a PowerPlant and a Solar Array are the same
-// answer to the same question. But Satisfaction only ever read `buildings`, so a world covered in
-// surface farms still counted as having NO food and its people went hungry on paper while standing in
-// a wheat field. Placing infrastructure on the map did nothing for the society that lived on it.
+// THIS USED TO RECONCILE TWO BUILDING SYSTEMS. A world's infrastructure lived in two lists that did not
+// know about each other: `CelestialBody.buildings`, the abstract facilities queued from a Production
+// tab, and `placedBuildings`, the structures standing on the surface grid. They modelled the same ideas
+// twice — a Farm existed in both — and Satisfaction read only the first, so a world covered in surface
+// farms counted as having NO food and its people went hungry on paper while standing in a wheat field.
 //
-// This is the single place that answers "does this colony have food / power / research / housing", and
-// it counts BOTH. Everything that used to test buildings.Contains(...) asks here instead, so the two
-// systems finally describe one colony.
+// THE ABSTRACT SYSTEM IS GONE. Nothing adds to `buildings` any more except the City marker; every
+// facility a colony has is a structure you can point at on the map. So this no longer reconciles
+// anything — it is simply the one place that reads the surface and answers the five questions, and
+// everything that used to test buildings.Contains(...) asks here instead.
+//
+// Deliberately NOT reading the legacy list even for old saves. A save from before the surface grid has
+// `buildings` entries and no structures, and honouring them would keep exactly the ghost the whole
+// change is removing: a colony that claims to have a mine with nothing anywhere on it. Such a world
+// reads as undeveloped, which is what it is — the ground is empty and the player can now see that and
+// fix it, rather than being told everything is fine by a list.
 //
 // Counts, not booleans, where it matters: two farms feed a colony better than one. That's what makes
 // developing the surface worth doing rather than a box to tick.
 public static class ColonyFacilities
 {
     // ---- Food ----
-    /// Everything feeding this colony, from either system.
+    /// Everything feeding this colony.
     public static int FoodSources(CelestialBody b)
     {
         if (b == null) return 0;
-        int n = b.buildings.Contains((int)BuildingType.Farm) ? 1 : 0;
+        int n = 0;
         foreach (var p in SurfaceBuildManager.On(b))
             if (p.Type == SurfaceBuildingType.Farm) n++;
         return n;
@@ -42,20 +44,35 @@ public static class ColonyFacilities
     }
 
     // ---- Power ----
-    /// Anything generating power: the abstract plant, or any of the surface generators. They're all the
-    /// same answer to "are the lights on?".
+    /// Anything generating power — the answer to "are the lights on?".
     public static int PowerSources(CelestialBody b)
     {
         if (b == null) return 0;
-        int n = b.buildings.Contains((int)BuildingType.PowerPlant) ? 1 : 0;
+        int n = 0;
         foreach (var p in SurfaceBuildManager.On(b))
             if (IsPower(p.Type)) n++;
         return n;
     }
 
+    /// Does this class MAKE power? Asked of the database rather than listed by hand.
+    ///
+    /// This was a hardcoded list of four — solar, wind, geothermal, hydro — written before the
+    /// Electrical category existed. Every generator added since was invisible to it: a world running on
+    /// a fusion reactor and three combustion plants reported "no power" to Satisfaction and took the
+    /// unrest for it, which is a hard bug to even suspect, because the Power tab next door showed a
+    /// perfectly healthy grid. Reading energyPerSec means a generator added tomorrow counts on the day
+    /// it is added.
+    ///
+    /// The seats of government are excluded on purpose. Both carry a founding reactor (see
+    /// SurfaceBuildingDatabase.Reactor) so every settled world would otherwise always report at least
+    /// one power source — and "this colony has power" would be true by definition and mean nothing.
     public static bool IsPower(SurfaceBuildingType t)
-        => t == SurfaceBuildingType.SolarArray || t == SurfaceBuildingType.WindFarm
-        || t == SurfaceBuildingType.GeothermalPlant || t == SurfaceBuildingType.HydroPlant;
+    {
+        if (t == SurfaceBuildingType.ColonyShipBase || t == SurfaceBuildingType.PlanetCapitol) return false;
+        if (CityGrowth.IsSettlement(t)) return false;   // a city's own lights are not a power industry
+        var info = SurfaceBuildingDatabase.Get(t);
+        return info != null && info.energyPerSec > 0f;
+    }
 
     public static float PowerLevel(CelestialBody b)
     {
@@ -65,6 +82,9 @@ public static class ColonyFacilities
     }
 
     // ---- Research ----
+    // The world's laboratory tier plus every field station. The tier itself is derived from the campus
+    // standing on the surface now (SurfaceBuildManager.SyncFacilityTiers), so this is two readings of
+    // the map rather than one of the map and one of a list.
     public static int ResearchSources(CelestialBody b)
     {
         if (b == null) return 0;
@@ -75,11 +95,12 @@ public static class ColonyFacilities
     }
 
     // ---- Industry: places to work ----
+    // The shipyard is counted through the structure rather than through b.shipyardLevel, which would
+    // have double-counted it now that the tier is derived FROM that structure.
     public static int IndustrySources(CelestialBody b)
     {
         if (b == null) return 0;
-        int n = b.buildings.Contains((int)BuildingType.Mine) ? 1 : 0;
-        if (b.shipyardLevel >= 1) n += b.shipyardLevel;
+        int n = 0;
         foreach (var p in SurfaceBuildManager.On(b))
             if (p.Type == SurfaceBuildingType.Mine || p.Type == SurfaceBuildingType.Factory ||
                 p.Type == SurfaceBuildingType.Refinery || p.Type == SurfaceBuildingType.Spaceport ||
@@ -91,7 +112,7 @@ public static class ColonyFacilities
     public static int HousingSources(CelestialBody b)
     {
         if (b == null) return 0;
-        int n = b.buildings.Contains((int)BuildingType.City) ? 1 : 0;
+        int n = 0;
         foreach (var p in SurfaceBuildManager.On(b))
             if (IsHousing(p.Type)) n++;
         return n;
@@ -101,13 +122,9 @@ public static class ColonyFacilities
         => t == SurfaceBuildingType.Habitat || t == SurfaceBuildingType.PlanetCapitol
         || t == SurfaceBuildingType.ColonyShipBase || CityGrowth.IsSettlement(t);
 
-    /// Total structures on this world, both systems — the "develop infrastructure" objective counts
-    /// what you actually built, wherever you built it.
+    /// Total structures standing on this world — what the "develop infrastructure" objective counts.
     public static int TotalStructures(CelestialBody b)
-    {
-        if (b == null) return 0;
-        return b.buildings.Count + SurfaceBuildManager.On(b).Count;
-    }
+        => b == null ? 0 : SurfaceBuildManager.On(b).Count;
 
     // ---- Unified listing, for the Production tab ----
     /// One row in a colony's infrastructure list, from either system.

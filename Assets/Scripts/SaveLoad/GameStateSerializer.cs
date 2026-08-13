@@ -387,6 +387,8 @@ public static class GameStateSerializer
         SurfaceBuildQueue.RefundAll();
 
         SurfaceBuildQueue.Clear();
+        // ...and the "this world used to have a shipyard" record, keyed on bodies from the dead galaxy.
+        SurfaceBuildManager.ForgetFacilityHistory();
 
         var bg = SpaceBackground.Instance;
         if (bg != null)
@@ -565,6 +567,12 @@ public static class GameStateSerializer
         // ANY of its worlds. Without this every colony in every old save would load with its industry
         // at the unpowered floor. Runs after the re-stamp above, so it packs around what's already down.
         SurfaceBuildManager.EnsureColonySeat(b);
+
+        // Same repair for the two facilities that used to be numbers with nothing on the map. A save
+        // written before the surface shipyard and research campus existed records "Shipyard: Level 3"
+        // and has no building anywhere carrying it; this gives the world the structure its own save
+        // already says it has. The tier itself is untouched — see EnsureFoundingFacilities.
+        SurfaceBuildManager.EnsureFoundingFacilities(b);
 
         if (b.surface != null)
             foreach (var o in dto.ores)

@@ -1836,6 +1836,29 @@ public class PlanetViewWindow : MonoBehaviour
         });
     }
 
+    /// Jump to the Build tab with a category already selected.
+    ///
+    /// The panels that used to carry a "Build X" button for an abstract facility now carry one of these
+    /// instead. The distinction matters: the old button BUILT something invisible, this one takes you to
+    /// where you draw a real one. Refused on a world the Build tab is not open on (unowned, unsurveyed) —
+    /// TabAvailable is the same gate the tab strip uses, so this can never strand the window on a tab
+    /// that will not render.
+    void GoToBuild(SurfaceBuildingCategory cat, string label)
+    {
+        if (!TabAvailable(Tab.Build, out string why))
+        {
+            Note($"<color=#C9A94D>{why}</color>");
+            return;
+        }
+
+        UIFactory.Button(sidePanel, label, () =>
+        {
+            tab = Tab.Build;
+            buildCategory = cat;
+            lastSig = null;
+        }, 26);
+    }
+
     static Unit FirstColonyShip(CelestialBody b)
     {
         if (b?.units == null) return null;
@@ -1866,19 +1889,16 @@ public class PlanetViewWindow : MonoBehaviour
         if (body.researchCenterLevel < 1)
         {
             var card = Card();
-            Note(card, "No research centre here. Build one to add research capacity to your empire.");
-            if (mgr != null)
-            {
-                var group = card.gameObject.AddComponent<CanvasGroup>();
-                var btn = UIFactory.Button(card, "", () => { if (mgr.StartBuilding(body, BuildingType.ResearchCenter)) lastSig = null; }, 24);
-                live.Button(btn, () =>
-                {
-                    bool can = mgr.CanBuild(body, BuildingType.ResearchCenter, out string why);
-                    var info = BuildingDatabase.Get(BuildingType.ResearchCenter);
-                    return (can, can ? $"Build Research Centre ({ColonyManager.DiscCost(info.costMetal)}m {ColonyManager.DiscCost(info.costEnergy)}e)"
-                                     : $"Build Research Centre — {why}");
-                }, group);
-            }
+            // NO "BUILD RESEARCH CENTRE" BUTTON HERE ANY MORE.
+            //
+            // This used to start an ABSTRACT facility: a timer, and then a word in a list. Nothing stood
+            // anywhere on the world, and the entire laboratory was the line of text above this one. A
+            // Research Centre is now a structure you draw on the surface like any other, so the button
+            // that conjured one out of nothing is gone and this points at the tab that actually builds it.
+            Note(card, "No research centre here. Draw one on the surface from the <b>Build</b> tab " +
+                       "(Science) — a campus scales with every tile you give it, and its tier is this " +
+                       "world's research capacity.");
+            GoToBuild(SurfaceBuildingCategory.Science, "Build a Research Centre »");
             return;
         }
 
@@ -1931,19 +1951,14 @@ public class PlanetViewWindow : MonoBehaviour
         if (body.shipyardLevel < 1)
         {
             var card = Card();
-            Note(card, "No shipyard in orbit of this world. A shipyard is where hulls are laid down; every one you own pools its build power.");
-            if (mgr != null && body.owner == FactionManager.Player)
-            {
-                var group = card.gameObject.AddComponent<CanvasGroup>();
-                var btn = UIFactory.Button(card, "", () => { if (mgr.StartBuilding(body, BuildingType.Shipyard)) lastSig = null; }, 24);
-                live.Button(btn, () =>
-                {
-                    bool can = mgr.CanBuild(body, BuildingType.Shipyard, out string why);
-                    var info = BuildingDatabase.Get(BuildingType.Shipyard);
-                    return (can, can ? $"Build Shipyard ({ColonyManager.DiscCost(info.costMetal)}m {ColonyManager.DiscCost(info.costEnergy)}e)"
-                                     : $"Build Shipyard — {why}");
-                }, group);
-            }
+            // Same retirement as the research centre on Overview: the abstract "Build Shipyard" button
+            // produced a number and no building. A yard is ground infrastructure with an orbital tether —
+            // it is placed on the surface grid, in the Military category — so this points at the tab that
+            // builds one rather than pretending to build it here.
+            Note(card, "No shipyard on this world. A shipyard is where hulls are laid down; every one you " +
+                       "own pools its build power. Place one on the surface from the <b>Build</b> tab (Military).");
+            if (body.owner == FactionManager.Player)
+                GoToBuild(SurfaceBuildingCategory.Military, "Build a Shipyard »");
         }
         else
         {

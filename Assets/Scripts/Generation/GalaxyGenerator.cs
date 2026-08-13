@@ -415,6 +415,10 @@ public static class GalaxyGenerator
         // settled world gets its seat from the colony ship that grounded itself there; this one was
         // simply declared settled, so it has to be given one. (See SurfaceBuildManager.EnsureColonySeat.)
         SurfaceBuildManager.EnsureColonySeat(planet);
+        // ...and real buildings for the yard and the laboratory it was just declared to have. Both used
+        // to be numbers with nothing on the map: the Production tab said "Shipyard: Level 1" and there
+        // was no shipyard to look at, select, site or lose. See EnsureFoundingFacilities.
+        SurfaceBuildManager.EnsureFoundingFacilities(planet);
 
         // Extra starting resources by difficulty.
         var keys = new List<ResourceType>(planet.resources.resources.Keys);

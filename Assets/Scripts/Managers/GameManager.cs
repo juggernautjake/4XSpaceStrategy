@@ -254,6 +254,9 @@ public class GameManager : MonoBehaviour
         SurfaceBuildQueue.RefundAll();
 
         SurfaceBuildQueue.Clear();
+        // ...and the "this world used to have a shipyard" record, which is keyed on CelestialBody
+        // references that no longer belong to any galaxy. See SurfaceBuildManager.SyncFacilityTiers.
+        SurfaceBuildManager.ForgetFacilityHistory();
         yield return null;
 
         // ============================================================================================
