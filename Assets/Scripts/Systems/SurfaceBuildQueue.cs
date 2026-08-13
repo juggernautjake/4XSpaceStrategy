@@ -35,6 +35,16 @@ public class SurfaceBuildJob
     /// Labor this job occupies while it is running.
     public float labor;
 
+    /// The standing building this job EXTENDS, if the player drew it onto the edge of one rather than
+    /// siting a new structure. On completion the painted cells are absorbed into that building instead
+    /// of becoming a second one beside it (see SurfaceBuildManager.AbsorbInto).
+    ///
+    /// A reference rather than an index, because the queue is not persisted and the reference is only
+    /// ever followed on the same session's completion. It is re-validated at that moment — a building
+    /// demolished while its own extension was under construction is exactly the case that would
+    /// otherwise merge into a corpse — so a stale one degrades to "build it as a new structure".
+    public PlacedBuilding mergeInto;
+
     public int Tiles => cells != null ? cells.Count : 0;
     public float Progress => duration > 0f ? Mathf.Clamp01(elapsed / duration) : 1f;
     public float Remaining => Mathf.Max(0f, duration - elapsed);

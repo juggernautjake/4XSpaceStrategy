@@ -112,6 +112,10 @@ public class PlanetViewWindow : MonoBehaviour
     RawImage mapImage, overlayImage;
     RectTransform mapRT, pieceLayer, ghostLayer;
 
+    // Placement Mode's two layers: the translucent guidance grids under the ghost, and the numbers over
+    // it (the per-tile yields, the size counter, the refusal label). See DrawPlacement.
+    RectTransform placementLayer, placementHud;
+
     // ---- Horizontal wrap ----------------------------------------------------------------------
     //
     // A planet map is a CYLINDER: its left and right edges are the same meridian, and the terrain is
@@ -504,10 +508,26 @@ public class PlanetViewWindow : MonoBehaviour
         var mlImg = markerLayer.gameObject.AddComponent<Image>();
         mlImg.color = new Color(0, 0, 0, 0); mlImg.raycastTarget = false;
 
+        // PLACEMENT MODE'S GUIDANCE GRIDS, under the ghost so the footprint being drawn always reads on
+        // top of the hints about where it may go next. Its own layer rather than sharing the ghost's,
+        // because the two are rebuilt on different triggers: the ghost follows the cursor every frame,
+        // while the guidance only moves when a tile is actually painted.
+        placementLayer = UIFactory.NewUI(mapRT, "Placement").GetComponent<RectTransform>();
+        UIFactory.Stretch(placementLayer);
+        var pcImg = placementLayer.gameObject.AddComponent<Image>();
+        pcImg.color = new Color(0, 0, 0, 0); pcImg.raycastTarget = false;
+
         ghostLayer = UIFactory.NewUI(mapRT, "Ghost").GetComponent<RectTransform>();
         UIFactory.Stretch(ghostLayer);
         var glImg = ghostLayer.gameObject.AddComponent<Image>();
         glImg.color = new Color(0, 0, 0, 0); glImg.raycastTarget = false;
+
+        // The per-tile yield icons and the size counter. ABOVE the ghost: they are text over the very
+        // footprint the ghost is filling, and a number the building draws over is not a readout.
+        placementHud = UIFactory.NewUI(mapRT, "PlacementHUD").GetComponent<RectTransform>();
+        UIFactory.Stretch(placementHud);
+        var phImg = placementHud.gameObject.AddComponent<Image>();
+        phImg.color = new Color(0, 0, 0, 0); phImg.raycastTarget = false;
 
         // Topmost overlay layer: the tectonics push arrows, so they sit above the fault-line wash.
         plateArrowLayer = UIFactory.NewUI(mapRT, "PlateArrows").GetComponent<RectTransform>();
@@ -602,6 +622,7 @@ public class PlanetViewWindow : MonoBehaviour
         if (overlayTex != null) Destroy(overlayTex);
         if (powerTex != null) Destroy(powerTex);
         if (MapHoverPanel.Instance != null) MapHoverPanel.Instance.Hide();
+        BuildPlacement.Cancel();   // static state must not outlive the window that drives it
     }
 
     // A single selection no longer throws the full-screen viewer open — that clutters the map. It just
@@ -620,6 +641,9 @@ public class PlanetViewWindow : MonoBehaviour
     {
         if (root != null) root.SetActive(false);
         MapHoverPanel.Instance.Hide();
+        // The window is the only way out of Placement Mode, so closing it has to end the session — a
+        // session left open would keep answering IsFor() for a window nobody can see.
+        BuildPlacement.Cancel();
     }
 
     public void ShowFor(CelestialBody b) => ShowFor(b, null);
@@ -639,6 +663,10 @@ public class PlanetViewWindow : MonoBehaviour
         showPowerOverlay = false;   // a fresh world opens on the plain map, not the last world's power view
         showTectonicsOverlay = false;   // ...nor the last world's tectonics view (also a survey-gated overlay)
         CancelPlace();          // a confirm from the last world means nothing on this one
+        // ...and neither does a half-drawn footprint. The session holds cells in the OLD world's grid
+        // coordinates, so carrying it over would draw a shape on this world at cells that mean nothing
+        // here — and Confirm would then try to build it.
+        BuildPlacement.Cancel();
         lastSig = null;
 
         // The tab you were on may not exist for THIS world — Build on your capital, then click a
@@ -1282,13 +1310,36 @@ public class PlanetViewWindow : MonoBehaviour
         // time, so cancelling a misclick doesn't also make you re-pick the building.
         if (pendingType.HasValue && Input.GetKeyDown(KeyCode.Escape)) { CancelPlace(); return; }
 
+        // The same one-step-at-a-time rule for a drawn footprint: Escape throws away what is painted and
+        // leaves you still holding the structure, ready to draw it somewhere else. A second Escape puts
+        // the structure down. Collapsing the two would make a single slip of the shape cost the trip
+        // back to the build tray as well.
+        if (tab == Tab.Build && Input.GetKeyDown(KeyCode.Escape)
+            && BuildPlacement.IsFor(body) && BuildPlacement.Tiles > 0)
+        {
+            BuildPlacement.ClearShape();
+            SimpleAudio.Instance?.PlayTick();
+            return;
+        }
+
         // Escape drops the held piece.
         if (tab == Tab.Build && selected.HasValue && Input.GetKeyDown(KeyCode.Escape))
         {
-            selected = null; CancelPlace(); lastSig = null; ClearGhost();
+            selected = null; CancelPlace(); BuildPlacement.Cancel(); lastSig = null; ClearGhost();
         }
 
-        if (tab == Tab.Build) DrawGhost();
+        if (tab == Tab.Build) { DrawGhost(); DrawPlacement(); }
+        else
+        {
+            // Leaving the Build tab has to take the build layers with it. It didn't: DrawGhost was only
+            // called on the Build tab, so whatever was on the ghost layer when you switched away stayed
+            // painted on the map underneath the Survey overlay until you came back.
+            ClearGhost();
+            ClearLayer(placementLayer);
+            ClearLayer(placementHud);
+            ClearYieldIcons();
+        }
+        RefreshPlacePanel();
 
         // The power overlay's colour tracks each grid's LIVE supply, so it has to be repainted as the
         // economy moves rather than only when the window rebuilds. A few times a second is plenty: it's
@@ -1311,6 +1362,23 @@ public class PlanetViewWindow : MonoBehaviour
                 if (!selected.HasValue)
                     statusText.text = "<color=#9FB4C8>Pick a structure on the right, then click the map to site it — you'll be asked to confirm. " +
                                       "Right-click rotates. Esc cancels.  ·  Scroll to zoom · drag the map to pan.</color>";
+
+                // ============================================================================
+                // PLACEMENT MODE: THE READOUT MOVES TO THE CURSOR
+                //
+                // Everything the branch below prints — the yield here, the index percentage, the
+                // efficiency, what it will cost — used to live in this line under the map. Which meant
+                // deciding where to put a mine was a matter of looking at the tile, then looking at the
+                // bottom of the window, then back at the tile, for every candidate site. The two things
+                // you are comparing were at opposite ends of the screen.
+                //
+                // So while a structure is held, all of it goes into the window locked to the mouse
+                // (PlacementHoverText, shown by PollHover) and this line becomes what it should have
+                // been: the MODE indicator, saying what you are doing and how to get out of it.
+                // ============================================================================
+                else if (UsesPlacementSession(SurfaceBuildingDatabase.Get(selected.Value)))
+                    statusText.text = PlacementModeBanner();
+
                 else
                 {
                     var info = SurfaceBuildingDatabase.Get(selected.Value);
@@ -1487,6 +1555,134 @@ public class PlanetViewWindow : MonoBehaviour
         }
     }
 
+    // ============================================================================================
+    // THE PLACEMENT MODE INDICATOR
+    //
+    // A short, loud line saying which mode the window is in, what is being placed, and the two ways out.
+    // It replaces the detailed readout that used to live here, all of which has moved to the cursor.
+    //
+    // It says the SIZE as well, because the floating counter on the map only shows progress toward the
+    // minimum and clamps there — past the minimum the only place the real tile count appears is here and
+    // on the Confirm panel.
+    // ============================================================================================
+    string PlacementModeBanner()
+    {
+        var info = SurfaceBuildingDatabase.Get(selected.Value);
+        string hex = ColorUtility.ToHtmlStringRGB(Vivid(info.color));
+        var sb = new System.Text.StringBuilder();
+
+        sb.Append($"<color=#4DFF6E><b>PLACEMENT MODE</b></color>  <color=#{hex}>•</color> <b>{info.name}</b>");
+
+        int tiles = BuildPlacement.IsFor(body) ? BuildPlacement.Tiles : 0;
+        if (tiles == 0)
+        {
+            string how =
+                info.drawMode == BuildDrawMode.Square ? $"press and drag out a square (min {MinSideFor(info)}x{MinSideFor(info)})"
+              : info.drawMode == BuildDrawMode.Rectangle ? "press and drag out a rectangle (min 2 wide both ways)"
+              : $"press and drag to draw it — at least {info.minTiles} tiles, edge to edge";
+            sb.Append($"  <size=10><color=#9FB4C8>{how}</color></size>");
+        }
+        else
+        {
+            BuildPlacement.Cost(out int m, out int e);
+            bool met = BuildPlacement.MeetsMinimum;
+            string mh = ColorUtility.ToHtmlStringRGB(met ? UITheme.Good : UITheme.Bad);
+            sb.Append($"  <color=#{mh}><b>{tiles} tile{(tiles == 1 ? "" : "s")}</b></color>");
+            sb.Append($" <color=#9FB4C8>· {m}m {e}e</color>");
+            sb.Append(met
+                ? "  <size=10><color=#9FB4C8>Confirm below the shape when you're happy with it.</color></size>"
+                : $"  <size=10><color=#FF6659>needs {BuildPlacement.MinTiles - tiles} more</color></size>");
+        }
+
+        // The one thing the player must always be able to find: the way out.
+        sb.Append(tiles > 0
+            ? "\n<size=10><color=#9FB4C8>Esc clears the shape · Esc again puts the structure down · Cancel does both</color></size>"
+            : "\n<size=10><color=#9FB4C8>Esc puts the structure down</color></size>");
+
+        // AT THE CEILING. Said here as well as at the tile, because the tile label fades and this does
+        // not: a player who stopped painting a while ago and is wondering why the shape will not grow
+        // should not have to try again to be told.
+        if (BuildPlacement.IsFor(body) && BuildPlacement.AtResourceCeiling)
+        {
+            BuildPlacement.CanAffordTiles(tiles + 1, out int sm, out int se);
+            string need = sm > 0 && se > 0 ? $"{sm} metal and {se} energy"
+                        : sm > 0 ? $"{sm} metal" : $"{se} energy";
+            sb.Append($"   <color=#FF6659><b>At your limit</b> — another tile needs {need}</color>");
+        }
+
+        return sb.ToString();
+    }
+
+    // ============================================================================================
+    // WHAT THE CURSOR WINDOW SAYS WHILE PLACING
+    //
+    // The whole siting decision, at the mouse: what this tile would yield, how good the ground is both
+    // absolutely and relative to the rest of the world, whether the grid reaches, and what the building
+    // as drawn so far costs. This is the readout that used to be under the map.
+    //
+    // It keeps the plain tile readout at the top — biome, ore, temperature — because that is context for
+    // the numbers below it and losing it would make Placement Mode strictly less informative than idly
+    // hovering.
+    // ============================================================================================
+    string PlacementHoverText(int x, int y)
+    {
+        var info = SurfaceBuildingDatabase.Get(selected.Value);
+        var sb = new System.Text.StringBuilder();
+
+        sb.Append(TileHoverText(body, x, y));
+
+        // ---- This tile, for this building ----
+        if (info.index != SurfaceIndexKind.None)
+        {
+            if (SurfaceIndex.Unlocked(body, info.index))
+            {
+                float v = SurfaceIndex.Get(body, info.index, x, y);
+                float pct = SurfaceIndex.Percentile(body, info.index, x, y);
+                string hex = ColorUtility.ToHtmlStringRGB(SurfaceBuildManager.EfficiencyColor(v));
+                sb.Append($"\n<color=#8FD0FF>{SurfaceIndex.Name(info.index)}</color> " +
+                          $"<color=#{hex}><b>{v * 100f:F0}% ({SurfaceBuildManager.EfficiencyLabel(v)})</b></color>");
+                sb.Append($"\n<size=10><color=#9FB4C8>better than {pct * 100f:F0}% of this world</color></size>");
+            }
+            else
+                sb.Append($"\n<color=#C9A94D>{SurfaceIndex.Name(info.index)} not surveyed — " +
+                          $"{SurfaceIndex.LockReason(body, info.index)}</color>");
+        }
+
+        // ---- What it would produce, sited here ----
+        // Quoted for a SINGLE tile of this class, because that is the honest answer to "what does this
+        // tile give me": the drawn building's total is the sum over its cells and is on the Confirm
+        // panel. PredictedYield takes an origin and a rotation, which for a one-cell question is this
+        // cell and no rotation.
+        string yield = SurfaceBuildManager.PredictedYield(body, selected.Value, x, y, 0);
+        if (!string.IsNullOrEmpty(yield) && yield != "no direct output")
+            sb.Append($"\n<size=10><color=#9FB4C8>per tile here:</color></size> <b>{yield}</b>");
+
+        // ---- The building as drawn so far ----
+        if (BuildPlacement.IsFor(body) && BuildPlacement.Tiles > 0)
+        {
+            int tiles = BuildPlacement.Tiles;
+            BuildPlacement.Cost(out int m, out int e);
+            bool met = BuildPlacement.MeetsMinimum;
+            string mh = ColorUtility.ToHtmlStringRGB(met ? UITheme.Good : UITheme.Bad);
+
+            sb.Append($"\n<color=#{mh}>{tiles}/{BuildPlacement.MinTiles} tiles</color>");
+
+            // THE RUNNING TOTAL, which is the number the player is actually spending. Red the moment the
+            // next tile is out of reach, so the limit is visible before it is hit rather than only when
+            // the brush stops responding.
+            string ch = ColorUtility.ToHtmlStringRGB(
+                BuildPlacement.AtResourceCeiling ? UITheme.Bad : UITheme.SubText);
+            sb.Append($"  <color=#{ch}><b>{m} metal · {e} energy</b></color>");
+
+            if (BuildPlacement.AtResourceCeiling)
+                sb.Append("\n<color=#FF6659><b>Cannot afford another tile</b></color>");
+        }
+        else
+            sb.Append("\n<size=10><color=#4DFF6E>Press and drag to draw</color></size>");
+
+        return sb.ToString();
+    }
+
     string HoverWhy()
     {
         if (!selected.HasValue || !HasHoverCell) return "";
@@ -1534,7 +1730,12 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 if (!TabAvailable(captured, out _)) return;
                 tab = captured;
-                if (captured != Tab.Build) { selected = null; CancelPlace(); }
+                // Leaving the Build tab ends Placement Mode. The spec asks for other UI to be locked out
+                // while placing; disabling the tabs outright would be the literal reading and a trap —
+                // a player who wants to go and check the Survey map should not have to hunt for the exit
+                // first. Leaving CANCELS instead, which costs nothing (nothing is spent until Confirm)
+                // and cannot strand anyone in a mode.
+                if (captured != Tab.Build) { selected = null; CancelPlace(); BuildPlacement.Cancel(); }
                 lastSig = null;
             }, 22);
             btn.interactable = open;
@@ -2478,9 +2679,25 @@ public class PlanetViewWindow : MonoBehaviour
 
             var btn = UIFactory.Button(card, "", () =>
             {
-                selected = (selected.HasValue && selected.Value == t) ? (SurfaceBuildingType?)null : t;
-                rotation = 0;
-                CancelPlace();   // picking a different structure abandons the pending question
+                bool wasHeld = selected.HasValue && selected.Value == t;
+                CancelPlace();            // picking a different structure abandons the pending question
+                BuildPlacement.Cancel();  // ...and any half-drawn footprint of the last one
+
+                if (wasHeld) selected = null;
+                else
+                {
+                    selected = t;
+                    rotation = 0;
+                    // PICKING A STRUCTURE *IS* ENTERING PLACEMENT MODE. It used to only arm a brush: the
+                    // map behaved exactly as before and the first press started a gesture that ended in
+                    // a building. Now the session opens here, which is what lets the map light up its
+                    // guidance grids, the overlay switch to this class's index, and the counter and the
+                    // Confirm panel exist at all before a single tile is painted.
+                    //
+                    // Fixed classes have nothing to draw, so they stay on the click-and-confirm path
+                    // (OnGridClick -> AskPlace) and open no session.
+                    if (UsesPlacementSession(info)) BuildPlacement.Begin(body, t);
+                }
                 lastSig = null;
             }, 24);
             live.Button(btn, () =>
@@ -4635,12 +4852,29 @@ public class PlanetViewWindow : MonoBehaviour
         //
         // It's still distinguishable from a placed structure, just not by hue: a ghost has no black
         // outline, and a placed one does.
-        // ---- Mid-drag: show exactly what is being drawn ----
+
+        // ---- PLACEMENT MODE: the footprint being drawn ----
         //
-        // The live footprint, coloured by whether it would actually be accepted. This is the feedback the
-        // whole gesture depends on — a square that has not yet reached its 2x2 minimum, or a paint that
-        // has jumped a diagonal and split in two, reads as red while you are still holding the button,
-        // which is the only moment the player can still fix it.
+        // Drawn in the structure's own colour rather than the old red/green pass-fail wash. The wash was
+        // the only feedback the release-commits gesture could give, and it had to carry every possible
+        // refusal in one bit. Now an illegal tile is simply UNPAINTABLE — the brush refuses it and says
+        // why, at the tile (see the refusal label) — so what is on the map is by construction a legal
+        // footprint, and colouring it as though it might not be would be a lie.
+        if (BuildPlacement.IsFor(body) && BuildPlacement.Tiles > 0)
+        {
+            var pc = Vivid(info.color);
+            foreach (var cell in BuildPlacement.Cells) AddCellQuad(ghostLayer, cell.x, cell.y, pc);
+
+            // The brush still rides the cursor, so it is clear the shape is still being drawn — but only
+            // over ground the next tile could actually go on.
+            if (HasHoverCell && !BuildPlacement.HasCell(hoverCell)
+                && BuildPlacement.Guidance().Contains(hoverCell))
+                AddCellQuad(ghostLayer, hoverCell.x, hoverCell.y,
+                            new Color(pc.r, pc.g, pc.b, 0.55f));
+            return;
+        }
+
+        // ---- The node chain, which is still a release-commits drag ----
         if (drawing && drawCells.Count > 0)
         {
             Color dc = string.IsNullOrEmpty(drawWhy) ? Vivid(info.color) : new Color(1f, 0.25f, 0.2f, 0.85f);
@@ -4681,6 +4915,425 @@ public class PlanetViewWindow : MonoBehaviour
                 qrt.anchoredPosition = lp + new Vector2(cell.x * cw, cell.y * ch);
             }
         }
+    }
+
+    // ============================================================================================
+    // WHAT PLACEMENT MODE PUTS ON THE MAP
+    //
+    // Four things, and they answer four different questions the player is holding at once:
+    //
+    //   GUIDANCE GRIDS   "where may the next tile go?" — a translucent wash over every legal neighbour,
+    //                    updated as the shape grows. Cells with a building already on them are simply
+    //                    absent, which is how the map says "not there" without drawing a refusal.
+    //   YIELD ICONS      "is this ground any good?" — the driving index, as a number, on every tile that
+    //                    scores well enough to be worth siting on. Only while placing; the instant the
+    //                    mode ends they go, because a map permanently covered in numbers is unreadable.
+    //   THE COUNTER      "am I big enough yet?" — n/min over the middle of the shape, red then green.
+    //   THE REFUSAL      "why did nothing happen?" — at the tile the player just tried, fading out.
+    //
+    // ALL FOUR ARE REBUILT EVERY FRAME, which is affordable because all four are bounded by what is on
+    // screen rather than by the size of the world: the guidance is at most four cells per painted tile,
+    // and the yield icons are culled to the visible viewport before a single label is made (see
+    // DrawYieldIcons — an uncapped version of this made 30,000 TMP objects on a big world and froze).
+    // ============================================================================================
+    void DrawPlacement()
+    {
+        ClearLayer(placementLayer);
+        ClearLayer(placementHud);
+
+        if (!BuildPlacement.IsFor(body) || body?.surface == null) { ClearYieldIcons(); return; }
+
+        DrawGuidanceGrids();
+        DrawSizeCounter();
+        DrawRefusal();
+
+        // NOT rebuilt every frame, unlike the three above — see RefreshYieldIcons.
+        RefreshYieldIcons();
+    }
+
+    void ClearLayer(RectTransform layer)
+    {
+        if (layer == null) return;
+        for (int i = layer.childCount - 1; i >= 0; i--) Destroy(layer.GetChild(i).gameObject);
+    }
+
+    /// The translucent "you may build here" wash. Deliberately faint and white rather than the
+    /// structure's own colour: it is not a preview of the building, it is a statement about the ground,
+    /// and painting it in the building's hue made a half-drawn farm look twice the size it was.
+    void DrawGuidanceGrids()
+    {
+        var guide = BuildPlacement.Guidance();
+        if (guide.Count == 0) return;
+
+        // Brighter when the shape is still short of its minimum, because that is when the player most
+        // needs to be told where the next tile can go; once it is big enough the hint recedes and the
+        // building itself is what the eye should be on.
+        float a = BuildPlacement.MeetsMinimum ? 0.16f : 0.26f;
+        var c = new Color(0.85f, 0.95f, 1.00f, a);
+
+        foreach (var cell in guide) AddCellQuad(placementLayer, cell.x, cell.y, c);
+    }
+
+    /// The floating "3/4" over the middle of what is drawn.
+    ///
+    /// Red below the minimum and green at or above it, and the number it shows is CLAMPED at the minimum
+    /// (BuildPlacement.CounterShown) so a nine-tile farm with a four-tile minimum reads 4/4 rather than
+    /// 9/4. Past the minimum the fraction has stopped being a target, and a numerator that keeps
+    /// climbing past its denominator reads as an error rather than as success.
+    void DrawSizeCounter()
+    {
+        if (BuildPlacement.Tiles == 0) return;
+
+        // Centre of the painted area, in cells. Follows the shape as it grows, which is what makes it
+        // feel attached to the building rather than parked somewhere on the map.
+        float sx = 0f, sy = 0f;
+        foreach (var c in BuildPlacement.Cells) { sx += c.x + 0.5f; sy += c.y + 0.5f; }
+        int n = BuildPlacement.Tiles;
+        var centre = new Vector2(sx / n, sy / n);
+
+        bool met = BuildPlacement.MeetsMinimum;
+        var col = met ? new Color(0.35f, 1f, 0.45f) : new Color(1f, 0.36f, 0.30f);
+        string text = $"{BuildPlacement.CounterShown}/{BuildPlacement.MinTiles}";
+
+        var go = UIFactory.NewUI(placementHud, "SizeCounter");
+        var label = UIFactory.Text(go.transform, $"<b>{text}</b>", 17, col, TextAlignmentOptions.Center);
+        label.raycastTarget = false;
+
+        // A hard shadow, because this sits over terrain that can be any colour from snow to lava and the
+        // one thing it must always be is readable.
+        var shadow = label.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.95f);
+        shadow.effectDistance = new Vector2(1.5f, -1.5f);
+
+        var rt = go.GetComponent<RectTransform>();
+        int w = body.surface.width, h = body.surface.height;
+        rt.anchorMin = rt.anchorMax = new Vector2(centre.x / w, centre.y / h);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.sizeDelta = new Vector2(64f, 24f);
+        rt.anchoredPosition = Vector2.zero;
+        UIFactory.Stretch(label.rectTransform);
+    }
+
+    /// "Need 34 metal!" in red at the tile the player just tried to paint, fading out.
+    void DrawRefusal()
+    {
+        if (!BuildPlacement.RefusalShowing) return;
+
+        var cell = BuildPlacement.RefusalCell;
+        float fade = BuildPlacement.RefusalFade;
+
+        var go = UIFactory.NewUI(placementHud, "Refusal");
+        var label = UIFactory.Text(go.transform, $"<b>{BuildPlacement.RefusalText}</b>", 13,
+            new Color(1f, 0.28f, 0.24f, fade), TextAlignmentOptions.Center);
+        label.raycastTarget = false;
+
+        var shadow = label.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.9f * fade);
+        shadow.effectDistance = new Vector2(1.5f, -1.5f);
+
+        int w = body.surface.width, h = body.surface.height;
+        var rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = rt.anchorMax = new Vector2((cell.x + 0.5f) / w, (cell.y + 0.5f) / h);
+        rt.pivot = new Vector2(0.5f, 0f);
+        rt.sizeDelta = new Vector2(190f, 20f);
+        // Drifts upward as it fades — the standard "this happened just now" motion, and it also lifts the
+        // text off the tile so the ground underneath is visible again by the time it matters.
+        rt.anchoredPosition = new Vector2(0f, 14f + (1f - fade) * 12f);
+        UIFactory.Stretch(label.rectTransform);
+    }
+
+    // ============================================================================================
+    // THE TEMPORARY TILE YIELDS
+    //
+    // While Placement Mode is open, every tile worth siting on shows what it would actually give this
+    // structure — the driving index as a percentage. This is the bit that turns the overlay from a
+    // picture into a decision: the colours say "this patch is good", the numbers say HOW good and let
+    // you choose between two patches that look the same.
+    //
+    // FOUR THINGS KEEP THIS FROM BEING RUINOUS, and all four are necessary:
+    //
+    //   ONLY WHAT IS ON SCREEN. The cells are derived from the viewport rect, not from the world, so the
+    //   cost is bounded by the window rather than by the planet.
+    //   ONLY WHEN THE TILES ARE BIG ENOUGH. Below about 22 pixels a percentage does not fit in a cell
+    //   and would render as an unreadable smear over the whole map, so it is simply not drawn — zoom in
+    //   and the numbers appear.
+    //   ONLY GROUND THE OVERLAY ALREADY LIT. SurfaceIndex.Shown is the same test the index map uses, so
+    //   a number appears exactly where there is colour under it and the two can never disagree.
+    //   ONLY WHEN SOMETHING MOVED. This is the important one. Everything else in Placement Mode is a
+    //   handful of quads and is rebuilt per frame without noticing; this is potentially hundreds of TMP
+    //   objects, and rebuilding those every frame is not "a bit expensive", it is a stall you can watch.
+    //   So it is keyed on what it actually depends on — the structure, the visible cell range, and the
+    //   zoom — and skipped entirely on the frames where none of those changed, which is nearly all of
+    //   them. SurfaceIndex.Get re-samples the terrain noise field per call, so the loop that builds them
+    //   is not cheap either.
+    // ============================================================================================
+
+    /// Below this many pixels per tile the yield numbers are suppressed — they would not fit.
+    const float YieldIconMinTilePx = 22f;
+
+    /// A ceiling on how many numbers may be on screen at once.
+    ///
+    /// The viewport-and-zoom limits above already bound this to a few hundred in practice, but "in
+    /// practice" depends on a viewport size and a zoom floor that someone will change. Past this many
+    /// the map is unreadable anyway — a wall of two-digit numbers is not a survey, it is noise — so
+    /// stopping is both the cheap answer and the right-looking one.
+    const int YieldIconMax = 400;
+
+    RectTransform yieldLayer;
+    string yieldSig;
+
+    void ClearYieldIcons()
+    {
+        if (yieldLayer != null) ClearLayer(yieldLayer);
+        yieldSig = null;
+    }
+
+    void RefreshYieldIcons()
+    {
+        var info = BuildPlacement.Info;
+
+        if (info == null || info.index == SurfaceIndexKind.None
+            || !SurfaceIndex.Unlocked(body, info.index))   // not surveyed: nothing honest to show
+        { ClearYieldIcons(); return; }
+
+        int w = body.surface.width, h = body.surface.height;
+        float tileW = mapRT.rect.width / w, tileH = mapRT.rect.height / h;
+        if (Mathf.Min(tileW, tileH) < YieldIconMinTilePx) { ClearYieldIcons(); return; }
+
+        // Which cells the viewport is actually showing. mapRT is far larger than the window and is
+        // scrolled by mapPan (it is centre-anchored, so its local origin is its middle), and this
+        // inverts that: the viewport's own rect, expressed in cells.
+        var vp = hostViewport.rect;
+        float leftInMap = vp.xMin - mapPan.x + mapRT.rect.width * 0.5f;
+        float botInMap = vp.yMin - mapPan.y + mapRT.rect.height * 0.5f;
+
+        int x0 = Mathf.Max(0, Mathf.FloorToInt(leftInMap / tileW) - 1);
+        int y0 = Mathf.Max(0, Mathf.FloorToInt(botInMap / tileH) - 1);
+        int x1 = Mathf.Min(w - 1, Mathf.CeilToInt((leftInMap + vp.width) / tileW) + 1);
+        int y1 = Mathf.Min(h - 1, Mathf.CeilToInt((botInMap + vp.height) / tileH) + 1);
+        if (x1 < x0 || y1 < y0) { ClearYieldIcons(); return; }
+
+        // Everything the drawn output depends on. The tile size is bucketed to whole pixels because it
+        // moves continuously while zooming and the labels only need to be re-laid out when a cell
+        // actually changes size on screen — anchored positions rescale themselves.
+        string sig = $"{info.type}|{x0},{y0},{x1},{y1}|{Mathf.RoundToInt(tileW)}";
+        if (sig == yieldSig && yieldLayer != null) return;
+        yieldSig = sig;
+
+        if (yieldLayer == null)
+        {
+            yieldLayer = UIFactory.NewUI(mapRT, "YieldIcons").GetComponent<RectTransform>();
+            UIFactory.Stretch(yieldLayer);
+            var img = yieldLayer.gameObject.AddComponent<Image>();
+            img.color = new Color(0, 0, 0, 0); img.raycastTarget = false;
+        }
+        ClearLayer(yieldLayer);
+
+        var outline = SurfaceIndex.Outline(info.index);
+        int made = 0;
+
+        for (int y = y0; y <= y1 && made < YieldIconMax; y++)
+            for (int x = x0; x <= x1 && made < YieldIconMax; x++)
+            {
+                float v = SurfaceIndex.Get(body, info.index, x, y);
+                if (!SurfaceIndex.ShownFor(body, info.index, v, out float t)) continue;
+
+                // The best ground gets the index's full outline colour at full strength; merely good
+                // ground gets it dimmed. Same two bands the overlay paints, so the numbers and the
+                // colours are one reading rather than two.
+                bool top = t >= 0.75f;
+                var col = top ? outline : new Color(outline.r, outline.g, outline.b, 0.72f);
+
+                var go = UIFactory.NewUI(yieldLayer, "Y");
+                var label = UIFactory.Text(go.transform, top ? $"<b>{v * 100f:F0}</b>" : $"{v * 100f:F0}",
+                    top ? 12 : 11, col, TextAlignmentOptions.Center);
+                label.raycastTarget = false;
+
+                var sh = label.gameObject.AddComponent<Shadow>();
+                sh.effectColor = new Color(0f, 0f, 0f, 0.85f);
+                sh.effectDistance = new Vector2(1f, -1f);
+
+                var rt = go.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(x / (float)w, y / (float)h);
+                rt.anchorMax = new Vector2((x + 1) / (float)w, (y + 1) / (float)h);
+                rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+                UIFactory.Stretch(label.rectTransform);
+                made++;
+            }
+    }
+
+    // ============================================================================================
+    // THE CONFIRM PANEL
+    //
+    // Anchored under the BOTTOM of the drawn shape, so it belongs to the thing it is asking about. It
+    // follows the footprint as the footprint grows, and through zoom and pan, because it is positioned
+    // in the map's own normalised space rather than pinned to a screen point the map slides out from
+    // under.
+    //
+    // Confirm goes live only when the shape is genuinely buildable; Cancel is always available, which is
+    // the property that makes drawing safe to experiment with.
+    // ============================================================================================
+    RectTransform placePanel;
+    TMP_Text placeText;
+    // Only Confirm is held: it is the one whose interactability tracks the shape. Cancel is always
+    // enabled, always says the same word, and never needs touching again after it is made.
+    Button placeConfirmBtn;
+
+    // ---- The validity check, throttled ----
+    //
+    // CanConfirm is not a cheap question: it walks the world's buildings, builds two hash sets and
+    // re-runs the shape rules. Asking it every frame for a panel whose answer changes only when a tile
+    // is painted or the economy ticks is pure waste — and unlike most waste in this file it ALLOCATES,
+    // so it would be garbage every frame for as long as a shape sits on the map waiting to be confirmed.
+    //
+    // Re-asked immediately when the footprint changes (the tile count is the trigger) and otherwise a
+    // few times a second, which is fast enough to catch the case that actually matters: another world
+    // spending the metal out from under a shape the player is still looking at.
+    bool placeOk;
+    string placeWhy;
+    int placeCheckedTiles = -1;
+    float placeCheckIn;
+
+    void RefreshPlacePanel()
+    {
+        bool want = BuildPlacement.IsFor(body) && BuildPlacement.Tiles > 0 && tab == Tab.Build;
+
+        if (!want)
+        {
+            if (placePanel != null) placePanel.gameObject.SetActive(false);
+            placeCheckedTiles = -1;
+            return;
+        }
+
+        BuildPlacePanel();
+        placePanel.gameObject.SetActive(true);
+
+        var info = BuildPlacement.Info;
+        BuildPlacement.Cost(out int m, out int e);
+        int tiles = BuildPlacement.Tiles;
+
+        placeCheckIn -= Time.unscaledDeltaTime;
+        if (tiles != placeCheckedTiles || placeCheckIn <= 0f)
+        {
+            placeCheckedTiles = tiles;
+            placeCheckIn = 0.25f;
+            placeOk = BuildPlacement.CanConfirm(out placeWhy);
+        }
+        bool ok = placeOk;
+        string why = placeWhy;
+
+        string hex = ColorUtility.ToHtmlStringRGB(Vivid(info.color));
+        float mult = BuildScaling.CostMultiplier(tiles);
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<color=#{hex}>•</color> <b>{info.name}</b> — {tiles} tile{(tiles == 1 ? "" : "s")}\n");
+        sb.Append($"<size=10><color=#9FB4C8>{m} metal · {e} energy · " +
+                  $"{info.buildTime * mult * TechEffects.BuildTimeMult:F0}s · " +
+                  $"x{BuildScaling.OutputMultiplier(tiles):0.0} output</color></size>");
+        if (!ok) sb.Append($"\n<size=10><color=#FF6659>{why}</color></size>");
+        placeText.text = sb.ToString();
+
+        // Written directly rather than registered with `live`. This runs every frame while a shape is
+        // drawn, and LiveSet entries are registered once and ticked — feeding it a new closure per frame
+        // would grow the set without bound until the next panel rebuild cleared it.
+        placeConfirmBtn.interactable = ok;
+
+        PositionPlacePanel();
+    }
+
+    /// Under the bottom edge of the footprint's bounding box, clamped inside the viewport.
+    void PositionPlacePanel()
+    {
+        if (placePanel == null || body?.surface == null || BuildPlacement.Tiles == 0) return;
+
+        int minX = int.MaxValue, maxX = int.MinValue, minY = int.MaxValue;
+        foreach (var c in BuildPlacement.Cells)
+        {
+            if (c.x < minX) minX = c.x;
+            if (c.x > maxX) maxX = c.x;
+            if (c.y < minY) minY = c.y;
+        }
+
+        int w = body.surface.width, h = body.surface.height;
+        float u = (minX + maxX + 1) * 0.5f / w;      // horizontal centre of the shape
+        float v = minY / (float)h;                    // its bottom edge
+
+        Vector2 inMap = new Vector2((u - 0.5f) * mapRT.rect.width, (v - 0.5f) * mapRT.rect.height);
+        float halfH = placePanel.sizeDelta.y * 0.5f;
+        Vector2 pos = inMap + mapPan + new Vector2(0f, -halfH - 10f);   // just below the shape
+
+        var vp = hostViewport.rect;
+        float hw = placePanel.sizeDelta.x * 0.5f;
+        pos.x = Mathf.Clamp(pos.x, vp.xMin + hw, vp.xMax - hw);
+        pos.y = Mathf.Clamp(pos.y, vp.yMin + halfH, vp.yMax - halfH);
+
+        placePanel.anchorMin = placePanel.anchorMax = new Vector2(0.5f, 0.5f);
+        placePanel.pivot = new Vector2(0.5f, 0.5f);
+        placePanel.anchoredPosition = pos;
+    }
+
+    void BuildPlacePanel()
+    {
+        if (placePanel != null) { placePanel.SetAsLastSibling(); return; }
+
+        placePanel = UIFactory.NewUI(hostViewport, "ConfirmPlacement").GetComponent<RectTransform>();
+        placePanel.sizeDelta = new Vector2(228, 78);
+        var bg = placePanel.gameObject.AddComponent<Image>();
+        bg.color = new Color(0.05f, 0.09f, 0.14f, 0.97f);
+        var outline = placePanel.gameObject.AddComponent<Outline>();
+        outline.effectColor = UITheme.Accent;
+        outline.effectDistance = new Vector2(1.2f, -1.2f);
+
+        var v = placePanel.gameObject.AddComponent<VerticalLayoutGroup>();
+        v.padding = new RectOffset(6, 6, 5, 5); v.spacing = 4;
+        v.childControlWidth = true; v.childControlHeight = true;
+        v.childForceExpandWidth = true; v.childForceExpandHeight = false;
+
+        placeText = UIFactory.Text(placePanel, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
+        var tle = placeText.gameObject.AddComponent<LayoutElement>();
+        tle.preferredHeight = 44f;
+
+        var row = UIFactory.NewUI(placePanel, "Row");
+        UIFactory.AddLayout(row, 22);
+        var hl = row.AddComponent<HorizontalLayoutGroup>();
+        hl.spacing = 4;
+        hl.childControlWidth = true; hl.childControlHeight = true;
+        hl.childForceExpandWidth = true; hl.childForceExpandHeight = true;
+
+        placeConfirmBtn = UIFactory.Button(row.transform, "Confirm", DoConfirmPlacement, 20);
+        UIFactory.Button(row.transform, "Cancel", DoCancelPlacement, 20);
+
+        placePanel.SetAsLastSibling();   // above the zoom bar, which is also a child of the viewport
+    }
+
+    void DoConfirmPlacement()
+    {
+        if (BuildPlacement.Confirm(out string why))
+        {
+            lastSig = null;                 // the queue gained a row and the map gained a ghost
+            SimpleAudio.Instance?.PlayComplete();
+            // The structure stays held, so laying down a row of habitats is one pick and several draws
+            // rather than a trip back to the tray between each. Esc or Cancel puts it down.
+            if (selected.HasValue) BuildPlacement.Begin(body, selected.Value);
+        }
+        else
+        {
+            SimpleAudio.Instance?.PlayTick();
+            if (!string.IsNullOrEmpty(why))
+                NotificationManager.Instance?.Push("Can't build that yet", why, null, NotifKind.Danger);
+        }
+    }
+
+    /// Cancel clears the drawing and leaves Placement Mode entirely — the structure is put down too.
+    ///
+    /// Clearing the shape but staying armed would leave the player in a mode with no visible state and
+    /// no obvious way out, which is the thing a Cancel button is supposed to prevent.
+    void DoCancelPlacement()
+    {
+        BuildPlacement.Cancel();
+        selected = null;
+        lastSig = null;
+        ClearGhost();
+        SimpleAudio.Instance?.PlayTick();
     }
 
     void ClearGhost()
@@ -4895,25 +5548,84 @@ public class PlanetViewWindow : MonoBehaviour
     static bool IsDrawn(SurfaceBuildingInfo info)
         => info != null && info.drawMode != BuildDrawMode.Fixed;
 
+    /// Does this class go through Placement Mode (BuildPlacement)?
+    ///
+    /// Everything drawn except the node chain. A chain lays a RUN of independent one-tile pylons rather
+    /// than one footprint, so a session that tracks a single connected shape has nothing to hold for it;
+    /// it keeps the immediate drag below. Fixed classes have no shape to draw at all.
+    static bool UsesPlacementSession(SurfaceBuildingInfo info)
+        => info != null && info.drawMode != BuildDrawMode.Fixed && info.drawMode != BuildDrawMode.NodeChain;
+
     /// The shortest side a square building may have, from its tile minimum.
-    static int MinSideFor(SurfaceBuildingInfo info)
-        => Mathf.Max(1, Mathf.CeilToInt(Mathf.Sqrt(Mathf.Max(1, info.minTiles))));
+    static int MinSideFor(SurfaceBuildingInfo info) => BuildPlacement.MinSide(info);
 
     void PollBuildDraw()
     {
-        // A confirm dialog is up, or nothing is held: no drag. Any in-flight one is abandoned rather
-        // than left latched, or the next press would resume a gesture the player has forgotten about.
+        // A Fixed class's confirm dialog is up, or nothing is held: no drag. Any in-flight one is
+        // abandoned rather than left latched, or the next press would resume a gesture the player has
+        // forgotten about.
         if (tab != Tab.Build || !selected.HasValue || pendingType.HasValue) { EndDraw(); return; }
 
         var info = SurfaceBuildingDatabase.Get(selected.Value);
         if (!IsDrawn(info)) { EndDraw(); return; }
+
+        if (info.drawMode == BuildDrawMode.NodeChain) { PollNodeChainDrag(info); return; }
+
+        // The session should already be open — picking the card opens it — but a tab change or a world
+        // change can leave the two out of step, and a brush with no session behind it would paint into
+        // nothing.
+        if (!BuildPlacement.IsFor(body)) BuildPlacement.Begin(body, selected.Value);
+
+        bool box = info.drawMode == BuildDrawMode.Square || info.drawMode == BuildDrawMode.Rectangle;
 
         // ---- Begin ----
         if (!drawing)
         {
             if (!Input.GetMouseButtonDown(0)) return;
             if (!HasHoverCell) return;                   // not over the host map
-            if (OverFloatingMapControl()) return;        // the zoom bar / confirm float over the map
+            if (OverFloatingMapControl()) return;        // the zoom bar / Confirm panel float over the map
+
+            drawing = true;
+            drawAnchor = hoverCell;
+            Brush(info, box);
+            return;
+        }
+
+        // ---- Continue ----
+        if (Input.GetMouseButton(0)) { Brush(info, box); return; }
+
+        // ---- Release ----
+        //
+        // WHICH NO LONGER BUILDS ANYTHING. This used to be the commit: letting go of the button queued
+        // the job. Now the footprint simply stays on the map and the Confirm panel appears under it, so
+        // the player can lift the button, look at what they have drawn, keep adding to it, and decide.
+        // That is the whole of the "bring back placement confirmation" change, and it is one line.
+        drawing = false;
+    }
+
+    /// One brush stroke, for whichever kind of brush this class uses.
+    ///
+    /// A BOX REPLACES and a PAINT ADDS, which is the difference that makes both feel right: dragging a
+    /// reactor's corner should resize the one square, while painting a farm should let you release the
+    /// button, move, and carry on adding tiles to the same farm.
+    void Brush(SurfaceBuildingInfo info, bool box)
+    {
+        if (!HasHoverCell) return;
+        if (box) BuildPlacement.SetBox(drawAnchor, hoverCell, info.drawMode == BuildDrawMode.Square);
+        else BuildPlacement.Paint(hoverCell);
+    }
+
+    // The node chain keeps its old immediate behaviour: press, drag out a run of pylons, release and
+    // they go up. Left alone here deliberately — the power rules that decide where a node may be placed
+    // at all are a separate change, and rebuilding this control before those land would mean building
+    // it twice.
+    void PollNodeChainDrag(SurfaceBuildingInfo info)
+    {
+        if (!drawing)
+        {
+            if (!Input.GetMouseButtonDown(0)) return;
+            if (!HasHoverCell) return;
+            if (OverFloatingMapControl()) return;
 
             drawing = true;
             drawAnchor = hoverCell;
@@ -4922,92 +5634,35 @@ public class PlanetViewWindow : MonoBehaviour
             return;
         }
 
-        // ---- Continue ----
         if (Input.GetMouseButton(0)) { RecomputeDraw(info); return; }
-
-        // ---- Release ----
         CommitDraw(info);
     }
 
-    /// Rebuild the proposed footprint from the anchor and wherever the cursor is now.
+    // ---- The node chain's own drag ----
+    //
+    // Everything that used to live here for the OTHER four draw modes has moved into BuildPlacement,
+    // which is the session behind Placement Mode. What is left is the chain, which is not a footprint at
+    // all: it is a run of independent one-tile pylons, so it has no shape to validate, no minimum, and
+    // nothing for a Confirm panel to be anchored to.
+
+    /// Rebuild the proposed pylon run from the anchor and wherever the cursor is now.
     void RecomputeDraw(SurfaceBuildingInfo info)
     {
         var cursor = HasHoverCell ? hoverCell : drawAnchor;
 
-        switch (info.drawMode)
-        {
-            case BuildDrawMode.Free:
-                // PAINT, so the drag accumulates rather than replacing. Only the cell under the cursor is
-                // added — no line-filling between frames — because a fast sweep that auto-filled the gaps
-                // would silently buy tiles the player never actually dragged over.
-                if (HasHoverCell && drawSet.Add(hoverCell)) drawCells.Add(hoverCell);
-                break;
-
-            case BuildDrawMode.Square:
-                Replace(BuildShapeRules.SquareFrom(drawAnchor, cursor, MinSideFor(info)));
-                break;
-
-            case BuildDrawMode.Rectangle:
-                // 2 in both directions is the rule this mode exists for — no 1-wide ribbons.
-                Replace(BuildShapeRules.RectFrom(drawAnchor, cursor, 2, 2));
-                break;
-
-            case BuildDrawMode.NodeChain:
-                Replace(BuildShapeRules.NodeChain(drawAnchor, cursor, info.powerRange));
-                break;
-        }
-
-        // Live validity, so the ghost can go red and the side panel can say why BEFORE the player commits
-        // to a footprint they have been carefully dragging out for three seconds.
-        //
-        // GROUND IS CHECKED PER CELL, NOT WITH CanPlace. CanPlace tests a type's AUTHORED footprint at an
-        // origin — asking it about each drawn cell of a farm would test the farm's stored 2x3 shape at
-        // every one of them, which is neither what is being built nor anywhere near the right tiles.
-        // CellBuildable is the per-tile question ("is this ground, is it dry enough for this class"), and
-        // Occupied answers the other half.
-        drawWhy = null;
-
-        if (info.drawMode == BuildDrawMode.NodeChain)
-        {
-            // A chain is many separate one-tile buildings, not one footprint, so the shape rules do not
-            // apply to it as a set. A pylon's authored footprint IS a single cell, so CanPlace is exactly
-            // right here — and it carries the world-level gates (tech, ownership) with it.
-            //
-            // THE CHAIN IS VALID IF ANY PYLON CAN GO UP, not if all of them can. CommitDraw deliberately
-            // skips the ones on bad ground and raises the rest — you dragged across a lake and expect
-            // poles on both shores — so reddening the whole run because one pylon landed in water would
-            // contradict what releasing actually does.
-            string last = null;
-            bool any = false;
-            foreach (var c in drawCells)
-                if (SurfaceBuildManager.CanPlace(body, selected.Value, c.x, c.y, 0, out last)) { any = true; break; }
-            if (!any) drawWhy = last ?? "nowhere along that line will take a pylon";
-            return;
-        }
-
-        if (!SurfaceBuildManager.CanPlaceType(body, selected.Value, out drawWhy)) return;
-        if (!BuildShapeRules.Validate(info, drawCells, out drawWhy)) return;
-
-        var occupied = SurfaceBuildManager.Occupied(body);
-
-        // GROUND A QUEUED JOB HAS ALREADY CLAIMED COUNTS AS TAKEN, even though nothing stands on it yet.
-        // Enqueue refuses an overlap outright, so without this the drag paints green over a construction
-        // site and then silently declines on release — the one moment the player has no idea what they
-        // did wrong. Now the footprint reddens while they are still dragging, over ghosts they can see.
-        var pending = SurfaceBuildQueue.PendingCells(body);
-
-        foreach (var c in drawCells)
-        {
-            if (!SurfaceBuildManager.CellBuildable(body, info, c.x, c.y, out drawWhy)) return;
-            if (occupied.Contains(c)) { drawWhy = "something is already standing there"; return; }
-            if (pending.Contains(c)) { drawWhy = "another project is already going up there"; return; }
-        }
-    }
-
-    void Replace(List<Vector2Int> cells)
-    {
         drawCells.Clear(); drawSet.Clear();
-        foreach (var c in cells) if (drawSet.Add(c)) drawCells.Add(c);
+        foreach (var c in BuildShapeRules.NodeChain(drawAnchor, cursor, info.powerRange))
+            if (drawSet.Add(c)) drawCells.Add(c);
+
+        // THE CHAIN IS VALID IF ANY PYLON CAN GO UP, not if all of them can. CommitDraw deliberately
+        // skips the ones on bad ground and raises the rest — you dragged across a lake and expect poles
+        // on both shores — so reddening the whole run because one pylon landed in water would contradict
+        // what releasing actually does.
+        drawWhy = null;
+        string last = null;
+        foreach (var c in drawCells)
+            if (SurfaceBuildManager.CanPlace(body, selected.Value, c.x, c.y, 0, out last)) return;
+        drawWhy = last ?? "nowhere along that line will take a pylon";
     }
 
     void CommitDraw(SurfaceBuildingInfo info)
@@ -5018,36 +5673,16 @@ public class PlanetViewWindow : MonoBehaviour
 
         if (cells.Count == 0) return;
 
-        // A CHAIN IS N BUILDINGS, NOT ONE. Every other mode draws a single structure's footprint; the
-        // node chain lays a row of independent pylons, each its own relay that can be destroyed on its
-        // own and break the chain in half. So they are placed one at a time, and a pylon that lands on
-        // bad ground is simply skipped rather than failing the whole run — the player dragged across a
-        // lake and expects the poles either side of it to still go up.
-        if (info.drawMode == BuildDrawMode.NodeChain)
-        {
-            int placed = 0;
-            foreach (var c in cells)
-                if (SurfaceBuildManager.CanPlace(body, type, c.x, c.y, 0, out _)
-                    && SurfaceBuildManager.Place(body, type, c.x, c.y, 0)) placed++;
+        // A CHAIN IS N BUILDINGS, NOT ONE. Each pylon is its own relay that can be destroyed on its own
+        // and break the chain in half, so they are placed one at a time, and one that lands on bad
+        // ground is skipped rather than failing the whole run.
+        int placed = 0;
+        foreach (var c in cells)
+            if (SurfaceBuildManager.CanPlace(body, type, c.x, c.y, 0, out _)
+                && SurfaceBuildManager.Place(body, type, c.x, c.y, 0)) placed++;
 
-            if (placed > 0) { lastSig = null; SimpleAudio.Instance?.PlayComplete(); }
-            else SimpleAudio.Instance?.PlayTick();
-            return;
-        }
-
-        // Everything else goes through the build QUEUE, which is what charges for it, scales its cost and
-        // time by the tile count, reserves its Labor, and re-validates the shape (SurfaceBuildQueue).
-        if (SurfaceBuildQueue.Enqueue(body, type, cells, out string why) != null)
-        {
-            lastSig = null;
-            SimpleAudio.Instance?.PlayComplete();
-        }
-        else
-        {
-            SimpleAudio.Instance?.PlayTick();
-            if (!string.IsNullOrEmpty(why))
-                NotificationManager.Instance?.Push($"Can't build that {info.name.ToLower()}", why, null, NotifKind.Danger);
-        }
+        if (placed > 0) { lastSig = null; SimpleAudio.Instance?.PlayComplete(); }
+        else SimpleAudio.Instance?.PlayTick();
     }
 
     void EndDraw()
@@ -5155,8 +5790,16 @@ public class PlanetViewWindow : MonoBehaviour
             // Suppressed over the zoom bar / confirm dialog: they float over the same part of the map the
             // tooltip targets, and covering their own buttons and text would be worse than no tooltip
             // there. Re-shown every frame (not just on cell change) so it tracks the mouse WITHIN a cell.
-            if (!OverFloatingMapControl()) MapHoverPanel.Instance.ShowAtCursor(TileHoverText(x, y));
-            else MapHoverPanel.Instance.Hide();
+            //
+            // WHILE PLACING, this window carries the siting decision rather than the plain tile readout —
+            // see PlacementHoverText. That is the whole of "put the information under the mouse instead
+            // of at the bottom of the window": one panel, already anchored to the cursor, told to say
+            // something more useful while a structure is in hand.
+            if (OverFloatingMapControl()) MapHoverPanel.Instance.Hide();
+            else if (tab == Tab.Build && selected.HasValue
+                     && UsesPlacementSession(SurfaceBuildingDatabase.Get(selected.Value)))
+                MapHoverPanel.Instance.ShowAtCursor(PlacementHoverText(x, y));
+            else MapHoverPanel.Instance.ShowAtCursor(TileHoverText(x, y));
         }
         else
         {
@@ -5174,6 +5817,11 @@ public class PlanetViewWindow : MonoBehaviour
         if (zoomBar != null && RectTransformUtility.RectangleContainsScreenPoint(zoomBar, p, null)) return true;
         if (confirmPanel != null && confirmPanel.gameObject.activeInHierarchy &&
             RectTransformUtility.RectangleContainsScreenPoint(confirmPanel, p, null)) return true;
+        // Placement Mode's Confirm/Cancel panel sits ON the map, directly under the shape it is asking
+        // about — so without this, pressing Confirm would also paint a tile on the cell behind the
+        // button, and the building would grow by one on the way to being confirmed.
+        if (placePanel != null && placePanel.gameObject.activeInHierarchy &&
+            RectTransformUtility.RectangleContainsScreenPoint(placePanel, p, null)) return true;
         return false;
     }
 
