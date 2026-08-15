@@ -10,32 +10,138 @@ Clickable bodies with Planet UI + surface grid
 
 Visualization & Camera
 3D system view with colored bodies
-Smooth camera panning (WASD) + elevation change (mouse wheel)
-Basic raycast selection + debug tools
+Smooth camera panning (WASD) + Zoom Function (mouse wheel)
+Basic raycast selection + debug tools that can be disabled outside of Dev Mode
 
 UI System
-Planet info panel (bottom left)
-Draggable/resizable Planet Grid Window with rectangular surface
-Sandbox Editor Panel (size, radius, speed sliders, Apply Changes)
-Terrain Editor Panel for testing biome generation
+Planet Info: Popup Planet Grid Surface view window for the celestial body being clicked on(null for stars and black holes). Anchored to the bottom left corner of the screenspace and extending to meet with the UI at the top of the screen without overlapping. Some space for UI below map view and left of it (need space for more UI, tabs and Toggles). 
+Square Tab buttons Under the Surface Grid Map: Overview, Build, Survey, Orbit.
+Tabs open a new window to right side of Planet Surface Grid, Anchored to the right side and uses the same height as the Surface Grid Map Panel UI so they are parallel.
+Player's own settled worlds will have access to all Tabs at the bottom of the Planet UI for Overview, Build, Survey, Orbit.
+Worlds Unowned by the player will only have access to tabs Overview (with the map view), a very limited view of Survey Mode(some options disabled)(hard to survey if you're not actually there), and a Limited view of Orbit Tab(some options disabled)
+clicking on a Tab will open it's window, clicking on another tab will close any other window and open the new window, can be closed (x in top right corner)
+
+Overview Tab: 1. Basic Information about the planet and it's size/mass, type, habitability to your race, should all display in the window to the right of the Planet Surface Map.
+
+==Build Mode==
+
+Build Mode: 2.
+Buildings unlocked through technology should Display here in their respective Tabs: Civil Engineering, Electrical Engineering, Agriculture, Science, Military,
+Each Tab Window should have its color matching the Tab color (adjustable color in debug/Dev Mode)(see color examples below)
+Any UI container boxes for displaying Buildings or the Title of the Tab should maintain the default color scheme of the Planet Info UI.
+
+2a. Civil Engineering Tab: Orange Tab (Hardhat color) Buildings like the Capitol Building, cities for housing, MegaCities,  Material Storage Facilities, Launch Site Building (for shuttles and cargo ships) City Blocks Building
+
+City Blocks Building 1x1 Grid: - :will still function as housing without power, however will not generate amenities without power  
+Material Storage Facilities 2x3 Grid: - :Holds locally mined materials like Minerals(generated from Mine Buildings), Energy Storage(generated at Capacitors), and Amenities (population Upkeep)
+
+2b. Electrical Engineering Tab: (Bright Yellow Tab) When Selecting this tab, the Planet Surface Map should turn on an overlay to see the Power Grid(highlighted with Yellow Transparent Squares)
+
+2c. Agriculture Tab: (Lush Green Tab) Overlay on Planet Surface to indicate the best areas for farms with a green grid highlight.
+Farm Buildings can be found here.
+
+2d. Science Tab: (Dark Blue Tab) Overlay on Planet Surface to indicate if there are any anomalies or boosts to Research buildings via anomalies.
+(a few examples: Ancient Ruins could give bonus to tech research from that lab, or there are massive crystal caves or crystals growing out of the ground and they give bonuses to research and also provide a Rare Material Crystals.)
+Science Lab Buildings can be found here to produce research for your empire.
+Science Academy Building could boost all Labs on the planet while also producing some research points.
+Could have Different Branches of Technology and A building type for each one to boost that type of research: Physics, Engineering, Society (Society would include Terraforming or farming or government buildings) (Engineering would be for ballistic weapons, Space station/Orbital technologies, Space Ship Technology, Armor and Hull Upgrades, Mining Stations/Mining Buildings) (Physics would have Shields, Lasers, some energy Generators like Reactors, Thruster technology, Sensor range/speed technology, computing technology)
+
+-New Feature-
+Power Grid: 1. 
+Power Grid Overlay of the Planet Surface Map will put color duller over the Planet Surface Map while the Power Grid Overlay is active.
+There should be a Total Energy Display, an Energy Generation per sec/tick Display, and a Fill Bar to indicate Total Power vs Power Storage Capacity (Build Capacitor Buildings to increase total Power Storage)
+Energy per tick/sec that will show positive or negative power depending on total power added by Generator buildings and total power used by the buildings using power. 
+There should be an Overall Planet Energy Generation Displayed in the Overview Tab.
+All Power Grids with a Launch Site Building or an Orbital Tether/Elevator Building (or with Tech unlock, a Wireless Energy Transfer Building).
+Highlights every tile that the Power Grid reaches in Electric Yellow transparent highlights and Electric Blue transparent highlights for the power Source Buildings, or Power Nodes Buildings. Yellow Denotes the Grid, Blue denotes the source/infrastructure.
+If there are no power generating Buildings this Overlay should only show the color duller for the Planet Surface Grid Map.
+All tiles within range of a power source or a Power Node Building make up a Power Grid. There can be multiple power grids on a single planet surface by having disconnected power sources supplying their own cities or industries. 
+One could connect these cities Power Grids using Power Nodes in a chain across the Surface Grid, as long as each Power Node is within the range of each other. 
+When two Power Grids connect, they should combine into one Power Grid
+If a Power Node is destroyed and each side of the Power Grid has Generator Buildings, the Power Grid should become two different Power Grids.
+If a Power Node is destroyed the Power Grid might no longer exist over some buildings tiles. The Power Grid can only supply power to fully functioning buildings, or it can use Power Node Buildings within its reach to extend its reach with the larger coverage of the Power Node.
+Each power source Building can have a different tile size or shape; Power Nodes take up only a 1x1 grid space, where as a reactor might take up 1x2 for a Fission Reactor Building or a 2x2 for a Fusion Reactor Building. For a Combustion Power Plant it could be a 3 block grid that forms a corner (Like Mining Building shape)
+When placed, and functioning, Power Generators will either create their own power grid (if not in range of an existing one), or if it is placed in an existing Power Grid it will contribute to the power grid it is placed within. (Check for existing Power Grid before creating one).
 
 
-Major Features In Progress / Recently Added
+Most buildings need connection to a Power Grid to function. . Need to be connected to a Power Grid to function at full efficiency 
+Buildings for Power Generation: - : Steam Turbines, Reactors, Solar Arrays, Wind Farms, Geothermal Generators, Combustion Power Plant
 
-Sandbox Mode (High Priority – Almost Done)
-Real-time editing of selected body (planet/moon)
-Radius slider (moons now jump + rings should resize)
-Size slider (stable scaling)
-Speed slider
-Parent/child relationships preserved for moons
-Debug logging for tracing issues
+Buildings: 
+1. Power Nodes 1x1: - :They will be 1x1 buildings with a Power Grid Projection Range of 7 tiles circularly around it and Project a Power Grid's distance from the Power Grid Generators.
+2. Generator Buildings: any generator building placed within the Power Grid will connect to it add power to the Total Power Generation in the Power Grid, as well as project the power grid with it's own influence (the immediate grid squares around it)
+	a. Combustion Power Plant 1x2x1(corner piece?): - :coal plant built on Planet Grid on Mineral Deposits or Fertile Land (for wood burning) energy generators mostly used by more primitive technology civilizations. Generates a small amount of Energy, placed on Minerals deposit grid space or Fertile Land Grid Space, so can be influenced by bonuses of both tiles. (See Survey Mode View Modes)
+	b. Fission Reactor [Cleveland Z Tetris shaped Grid]: - : Generates a moderate amount of power, easy to build.
+	c. Fusion Reactor 2x2: - : Generates more power than Fission.
+	d. Steam Turbines 1x2: - : Generates moderate amount of power. Must be placed near.
+	e. Solar Arrays 1x3: - : Generates passive power but cheap to build and are more efficient when built on a planet closer to it's host star
+	f. Wind Farms [TeeWee Tetris shaped Grid minus the middle bottom square]: - : Overview on Windy Locations for best effect and higher energy Generation.
+	g. Geothermal Generator [Orange Ricky Tetris shaped Grid]: - : View Tectonic View in Survey Tab of Planet UI to see best places to build these for the best efficiency bonus. Tectonic Plates Layer of Surface Grid Map should color grid squares in a Red color Highlight to indicate the seams of the Tectonic plates, and should Generate Volcanoes or hotspots along its fault lines.
+
+
+
+Planet Generation and Solar System Generation: 1. Generation based on Mass (larger masses will be stars and gas giants, middle sized masses will be Terrestrial planets, and smaller masses will be Moons and Notable Asteroids.) Orbits must be Keplerian, but controlable with a Gamespeed setting.
+
+[ - ] Planet Surface Grid: 1. I want all celestial bodies other than the stars and Black Holes to have a Surface Grid view that lets you zoom into the planet surface to see the tiny biome tiles and place buildings in Build Mode. Display the surface of the planet with different biomes as textured/colored Tiles in a rectangular grid 2x1 length by height where the tops and bottoms of the rectangle are the North and South Pole (colder and should effect planet heat Map)
+
+Surface Grid Map of the planet will be scaled based on planet size/mass. I want all celestial bodies other than the stars themselves and Black Holes to Have a Surface Grid view. Gas Giants will have massive Surface Grid views, but should shrink to scale with the UI so that it stays within the screen and doesn't overlap other UI.
+
+Seamless Planet View Scrolling:
+. The Surface Grid Map should also Connect both left and right sides of the grid so that the entire grid can scroll left and right as much as you want as if it were seamless (think Rotating an image on a cylinder, but you see it as a flat image) 
+Planet Surface Grid: 2. Should render the surface of the planet based on Planet Generation Presets and 
+
+
+Planet Surface Grid: 3. Surface generation results must account for the left and right side needing to have a connected terrain generation (seamless map scrolling in left or right direction L-Click click and drag to scroll)
+Planet Surface Grid: 4. Has a toggle box for different views of the Planet Grid Surface such as Default (will show the Grid as a rectangular map with any structure rendered on the gridMineral deposits (should automatically toggle on when trying to place mining buildings)
+
+Sandbox Editor Panels: added to regular gameplay panels
+Terrain Editor Panel: (Sandbox/Dev Mode ONLY): for testing biome generation Realtime
+
+
+==Terraforming==
+
+Realtime Terraforming visuals that affect the terrain sliders.
+
+Gas Giants Should not have Terraforming Sliders other than maybe the Feature Scale and a Gas Giant Only slider for Storm Cells (Jupiters Red Spot) which should appear on the Gas Giants Grid Terrain Map as large Swirls.
+
+Gas Giants should also have their own set of Buildings in the Build menu as land based buildings will not work on Gas Giants. Gas Giant Settling should be unlocked through Technology Tree in the Society Genre of Research Items. They will need to have Floating Buildings like a Floating City, maybe some Floating Gas Harvesters, and Floating Shipyards. More to be added for Gas Giant Settling.
+
+Any Planet Settling Building type for hostile worlds/environments (not terraformed to species needs) such as Domed Cities should be Unlocked in the Society Genre of Research. (research Tree to be developed later)
+
+
+Elevation Slider in the Terrain Sandbox for editing planet surfaces should be Replaced with Water Level  Slider and be functional to show the level of water to accurately reflect how much is present on a planets surface at any point during terraforming.
+Currently the Elevation Slider makes the terrain more or less mountainous, the slider can be kept for Sandbox/Dev Mode but not be available in player mode.
+
+Any Terraforming option that either adds or removes water should alter the Planet Terrain editor slider for Water Level appropriately so it can be viewed in realtime.
+Ice/Cold planets should turn their water Tiles into cold versions of Water Grid Tiles (such as Ice, or snow, etc)
+
+The Moisture slider can be replaced or renamed as BioSphere slider, and should Generate plant life Tiles (grasslands, forests, swamps etc), in the appropriate places. 
+BioSphere cannot increase unless other planet Attributes are within limits.
+
+Planets must have a Heat Attribute to indicate overall Heat, or lack of heat making the planet Cold
+ (Molten/volcanic worlds vs Ice/barren worlds)
+
+Planets must have a Water Level to indicate how much water is on a planet 
+(determines suitability for different Empire species)
+Volcanic/Hot worlds will likely have no water, and adding water would cool the planet down slightly.
+Ice/Cold worlds can have water, but it will be frozen into Ice Grid Tiles. If heating Cold planets through terraforming, Ice Grid Tiles or Snow Tiles can melt into water Tiles like Oceans or Lakes and Rivers.
+Cold worlds should still allow for Sea Level to Increase with addition of water, however if the planet remains too cold, the Ice level will just increase.
+
+
+The Microbial Seeding Terraform option should increase the BioSphere slider in the Planet Terrain editor so as to Make it possible for Plantlife Tiles to spawn.
+Requires the planet to have a Stable and thick enough Atmosphere and a sufficient Water Level.
+Too thin an atmosphere, or too little water level, or Too Hot/Too Cold won't let the Microbial Seeding option succeed (give warning before activating if failure is likely)
+
+The Stellar Engineering Terraform option
 
 Planet Surface System
 Rectangular grids (map-like view)
-Improved noise-based biome generation (mountains, volcanoes, magma fields, etc.)
+Biome generation based on Sliders like  (mountains, volcanoes, magma fields, etc.)
 Seamless horizontal scrolling (in progress)
-Terrain Editor with sliders for regeneration testing
+Terrain Editor with sliders for Realtime generation via sliders like Elevation, Moisture Level, Sea Level, Tectonic Activity,
 
+Tectonic Activity: 1. EarthQuakes; cause damage on any Buildings or Population residing in these Grids, indicated by a Tectonic Plate layer (which should be viewable in a planet Survey Tab of the Host Planet's UI and have it's own tectonic plate simulator script ) and of the Planets Surface Grid. 
+Tectonic Activity: 2. Volcanic Activity; which should generate a volcano in the Surface Grid's BiomeTile on stress points of tectonic activity (generated on planets WITH tectonic activity.
 
 Planned / Suggested Features (Organized by Priority)
 1. Core Gameplay Loop
