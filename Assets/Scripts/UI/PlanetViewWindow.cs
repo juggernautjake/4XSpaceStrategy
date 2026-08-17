@@ -6777,8 +6777,21 @@ public class PlanetViewWindow : MonoBehaviour
     string TileHoverText(CelestialBody b, int x, int y, SurfaceIndexKind except = SurfaceIndexKind.None)
     {
         var tile = b.surface.tiles[x, y];
-        string typeHex = ColorUtility.ToHtmlStringRGB(TerrainColorMap.Get(tile.type));
         var sb = new System.Text.StringBuilder();
+
+        // A CELL STILL UNDER THE BLACKOUT SAYS NOTHING, and that has to be enforced here as well as in
+        // the drawing. The mask hides the colour; the readout would otherwise hand over the biome, the
+        // temperature and the ore of a cell the player is looking at a black square of — which is the
+        // whole survey given away by hovering.
+        if (!GameMode.DevMode && !b.Surveyed
+            && !Survey.Reached(b, x, y, Mathf.Clamp01(b.explorationProgress)))
+        {
+            sb.Append("<b><color=#7E8B9C>Unknown</color></b>");
+            sb.Append("\n<size=10><color=#7E8B9C>Not yet surveyed</color></size>");
+            return sb.ToString();
+        }
+
+        string typeHex = ColorUtility.ToHtmlStringRGB(TerrainColorMap.Get(tile.type));
         sb.Append($"<b><color=#{typeHex}>{tile.type}</color></b>");
 
         if (tile.HasOre && ResearchManager.IsDiscovered(tile.ore))

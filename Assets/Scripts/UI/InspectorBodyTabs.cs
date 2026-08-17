@@ -153,7 +153,26 @@ public partial class InspectorWindow
         // world is two things to keep in step and one of them is always slightly wrong — the sites are a
         // TAB now, not a window. It opens unsurveyed too: there's nothing to hide about a world's name
         // and orbit, and the tabs that need a survey say so themselves.
-        UIFactory.Button(actionRow.transform, "Surface View", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
+        // ---- THE MAP UNLOCKS WHEN A SHIP STARTS WORK, NOT WHEN IT FINISHES ----
+        //
+        // The blacked-out grid filling in cell by cell is the thing worth watching, so locking the window
+        // until the survey completes would hide the mechanic behind its own completion. Before a ship
+        // arrives there is genuinely nothing to show — not even the grid's shape, which is itself a fact
+        // about a world nobody has been to.
+        //
+        // Greyed rather than absent, and it says WHY: a control that vanishes teaches nothing, and one
+        // that is dead without explanation is worse than either.
+        var surfaceBtn = UIFactory.Button(actionRow.transform, "Surface View",
+            () => PlanetViewWindow.Instance?.ShowFor(b), 26);
+        if (!Survey.MapUnlocked(b))
+        {
+            surfaceBtn.interactable = false;
+            var lbl = surfaceBtn.GetComponentInChildren<TMP_Text>();
+            if (lbl != null) lbl.color = UITheme.SubText;
+            UIFactory.Tooltip(surfaceBtn.gameObject, SystemPresence.Revealed(b)
+                ? "Send a ship to survey this world — the surface map opens as soon as one starts."
+                : "Nothing is known about this world. Send a ship to its system.");
+        }
 
         UIFactory.Button(actionRow.transform, "Focus Camera", () =>
         {
