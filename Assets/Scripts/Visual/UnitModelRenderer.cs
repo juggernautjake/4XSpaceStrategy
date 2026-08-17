@@ -76,6 +76,47 @@ public static class UnitModelLibrary
         // The Science Vessel is the top of that line — a dedicated deep-survey laboratory, and the
         // largest of them.
         map[UnitType.ScienceVessel] = new Entry { path = sciencePath, size = 0.34f, motion = Motion.Freeflying, modelRotation = sciRot };
+
+        // ============================================================================================
+        // EVERY OTHER HULL, ON A BORROWED MESH
+        //
+        // There are three meshes in the project and twenty-odd classes. Until each has art of its own,
+        // a hull is better served by a real ship at the wrong silhouette than by a flat billboard: it
+        // sits in space properly, it turns to face its course, it catches the star's light, and it reads
+        // as a VESSEL next to the stations and colony ships that already do.
+        //
+        // WHAT MAKES THEM TELLABLE APART IS THE BADGE, not the mesh (see UnitModelRenderer's class
+        // marker). Three shared hulls with no marking would be worse than billboards — this is the trade
+        // only because every modelled ship now carries its class symbol above it.
+        //
+        // Sized by role rather than by tier alone: a scout is small and a dreadnought is the largest
+        // thing under way, so the fleet reads at a glance even before the badges resolve.
+        void Ship(UnitType t, float size, string path, Quaternion rot)
+            => map[t] = new Entry { path = path, size = size, motion = Motion.Freeflying, modelRotation = rot };
+
+        const string colonyPath = "SpaceAssets/Ships/LP Colony Ship";
+        var colRot = Quaternion.Euler(-90f, 0f, 0f);
+
+        // Fast, light hulls — the science frame is the slimmer of the two.
+        Ship(UnitType.Scout, 0.14f, sciencePath, sciRot);
+        Ship(UnitType.ScoutII, 0.16f, sciencePath, sciRot);
+        Ship(UnitType.ScoutIII, 0.18f, sciencePath, sciRot);
+        Ship(UnitType.Explorer, 0.24f, sciencePath, sciRot);
+        Ship(UnitType.Probe, 0.09f, sciencePath, sciRot);
+
+        // Combat, escalating. Nothing here is a fighter-shaped mesh yet; size is doing the work.
+        Ship(UnitType.Fighter, 0.13f, sciencePath, sciRot);
+        Ship(UnitType.FighterII, 0.15f, sciencePath, sciRot);
+        Ship(UnitType.FighterIII, 0.17f, sciencePath, sciRot);
+        Ship(UnitType.Frigate, 0.20f, colonyPath, colRot);
+        Ship(UnitType.Cruiser, 0.26f, colonyPath, colRot);
+        Ship(UnitType.Carrier, 0.32f, colonyPath, colRot);
+        Ship(UnitType.Dreadnought, 0.40f, colonyPath, colRot);
+
+        // Bulk hulls — the colony frame is the heavier one, which suits them.
+        Ship(UnitType.Miner, 0.22f, colonyPath, colRot);
+        Ship(UnitType.Transport, 0.26f, colonyPath, colRot);
+        Ship(UnitType.Terraformer, 0.30f, colonyPath, colRot);
     }
 
     public static Entry For(UnitType t)
@@ -167,6 +208,62 @@ public class UnitModelRenderer : MonoBehaviour
         foreach (var kv in models) VisibilityService.Apply(kv.Key);
     }
 
+    /// How far above the hull the badge floats, as a multiple of the hull's own size, and how big it is
+    /// relative to the hull. Both in the model's own space so a dreadnought's badge sits proportionally
+    /// where a scout's does.
+    const float BadgeLift = 1.15f, BadgeScale = 1.35f;
+
+    /// The badges, kept so LateUpdate can turn them to face the camera without a GetComponentInChildren
+    /// per ship per frame.
+    readonly List<Transform> badges = new List<Transform>();
+
+    void BuildBadge(GameObject host, Unit u, float size)
+    {
+        // A holder that is NOT scaled by the hull's fit, so the badge keeps its size whatever the mesh
+        // was authored at — and so billboarding it cannot inherit a squashed scale from the model.
+        var holder = new GameObject("ClassBadge");
+        holder.transform.SetParent(host.transform, false);
+        holder.transform.localPosition = Vector3.up * (BadgeLift);
+        // Undo the host's normalisation so the badge is sized in WORLD terms, not in hull terms.
+        float lossy = Mathf.Max(0.0001f, host.transform.lossyScale.x);
+        holder.transform.localScale = Vector3.one * (size * BadgeScale / lossy);
+
+        // Owner colour behind, class shape in front — the same two-layer reading a token gives.
+        Quad(holder.transform, UnitIconRenderer.Get(u.type), Color.white, Vector3.zero, 1f);
+
+        badges.Add(holder.transform);
+    }
+
+    static GameObject Quad(Transform parent, Texture2D tex, Color tint, Vector3 localPos, float scale)
+    {
+        var q = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        var col = q.GetComponent<Collider>();
+        if (col != null) Destroy(col);          // the hull owns the click; the badge must not steal it
+        q.transform.SetParent(parent, false);
+        q.transform.localPosition = localPos;
+        q.transform.localScale = Vector3.one * scale;
+        var mr = q.GetComponent<MeshRenderer>();
+        mr.material = new Material(Shader.Find("Sprites/Default")) { mainTexture = tex, color = tint };
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        mr.receiveShadows = false;
+        return q;
+    }
+
+    /// Turn every badge to face the camera. Done here rather than with a per-badge Billboard component
+    /// because it is one transform write per ship and a component would be an Update call per ship.
+    void TickBadges()
+    {
+        var cam = Camera.main;
+        if (cam == null) return;
+
+        var rot = cam.transform.rotation;
+        for (int i = badges.Count - 1; i >= 0; i--)
+        {
+            if (badges[i] == null) { badges.RemoveAt(i); continue; }   // its ship was destroyed
+            badges[i].rotation = rot;
+        }
+    }
+
     Model Build(Unit u)
     {
         var entry = UnitModelLibrary.For(u.type);
@@ -224,6 +321,24 @@ public class UnitModelRenderer : MonoBehaviour
 
         go.AddComponent<UnitModelClick>().Init(u);
 
+        // ============================================================================================
+        // THE CLASS BADGE
+        //
+        // A ship rendered as a mesh used to carry NO class marking at all: tokens and models were an
+        // either/or, and the token was the thing with the icon on it. That was survivable while only
+        // colony ships and the research line had meshes, and it stopped being survivable the moment
+        // every hull got one — three shared meshes across twenty classes means the silhouette cannot
+        // tell you what you are looking at, and at system zoom a hull is a few pixels of grey.
+        //
+        // So every modelled ship wears the same icon its billboard would have: the class shape in the
+        // class colour, plus the owner's colour behind it. Held ABOVE the hull rather than on it, so it
+        // never disappears into the mesh from a bad angle, and billboarded to the camera every frame
+        // (see TickBadge) so it is legible from anywhere.
+        //
+        // Deliberately the SAME sprite the tokens and the build menus use. A class that reads as a
+        // diamond in the shipyard has to read as a diamond in space, or the icon is decoration.
+        BuildBadge(go, u, entry.size);
+
         // Seeded from the unit id so an orbit is stable across frames and reloads, and two stations at
         // one world never share a ring.
         var rng = new System.Random(u.id * 7919);
@@ -273,6 +388,10 @@ public class UnitModelRenderer : MonoBehaviour
             if (m.entry.motion == UnitModelLibrary.Motion.OrbitHost) TickStation(um, u, m, dt);
             else TickShip(um, u, m, dt);
         }
+
+        // AFTER the hulls have moved and turned, so a badge is never a frame behind the ship it belongs
+        // to — at system zoom a badge lagging its hull reads as two separate objects.
+        TickBadges();
     }
 
     // A station: orbits whatever it's deployed at, exactly as that world orbits its star.

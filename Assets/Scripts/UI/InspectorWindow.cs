@@ -232,6 +232,27 @@ public partial class InspectorWindow : MonoBehaviour
                 tr = StarInteraction.TransformOf(target.star);
                 if (tr != null) hint = tr.lossyScale.x;
                 break;
+
+            // ---- SHIPS ----
+            //
+            // These were simply absent, so the F key did nothing at all with a ship selected while the
+            // Inspector's own "Focus Camera" button beside it worked — the same verb answering in one
+            // place and not the other.
+            //
+            // Routed through FocusUnit rather than FocusAndZoom because a ship cannot be followed by
+            // Transform: its token or hull is destroyed and rebuilt whenever the fleet changes, and a
+            // camera holding the old one goes fake-null and silently stops tracking. FocusUnit follows
+            // by IDENTITY and re-resolves the transform each frame. See CameraController.
+            case InspectorKind.Unit:
+                if (target.unit != null) CameraController.Instance?.FocusUnit(target.unit);
+                return;
+
+            case InspectorKind.Fleet:
+                // The lead ship. A fleet has no single position, and framing its centroid would put the
+                // camera on empty space between hulls.
+                if (UnitSelection.Selected.Count > 0)
+                    CameraController.Instance?.FocusUnit(UnitSelection.Selected[0]);
+                return;
         }
         if (tr != null) CameraController.Instance?.FocusAndZoom(tr, hint, true);
     }

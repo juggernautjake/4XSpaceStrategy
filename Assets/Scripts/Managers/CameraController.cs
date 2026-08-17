@@ -362,11 +362,20 @@ public class CameraController : MonoBehaviour
                            EventSystem.current.currentSelectedGameObject.GetComponent<TMPro.TMP_InputField>() != null;
         if (!menuOpen && !typingField && (Input.GetKeyDown(KeyCode.F) || Input.GetKeyDown(KeyCode.Q)))
         {
-            var sel = PlanetUI.Selected;
-            if (sel != null && sel.visualObject != null)
-                FocusAndZoom(sel.visualObject.transform, sel.surfaceSize, true);
+            // SHIPS FIRST. Selecting a ship is the most immediate "I mean that one" the game has, and
+            // until now F ignored it entirely: it looked at the selected WORLD, and a player who had
+            // just clicked a scout got the camera flown to whichever planet happened to still be
+            // selected underneath — the wrong subject, confidently.
+            if (UnitSelection.Selected.Count > 0)
+                FocusUnit(UnitSelection.Selected[0]);
             else
-                InspectorWindow.Instance?.FocusCurrent();   // a selected star / facility / etc.
+            {
+                var sel = PlanetUI.Selected;
+                if (sel != null && sel.visualObject != null)
+                    FocusAndZoom(sel.visualObject.transform, sel.surfaceSize, true);
+                else
+                    InspectorWindow.Instance?.FocusCurrent();   // a selected star / facility / etc.
+            }
         }
 
         SmoothHeightMovement();   // identical zoom smoothing whether following or not
