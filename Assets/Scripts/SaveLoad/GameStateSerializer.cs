@@ -96,6 +96,7 @@ public static class GameStateSerializer
             isBlackHole = sys.isBlackHole,
             ownerId = sys.owner != null ? sys.owner.id : -1,
             isHome = sys.isHome,
+            visited = sys.visited,
             hideReason = Persist(sys.hideReason)
         };
         foreach (var s in sys.stars) sd.starTypes.Add((int)s.type);
@@ -200,6 +201,8 @@ public static class GameStateSerializer
             birthrightClaim = b.birthrightClaim, settled = b.settled,
             visited = b.visited, explorationProgress = b.explorationProgress,
             claimProgress = b.claimProgress, researchProgress = b.researchProgress,
+            deepProgress = b.deepProgress,
+            deepProgress = b.deepProgress,
             hideReason = Persist(b.hideReason), ringHideReason = Persist(b.ringHideReason)
         };
 
@@ -292,6 +295,7 @@ public static class GameStateSerializer
                 galaxyPosition = new Vector3(sd.px, sd.py, sd.pz),
                 isBlackHole = sd.isBlackHole,
                 isHome = sd.isHome,
+                visited = sd.visited,
                 owner = sd.ownerId >= 0 ? FactionManager.Get(sd.ownerId) : null,
                 hideReason = Restore(sd.hideReason)
             };
@@ -466,6 +470,12 @@ public static class GameStateSerializer
             // it there is harmless; for a colony ship part-way through a claim it is the only record.
             claimProgress = Mathf.Clamp01(dto.claimProgress),
             researchProgress = Mathf.Clamp01(dto.researchProgress),
+            // A save written before the level-2 survey existed gated the overlays on `researchLevel`
+            // instead, so the honest conversion is "how much of the running order had that tier already
+            // handed over" — Tier I gave the first three indexes, II the first five, III all six. Below
+            // it is just the stored value. Done after the object initializer, at the researchLevel
+            // fallback further down, because it needs the level that block settles on.
+            deepProgress = Mathf.Clamp01(dto.deepProgress),
             hideReason = Restore(dto.hideReason), ringHideReason = Restore(dto.ringHideReason)
         };
         // Saves written before `settled` existed have it false everywhere, which would silently
@@ -482,6 +492,28 @@ public static class GameStateSerializer
         b.researchLevel = Mathf.Clamp(
             dto.researchLevel > 0 ? dto.researchLevel : (dto.deepSurveyed ? 1 : 0),
             0, CelestialBody.MaxResearchLevel);
+
+        // ---- OLD SAVE -> LEVEL-2 PROGRESS ----
+        //
+        // A save from before the level-2 survey has deepProgress 0 but may well have a researchLevel,
+        // and that tier had already handed the player some of the overlays. Loading it as "no indexes
+        // known" would take back overlays the player had earned and been using.
+        //
+        // The old ladder gave Mineral at survey, +Heat/Fertile at I, +Wind/Solar at II, +Water at III —
+        // which in the new running order is the first 1, 3, 5 and 6 indexes. Converted to a fraction of
+        // the whole sequence, that is what the world already knew. Only applied when nothing was
+        // stored, so a save that HAS the field is never second-guessed by an inference.
+        if (dto.deepProgress <= 0f && b.researchLevel > 0)
+        {
+            int known = b.researchLevel >= 3 ? 6 : b.researchLevel == 2 ? 5 : 3;
+            b.deepProgress = Mathf.Clamp01(known / (float)SurfaceIndex.All.Length);
+        }
+        else if (dto.deepProgress <= 0f && b.Surveyed)
+        {
+            // Surveyed but never deep-studied: the old rules still showed the Mineral index, which is
+            // the first slot of the new order.
+            b.deepProgress = Mathf.Clamp01(1f / SurfaceIndex.All.Length);
+        }
         b.clueIndex = dto.clueIndex;
         b.cityGrowthTimer = dto.cityGrowthTimer;
         if (dto.placedBuildings != null) b.placedBuildings = new List<PlacedBuilding>(dto.placedBuildings);

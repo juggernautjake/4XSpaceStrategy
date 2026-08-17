@@ -147,6 +147,11 @@ public class SystemDTO
     public int ownerId = -1;                 // -1 == unclaimed
     public bool isHome;
 
+    /// Has the player ever had presence in this system? Drives the system-level fog of war. Absent in
+    /// an older save, where false is safe: SystemPresence re-derives it the moment the player has
+    /// anything here, so a system they are already standing in comes back known on the first frame.
+    public bool visited;
+
     // Concealment (see Visibility.cs): 0 = visible, 1 = Dev, 2 = Cloaked, 3 = Undiscovered. Held as an
     // int because JsonUtility serializes enums as ints anyway and an int is what an older save missing
     // this field deserializes to — 0, i.e. visible, which is the correct reading of a save written
@@ -267,6 +272,12 @@ public class BodyDTO
     /// ship most of the way through a survey, had its work silently reset to zero by a reload.
     public float claimProgress;
     public float researchProgress;
+
+    /// How far the level-2 survey has got: 0..1 across every index and every band of every index, in
+    /// the order SurfaceIndex.All lists them. Absent in an older save, where 0 is the honest reading —
+    /// those saves gated the overlays on `researchLevel` instead, and the loader converts from it so a
+    /// world that had already earned its overlays does not lose them.
+    public float deepProgress;
 
     // ---- The surface, as it actually is -------------------------------------------------------
     //

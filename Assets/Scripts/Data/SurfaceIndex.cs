@@ -1126,24 +1126,33 @@ public static class SurfaceIndex
         }
     }
 
+    /// Is there anything of this index to look at yet?
+    ///
+    /// The gate is the LEVEL-2 SURVEY now, not an empire-tech tier. An index opens the moment a science
+    /// ship starts reading it and fills in as it works — see Survey.RevealOf, which is what the overlay
+    /// asks how much of it to draw. `RequiredLevel` above survives as the running ORDER (it is what
+    /// SurfaceIndex.All is sorted by), not as a lock.
     public static bool Unlocked(CelestialBody b, SurfaceIndexKind k)
     {
         if (b == null) return false;
         if (GameMode.DevMode) return true;
         if (!b.Surveyed) return false;
-        return b.researchLevel >= RequiredLevel(k);
+        return Survey.RevealOf(b, k).started;
     }
 
-    /// Why an overlay is locked — and it names the TIER, because "needs a deep survey" was useless once
-    /// there was more than one of them. A greyed control that will not say what is missing is a dead end.
+    /// Why an overlay is locked. A greyed control that will not say what is missing is a dead end, and
+    /// the answer is now always the same shape: this world has not been read that far yet, and the way
+    /// to change that is a science ship.
     public static string LockReason(CelestialBody b, SurfaceIndexKind k)
     {
         if (b == null) return "no world selected";
         if (!b.Surveyed) return "survey this world first";
+        if (Survey.RevealOf(b, k).started) return null;
 
-        int need = RequiredLevel(k);
-        if (b.researchLevel >= need) return null;
-
-        return $"needs {DeepResearch.Name(need)} — send a research ship to study this world";
+        int slot = Survey.IndexSlot(k);
+        var now = Survey.CurrentIndex(b);
+        return now == SurfaceIndexKind.None
+            ? $"send a research ship — it reads the indexes in order, and {Name(k)} is #{slot + 1} of {All.Length}"
+            : $"a research ship is on the {Name(now)} index; {Name(k)} is #{slot + 1} of {All.Length}";
     }
 }

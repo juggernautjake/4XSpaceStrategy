@@ -265,7 +265,7 @@ public class ColonyWindow : MonoBehaviour
         // abstract buildings; they are tiers on a world that already has the real structure standing.
         UIFactory.Label(buildList,
             "<color=#9FB4C8>Farms, mines, power and laboratories are built on the world's surface — " +
-            "open Planet View and draw them on the grid.</color>",
+            "open Surface View and draw them on the grid.</color>",
             UITheme.SmallSize, UITheme.SubText, 34);
     }
 

@@ -18,6 +18,14 @@ public class StarSystemData
     public Faction owner;      // null == unclaimed
     public bool isHome;
 
+    /// Has the player ever had anything here — a ship, a station, a claim?
+    ///
+    /// The system-level fog of war turns on this: until it is true the only thing drawn is the star,
+    /// and every world in the system is an unidentified silhouette. STICKY once set, because a system
+    /// that becomes a mystery again the moment a scout leaves is not fog of war, it is amnesia. See
+    /// SystemPresence, which owns the rule and is what sets this.
+    public bool visited;
+
     // Conceal the WHOLE system in one flag — its sun(s), its worlds, their moons, every orbit line, and
     // the enlarged star that stands in for it at galaxy zoom. Held here rather than stamped onto each
     // part, so revealing the system gives every object back exactly the concealment it had of its own.

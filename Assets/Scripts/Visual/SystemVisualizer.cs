@@ -58,8 +58,13 @@ public class SystemVisualizer : MonoBehaviour
         VisibilityService.ApplyAll();
     }
 
-    // Re-applies fog / reveal to every body based on current Surveyed state (called when Dev Mode
-    // toggles, so the reveal is correct in both directions).
+    // Re-applies fog / reveal to every body based on whether the empire is in its system (called when
+    // Dev Mode toggles, so the reveal is correct in both directions).
+    //
+    // The test is SystemPresence.Revealed, not `Surveyed` — see BodyFog for why those came apart. Note
+    // it has to run in BOTH directions: leaving Dev Mode has to put the silhouettes back on systems the
+    // player has never been to, which the old one-way "reveal if surveyed" branch already handled and
+    // which is easy to lose when rewriting this.
     public void RefreshFog()
     {
         if (SystemContext.Galaxy == null) return;
@@ -68,7 +73,7 @@ public class SystemVisualizer : MonoBehaviour
             {
                 if (b.visualObject == null) continue;
                 var fog = b.visualObject.GetComponent<BodyFog>();
-                if (b.Surveyed)
+                if (SystemPresence.Revealed(b))
                 {
                     if (fog != null) Destroy(fog);
                     PlanetAppearance.Apply(b, b.visualObject);
@@ -158,7 +163,9 @@ public class SystemVisualizer : MonoBehaviour
             // this appended controller silently drove the planet. One controller, configured AND fetched.
             var oc = UIFactory.Ensure<OrbitController>(visual);
             oc.SetupFromData(pivot.transform, body);
-            if (body.Surveyed) PlanetAppearance.Apply(body, visual);
+            // Presence, not survey: a world in a system the empire is standing in is drawn as itself
+            // whether or not anyone has mapped its surface. See BodyFog.
+            if (SystemPresence.Revealed(body)) PlanetAppearance.Apply(body, visual);
             else visual.AddComponent<BodyFog>().Init(body);   // fog-of-war silhouette
             if (body.owner != null) oc.SetOwnerHighlight(FactionManager.OwnerColor(body.owner), true);
 
@@ -179,7 +186,7 @@ public class SystemVisualizer : MonoBehaviour
                 // the one GetComponent later returns.
                 var moc = UIFactory.Ensure<OrbitController>(moonVisual);
                 moc.SetupFromData(body.visualObject.transform, moon);
-                if (moon.Surveyed) PlanetAppearance.Apply(moon, moonVisual);
+                if (SystemPresence.Revealed(moon)) PlanetAppearance.Apply(moon, moonVisual);
                 else moonVisual.AddComponent<BodyFog>().Init(moon);
                 if (moon.owner != null) moc.SetOwnerHighlight(FactionManager.OwnerColor(moon.owner), true);
             }

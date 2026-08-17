@@ -782,11 +782,11 @@ public class UnitManager : MonoBehaviour
         if (b == null) { u.status = UnitStatus.Idle; return; }
         if (b.Surveyed) { FinishAction(u, OrderKind.Survey, b); return; }   // already done
 
+        // Paced in CELLS now, not in abstract progress per second — see Survey.CellSeconds. The number
+        // the player watches is the map uncovering, so the number the rate is expressed in should be the
+        // same one: a world is as long to survey as it has ground, and Empire Tech buys that time back.
         float before = b.explorationProgress;
-        float sizeFactor = Mathf.Max(0.5f, b.surfaceSize / 8f);                                   // bigger = slower
-        float hostility = Mathf.Lerp(1f, 2.2f, Mathf.Clamp01((100f - b.habitability) / 100f));    // less habitable = slower
-        b.explorationProgress = Mathf.Clamp01(
-            b.explorationProgress + 0.05f * u.Info.surveyRate / (sizeFactor * hostility) * dt);
+        b.explorationProgress = Mathf.Clamp01(b.explorationProgress + Survey.Fraction(b, u, dt, false));
 
         // Collect an ore SAMPLE at each survey milestone (discovered + carried; not researched here).
         if (Crossed(before, b.explorationProgress, 0.25f) || Crossed(before, b.explorationProgress, 0.5f) ||
@@ -843,19 +843,11 @@ public class UnitManager : MonoBehaviour
     // fragment the world was hiding, and the Heat / Fertile / Weather indexes that make siting buildings
     // possible at all.
     //
-    // DeepSurveyRate is a fraction of Explore's 0.05f base. A big or hostile world divides it further,
-    // exactly as the surface pass does, so the worlds most worth studying are also the slowest.
-    //
-    // Tuned WITH the quality factor below, not before it. An earlier version multiplied by
-    // (EffectiveResearch + 1) — a base research ship's 8 — which made the "slower, deeper" pass finish
-    // in a third of the time of the surface survey it is supposed to follow. A veteran Science Vessel
-    // did it in under three seconds.
-    const float DeepSurveyRate = 0.009f;
-
-    // A better research suite, and a more experienced crew, buy time back — but on a curve that keeps
-    // the deep survey a real commitment at every tier. Base research ship ~1.3x, Mk III ~1.8x, a
-    // legendary Science Vessel ~2.5x. Never the order-of-magnitude the raw stat gave.
-    static float DeepSurveyQuality(Unit u) => 1f + u.EffectiveResearch / 24f;
+    // ITS PACING MOVED TO Survey.cs. The rate and the crew-quality curve that used to live here are now
+    // expressed per CELL rather than per second of abstract progress, because the level-2 survey is a
+    // thing the player watches uncover the map — so the number it is measured in should be the same one
+    // they are looking at. The tuning survived the move intact: see Survey.CellSeconds, which still
+    // carries the hostility factor and the EffectiveResearch / 24 curve this pair encoded.
 
     void Research(Unit u, float dt)
     {
@@ -863,21 +855,65 @@ public class UnitManager : MonoBehaviour
         if (b == null || !u.Info.canResearch) { u.status = UnitStatus.Idle; return; }
         if (!b.Surveyed) { FinishAction(u, OrderKind.Research, b); return; }
 
-        // Same shape as the surface pass: bigger worlds and hostile ones take longer. A better research
-        // suite is what buys the time back.
-        float sizeFactor = Mathf.Max(0.5f, b.surfaceSize / 8f);
-        float hostility = Mathf.Lerp(1f, 2.2f, Mathf.Clamp01((100f - b.habitability) / 100f));
-        u.researchTimer += DeepSurveyRate * DeepSurveyQuality(u) / (sizeFactor * hostility) * dt;
-        b.researchProgress = Mathf.Clamp01(u.researchTimer);
-
-        if (u.researchTimer >= 1f)
+        // ---- THE LEVEL-2 SURVEY ----
+        //
+        // This is the index sweep now: six overlays, three passes each, uncovering cell by cell in the
+        // order SurfaceIndex.All lists them. Paced in cells like the surface pass, so the same Empire
+        // Tech that speeds up mapping the ground speeds up reading it.
+        //
+        // `researchTimer` still runs alongside as the ship's OWN progress bar, because a research ship
+        // arriving at a half-studied world should show how far ITS visit has got rather than inheriting
+        // the world's total. `b.researchProgress` mirrors it for the inspector.
+        if (b.deepProgress < 1f)
         {
-            u.AddExperience(XpResearch);
-            DoDeepResearch(u, b);
-            u.researchTimer = 0f;
-            b.researchProgress = 1f;
-            FinishAction(u, OrderKind.Research, b);
+            float before = b.deepProgress;
+            var wasOn = Survey.CurrentIndex(b);
+
+            b.deepProgress = Mathf.Clamp01(b.deepProgress + Survey.Fraction(b, u, dt, true));
+            u.researchTimer = Mathf.Clamp01(u.researchTimer + Survey.Fraction(b, u, dt, true));
+            b.researchProgress = b.deepProgress;
+
+            // Each index finishing is worth saying out loud: it is the unit of progress the player is
+            // actually watching, and six quiet overlays appearing is a worse story than six arrivals.
+            var nowOn = Survey.CurrentIndex(b);
+            if (nowOn != wasOn && wasOn != SurfaceIndexKind.None)
+            {
+                u.AddExperience(XpResearch);
+                NotificationManager.Instance?.Push($"{b.name}: {SurfaceIndex.Name(wasOn)} index charted",
+                    nowOn == SurfaceIndexKind.None
+                        ? "Every index read — this world is fully studied."
+                        : $"Now reading the {SurfaceIndex.Name(nowOn)} index.",
+                    FlyTo(b), NotifKind.Research);
+            }
+
+            if (before < 1f && b.deepProgress >= 1f)
+            {
+                // The tier ladder is settled FIRST, so DoDeepResearch below sees a world with nothing
+                // left to advance and skips straight to the part that still matters. Reaching the end of
+                // the running order IS reaching the end of the ladder now; leaving researchLevel behind
+                // would leave every other reader of it describing a fully-studied world as unstudied.
+                b.researchLevel = CelestialBody.MaxResearchLevel;
+
+                // Still the thing that charts the surface's SITES and names its ores. That was never
+                // about which overlay you may look at — it is the ship writing up what it found — and it
+                // is what turns a point of interest into a job the player can commission.
+                DoDeepResearch(u, b);
+
+                // The Vael fragment surfaces here. It used to be Deep Research Tier III; that tier no
+                // longer gates anything, and the fragment belongs on the last thing a world has left to
+                // give rather than on a tier an empire might never buy the tech for. Reveal is a no-op
+                // on a world with no fragment and on one already recovered.
+                AncientClues.Reveal(b);
+
+                SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
+                FinishAction(u, OrderKind.Research, b);
+            }
+            return;
         }
+
+        // Nothing left to read.
+        b.researchProgress = 1f;
+        FinishAction(u, OrderKind.Research, b);
     }
 
     // A research ship finishing a deep survey of a world.

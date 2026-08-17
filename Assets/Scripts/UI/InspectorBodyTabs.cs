@@ -56,13 +56,36 @@ public partial class InspectorWindow
         // fit in 156px and a HorizontalLayoutGroup answers that by crushing them.
         var card = Card(topRow.transform);
         EmbeddedGlobe.Build(topRow.transform, b, GlobeSize, GlobeSize);
-        Stat(card, "Type", () => TerraformDiagnosis.Pretty(b));
-        Stat(card, "Atmospheres", () => $"{b.atmospheres:0.#} <size=10><color=#9FB4C8>({AtmosphereRules.Describe(b)})</color></size>");
+
+        // ---- WHAT YOU MAY KNOW, AND WHEN ----
+        //
+        // Three gates, and each row sits behind the one that actually earns it (see SystemPresence and
+        // Survey). A world nobody has been near is a black sphere with a name and an orbit, and every
+        // other line says so rather than quietly showing a number the player has not paid for.
+        //
+        //   in the system   — TYPE. You can see a frozen world is frozen from across a solar system.
+        //   survey level 1  — habitability, the surface map.
+        //   survey level 2  — the index overlays (elsewhere; this panel only reports the level).
+        //
+        // Atmospheres sits with type: it is the same kind of observation, made with the same telescope.
+        bool seen = SystemPresence.Revealed(b);
+
+        Stat(card, "Type", () => seen ? TerraformDiagnosis.Pretty(b) : "<color=#7E8B9C>Unknown</color>");
+        Stat(card, "Atmospheres", () => seen
+            ? $"{b.atmospheres:0.#} <size=10><color=#9FB4C8>({AtmosphereRules.Describe(b)})</color></size>"
+            : "<color=#7E8B9C>Unknown</color>");
         Stat(card, "Owner", () =>
         {
             string hex = "#" + ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(b.owner));
             return $"<color={hex}>{FactionManager.OwnerLabel(b.owner)}</color>";
         });
+
+        // ABOVE Status, because it is the thing that decides how much of the rest of this panel is
+        // real — and because a player looking for "why can't I see the ore map" should hit this line
+        // before they hit anything that could be mistaken for an answer.
+        Stat(card, "Survey", () => seen
+            ? Survey.LevelLabel(b)
+            : "<color=#7E8B9C>Not surveyed</color>");
         // Claimed and settled are different things (see Claim.cs) and the difference is most of the
         // mid-game, so it's stated rather than left to be inferred from whether a city happens to exist.
         Stat(card, "Status", () =>
@@ -74,8 +97,11 @@ public partial class InspectorWindow
                 : "";
             return $"<color={hex}>{Claim.StageLabel(st)}</color>{note}";
         });
+        // Habitability is a LEVEL-1 fact: it is what finishing the surface map tells you, so it stays
+        // hidden until that is done rather than being readable off a world nobody has landed on.
         Stat(card, "Habitability", () =>
         {
+            if (!b.Surveyed) return "<color=#7E8B9C>Not surveyed</color>";
             string hex = Habitability.ScoreColorHex(b.habitability);
             return $"<color={hex}><b>{b.habitability:F0}%</b> ({Habitability.Label(b.habitability, b.isHabitable)})</color>" +
                    $" <color=#9FB4C8>for {SpeciesManager.Current.name}</color>";
@@ -86,7 +112,13 @@ public partial class InspectorWindow
             var warn = Card(p, new Color(0.16f, 0.13f, 0.06f, 0.9f));
             UIFactory.WrapText(warn, "<b><color=#FFBF4D>Unexplored world</color></b>", UITheme.SmallSize, UITheme.Warn);
             Note(warn, "Known: name, type, owner, orbit and host star. Send a ship to survey it and its habitability, resources, ores and points of interest are revealed.");
-            Bar(warn, () => (b.explorationProgress, $"Survey {b.explorationProgress * 100f:F0}%", UITheme.Accent));
+
+            // ONLY WHILE THERE IS SOMETHING TO REPORT. A permanent "Survey 0%" on every unvisited world
+            // in the galaxy reads as a stalled job rather than as one nobody has started: it draws the
+            // eye to a bar that will never move on its own. It appears when a ship is actually working
+            // or when some progress already stands, which is when a progress bar means anything.
+            if (Survey.InProgress(b) || b.explorationProgress > 0f)
+                Bar(warn, () => (b.explorationProgress, $"Survey {b.explorationProgress * 100f:F0}%", UITheme.Accent));
         }
         else
         {
@@ -121,7 +153,7 @@ public partial class InspectorWindow
         // world is two things to keep in step and one of them is always slightly wrong — the sites are a
         // TAB now, not a window. It opens unsurveyed too: there's nothing to hide about a world's name
         // and orbit, and the tabs that need a survey say so themselves.
-        UIFactory.Button(actionRow.transform, "Planet View", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
+        UIFactory.Button(actionRow.transform, "Surface View", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
 
         UIFactory.Button(actionRow.transform, "Focus Camera", () =>
         {
@@ -488,7 +520,7 @@ public partial class InspectorWindow
             }
         }
 
-        UIFactory.Button(p, "Open Planet View (build on the surface) »", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
+        UIFactory.Button(p, "Open Surface View (build on the surface) »", () => PlanetViewWindow.Instance?.ShowFor(b), 26);
 
         if (ColonyFacilities.TotalStructures(b) == 0 && b.shipyardLevel < 1 && b.researchCenterLevel < 1)
             Note(p, "Nothing built here yet.");
@@ -559,10 +591,10 @@ public partial class InspectorWindow
         //
         // Every one of them has a real structure on the surface grid now, drawn where you want it and
         // scaled by how much you drew. So the cards are replaced by the one control that still means
-        // anything: the way through to the map they are actually built on. (The "Open Planet View"
+        // anything: the way through to the map they are actually built on. (The "Open Surface View"
         // button above this is that control — this is the sentence explaining why there is nothing else.)
         Note(p, "Everything else is built on the SURFACE — a mine on a seam, a farm on green ground, a " +
-                "shipyard where there is room for one. Open the Planet View above and draw them on the map.");
+                "shipyard where there is room for one. Open the Surface View above and draw them on the map.");
     }
 
     // ---------------- Objects ----------------

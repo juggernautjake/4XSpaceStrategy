@@ -194,6 +194,22 @@ public class CelestialBody
 
     public const int MaxResearchLevel = 3;
 
+    // ============================================================================================
+    // THE LEVEL-2 SURVEY, AS A CONTINUOUS THING
+    //
+    // 0..1 across EVERY index and every band of every index — six indexes of three passes, eighteen
+    // sweeps of the map in the order SurfaceIndex.All lists them. See Survey.cs for the whole model.
+    //
+    // A single float rather than a per-index array on purpose. The passes are strictly sequential — an
+    // index is not started until the one before it is finished — so the running order plus one number
+    // says exactly as much as eighteen numbers would, costs one field in the save, and cannot get into
+    // a state where index four is done and index two is not.
+    //
+    // `researchLevel` above is what this replaced as the gate on the overlays. It is still written and
+    // still read: it carries old saves, and Deep Research still exists as a thing a research ship does
+    // for its OTHER rewards. What it no longer decides is whether you may look at an index.
+    public float deepProgress = 0f;
+
     // Which fragment of the Vael's message this world hides (0..9), or -1 for none. Exactly ten worlds carry
     // one (AncientClues.SeedGalaxy); it's revealed when the world is surveyed AND deeply studied.
     public int clueIndex = -1;

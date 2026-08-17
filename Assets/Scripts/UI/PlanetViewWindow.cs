@@ -297,6 +297,15 @@ public class PlanetViewWindow : MonoBehaviour
     // The Power grid is now a Survey overlay rather than its own tab: this flag is the "showing the power
     // grid" option. NOT exclusive with the index ramps any more — the grid has its own layer above the
     // buildings while an index ramp sits below them, so both can be read at once.
+    /// How strongly the power grid washes over everything under it.
+    ///
+    /// The overlay paints its own per-texel alphas — a dull ground at 0.62, lit tiles at 0.34-0.42, the
+    /// rim brighter still — and this scales all of them at once on the RawImage, so their RELATIVE
+    /// strengths, which are what make the map readable, are untouched. Halving them is what lets a
+    /// ground index stay legible underneath: the two are shown together far more often than not, and at
+    /// full strength the grid simply erased whichever index the player had also asked for.
+    const float PowerOverlayAlpha = 0.5f;
+
     bool showPowerOverlay;
     // The plate-tectonics overlay — another bespoke Survey overlay (not an index ramp): it washes the map
     // white, paints the fault lines red, and draws a push-direction arrow per plate. Mutually exclusive
@@ -313,6 +322,11 @@ public class PlanetViewWindow : MonoBehaviour
     float powerRepaintIn;   // see Update: the power overlay repaints on a timer, not every frame
     Color[] powerPx;        // reused scratch for that repaint — see RefreshPowerOverlay
     bool[] powerLit;        // ...and which tiles any grid reaches, for the edge pass
+    Color[] powerOut;       // ...and the supersampled texels the rim is drawn into
+
+    RawImage surveyFogImage;    // the blacked-out grid of an unsurveyed world
+    Texture2D surveyFogTex;
+    Color32[] surveyFogPx;
 
     // Selection marker (see DrawSelectionMarker / AnimateMarker).
     RectTransform markerLayer;
@@ -462,10 +476,53 @@ public class PlanetViewWindow : MonoBehaviour
         overlayImage.raycastTarget = false;
         ovGO.SetActive(false);
 
+        // ============================================================================================
+        // THE UNSURVEYED GROUND, BLACKED OUT
+        //
+        // A world nobody has mapped shows its grid and nothing in it: one opaque cell per grid cell,
+        // lifting cell by cell as the survey front crosses the world. Above the ground overlay so it
+        // hides the indexes and the tectonics with the terrain — an unsurveyed world should not be
+        // leaking its fault lines — and below everything else, because there is nothing else on a world
+        // nobody has been to.
+        // ============================================================================================
+        var fogGO = UIFactory.NewUI(mapRT, "SurveyFog");
+        surveyFogImage = fogGO.AddComponent<RawImage>();
+        UIFactory.Stretch(surveyFogImage.rectTransform);
+        surveyFogImage.raycastTarget = false;
+        fogGO.SetActive(false);
+
         // Points of interest sit ABOVE the terrain but BELOW the pieces: a site is GROUND, so a building
         // put on top of it should cover it. Built before the piece layer so hierarchy order says so.
         siteLayer = UIFactory.NewUI(mapRT, "Sites").GetComponent<RectTransform>();
         UIFactory.Stretch(siteLayer);
+
+        // ============================================================================================
+        // THE POWER GRID GETS ITS OWN LAYER, BETWEEN THE GROUND AND THE BUILDINGS
+        //
+        // Overlays used to share one image, which forced them to be mutually exclusive — and the loser
+        // was always the one the player most needed. A Combustion Plant is Electrical (so it wants the
+        // power map) but is sited on ORE (so it wants the Mineral map), and one of those had to be
+        // thrown away. Same for a Farm, which needs fertile ground AND a grid connection, and for wind
+        // and solar arrays, which need their own index AND somewhere to plug in.
+        //
+        // They cannot simply be composited into one texture either: a ground index and the grid are
+        // different KINDS of fact and the player reads them together, so each needs its own depth.
+        //
+        // IT USED TO SIT ABOVE THE PIECES. The argument was that the grid describes which structures it
+        // reaches, so hiding it behind those structures answers the question by obscuring it. True, but
+        // it bought that read by paying a worse price: a full-strength wash over every building on the
+        // map meant you could not see what was ALREADY BUILT, and the first thing a player does with the
+        // power map open is look for somewhere to put the next thing. Losing the standing structures is
+        // worse than losing the tint on top of them, so the pieces now draw over it — and the grid is
+        // half-transparent (see PowerOverlayAlpha), which is what lets the ground index below it and the
+        // buildings above it both stay readable through the wash.
+        // ============================================================================================
+        var pwGO = UIFactory.NewUI(mapRT, "PowerOverlay");
+        powerOverlayImage = pwGO.AddComponent<RawImage>();
+        UIFactory.Stretch(powerOverlayImage.rectTransform);
+        powerOverlayImage.raycastTarget = false;
+        powerOverlayImage.color = new Color(1f, 1f, 1f, PowerOverlayAlpha);
+        pwGO.SetActive(false);
 
         pieceLayer = UIFactory.NewUI(mapRT, "Pieces").GetComponent<RectTransform>();
         UIFactory.Stretch(pieceLayer);
@@ -478,30 +535,6 @@ public class PlanetViewWindow : MonoBehaviour
         // you are actually pointing, not to a copy of it one world away.
         BuildWrapMirror(-1);
         BuildWrapMirror(+1);
-
-        // ============================================================================================
-        // THE POWER GRID GETS ITS OWN LAYER, ABOVE THE PIECES
-        //
-        // Overlays used to share one image, which forced them to be mutually exclusive — and the loser
-        // was always the one the player most needed. A Combustion Plant is Electrical (so it wants the
-        // power map) but is sited on ORE (so it wants the Mineral map), and one of those had to be
-        // thrown away. Same for a Farm, which needs fertile ground AND a grid connection, and for wind
-        // and solar arrays, which need their own index AND somewhere to plug in.
-        //
-        // They cannot simply be composited into one texture either, because they belong at DIFFERENT
-        // DEPTHS. A ground index describes the ground, so a building standing on it should cover it. The
-        // power overlay describes which structures the grid reaches, so hiding it behind those same
-        // structures answers the question by obscuring it — a mine in a dead zone looked identical to a
-        // powered one.
-        //
-        // So: two layers. The ground index stays below the pieces; the power grid sits above them, right
-        // under the markers. Both can be on at once, each at the depth that makes it readable.
-        // ============================================================================================
-        var pwGO = UIFactory.NewUI(mapRT, "PowerOverlay");
-        powerOverlayImage = pwGO.AddComponent<RawImage>();
-        UIFactory.Stretch(powerOverlayImage.rectTransform);
-        powerOverlayImage.raycastTarget = false;
-        pwGO.SetActive(false);
 
         // Above the pieces so the ring/arrow are never hidden behind a structure's own tiles.
         markerLayer = UIFactory.NewUI(mapRT, "Markers").GetComponent<RectTransform>();
@@ -1063,16 +1096,17 @@ public class PlanetViewWindow : MonoBehaviour
         m.overlay.raycastTarget = false;
         o.SetActive(false);
 
-        m.pieces = UIFactory.NewUI(m.root, "Pieces").GetComponent<RectTransform>();
-        UIFactory.Stretch(m.pieces);
-
-        // Built AFTER pieces, so it draws over them — matching the real map's stacking. A grid whose job
-        // is showing which structures it reaches cannot be hidden behind those structures.
+        // Built BEFORE pieces, so they draw over it — matching the real map's stacking. Miss this and
+        // the seam becomes a place where buildings vanish under the grid on one side of it and not the
+        // other, which reads as a rendering fault rather than as a wrapped map.
         var p = UIFactory.NewUI(m.root, "PowerOverlay");
         m.power = p.AddComponent<RawImage>();
         UIFactory.Stretch(m.power.rectTransform);
         m.power.raycastTarget = false;
         p.SetActive(false);
+
+        m.pieces = UIFactory.NewUI(m.root, "Pieces").GetComponent<RectTransform>();
+        UIFactory.Stretch(m.pieces);
 
         m.root.gameObject.SetActive(false);
         mirrors.Add(m);
@@ -1184,6 +1218,14 @@ public class PlanetViewWindow : MonoBehaviour
         // would still be telling you to click a structure to pick it up while the map was in demolition.
         sb.Append(BuildDemolition.IsFor(body) ? 1 : 0).Append('|');
         sb.Append((int)activeIndex).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(showTectonicsOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
+
+        // A SURVEY IN PROGRESS IS A CHANGING PICTURE, and the whole point of it is that you can watch.
+        // Quantised rather than raw so this is not a rebuild every frame: 200 steps across a level is
+        // about a cell's worth of change on a mid-sized world, which is the granularity the map is drawn
+        // at anyway. Without it the fog and the index passes would only redraw when something else in
+        // the window happened to change shape.
+        sb.Append(Mathf.FloorToInt(body.explorationProgress * 200f)).Append('|');
+        sb.Append(Mathf.FloorToInt(body.deepProgress * 200f)).Append('|');
 
         // The Overview and Orbit tabs fold in the colony/shipyard structure, so their SHAPE changes when
         // a shipyard or research centre is built or upgraded, when a city appears, when ownership flips,
@@ -1309,16 +1351,38 @@ public class PlanetViewWindow : MonoBehaviour
 
         // Rotate the held piece 90° — before it snaps to the grid and after. Handled here rather than on
         // the map so it works the moment you pick a building up, wherever the cursor happens to be.
-        // R is offered alongside right-click because right-click is also the world's "send fleet" verb,
-        // so a keyboard rotate is never ambiguous.
-        // Not while a confirm is up: the panel is asking about a specific footprint at a specific
+        //
+        // R ONLY. Rotate used to also be on right-click, and right-click is now the way OUT of placement
+        // mode (below), which is the more valuable binding: rotating has a key sitting right under the
+        // hand already, while leaving the mode meant travelling back to the tray to put the building
+        // down. Not while a confirm is up: the panel is asking about a specific footprint at a specific
         // rotation, and rotating underneath the question would make the answer mean something else.
-        if (tab == Tab.Build && selected.HasValue && !pendingType.HasValue &&
-            (Input.GetMouseButtonDown(1) || Input.GetKeyDown(KeyCode.R)))
+        if (tab == Tab.Build && selected.HasValue && !pendingType.HasValue && Input.GetKeyDown(KeyCode.R))
         {
             rotation = (rotation + 1) % 4;
             RecomputeHoverValidity();   // a rotated piece may now fit (or stop fitting) where it is
             SimpleAudio.Instance?.PlayTick();
+        }
+
+        // ---- RIGHT-CLICK LEAVES PLACEMENT MODE ----
+        //
+        // One press, all the way out: the piece is dropped and any drawn shape goes with it. Escape
+        // keeps its one-step-at-a-time ladder (confirm, then shape, then piece) for the player who wants
+        // to undo just the last thing; this is the other half of that pair — the quick way out for the
+        // far more common "actually, not here, and not this".
+        //
+        // A confirm still gets backed out of first rather than dismissed along with everything else. It
+        // is a question already on screen, and answering "no" to it is not the same gesture as
+        // abandoning the build, so collapsing the two would make a stray click lose more than it looks
+        // like it should.
+        if (tab == Tab.Build && Input.GetMouseButtonDown(1))
+        {
+            if (pendingType.HasValue) { CancelPlace(); return; }
+            if (selected.HasValue || (BuildPlacement.IsFor(body) && BuildPlacement.Tiles > 0))
+            {
+                DoCancelPlacement();
+                return;
+            }
         }
 
         // Escape backs out of the confirm first, and only then drops the held piece — one step at a
@@ -4211,6 +4275,10 @@ public class PlanetViewWindow : MonoBehaviour
         // (index ramp, power, build, nothing) leaves none behind; the tectonics branch redraws them.
         ClearPlateArrows();
 
+        // Same reasoning as the power layer below: resolved before any branch can return early, so an
+        // unsurveyed world cannot strand a stale fog on screen — or, worse, fail to draw one.
+        RefreshSurveyFog();
+
         // The power layer is resolved FIRST, before any branch can early-return, because it is now
         // independent of whatever the ground layer is doing. Left to the branches, a path that returned
         // early — tectonics, or an unsurveyed world — would strand the grid on screen from the last
@@ -4299,19 +4367,35 @@ public class PlanetViewWindow : MonoBehaviour
     // colour. So a good area has a boundary you can aim a footprint at instead of a gradient you have to
     // squint at, and a BETTER area inside it has one of its own.
     //
-    // THE TEXTURE IS SUPERSAMPLED, a few texels per tile, purely so the outline can be a LINE. At one
+    // THE TEXTURE IS SUPERSAMPLED, several texels per tile, purely so the outline can be a LINE. At one
     // texel per tile the only way to mark a boundary is to recolour the whole edge tile, which eats the
     // very ground the outline is pointing at. `sub` is chosen from the map's size so a big world doesn't
     // pay for a texture nobody asked for, and at sub == 1 the outline is simply skipped — the fill still
     // carries the information, and a 640-wide gas giant is not where anyone is siting a farm.
+    //
+    // SUB WENT 3 -> 6, WHICH IS THE OUTLINE GETTING THINNER. The line is one texel wide, so at sub 3 it
+    // was a THIRD of a tile on every open side — and a tile open on two sides lost two thirds of itself
+    // to its own border. That is the complaint: the outline was eating the ground and the per-tile
+    // numbers it was supposed to be pointing at. At sub 6 the same line is a sixth of a tile.
+    //
+    // The cost is the texture: a 280x140 world goes from 840x420 to 1680x840, about 5 MB, rebuilt only
+    // when the overlay actually changes rather than per frame. The tiers below keep the big worlds off
+    // that bill, and they are not the worlds anyone sites a building on.
     // ============================================================================================
     static int OverlaySub(int w, int h)
     {
         long cells = (long)w * h;
-        if (cells <= 40_000) return 3;    // up to ~280x140 — every world you actually build on
-        if (cells <= 140_000) return 2;
+        if (cells <= 40_000) return 6;    // up to ~280x140 — every world you actually build on
+        if (cells <= 140_000) return 3;
         return 1;                          // enormous: fill only
     }
+
+    /// How much of a tile the band outline may eat, as a fraction of the tile. The texel count follows
+    /// from `sub` so the line is the same visual weight whichever tier a world falls into, rather than
+    /// being "one texel" and therefore three times fatter on a world that happens to be smaller.
+    const float OutlineTileFraction = 0.17f;
+
+    static int OutlineTexels(int sub) => Mathf.Max(1, Mathf.RoundToInt(sub * OutlineTileFraction));
 
     void RefreshIndexOverlay(SurfaceIndexKind kind)
     {
@@ -4329,13 +4413,41 @@ public class PlanetViewWindow : MonoBehaviour
         int steps = Mathf.Max(1, Mathf.RoundToInt((1f - SurfaceIndex.ShowFloor) / SurfaceIndex.BandStep));
         for (int i = 0; i < step.Length; i++) step[i] = -1;
 
+        // ============================================================================================
+        // THE SURVEY IS DRAWN WHILE IT HAPPENS
+        //
+        // An index is not a thing you have or have not got any more — it arrives in three passes, and
+        // this is what those passes look like. `pass` is how many 10% bands the ship has resolved, so
+        // a tile is drawn at min(its own band, pass): during the first pass the whole 70-and-up region
+        // is one flat 70s colour, and the 80s and 90s separate out of it as the later passes land.
+        //
+        // Within the pass in progress, a tile is only upgraded once the survey has REACHED it — see
+        // Survey.Reached, which is a ragged front travelling across the world rather than a dissolve.
+        // A tile the front has not got to yet stays at the previous pass's fidelity, and during the
+        // very first pass that means it is not drawn at all.
+        var reveal = Survey.RevealOf(body, kind);
+        int maxBand = reveal.complete ? steps - 1 : Mathf.Min(reveal.pass, steps - 1);
+
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
                 int i = y * w + x;
                 float v = SurfaceIndex.Get(body, kind, x, y);
                 if (!SurfaceIndex.ShownFor(body, kind, v, out float t)) continue;
-                step[i] = Mathf.Clamp(Mathf.RoundToInt(t * (steps - 1)), 0, steps - 1);
+
+                int band = Mathf.Clamp(Mathf.RoundToInt(t * (steps - 1)), 0, steps - 1);
+
+                if (!reveal.complete)
+                {
+                    // Has the front reached this cell during the pass currently being painted?
+                    bool reached = Survey.Reached(body, x, y, reveal.frac);
+                    int resolved = reached ? maxBand : maxBand - 1;
+                    if (resolved < 0) continue;                 // first pass, not yet reached: nothing here
+                    band = Mathf.Min(band, resolved);
+                    t = steps > 1 ? band / (float)(steps - 1) : 1f;
+                }
+
+                step[i] = band;
                 fill[i] = SurfaceIndex.Highlight(kind, t);
                 edgeOf[i] = SurfaceIndex.Outline(kind, t);
 
@@ -4386,12 +4498,13 @@ public class PlanetViewWindow : MonoBehaviour
                 bool openD = y == 0 || step[(y - 1) * w + x] < me;
                 bool openU = y == h - 1 || step[(y + 1) * w + x] < me;
 
+                int et = OutlineTexels(sub);
                 for (int sy = 0; sy < sub; sy++)
                     for (int sx = 0; sx < sub; sx++)
                     {
                         bool onEdge = sub > 1 &&
-                            ((openL && sx == 0) || (openR && sx == sub - 1) ||
-                             (openD && sy == 0) || (openU && sy == sub - 1));
+                            ((openL && sx < et) || (openR && sx >= sub - et) ||
+                             (openD && sy < et) || (openU && sy >= sub - et));
                         px[(y * sub + sy) * tw + (x * sub + sx)] = onEdge ? edge : c;
                     }
             }
@@ -4477,41 +4590,8 @@ public class PlanetViewWindow : MonoBehaviour
             }
         }
 
-        // ============================================================================================
-        // THE GRID'S EDGE, IN A LIGHTER YELLOW
-        //
-        // The yellow coverage is a translucent wash, and a translucent wash over terrain has no boundary
-        // you can point at: you can see roughly where the power is and not where it STOPS, which is the
-        // only question the overlay is really asked. Worse, the wash is a reach radius, so its edge is
-        // exactly the thing the player is trying to plan a pylon against.
-        //
-        // So every lit tile with an unlit side neighbour is redrawn in a paler, more opaque version of
-        // its own grid's colour — paler rather than a fixed white, so a failing grid's rim stays grey and
-        // a healthy one's stays yellow and the two are still told apart at the edge as well as in the
-        // middle. The lit set is shared across grids on purpose: where two grids' coverage touches they
-        // are ONE grid by definition (PowerGrid's whole rule), and drawing a rim down the middle of a
-        // single grid would say the opposite.
-        // ============================================================================================
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-            {
-                int i = y * w + x;
-                if (!powerLit[i]) continue;
-
-                // Longitude wraps, latitude does not — the pole rows genuinely are the end of the map,
-                // and a grid reaching one has its edge there.
-                bool open = !powerLit[y * w + ((x - 1 + w) % w)]
-                         || !powerLit[y * w + ((x + 1) % w)]
-                         || y == 0 || !powerLit[(y - 1) * w + x]
-                         || y == h - 1 || !powerLit[(y + 1) * w + x];
-                if (!open) continue;
-
-                var c = px[i];
-                px[i] = new Color(Mathf.Lerp(c.r, 1f, 0.55f), Mathf.Lerp(c.g, 1f, 0.6f),
-                                  Mathf.Lerp(c.b, 0.55f, 0.5f), Mathf.Min(1f, c.a + 0.34f));
-            }
-
-        // Sources and relays go on last so they always read on top of their own light.
+        // Sources and relays go on before the rim so the rim can still draw over their own edge — they
+        // are lit tiles like any other and a grid that ends on a relay should still show where it ends.
         var electricBlue = new Color(0.25f, 0.72f, 1.00f, 0.85f);
         foreach (var p in SurfaceBuildManager.On(body))
         {
@@ -4526,18 +4606,136 @@ public class PlanetViewWindow : MonoBehaviour
             }
         }
 
+        // ============================================================================================
+        // THE GRID'S EDGE, IN A LIGHTER YELLOW — AND AS A LINE, NOT A TILE
+        //
+        // The yellow coverage is a translucent wash, and a translucent wash over terrain has no boundary
+        // you can point at: you can see roughly where the power is and not where it STOPS, which is the
+        // only question the overlay is really asked. Worse, the wash is a reach radius, so its edge is
+        // exactly the thing the player is trying to plan a pylon against.
+        //
+        // So every lit tile with an unlit side neighbour gets a rim in a paler, more opaque version of
+        // its own grid's colour — paler rather than a fixed white, so a failing grid's rim stays grey and
+        // a healthy one's stays yellow and the two are still told apart at the edge as well as in the
+        // middle. The lit set is shared across grids on purpose: where two grids' coverage touches they
+        // are ONE grid by definition (PowerGrid's whole rule), and drawing a rim down the middle of a
+        // single grid would say the opposite.
+        //
+        // IT USED TO RECOLOUR THE WHOLE TILE, because the texture was one texel per tile and a whole
+        // tile was the thinnest line available. That made the border of the grid a full cell wide —
+        // wider than any index outline, and it swallowed the ground and the per-tile numbers at exactly
+        // the edge where a player is deciding where the next pylon goes. Supersampling like the index
+        // overlay makes the rim a third of a tile instead.
+        //
+        // A COARSER SUB THAN THE INDEXES, deliberately. This repaints four times a second for as long as
+        // the tab is open, where an index overlay is rebuilt only when it changes; the indexes can
+        // afford 36 texels per tile and this cannot.
+        // ============================================================================================
+        int sub = PowerSub(w, h);
+        int tw = w * sub, th = h * sub;
+        int et = OutlineTexels(sub);
+
+        if (powerOut == null || powerOut.Length != tw * th) powerOut = new Color[tw * th];
+        var outp = powerOut;
+
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int i = y * w + x;
+                Color c = px[i];
+
+                // Longitude wraps, latitude does not — the pole rows genuinely are the end of the map,
+                // and a grid reaching one has its edge there.
+                bool lit = powerLit[i];
+                bool openL = lit && !powerLit[y * w + ((x - 1 + w) % w)];
+                bool openR = lit && !powerLit[y * w + ((x + 1) % w)];
+                bool openD = lit && (y == 0 || !powerLit[(y - 1) * w + x]);
+                bool openU = lit && (y == h - 1 || !powerLit[(y + 1) * w + x]);
+
+                Color rim = (openL || openR || openD || openU)
+                    ? new Color(Mathf.Lerp(c.r, 1f, 0.55f), Mathf.Lerp(c.g, 1f, 0.6f),
+                                Mathf.Lerp(c.b, 0.55f, 0.5f), Mathf.Min(1f, c.a + 0.34f))
+                    : c;
+
+                for (int sy = 0; sy < sub; sy++)
+                    for (int sx = 0; sx < sub; sx++)
+                    {
+                        bool onEdge = sub > 1 &&
+                            ((openL && sx < et) || (openR && sx >= sub - et) ||
+                             (openD && sy < et) || (openU && sy >= sub - et));
+                        outp[(y * sub + sy) * tw + (x * sub + sx)] = onEdge ? rim : c;
+                    }
+            }
+
         // Its OWN texture and its OWN image — the ground index is very likely using the other one at the
         // same time now.
-        if (powerTex == null || powerTex.width != w || powerTex.height != h)
+        if (powerTex == null || powerTex.width != tw || powerTex.height != th)
         {
             if (powerTex != null) Destroy(powerTex);
-            powerTex = new Texture2D(w, h, TextureFormat.RGBA32, false)
+            powerTex = new Texture2D(tw, th, TextureFormat.RGBA32, false)
             { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
         }
 
-        powerTex.SetPixels(px);
+        powerTex.SetPixels(outp);
         powerTex.Apply();
         if (powerOverlayImage != null) powerOverlayImage.texture = powerTex;
+    }
+
+    // ============================================================================================
+    // THE SURVEY FOG — one black cell per grid cell, lifting as the ship works
+    //
+    // Deliberately ONE TEXEL PER TILE and point-filtered, because the thing being drawn is the GRID:
+    // the player is meant to see the shape of the map they are about to be given and watch it fill in
+    // square by square. Supersampling it would soften exactly the edges that make it read as cells.
+    //
+    // Not quite opaque. At a flat black the map underneath is gone and the window looks broken; at 0.93
+    // the terrain is a rumour — enough that the planet reads as a planet rather than as a failed load,
+    // nowhere near enough to plan on. That is the honest state: something is there, you have not
+    // measured it.
+    // ============================================================================================
+    void RefreshSurveyFog()
+    {
+        bool want = body?.surface != null && !GameMode.DevMode && !body.Surveyed;
+        if (surveyFogImage == null) return;
+
+        if (!want)
+        {
+            if (surveyFogImage.gameObject.activeSelf) surveyFogImage.gameObject.SetActive(false);
+            return;
+        }
+
+        int w = body.surface.width, h = body.surface.height;
+        if (surveyFogPx == null || surveyFogPx.Length != w * h) surveyFogPx = new Color32[w * h];
+
+        var covered = new Color32(4, 5, 9, 237);
+        var clear = new Color32(0, 0, 0, 0);
+        float p = Mathf.Clamp01(body.explorationProgress);
+
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                surveyFogPx[y * w + x] = Survey.Reached(body, x, y, p) ? clear : covered;
+
+        if (surveyFogTex == null || surveyFogTex.width != w || surveyFogTex.height != h)
+        {
+            if (surveyFogTex != null) Destroy(surveyFogTex);
+            surveyFogTex = new Texture2D(w, h, TextureFormat.RGBA32, false)
+            { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+        }
+
+        surveyFogTex.SetPixels32(surveyFogPx);
+        surveyFogTex.Apply();
+        surveyFogImage.texture = surveyFogTex;
+        if (!surveyFogImage.gameObject.activeSelf) surveyFogImage.gameObject.SetActive(true);
+    }
+
+    /// Texels per tile for the power overlay. See the rim note in RefreshPowerOverlay for why this is
+    /// coarser than the index overlays' — this one repaints on a timer, they repaint on a change.
+    static int PowerSub(int w, int h)
+    {
+        long cells = (long)w * h;
+        if (cells <= 40_000) return 3;
+        if (cells <= 140_000) return 2;
+        return 1;
     }
 
     // ============================================================================================
@@ -5449,8 +5647,16 @@ public class PlanetViewWindow : MonoBehaviour
     {
         var kind = YieldIndex();
 
+        // The numbers wait for the index to be FINISHED, not merely started.
+        //
+        // A level-2 survey resolves an index in three passes, and until the last one lands the colours
+        // on the map are deliberately coarse — the whole 70-and-up region painted as one band, then
+        // splitting. An exact per-tile figure printed over that would be a precise answer sitting on
+        // top of an approximate picture, and the player would site a building off a number the map
+        // underneath does not yet support.
         if (body?.surface == null || kind == SurfaceIndexKind.None
             || !SurfaceIndex.Unlocked(body, kind)      // not surveyed: nothing honest to show
+            || !Survey.RevealOf(body, kind).complete   // still being read: the map is coarse, so is the truth
             || !HasHoverCell)                          // nothing to centre on
         { ClearYieldIcons(); return; }
 
