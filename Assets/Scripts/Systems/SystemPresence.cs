@@ -30,9 +30,33 @@ using UnityEngine;
 public static class SystemPresence
 {
     /// Does the player have a unit, station or holding anywhere in this system right now?
+    ///
+    /// MEMOISED FOR A FRACTION OF A SECOND, because this is a scan and it is asked in a loop: every
+    /// unidentified world polls it, and a world only stops polling once the answer comes back true. So
+    /// on a fresh galaxy — where almost nothing is visited and therefore almost everything is asking —
+    /// the uncached version runs the scan hundreds of times a second to produce an answer that changes
+    /// when a ship arrives, which is not a per-frame event.
+    ///
+    /// Short enough that a fleet arriving still lights the system up within a blink.
+    const float PresenceMemoSeconds = 0.4f;
+    static readonly System.Collections.Generic.Dictionary<StarSystemData, (float at, bool val)> presenceMemo
+        = new System.Collections.Generic.Dictionary<StarSystemData, (float, bool)>();
+
     public static bool HasPresence(StarSystemData sys)
     {
         if (sys == null) return false;
+
+        float now = Time.unscaledTime;
+        if (presenceMemo.TryGetValue(sys, out var memo) && now - memo.at < PresenceMemoSeconds)
+            return memo.val;
+
+        bool result = Scan(sys);
+        presenceMemo[sys] = (now, result);
+        return result;
+    }
+
+    static bool Scan(StarSystemData sys)
+    {
         if (sys.owner == FactionManager.Player) return true;
 
         foreach (var b in sys.AllBodies())
@@ -60,18 +84,59 @@ public static class SystemPresence
         return true;
     }
 
+    // ---- body -> system, without walking the galaxy every time ---------------------------------
+    //
+    // This is asked once per body per BodyFog poll — four times a second for every unidentified world
+    // on the map — and the obvious implementation is a nested scan of every system's every body, which
+    // makes the whole thing quadratic in the galaxy and allocates an iterator per system per call. On a
+    // twelve-system galaxy of three hundred bodies that is hundreds of thousands of steps a second to
+    // answer a question whose answer never changes.
+    //
+    // So it is indexed once and rebuilt only when the galaxy object itself is replaced. Keyed on the
+    // Galaxy REFERENCE rather than a version counter: a new game or a load builds a new Galaxy, which
+    // is exactly when the map is stale and the only time it is.
+    static Galaxy indexedFor;
+    static readonly System.Collections.Generic.Dictionary<CelestialBody, StarSystemData> systemOf
+        = new System.Collections.Generic.Dictionary<CelestialBody, StarSystemData>();
+
+    static void EnsureIndex()
+    {
+        var g = SystemContext.Galaxy;
+        if (g == null || ReferenceEquals(g, indexedFor)) return;
+
+        systemOf.Clear();
+        foreach (var sys in g.systems)
+            foreach (var member in sys.AllBodies())
+                if (member != null) systemOf[member] = sys;
+        indexedFor = g;
+    }
+
+    /// Drops the index. For anything that adds or removes bodies inside the CURRENT galaxy — the Dev
+    /// sandbox does — where the Galaxy reference is unchanged and so the automatic rebuild would not
+    /// fire.
+    public static void Invalidate()
+    {
+        indexedFor = null;
+        presenceMemo.Clear();
+    }
+
     /// The system a body belongs to, or null. Walks up through a moon's parent first — a moon's units
     /// are its own, but its SYSTEM is its planet's.
     public static StarSystemData SystemOf(CelestialBody b)
     {
         if (b == null || SystemContext.Galaxy == null) return null;
+        EnsureIndex();
+
+        if (systemOf.TryGetValue(b, out var direct)) return direct;
+
+        // A moon added after the index was built, or one whose parent is the thing that is listed.
         var top = b;
         int guard = 0;
-        while (top.parentBody != null && guard++ < 8) top = top.parentBody;
-
-        foreach (var sys in SystemContext.Galaxy.systems)
-            foreach (var member in sys.AllBodies())
-                if (ReferenceEquals(member, top) || ReferenceEquals(member, b)) return sys;
+        while (top.parentBody != null && guard++ < 8)
+        {
+            top = top.parentBody;
+            if (systemOf.TryGetValue(top, out var viaParent)) return viaParent;
+        }
         return null;
     }
 

@@ -163,6 +163,49 @@ public class OrbitController : MonoBehaviour
         }
     }
 
+    // ============================================================================================
+    // THE SAME ARRIVAL, FOR A GAME THAT WAS LOADED RATHER THAN BORN
+    //
+    // A new game gets its orbit lines drawn in by GenesisSequence's last beat, and that arrival is the
+    // cue that the player has control. Loading a save had no equivalent: LoadGalaxy set the reveal to 1
+    // and built the rings already lit, so the galaxy appeared complete and the lines were simply there —
+    // on screen while the world was still settling, which is the thing that reads as "loading is not
+    // finished yet but the map is already drawn".
+    //
+    // A load has no cinematic to hang the fade off, so it runs on its own: a hidden runner that holds
+    // the rings dark for a beat while the camera settles, then brings them up on the same curve the
+    // sequence uses. Same signal, same shape, no coroutine host required at the call site.
+    // ============================================================================================
+    class RingFader : MonoBehaviour
+    {
+        public float delay, duration, clock;
+
+        void Update()
+        {
+            clock += Time.unscaledDeltaTime;
+            if (clock < delay) { SetRevealAlpha(0f); return; }
+
+            float k = duration <= 0f ? 1f : Mathf.Clamp01((clock - delay) / duration);
+            SetRevealAlpha(1f - Mathf.Pow(1f - k, 2f));
+            if (k >= 1f) Destroy(gameObject);
+        }
+    }
+
+    static RingFader fader;
+
+    /// Hold the orbit lines dark, then bring them in. Cancels any fade already running, so two loads in
+    /// a row cannot leave two runners fighting over the same static.
+    public static void FadeInRings(float delay = 0.35f, float duration = 0.9f)
+    {
+        if (fader != null) Destroy(fader.gameObject);
+        SetRevealAlpha(0f);
+        var go = new GameObject("OrbitRingFader");
+        DontDestroyOnLoad(go);
+        fader = go.AddComponent<RingFader>();
+        fader.delay = delay;
+        fader.duration = duration;
+    }
+
     void ApplyRingColor()
     {
         if (orbitRing == null) return;

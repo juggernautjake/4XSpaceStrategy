@@ -143,6 +143,12 @@ public class PlanetViewWindow : MonoBehaviour
         /// rather than a second use of `overlay`, because the two layers straddle the pieces: the ground
         /// index below, the grid above. One image cannot be on both sides of them.
         public RawImage power;
+
+        /// The blacked-out grid of an unsurveyed world. EVERY layer that covers the map has to be
+        /// mirrored or the seam becomes a hole in it: without this one the wrapped strip showed the
+        /// terrain of an unsurveyed world in full daylight beside the fogged copy of itself, which
+        /// reads as half the map being lit differently rather than as a missing overlay.
+        public RawImage fog;
     }
 
     readonly List<WrapMirror> mirrors = new List<WrapMirror>();
@@ -305,6 +311,11 @@ public class PlanetViewWindow : MonoBehaviour
     /// ground index stay legible underneath: the two are shown together far more often than not, and at
     /// full strength the grid simply erased whichever index the player had also asked for.
     const float PowerOverlayAlpha = 0.5f;
+
+    /// Texels a single open MOON pane may spend on its map. A quarter of the host's, because several
+    /// moons can be open at once and each is a fraction of the window — a moon-sized grid still gets the
+    /// tile art at its native resolution, which is the point.
+    const int MoonPaneTexelBudget = 2 * 1024 * 1024;
 
     bool showPowerOverlay;
     // The plate-tectonics overlay — another bespoke Survey overlay (not an index ramp): it washes the map
@@ -1096,6 +1107,15 @@ public class PlanetViewWindow : MonoBehaviour
         m.overlay.raycastTarget = false;
         o.SetActive(false);
 
+        // Directly above the ground index, exactly where it sits on the real map — it hides the indexes
+        // and the tectonics along with the terrain, and a mirror that let either show through would be
+        // leaking an unsurveyed world's geology at the seam.
+        var fg = UIFactory.NewUI(m.root, "SurveyFog");
+        m.fog = fg.AddComponent<RawImage>();
+        UIFactory.Stretch(m.fog.rectTransform);
+        m.fog.raycastTarget = false;
+        fg.SetActive(false);
+
         // Built BEFORE pieces, so they draw over it — matching the real map's stacking. Miss this and
         // the seam becomes a place where buildings vanish under the grid on one side of it and not the
         // other, which reads as a rendering fault rather than as a wrapped map.
@@ -1147,6 +1167,14 @@ public class PlanetViewWindow : MonoBehaviour
                 if (m.overlay.gameObject.activeSelf != ov) m.overlay.gameObject.SetActive(ov);
                 m.overlay.texture = overlayImage.texture;
                 m.overlay.color = overlayImage.color;
+            }
+
+            if (m.fog != null && surveyFogImage != null)
+            {
+                bool fv = surveyFogImage.gameObject.activeSelf && surveyFogImage.texture != null;
+                if (m.fog.gameObject.activeSelf != fv) m.fog.gameObject.SetActive(fv);
+                m.fog.texture = surveyFogImage.texture;
+                m.fog.color = surveyFogImage.color;
             }
 
             // Mirrored on its own now that it has its own layer. Miss this and a node chain crossing
@@ -4688,11 +4716,22 @@ public class PlanetViewWindow : MonoBehaviour
     // the player is meant to see the shape of the map they are about to be given and watch it fill in
     // square by square. Supersampling it would soften exactly the edges that make it read as cells.
     //
-    // Not quite opaque. At a flat black the map underneath is gone and the window looks broken; at 0.93
-    // the terrain is a rumour — enough that the planet reads as a planet rather than as a failed load,
-    // nowhere near enough to plan on. That is the honest state: something is there, you have not
-    // measured it.
     // ============================================================================================
+
+    /// How opaque an uncovered cell is.
+    ///
+    /// MIND THE COLOUR SPACE. This project renders in Linear (ProjectSettings m_ActiveColorSpace: 1),
+    /// so the blend happens on linear values and the result is then gamma-encoded for the screen —
+    /// which makes any given alpha look markedly LIGHTER than the number suggests. Measured against a
+    /// screenshot: 237/255 (0.93) left the terrain plainly readable, at about a third of its
+    /// brightness, nowhere near the "no information visible" this is supposed to be. Working back
+    /// through the gamma, hiding the ground properly takes about 0.98.
+    ///
+    /// Not a flat 255. A hair of light keeps the planet reading as a planet with something under the
+    /// fog rather than as a black rectangle where the map failed to load, which is the honest state:
+    /// there is ground there, nobody has measured it.
+    const byte FogAlpha = 250;
+
     void RefreshSurveyFog()
     {
         bool want = body?.surface != null && !GameMode.DevMode && !body.Surveyed;
@@ -4707,7 +4746,7 @@ public class PlanetViewWindow : MonoBehaviour
         int w = body.surface.width, h = body.surface.height;
         if (surveyFogPx == null || surveyFogPx.Length != w * h) surveyFogPx = new Color32[w * h];
 
-        var covered = new Color32(4, 5, 9, 237);
+        var covered = new Color32(4, 5, 9, FogAlpha);
         var clear = new Color32(0, 0, 0, 0);
         float p = Mathf.Clamp01(body.explorationProgress);
 
@@ -7201,7 +7240,18 @@ public class PlanetViewWindow : MonoBehaviour
             var contentGO = UIFactory.NewUI(frame, "MoonMap");
             var img = contentGO.AddComponent<RawImage>();
             img.raycastTarget = true;   // a click on a moon map is UI, not a click-away that closes the window
-            Texture2D tex = m.surface != null ? SurfaceTextureRenderer.BuildGrid(m) : null;
+            // TEXTURED, like the host planet's map — this is a real scrollable map of a real world that
+            // the player pans, zooms and builds on, not a thumbnail. It used to take the flat build,
+            // which meant a moon's ground was untextured beside a planet's textured ground in the same
+            // window, and the difference read as the moon having failed to load rather than as two
+            // renderers.
+            //
+            // A smaller texel budget than the host's, because a moon pane is a fraction of the window:
+            // it still buys the art at full resolution on the moon-sized grids that matter, and it stops
+            // three open moons costing more memory than the planet they orbit.
+            Texture2D tex = m.surface != null
+                ? SurfaceTextureRenderer.BuildGridTextured(m, MoonPaneTexelBudget)
+                : null;
             img.texture = tex;
             if (tex == null) img.color = new Color(0.10f, 0.12f, 0.16f, 1f);
             var crt = img.rectTransform;

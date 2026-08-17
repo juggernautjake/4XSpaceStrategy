@@ -291,7 +291,13 @@ public class GameManager : MonoBehaviour
             float elapsed = 0f;
             while (play.MoveNext())
             {
-                elapsed += Time.unscaledDeltaTime;
+                // CLAMPED. Time.unscaledDeltaTime is not capped the way deltaTime is, so one long frame
+                // — any single blocking step anywhere in the sequence — hands this loop a delta worth
+                // seconds and the bar leaps most of its remaining span in one go. That is the "sticks,
+                // then is suddenly done" the bar was doing: not a bar that stalled and skipped, but a
+                // bar reading a wall clock that jumped. A ceiling means a hitch costs the bar a pause,
+                // never a jump, and the sequence's own beats still keep it moving overall.
+                elapsed += Mathf.Min(Time.unscaledDeltaTime, 0.1f);
                 // Once the bar is full the caption stops being reported too — otherwise the next
                 // iteration writes it straight back over the blank the completion just set, and the
                 // world's name sits under a finished bar for the whole travel-to-centre beat.
@@ -398,9 +404,17 @@ public class GameManager : MonoBehaviour
     {
         Galaxy = g;
         FocusedSystem = g.Home;
-        // A loaded game has no finale to turn them back on, and the reveal alpha is a static that
-        // survives whatever the last new-game left it at.
-        OrbitController.SetRevealAlpha(1f);
+
+        // The bodies moved, so the body-to-system index this galaxy's fog of war reads is about the
+        // galaxy that just went away.
+        SystemPresence.Invalidate();
+
+        // Rings dark, built dark, then brought in — the same arrival a new game gets from the genesis
+        // finale, which a loaded game has no cinematic to hang off. Held at zero across Visualize so the
+        // lines are never drawn lit; FadeInRings sets that itself, and it is what turns them back on.
+        // Without the fade a load put every orbit line on screen at full brightness while the world was
+        // still settling, which reads as the map being finished before the loading is.
+        OrbitController.FadeInRings();
         Visualize();
     }
 

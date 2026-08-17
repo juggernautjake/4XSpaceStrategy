@@ -76,23 +76,29 @@ public static class TerrainTextureMap
             case TerrainType.CrystalField:  return "CrystalField";
             case TerrainType.MetallicCrust: return "MetallicCrust";
 
-            // ---- types borrowing a relative's grain, keeping their own colour ----
-            case TerrainType.Volcano:       return "MagmaField";
-            case TerrainType.LavaRock:      return "ObsidianFlat";
-            case TerrainType.Island:        return "grass";
-            case TerrainType.Hills:         return "grass";
-            case TerrainType.Crater:        return "rocky";
-            case TerrainType.Highlands:     return "rocky";
-            case TerrainType.Canyon:        return "rocky";
-            case TerrainType.Badlands:      return "rocky";
-            case TerrainType.River:         return "lake";
-            case TerrainType.Reef:          return "ocean";
-            case TerrainType.Glacier:       return "ice";
-            case TerrainType.Dunes:         return "desert";
-            case TerrainType.SaltFlat:      return "barren";
-            case TerrainType.Wasteland:     return "barren";
-            case TerrainType.GasClouds:     return "Plains";
-            case TerrainType.Storm:         return "Plains";
+            // ---- the sixteen that were drawn to fill the gaps ----
+            //
+            // These used to borrow a relative's grain — Canyon took rock, Dunes took sand, Storm took
+            // the plainest noise there was. That worked, and it meant four different kinds of rock all
+            // wore the same rock. They have their own now, authored to the same brief as the supplied
+            // set: fine grain first, structure only as a hint. A bold motif at this scale does not read
+            // as material, it reads as a symbol stamped once per cell and repeated across a continent.
+            case TerrainType.Volcano:       return "Volcano";
+            case TerrainType.LavaRock:      return "LavaRock";
+            case TerrainType.Island:        return "Island";
+            case TerrainType.Hills:         return "Hills";
+            case TerrainType.Crater:        return "Crater";
+            case TerrainType.Highlands:     return "Highlands";
+            case TerrainType.Canyon:        return "Canyon";
+            case TerrainType.Badlands:      return "Badlands";
+            case TerrainType.River:         return "River";
+            case TerrainType.Reef:          return "Reef";
+            case TerrainType.Glacier:       return "Glacier";
+            case TerrainType.Dunes:         return "Dunes";
+            case TerrainType.SaltFlat:      return "SaltFlat";
+            case TerrainType.Wasteland:     return "Wasteland";
+            case TerrainType.GasClouds:     return "GasClouds";
+            case TerrainType.Storm:         return "Storm";
         }
         return null;
     }

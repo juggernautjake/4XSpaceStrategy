@@ -209,10 +209,23 @@ public class GenesisSequence : MonoBehaviour
         // would show the player a completed world that then visibly reverts to a featureless orb — and
         // each moon popping back to primordial one at a time as its beat arrived. Priming installs the
         // stage-0 texture without starting the clock, so what appears is already the beginning of itself.
+        // ONE BODY PER FRAME. Priming builds a world's stage-0 frame, and a stage is a full pass of
+        // PlanetTerrainGenerator.SampleNormalized over the morph grid — 4,608 samples for the planet,
+        // 800 for each moon, every one of them going through the tectonics field as well as the noise.
+        // Doing the planet and every moon in a single frame is the whole lot on one tick, and that tick
+        // lands immediately after the bar is handed to this sequence: the bar sits at 63% for as long as
+        // the freeze lasts and then jumps, because the frame that unblocks it carries a delta time worth
+        // seconds straight into the interpolation driving it.
+        //
+        // Spread across frames it is the same work and the bar keeps moving through it.
         TerrainMorph.Prime(home, PlanetMorphW, PlanetMorphH, 20260720);
+        yield return null;
         if (home.moons != null)
             for (int i = 0; i < home.moons.Count; i++)
+            {
                 TerrainMorph.Prime(home.moons[i], MoonMorphW, MoonMorphH, 20260721 + i);
+                yield return null;
+            }
 
         // The world is revealed BEFORE the camera arrives, not after: the move takes seconds, and a
         // planet that popped into being at the end of it would undo the whole point of travelling there.
