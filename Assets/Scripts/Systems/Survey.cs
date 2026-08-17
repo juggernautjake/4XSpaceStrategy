@@ -281,21 +281,52 @@ public static class Survey
     //
     // This replaced a hash-jittered diagonal. That looked like weather; this looks like work.
 
+    /// Where a row sits in the running order: 0 is the middle, then alternately one above, one below.
+    public static int RowRank(int h, int y)
+    {
+        int d = y - h / 2;
+        return d == 0 ? 0 : (d > 0 ? 2 * d - 1 : -2 * d);
+    }
+
+    /// How far along a row a column sits: 0 at the middle column, running right and wrapping.
+    public static int ColRank(int w, int x) => ((x - w / 2) % w + w) % w;
+
+    /// Every row of a world, in the order a survey works them. Rows that would fall off the top or
+    /// bottom of an asymmetric grid are simply absent — the rank sequence overshoots on one side first.
+    public static int[] RowOrder(int h)
+    {
+        if (rowOrderCache != null && rowOrderCache.Length == h) return rowOrderCache;
+
+        var order = new int[h];
+        int n = 0;
+        for (int rank = 0; n < h && rank < h * 2 + 2; rank++)
+        {
+            int y = RowForRank(h, rank);
+            if (y >= 0 && y < h) order[n++] = y;
+        }
+        return rowOrderCache = order;
+    }
+
+    static int[] rowOrderCache;
+
+    static int RowForRank(int h, int rank)
+    {
+        int cy = h / 2;
+        if (rank <= 0) return cy;
+        int d = (rank + 1) / 2;
+        return (rank % 2 == 1) ? cy + d : cy - d;
+    }
+
     /// This cell's place in the running order, 0 .. cells-1. Stable for a given world.
+    ///
+    /// Used by the LEVEL-2 passes, which are one front rather than several: a deep survey is one science
+    /// ship reading one field, and splitting it across rows would be describing a division of labour
+    /// that is not happening. Level 1 uses the per-row fills instead — see Rows.
     public static int CellRank(CelestialBody b, int x, int y)
     {
         int w = Mathf.Max(1, MapMetrics.SurfW(b));
         int h = Mathf.Max(1, MapMetrics.SurfH(b));
-        int cx = w / 2, cy = h / 2;
-
-        // Rows outward from the middle, alternating: centre, above, below, above, below...
-        int d = y - cy;
-        int rowRank = d == 0 ? 0 : (d > 0 ? 2 * d - 1 : -2 * d);
-
-        // ...and within a row, rightward from the middle column, wrapping at the date line.
-        int colRank = ((x - cx) % w + w) % w;
-
-        return rowRank * w + colRank;
+        return RowRank(h, y) * w + ColRank(w, x);
     }
 
     /// 0..1 position of this cell in the running order.
@@ -307,11 +338,167 @@ public static class Survey
     }
 
     /// Has the survey reached this cell yet, at `progress` through the current sweep?
+    ///
+    /// The single-front form, for the LEVEL-2 passes. Level 1 asks ReachedGround instead.
     public static bool Reached(CelestialBody b, int x, int y, float progress)
     {
         if (progress >= 1f) return true;
         if (progress <= 0f) return false;
         return CellOrder(b, x, y) < progress;
+    }
+
+    // ============================================================================================
+    // LEVEL 1, ROW BY ROW — WHICH IS WHAT LETS SHIPS SHARE A WORLD
+    //
+    // Each ship takes the next unfinished row in the running order and sweeps it. Two ships are two
+    // fronts on two latitudes, three are three, and the map shows it.
+    //
+    // WHY THIS NEEDED STATE AND THE REST DID NOT. Every other reveal here is a pure function of one
+    // number, which costs nothing and cannot desynchronise. This one cannot be: if the row assignment
+    // were derived from the CURRENT ship count, a ship arriving or leaving would re-partition the rows
+    // and cells already uncovered would go black again. A survey that un-reveals ground is worse than
+    // one that does not show its ships. So the fills are stored, and the ship count only decides who
+    // works on what NEXT.
+    // ============================================================================================
+
+    /// This world's per-row fills, sized to its grid and seeded from `explorationProgress` if it has
+    /// none — which is what carries an older save, and what survives a sandbox resize.
+    public static float[] Rows(CelestialBody b)
+    {
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        if (b.surveyRows != null && b.surveyRows.Length == h) return b.surveyRows;
+
+        var rows = new float[h];
+        SeedRows(rows, h, b.explorationProgress);
+        b.surveyRows = rows;
+        return rows;
+    }
+
+    /// Lay `progress` out over the rows in running order: the first rows full, one part-done, the rest
+    /// empty. The same shape the survey itself would have produced, so a converted save looks like a
+    /// survey caught mid-sweep rather than like a wash over the whole map.
+    static void SeedRows(float[] rows, int h, float progress)
+    {
+        var order = RowOrder(h);
+        float done = Mathf.Clamp01(progress) * h;
+        for (int i = 0; i < order.Length; i++)
+            rows[order[i]] = Mathf.Clamp01(done - i);
+    }
+
+    /// Keep `explorationProgress` — which everything else in the game reads — equal to the average of
+    /// the rows, so there is still exactly one number that decides when a world is surveyed.
+    public static void SyncAggregate(CelestialBody b)
+    {
+        var rows = Rows(b);
+        float sum = 0f;
+        for (int i = 0; i < rows.Length; i++) sum += rows[i];
+        b.explorationProgress = Mathf.Clamp01(sum / Mathf.Max(1, rows.Length));
+    }
+
+    /// The row this ship is working: the Nth unfinished row in running order, where N is the ship's
+    /// place among the ships surveying this world. Sorted by id so the assignment is stable frame to
+    /// frame — two ships must not swap rows every tick and leave two half-swept latitudes.
+    ///
+    /// Returns -1 when every row is done, or when this ship is not surveying here.
+    public static int RowForShip(CelestialBody b, Unit u)
+    {
+        if (b?.units == null || u == null) return -1;
+
+        int slot = 0;
+        foreach (var other in b.units)
+        {
+            if (other == null || other.status != UnitStatus.Exploring) continue;
+            if (other == u) break;
+            if (other.id < u.id) slot++;
+        }
+
+        var rows = Rows(b);
+        var order = RowOrder(rows.Length);
+        int seen = 0;
+        for (int i = 0; i < order.Length; i++)
+        {
+            if (rows[order[i]] >= 1f) continue;
+            if (seen == slot) return order[i];
+            seen++;
+        }
+
+        // More ships than unfinished rows: everyone piles onto the last one rather than idling.
+        for (int i = order.Length - 1; i >= 0; i--) if (rows[order[i]] < 1f) return order[i];
+        return -1;
+    }
+
+    /// Advance this ship's row by the share of the world it covers in `dt`. One row is 1/h of the map,
+    /// so a fraction of the whole map becomes h times as much of one row.
+    public static void AdvanceGround(CelestialBody b, Unit u, float dt)
+    {
+        int y = RowForShip(b, u);
+        if (y < 0) return;
+
+        var rows = Rows(b);
+        rows[y] = Mathf.Clamp01(rows[y] + Fraction(b, u, dt, false) * rows.Length);
+        SyncAggregate(b);
+    }
+
+    /// Has the ground survey uncovered this cell?
+    public static bool ReachedGround(CelestialBody b, int x, int y)
+    {
+        if (b == null) return false;
+        if (GameMode.DevMode || b.Surveyed) return true;
+
+        var rows = Rows(b);
+        if (y < 0 || y >= rows.Length) return false;
+        if (rows[y] >= 1f) return true;
+
+        int w = Mathf.Max(1, MapMetrics.SurfW(b));
+        return ColRank(w, x) / (float)w < rows[y];
+    }
+
+    /// Is this cell under a ship's sweep head right now? One head per row being worked.
+    public static bool BeingSurveyedGround(CelestialBody b, int x, int y)
+    {
+        if (b == null || b.Surveyed || b.units == null) return false;
+
+        var rows = Rows(b);
+        if (y < 0 || y >= rows.Length || rows[y] >= 1f) return false;
+
+        // Only rows an actual ship is on — a part-done row nobody is working is not being surveyed, it
+        // is abandoned, and marking it would say a ship is there when the player has moved it away.
+        bool worked = false;
+        foreach (var u in b.units)
+            if (u != null && u.status == UnitStatus.Exploring && RowForShip(b, u) == y) { worked = true; break; }
+        if (!worked) return false;
+
+        int w = Mathf.Max(1, MapMetrics.SurfW(b));
+        int front = Mathf.Clamp(Mathf.FloorToInt(rows[y] * w), 0, w - 1);
+        int rank = ColRank(w, x);
+        return rank >= front && rank < front + ActiveBandCells;
+    }
+
+    // ---- Packing, for the save ------------------------------------------------------------------
+
+    /// The row fills as a compact string. Quantised to a byte each and run-length encoded, which is
+    /// near-free: a survey in progress is a run of finished rows, one partial, and a run of empty ones.
+    public static string PackRows(CelestialBody b)
+    {
+        if (b?.surveyRows == null || b.surveyRows.Length == 0) return "";
+        var bytes = new byte[b.surveyRows.Length];
+        for (int i = 0; i < bytes.Length; i++)
+            bytes[i] = (byte)Mathf.Clamp(Mathf.RoundToInt(b.surveyRows[i] * 255f), 0, 255);
+        return GridCodec.Encode(bytes);
+    }
+
+    /// Restore packed rows. Refuses a string that is not this world's height — the grid is derived from
+    /// mass, and stretching one world's rows over another's map would be worse than re-seeding.
+    public static void UnpackRows(CelestialBody b, string packed)
+    {
+        if (b == null) return;
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        var bytes = GridCodec.Decode(packed, h);
+        if (bytes == null) { b.surveyRows = null; return; }   // Rows() will re-seed from the aggregate
+
+        var rows = new float[h];
+        for (int i = 0; i < h; i++) rows[i] = bytes[i] / 255f;
+        b.surveyRows = rows;
     }
 
     /// Is this cell in the band the survey is working on RIGHT NOW — the tiles the white marker sits on?

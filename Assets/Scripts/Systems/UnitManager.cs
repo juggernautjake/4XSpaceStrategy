@@ -782,11 +782,15 @@ public class UnitManager : MonoBehaviour
         if (b == null) { u.status = UnitStatus.Idle; return; }
         if (b.Surveyed) { FinishAction(u, OrderKind.Survey, b); return; }   // already done
 
-        // Paced in CELLS now, not in abstract progress per second — see Survey.CellSeconds. The number
-        // the player watches is the map uncovering, so the number the rate is expressed in should be the
+        // Paced in CELLS, not in abstract progress per second — see Survey.CellSeconds. The number the
+        // player watches is the map uncovering, so the number the rate is expressed in should be the
         // same one: a world is as long to survey as it has ground, and Empire Tech buys that time back.
+        //
+        // Advanced through the ROW this ship is working rather than as one total, so several ships on a
+        // world sweep several latitudes at once instead of one front moving faster. explorationProgress
+        // is kept as the average of the rows, so everything that reads it is unaffected.
         float before = b.explorationProgress;
-        b.explorationProgress = Mathf.Clamp01(b.explorationProgress + Survey.Fraction(b, u, dt, false));
+        Survey.AdvanceGround(b, u, dt);
 
         // Collect an ore SAMPLE at each survey milestone (discovered + carried; not researched here).
         if (Crossed(before, b.explorationProgress, 0.25f) || Crossed(before, b.explorationProgress, 0.5f) ||

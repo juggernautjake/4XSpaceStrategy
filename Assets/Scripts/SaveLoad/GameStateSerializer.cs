@@ -203,6 +203,7 @@ public static class GameStateSerializer
             visited = b.visited, explorationProgress = b.explorationProgress,
             claimProgress = b.claimProgress, researchProgress = b.researchProgress,
             deepProgress = b.deepProgress,
+            surveyRows = Survey.PackRows(b),
             hideReason = Persist(b.hideReason), ringHideReason = Persist(b.ringHideReason)
         };
 
@@ -624,6 +625,10 @@ public static class GameStateSerializer
         // the orbit the world is at now — there's no earlier one recorded.
         b.naturalOrbitRadius = dto.naturalOrbitRadius > 0f ? dto.naturalOrbitRadius : b.orbitRadius;
         b.lastTerraformRenderHab = b.habitability;   // don't regenerate on the first tick after loading
+
+        // The level-1 survey's per-row fills. Refused and re-seeded from explorationProgress if the
+        // world's grid height has changed under it — see Survey.UnpackRows.
+        Survey.UnpackRows(b, dto.surveyRows);
 
         // BEFORE the surface is baked, because the generator samples the plate belts while it raises
         // mountains. Importing afterwards would leave the overlay describing a geology the ground was

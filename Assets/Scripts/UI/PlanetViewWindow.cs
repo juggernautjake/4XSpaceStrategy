@@ -4799,14 +4799,12 @@ public class PlanetViewWindow : MonoBehaviour
         // the covered ground, which is what a survey sweep should look like.
         var active = new Color32(235, 242, 255, 96);
 
-        float p = Mathf.Clamp01(b.explorationProgress);
-        int ships = Mathf.Max(1, Survey.ShipsOn(b, false));
-
+        // Per ROW, so several ships show as several fronts on several latitudes — see Survey.Rows.
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
                 surveyFogPx[y * w + x] =
-                    Survey.Reached(b, x, y, p) ? clear
-                    : Survey.BeingSurveyed(b, x, y, p, ships) ? active
+                    Survey.ReachedGround(b, x, y) ? clear
+                    : Survey.BeingSurveyedGround(b, x, y) ? active
                     : covered;
 
         if (tex == null || tex.width != w || tex.height != h)
@@ -6853,8 +6851,7 @@ public class PlanetViewWindow : MonoBehaviour
         // the drawing. The mask hides the colour; the readout would otherwise hand over the biome, the
         // temperature and the ore of a cell the player is looking at a black square of — which is the
         // whole survey given away by hovering.
-        if (!GameMode.DevMode && !b.Surveyed
-            && !Survey.Reached(b, x, y, Mathf.Clamp01(b.explorationProgress)))
+        if (!GameMode.DevMode && !b.Surveyed && !Survey.ReachedGround(b, x, y))
         {
             sb.Append("<b><color=#7E8B9C>Unknown</color></b>");
             sb.Append("\n<size=10><color=#7E8B9C>Not yet surveyed</color></size>");

@@ -210,6 +210,23 @@ public class CelestialBody
     // for its OTHER rewards. What it no longer decides is whether you may look at an index.
     public float deepProgress = 0f;
 
+    // ============================================================================================
+    // THE LEVEL-1 SURVEY, ROW BY ROW
+    //
+    // How far along each GRID ROW the ground survey has been swept, 0..1, indexed by y. This is what
+    // lets several ships work a world at once and be SEEN doing it: each takes the next unfinished row
+    // and advances its own, so three ships are three fronts crossing three different latitudes rather
+    // than one front moving three times faster.
+    //
+    // `explorationProgress` above stays the authority on "is this world surveyed" and is kept as the
+    // average of this — every reader of it (Claim, the colony objectives, the inspector's bar) goes on
+    // working unchanged, and there is exactly one number that decides when the survey is done.
+    //
+    // NonSerialized and lazily sized: the grid height comes from the body's mass, and a sandbox resize
+    // has to re-seed rather than index off the end of a stale array. Survey.Rows owns that. The SAVE
+    // carries it as a packed string on BodyDTO — see Survey.PackRows.
+    [System.NonSerialized] public float[] surveyRows;
+
     // Which fragment of the Vael's message this world hides (0..9), or -1 for none. Exactly ten worlds carry
     // one (AncientClues.SeedGalaxy); it's revealed when the world is surveyed AND deeply studied.
     public int clueIndex = -1;

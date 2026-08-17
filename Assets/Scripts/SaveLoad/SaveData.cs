@@ -284,6 +284,11 @@ public class BodyDTO
     /// world that had already earned its overlays does not lose them.
     public float deepProgress;
 
+    /// The level-1 survey per grid ROW, one quantised byte each, run-length encoded. Empty in an older
+    /// save and for a world nobody has started — Survey.Rows re-seeds from deepProgress-s sibling,
+    /// explorationProgress, so a converted save looks like a survey caught mid-sweep.
+    public string surveyRows = "";
+
     // ---- The surface, as it actually is -------------------------------------------------------
     //
     // The biome of every cell, run-length encoded and base64'd by GridCodec, row-major from (0,0).
