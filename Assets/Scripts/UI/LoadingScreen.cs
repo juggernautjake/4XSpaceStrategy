@@ -480,8 +480,24 @@ public class LoadingScreen : MonoBehaviour
         welcomeLabel.gameObject.SetActive(false);
     }
 
+    /// A frame longer than this during loading is a step that should have been sliced, and it is worth
+    /// naming rather than leaving to be inferred from where the bar stopped.
+    ///
+    /// The bar CREEPS toward a ceiling above each reported figure (see below), so a long block does not
+    /// leave it at the last number reported — it leaves it at that ceiling, which is a number nobody
+    /// wrote down anywhere. Chasing "it sticks at 63%" through the code costs far more than logging the
+    /// caption that was on screen when the frame took two seconds.
+    const float SlowFrameSeconds = 0.5f;
+    float lastReportAt = -1f;
+
     public void Report(float t, string stage)
     {
+        float now = Time.realtimeSinceStartup;
+        if (lastReportAt > 0f && now - lastReportAt > SlowFrameSeconds)
+            Debug.Log($"[Loading] {now - lastReportAt:F2}s spent on '{lastStage}' before reaching " +
+                      $"{t * 100f:F0}%. Slice that step if it is a step rather than a wait.");
+        lastReportAt = now;
+
         float next = Mathf.Clamp01(t);
         if (next > target)
         {
@@ -499,8 +515,12 @@ public class LoadingScreen : MonoBehaviour
         if (stage != null) SetStage(stage);
     }
 
+    /// The caption currently showing, kept so the slow-frame log can name what was on screen.
+    string lastStage = "(start)";
+
     void SetStage(string s)
     {
+        lastStage = s;
         if (stageLabel != null) stageLabel.text = s;
     }
 

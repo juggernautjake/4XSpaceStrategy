@@ -10,7 +10,7 @@ using TMPro;
 //   Ores       — what is in the ground and whether you have researched it
 //   Society    — cities (drill in), population, and WHY the population feels how it does
 //   Production — the facilities (drill into the shipyard or research centre) and the build queue
-//   Objects    — moons, stations and ships associated with this world (all selectable)
+//   Orbit      — moons, stations and ships associated with this world (all selectable)
 //   Terraform  — the fault list and the ceiling, with a link to the full console
 public partial class InspectorWindow
 {
@@ -21,7 +21,7 @@ public partial class InspectorWindow
         tabs.Add(new InspectorTab("Ores", BuildBodyOres, () => target.body != null && target.body.Surveyed));
         tabs.Add(new InspectorTab("Society", BuildBodySociety, () => target.body != null && target.body.owner == FactionManager.Player));
         tabs.Add(new InspectorTab("Production", BuildBodyProduction, () => target.body != null && target.body.owner == FactionManager.Player));
-        tabs.Add(new InspectorTab("Objects", BuildBodyObjects));
+        tabs.Add(new InspectorTab("Orbit", BuildBodyObjects));
         tabs.Add(new InspectorTab("Terraform", BuildBodyTerraform, () => target.body != null && target.body.type != CelestialBodyType.GasGiant));
     }
 

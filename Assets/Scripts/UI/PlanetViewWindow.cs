@@ -4410,20 +4410,35 @@ public class PlanetViewWindow : MonoBehaviour
     // when the overlay actually changes rather than per frame. The tiers below keep the big worlds off
     // that bill, and they are not the worlds anyone sites a building on.
     // ============================================================================================
+    // A CELL IS SIXTEEN TEXELS AND THE OUTLINE IS ONE OF THEM. That is the spec, and it is the right
+    // one: the outline exists to say where a band ends, and anything thicker starts eating the ground
+    // and the per-tile numbers it is pointing at. One texel in sixteen is a hairline that still lands on
+    // a pixel at every sane zoom.
+    //
+    // The tiers below are a MEMORY ceiling, not a taste one. 16 texels a side is 256 texels per cell:
+    //
+    //     100x50    ->  1600x800    5 MB     sixteenths
+    //     200x100   ->  3200x1600  20 MB     sixteenths
+    //     400x200   ->  3200x1600  20 MB     eighths
+    //     640x320   ->  2560x1280  13 MB     quarters
+    //
+    // So every world anyone actually sites a building on gets the sixteenth the spec asks for, and the
+    // two sizes above that trade it for not spending eighty megabytes on one overlay. The outline stays
+    // ONE texel throughout — the fraction changes because the cell does, never because the line does.
     static int OverlaySub(int w, int h)
     {
         long cells = (long)w * h;
-        if (cells <= 40_000) return 6;    // up to ~280x140 — every world you actually build on
-        if (cells <= 140_000) return 3;
-        return 1;                          // enormous: fill only
+        if (cells <= 20_000) return 16;    // up to 200x100 — the spec, exactly
+        if (cells <= 90_000) return 8;     // up to 400x200
+        return 4;                          // enormous
     }
 
     /// How much of a tile the band outline may eat, as a fraction of the tile. The texel count follows
     /// from `sub` so the line is the same visual weight whichever tier a world falls into, rather than
     /// being "one texel" and therefore three times fatter on a world that happens to be smaller.
-    const float OutlineTileFraction = 0.17f;
-
-    static int OutlineTexels(int sub) => Mathf.Max(1, Mathf.RoundToInt(sub * OutlineTileFraction));
+    /// ONE TEXEL. Not a fraction of the cell that gets rounded — the line is a line, and how much of a
+    /// cell it covers is whatever one texel happens to be at that world's supersampling.
+    static int OutlineTexels(int sub) => 1;
 
     void RefreshIndexOverlay(SurfaceIndexKind kind)
     {
@@ -4718,19 +4733,18 @@ public class PlanetViewWindow : MonoBehaviour
     //
     // ============================================================================================
 
-    /// How opaque an uncovered cell is.
+    /// A cell is either COVERED or it is not. No middle.
     ///
-    /// MIND THE COLOUR SPACE. This project renders in Linear (ProjectSettings m_ActiveColorSpace: 1),
-    /// so the blend happens on linear values and the result is then gamma-encoded for the screen —
-    /// which makes any given alpha look markedly LIGHTER than the number suggests. Measured against a
-    /// screenshot: 237/255 (0.93) left the terrain plainly readable, at about a third of its
-    /// brightness, nowhere near the "no information visible" this is supposed to be. Working back
-    /// through the gamma, hiding the ground properly takes about 0.98.
+    /// This was translucent, on the reasoning that a hint of ground under the fog keeps the planet
+    /// reading as a planet rather than as a rectangle where the map failed to load. In practice it did
+    /// the opposite of what a mask is for: it broke the "no information below is visible" rule the
+    /// blackout exists to enforce, AND — because the project renders in Linear space, where an alpha
+    /// looks markedly lighter than its number — it left every unsurveyed world looking like a DIMMED
+    /// map rather than a covered one. A map that is merely dim reads as a rendering fault.
     ///
-    /// Not a flat 255. A hair of light keeps the planet reading as a planet with something under the
-    /// fog rather than as a black rectangle where the map failed to load, which is the honest state:
-    /// there is ground there, nobody has measured it.
-    const byte FogAlpha = 250;
+    /// Binary, the two states are unmistakable: a covered cell is black and tells you nothing, an
+    /// uncovered cell is the terrain at full vibrance with no tint over it at all.
+    const byte FogAlpha = 255;
 
     void RefreshSurveyFog()
     {
@@ -4746,13 +4760,23 @@ public class PlanetViewWindow : MonoBehaviour
         int w = body.surface.width, h = body.surface.height;
         if (surveyFogPx == null || surveyFogPx.Length != w * h) surveyFogPx = new Color32[w * h];
 
-        var covered = new Color32(4, 5, 9, FogAlpha);
+        var covered = new Color32(3, 4, 7, FogAlpha);
         var clear = new Color32(0, 0, 0, 0);
+
+        // The tiles the ship is on RIGHT NOW, so the player can see where the work is rather than only
+        // that it is happening. White and translucent over the black: it reads as a light passing across
+        // the covered ground, which is what a survey sweep should look like.
+        var active = new Color32(235, 242, 255, 96);
+
         float p = Mathf.Clamp01(body.explorationProgress);
+        int ships = Mathf.Max(1, Survey.ShipsOn(body, false));
 
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
-                surveyFogPx[y * w + x] = Survey.Reached(body, x, y, p) ? clear : covered;
+                surveyFogPx[y * w + x] =
+                    Survey.Reached(body, x, y, p) ? clear
+                    : Survey.BeingSurveyed(body, x, y, p, ships) ? active
+                    : covered;
 
         if (surveyFogTex == null || surveyFogTex.width != w || surveyFogTex.height != h)
         {
@@ -4772,9 +4796,9 @@ public class PlanetViewWindow : MonoBehaviour
     static int PowerSub(int w, int h)
     {
         long cells = (long)w * h;
-        if (cells <= 40_000) return 3;
-        if (cells <= 140_000) return 2;
-        return 1;
+        if (cells <= 20_000) return 8;
+        if (cells <= 90_000) return 4;
+        return 2;
     }
 
     // ============================================================================================

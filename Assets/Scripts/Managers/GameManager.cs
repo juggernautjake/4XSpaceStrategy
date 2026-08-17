@@ -221,7 +221,21 @@ public class GameManager : MonoBehaviour
         // player they have control. Restored by the finale itself.
         OrbitController.SetRevealAlpha(0f);
 
-        Visualize();
+        // ---- THE GALAXY'S VISUALS, SPREAD OVER FRAMES ----
+        //
+        // This is where the load actually spent its time, and it used to spend all of it inside a single
+        // frame: a prefab per body and per moon across every system, an ellipse per orbit, and a texture
+        // built for every world drawn as itself. The bar sat on whatever it had last reported — 0.50,
+        // easing toward the next figure — for the whole of it, and then the next report landed and it
+        // appeared to leap. Time-sliced, the bar walks 0.50 to 0.60 through the real work.
+        if (systemVisualizer != null)
+        {
+            systemVisualizer.solarSystemGenerator = solarSystemGenerator;
+            var vis = systemVisualizer.VisualizeGalaxyStepped(Galaxy,
+                (f, what) => screen?.Report(Mathf.Lerp(0.50f, 0.60f, f), what));
+            while (vis.MoveNext()) yield return vis.Current;
+        }
+        else Visualize();
 
         var homePlanet = FindHomePlanet();
         PlayerEconomy.NewGame(homePlanet, SpeciesManager.Current);
@@ -291,13 +305,18 @@ public class GameManager : MonoBehaviour
             float elapsed = 0f;
             while (play.MoveNext())
             {
-                // CLAMPED. Time.unscaledDeltaTime is not capped the way deltaTime is, so one long frame
-                // — any single blocking step anywhere in the sequence — hands this loop a delta worth
-                // seconds and the bar leaps most of its remaining span in one go. That is the "sticks,
-                // then is suddenly done" the bar was doing: not a bar that stalled and skipped, but a
-                // bar reading a wall clock that jumped. A ceiling means a hitch costs the bar a pause,
-                // never a jump, and the sequence's own beats still keep it moving overall.
-                elapsed += Mathf.Min(Time.unscaledDeltaTime, 0.1f);
+                // UNCLAMPED, and deliberately back to that after a spell of being capped.
+                //
+                // This is the sequence's OWN clock: every beat in Play is a Wait on unscaled time, so
+                // summing unscaled delta here tracks the beats exactly and the bar arrives at 0.99 as the
+                // last one ends. Capping the delta desynchronises the two — the bar falls behind the
+                // cinematic it is describing and then jumps when completion fires, which is the very
+                // artefact the cap was added to prevent.
+                //
+                // It was added on the theory that a long frame was making the bar leap. It was not: the
+                // stall was Visualize running unsliced, with the bar parked on its creep ceiling. That is
+                // fixed where it happens, above, rather than papered over here.
+                elapsed += Time.unscaledDeltaTime;
                 // Once the bar is full the caption stops being reported too — otherwise the next
                 // iteration writes it straight back over the blank the completion just set, and the
                 // world's name sits under a finished bar for the whole travel-to-centre beat.

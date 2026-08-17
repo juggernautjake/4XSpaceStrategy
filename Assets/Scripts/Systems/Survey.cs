@@ -130,8 +130,15 @@ public static class Survey
     public static float Fraction(CelestialBody b, Unit u, float dt, bool deep)
     {
         if (b == null) return 0f;
-        // A level-2 survey is six indexes of three passes, so its "whole" is that many sweeps of the map.
-        float total = SweepSeconds(b, u, deep) * (deep ? TotalPasses : 1);
+
+        // A level-2 survey is six indexes, and each index is a full sweep for its 70s pass plus a half
+        // and a quarter for the two that refine it — 1.75 sweeps, not 3, because the later passes are
+        // quicker (see PassShare). Getting this wrong would not break anything visibly; it would just
+        // silently make a deep survey take twice as long as the pass weights say it should.
+        float perIndex = 0f;
+        for (int p = 0; p < Bands; p++) perIndex += Mathf.Pow(0.5f, p);
+
+        float total = SweepSeconds(b, u, deep) * (deep ? perIndex * SurfaceIndex.All.Length : 1f);
         return total <= 0f ? 1f : dt / total;
     }
 
@@ -191,14 +198,42 @@ public static class Survey
         int slot = IndexSlot(k);
         if (slot < 0) return r;
 
-        float stage = Mathf.Clamp01(b.deepProgress) * TotalPasses;   // 0 .. 18
-        float mine = stage - slot * Bands;                            // this index's own share
+        // Each index gets an equal share of the whole; within it, the passes are weighted.
+        int n = SurfaceIndex.All.Length;
+        float mine = Mathf.Clamp01(b.deepProgress) * n - slot;        // 0..1 through THIS index
 
         if (mine <= 0f) return r;                                     // not reached yet
-        if (mine >= Bands) return new Reveal { started = true, pass = Bands - 1, frac = 1f, complete = true };
+        if (mine >= 1f) return new Reveal { started = true, pass = Bands - 1, frac = 1f, complete = true };
 
-        int pass = Mathf.Clamp(Mathf.FloorToInt(mine), 0, Bands - 1);
-        return new Reveal { started = true, pass = pass, frac = mine - pass, complete = false };
+        // ---- EACH PASS TAKES HALF AS LONG AS THE ONE BEFORE ----
+        //
+        // The 70s pass is charting unknown ground; the 80s pass is refining a region already found; the
+        // 90s pass is picking the best cells out of a region already narrowed twice. Each is a smaller
+        // question than the last, so each is quicker — 1 : 1/2 : 1/4, which is 4/7, 2/7 and 1/7 of the
+        // index's time.
+        float acc = 0f;
+        for (int p = 0; p < Bands; p++)
+        {
+            float share = PassShare(p);
+            if (mine < acc + share || p == Bands - 1)
+                return new Reveal
+                {
+                    started = true,
+                    pass = p,
+                    frac = share <= 0f ? 1f : Mathf.Clamp01((mine - acc) / share),
+                    complete = false
+                };
+            acc += share;
+        }
+        return new Reveal { started = true, pass = Bands - 1, frac = 1f, complete = true };
+    }
+
+    /// What fraction of one index's time pass `p` takes. Halving weights, normalised.
+    public static float PassShare(int p)
+    {
+        float total = 0f;
+        for (int i = 0; i < Bands; i++) total += Mathf.Pow(0.5f, i);
+        return total <= 0f ? 1f : Mathf.Pow(0.5f, p) / total;
     }
 
     /// Position of an index in the level-2 running order. SurfaceIndex.All IS the order — Mineral,
@@ -213,40 +248,53 @@ public static class Survey
     public static SurfaceIndexKind CurrentIndex(CelestialBody b)
     {
         if (b == null || b.deepProgress <= 0f || b.deepProgress >= 1f) return SurfaceIndexKind.None;
-        int slot = Mathf.Clamp(Mathf.FloorToInt(b.deepProgress * TotalPasses / Bands), 0, SurfaceIndex.All.Length - 1);
+        int n = SurfaceIndex.All.Length;
+        int slot = Mathf.Clamp(Mathf.FloorToInt(b.deepProgress * n), 0, n - 1);
         return SurfaceIndex.All[slot];
     }
 
     // ---- Which cells have been reached ----------------------------------------------------------
     //
     // A survey reveals CELLS, and which cells it has got to has to be answerable at any moment without
-    // storing a bitmask per world per index. So it is a pure function: every cell is given a fixed
-    // position in the running order, and a cell is uncovered once the survey has passed it.
+    // storing a bitmask per world per index. So it is a pure function: every cell has a fixed place in
+    // the running order, and a cell is uncovered once the survey has passed it. One float per world per
+    // level says everything, it costs nothing to save, and a reload mid-survey cannot reshuffle what is
+    // already known.
     //
-    // The order is a diagonal sweep with hash jitter mixed in, not a plain hash. A plain hash dissolves
-    // the map as television static — every part of the world uncovering at once, which reads as a
-    // rendering effect. A pure sweep is a clean line crossing the planet, which reads as a wipe. The
-    // mix gives a ragged front that advances across the world: a machine working its way over ground.
+    // THE ORDER IS A SURVEY PATTERN, not a dissolve. It starts at the middle of the map, runs RIGHT
+    // along that row and wraps, and then works outward alternating above and below — so the equator is
+    // charted first and the poles last, which is the order a ship in an inclined orbit would actually
+    // build a map in. Cell 0 is the centre; the last cell is a corner of a pole row.
     //
-    // Seeded off the world, so the same planet always uncovers the same way and a reload mid-survey
-    // does not reshuffle what is already known.
+    //     row rank:  centre, +1, -1, +2, -2, ...
+    //     within a row: start at the centre column, run right, wrap around
+    //
+    // This replaced a hash-jittered diagonal. That looked like weather; this looks like work.
 
-    /// 0..1 position of this cell in the reveal order. Stable for a given world.
+    /// This cell's place in the running order, 0 .. cells-1. Stable for a given world.
+    public static int CellRank(CelestialBody b, int x, int y)
+    {
+        int w = Mathf.Max(1, MapMetrics.SurfW(b));
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        int cx = w / 2, cy = h / 2;
+
+        // Rows outward from the middle, alternating: centre, above, below, above, below...
+        int d = y - cy;
+        int rowRank = d == 0 ? 0 : (d > 0 ? 2 * d - 1 : -2 * d);
+
+        // ...and within a row, rightward from the middle column, wrapping at the date line.
+        int colRank = ((x - cx) % w + w) % w;
+
+        return rowRank * w + colRank;
+    }
+
+    /// 0..1 position of this cell in the running order.
     public static float CellOrder(CelestialBody b, int x, int y)
     {
         int w = Mathf.Max(1, MapMetrics.SurfW(b));
         int h = Mathf.Max(1, MapMetrics.SurfH(b));
-
-        // The sweep. Normalised so it is the same shape on every world, and tilted so it does not run
-        // exactly along a row — a front parallel to the grid reads as a scanline.
-        float sweep = (x / (float)w) * 0.72f + (y / (float)h) * 0.28f;
-
-        return Mathf.Clamp01(sweep * (1f - JitterWeight) + Hash01(b, x, y) * JitterWeight);
+        return CellRank(b, x, y) / (float)Mathf.Max(1, w * h);
     }
-
-    /// How much of the reveal order is noise rather than sweep. Enough to break the front into a ragged
-    /// edge, little enough that it still visibly travels in one direction.
-    const float JitterWeight = 0.34f;
 
     /// Has the survey reached this cell yet, at `progress` through the current sweep?
     public static bool Reached(CelestialBody b, int x, int y, float progress)
@@ -255,6 +303,36 @@ public static class Survey
         if (progress <= 0f) return false;
         return CellOrder(b, x, y) < progress;
     }
+
+    /// Is this cell in the band the survey is working on RIGHT NOW — the tiles the white marker sits on?
+    ///
+    /// A band rather than a single cell, and it widens with the number of ships on station. One ship on
+    /// a big world advances a cell every few tenths of a second, and a one-cell marker at that rate
+    /// reads as a flicker rather than as a machine working; a short run of tiles reads as a sweep head.
+    /// It is also the honest picture of two ships being twice as fast: the front is simply wider.
+    ///
+    /// NOT a real division of labour. The spec asks for several ships to work separate rows at once, and
+    /// that would need per-ship row assignments and a per-row progress array in the save. This is one
+    /// front, moving proportionally faster, drawn proportionally wider — the same information, at a
+    /// fraction of the state.
+    public static bool BeingSurveyed(CelestialBody b, int x, int y, float progress, int ships)
+    {
+        if (b == null || ships <= 0 || progress <= 0f || progress >= 1f) return false;
+
+        int w = Mathf.Max(1, MapMetrics.SurfW(b));
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        int cells = Mathf.Max(1, w * h);
+
+        int front = Mathf.Clamp(Mathf.FloorToInt(progress * cells), 0, cells - 1);
+        int width = Mathf.Clamp(ActiveBandCells * ships, ActiveBandCells, w);
+        int rank = CellRank(b, x, y);
+
+        return rank >= front && rank < front + width;
+    }
+
+    /// How many cells one ship's marker covers. Chosen to read as a sweep head at map zoom rather than
+    /// as a single blinking tile.
+    const int ActiveBandCells = 3;
 
     /// A stable 0..1 per cell, mixed with the world's seed so two worlds do not uncover identically.
     public static float Hash01(CelestialBody b, int x, int y)
@@ -286,5 +364,30 @@ public static class Survey
         foreach (var u in b.units)
             if (u != null && u.status == UnitStatus.Researching) return true;
         return false;
+    }
+
+    /// How many ships are working this world right now, at the given level. Drives how wide the active
+    /// marker is drawn — more ships, more front.
+    public static int ShipsOn(CelestialBody b, bool deep)
+    {
+        if (b?.units == null) return 0;
+        var want = deep ? UnitStatus.Researching : UnitStatus.Exploring;
+        int n = 0;
+        foreach (var u in b.units) if (u != null && u.status == want) n++;
+        return n;
+    }
+
+    /// May the player open this world's Surface View at all?
+    ///
+    /// The map unlocks when a ship STARTS work, not when it finishes: the blacked-out grid filling in is
+    /// the thing worth watching, and locking the window until the survey is done would hide the entire
+    /// mechanic behind its own completion. Before that there is genuinely nothing to show — not even the
+    /// grid's shape, which is a fact about a world nobody has been to.
+    public static bool MapUnlocked(CelestialBody b)
+    {
+        if (b == null) return false;
+        if (GameMode.DevMode) return true;
+        if (b.owner == FactionManager.Player || b.settled || b.Surveyed) return true;
+        return b.explorationProgress > 0f || InProgress(b);
     }
 }

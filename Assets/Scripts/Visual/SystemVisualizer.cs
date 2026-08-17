@@ -14,17 +14,55 @@ public class SystemVisualizer : MonoBehaviour
 
     // Renders the whole galaxy: a central object plus every star system at its (static) galaxy
     // position, each with its own orbiting bodies.
+    /// Drain the stepped version. ONE implementation, two entry points — the same pattern the galaxy and
+    /// terrain generators use. A second copy of this would be a second place for the galaxy's visuals to
+    /// drift from the galaxy's data.
     public void VisualizeGalaxy(Galaxy galaxy)
+    {
+        var it = VisualizeGalaxyStepped(galaxy, null);
+        while (it.MoveNext()) { }
+    }
+
+    // ============================================================================================
+    // BUILDING THE GALAXY'S VISUALS, A FRAME AT A TIME
+    //
+    // This is the biggest single block of work in a load: a prefab per body and per moon, an ellipse
+    // per orbit, and a Texture2D built per world that is drawn as itself. On a twelve-system galaxy that
+    // is a few hundred instantiations and a few hundred thousand texel writes, and it all used to happen
+    // between two yields — one frame, seconds long, with the loading bar frozen on whatever it last
+    // reported. That freeze is the one the bar was blamed for.
+    //
+    // Stepped, it is the same work spread over a few dozen frames, and `report` moves the bar through it.
+    //
+    // THE APPEARANCE PASS IS SEPARATE, and that is the point rather than tidiness. Instantiating a body
+    // is cheap; giving it its surface is not, and only some bodies get one. Doing both in RenderSystem
+    // meant the expensive half was buried inside the cheap half and could not be sliced independently —
+    // one system with a dozen revealed worlds was one enormous frame however finely the systems were
+    // divided. So every body is built wearing its silhouette, and the worlds that have earned a face get
+    // one afterwards, a few bodies per frame.
+    // ============================================================================================
+    public System.Collections.IEnumerator VisualizeGalaxyStepped(Galaxy galaxy, System.Action<float, string> report)
     {
         if (planetPrefab == null || systemParent == null)
         {
             Debug.LogError("Missing references in SystemVisualizer!");
-            return;
+            yield break;
         }
-        if (galaxy == null || galaxy.systems.Count == 0) return;
+        if (galaxy == null || galaxy.systems.Count == 0) yield break;
 
         foreach (Transform child in systemParent)
             Destroy(child.gameObject);
+
+        // ---- BEFORE ANY BODY IS RENDERED ----
+        //
+        // RenderSystem asks SystemPresence whether each world is revealed, and SystemPresence answers by
+        // looking the body up in SystemContext.Galaxy. This assignment used to sit at the BOTTOM of this
+        // method, so every one of those questions was asked against the PREVIOUS galaxy — or against
+        // null on a fresh game — and the lookup failed for every body in the new one. The visible
+        // symptom was the whole home system coming up as black spheres except the homeworld itself,
+        // which is revealed by a direct owner check that needs no lookup.
+        SystemContext.Galaxy = galaxy;
+        SystemPresence.Invalidate();
 
         // Central supermassive object.
         if (galaxy.center != null)
@@ -35,8 +73,12 @@ public class SystemVisualizer : MonoBehaviour
             CreateBlackHole(centerPivot.transform, galaxy.center, null);
         }
 
-        foreach (var sys in galaxy.systems)
-            RenderSystem(sys);
+        for (int i = 0; i < galaxy.systems.Count; i++)
+        {
+            RenderSystem(galaxy.systems[i]);
+            report?.Invoke(0.55f * (i + 1) / galaxy.systems.Count, $"Placing {galaxy.systems[i].name}");
+            yield return null;
+        }
 
         // Habitable zone for the focused (home) system.
         var focus = GameManager.Instance != null && GameManager.Instance.FocusedSystem != null
@@ -47,15 +89,41 @@ public class SystemVisualizer : MonoBehaviour
         var zone = zoneGo.AddComponent<HabitableZoneVisualizer>();
         zone.Build(focus.combinedStar, focus.pivot, focus.bodies);
 
-        SystemContext.Galaxy = galaxy;
         SystemContext.Zone = zone;
         SystemContext.Set(focus.bodies, focus.combinedStar, focus.pivot, systemParent, this);
+        yield return null;
+
+        // ---- The faces of the worlds that have one ----
+        var all = new List<CelestialBody>();
+        foreach (var sys in galaxy.systems)
+            foreach (var b in sys.AllBodies())
+                if (b != null) all.Add(b);
+
+        for (int i = 0; i < all.Count; i++)
+        {
+            var b = all[i];
+            if (b.visualObject != null && SystemPresence.Revealed(b))
+            {
+                var fog = b.visualObject.GetComponent<BodyFog>();
+                if (fog != null) Destroy(fog);
+                PlanetAppearance.Apply(b, b.visualObject);
+            }
+
+            // A handful per frame. One per frame would take three hundred frames on a big galaxy and
+            // make this step longer than the generation it follows.
+            if ((i & 7) == 7)
+            {
+                report?.Invoke(0.55f + 0.45f * (i + 1) / all.Count, "Lighting the worlds");
+                yield return null;
+            }
+        }
 
         // Every visual above is brand new and knows nothing about what was concealed. Concealment lives
         // on the DATA (CelestialBody.hideReason and friends), so it survives a rebuild — but it has to be
         // pushed back at the freshly built objects, or a rare undiscovered world would be drawn in plain
         // sight the moment the galaxy is generated, and a cloaked one would reappear on every reload.
         VisibilityService.ApplyAll();
+        report?.Invoke(1f, "Lighting the worlds");
     }
 
     // Re-applies fog / reveal to every body based on whether the empire is in its system (called when
@@ -163,10 +231,11 @@ public class SystemVisualizer : MonoBehaviour
             // this appended controller silently drove the planet. One controller, configured AND fetched.
             var oc = UIFactory.Ensure<OrbitController>(visual);
             oc.SetupFromData(pivot.transform, body);
-            // Presence, not survey: a world in a system the empire is standing in is drawn as itself
-            // whether or not anyone has mapped its surface. See BodyFog.
-            if (SystemPresence.Revealed(body)) PlanetAppearance.Apply(body, visual);
-            else visual.AddComponent<BodyFog>().Init(body);   // fog-of-war silhouette
+            // ALWAYS the silhouette here, even for a world that has earned its face. Giving it that face
+            // means building a texture, which is the expensive half of this method — and buried here it
+            // could not be sliced apart from the cheap half. VisualizeGalaxyStepped's appearance pass
+            // replaces this a few bodies per frame. See the note there.
+            visual.AddComponent<BodyFog>().Init(body);
             if (body.owner != null) oc.SetOwnerHighlight(FactionManager.OwnerColor(body.owner), true);
 
             // --- Moons ---
@@ -186,8 +255,7 @@ public class SystemVisualizer : MonoBehaviour
                 // the one GetComponent later returns.
                 var moc = UIFactory.Ensure<OrbitController>(moonVisual);
                 moc.SetupFromData(body.visualObject.transform, moon);
-                if (SystemPresence.Revealed(moon)) PlanetAppearance.Apply(moon, moonVisual);
-                else moonVisual.AddComponent<BodyFog>().Init(moon);
+                moonVisual.AddComponent<BodyFog>().Init(moon);   // same as the planet above
                 if (moon.owner != null) moc.SetOwnerHighlight(FactionManager.OwnerColor(moon.owner), true);
             }
         }

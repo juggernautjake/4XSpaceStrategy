@@ -78,6 +78,15 @@ public static class SystemPresence
     {
         if (sys == null) return false;
         if (GameMode.DevMode) return true;
+
+        // THE HOME SYSTEM IS NEVER A MYSTERY. A civilisation does not reach the space age without having
+        // pointed a telescope at its own neighbours: every world around its own star has been catalogued
+        // for centuries before the first ship leaves. Stated outright rather than left to fall out of
+        // "the player owns a world here", because that inference depends on ownership being assigned
+        // before the visuals are built, and it silently was not — which is exactly how the home system
+        // came up as black spheres with only the homeworld showing.
+        if (sys.isHome) { sys.visited = true; return true; }
+
         if (sys.visited) return true;
         if (!HasPresence(sys)) return false;
         sys.visited = true;
