@@ -23,12 +23,36 @@ public class EarthquakeManager : MonoBehaviour
     // timeScale-scaled, so quakes come faster under fast-forward, like every other timed system here.
     // These three are gameplay-tuning knobs picked by feel — there is no Editor in CI to calibrate them.
     const float CheckInterval = 18f;
-    // Chance PER CHECK that an eligible world quakes, before scaling by how active its plates are.
-    const float BaseQuakeChance = 0.14f;
+
+    // ---- HOW OFTEN, AND HOW HARD ----------------------------------------------------------------
+    //
+    // These were tuned when damage was permanent, and they were tuned too high for that. At 0.14 an
+    // eligible world rolled a quake about every two minutes, and a hit at the epicentre took up to 72%
+    // of a structure's health — so a colony sited anywhere near a fault lost buildings outright within
+    // a few minutes and had no way to put them back. What was meant to be a siting TRADE-OFF read as a
+    // penalty for having built at all.
+    //
+    // Three changes, and they work together:
+    //
+    //   * Quakes are about a third as frequent, so one is an event rather than weather.
+    //   * A single quake takes a much smaller bite (see MaxSingleHit), so a healthy structure needs to
+    //     be hit repeatedly before it is in real trouble.
+    //   * Damage is REPAIRABLE now (SurfaceBuildManager.Repair), so a quake presents a bill instead of
+    //     a loss — which is what makes a fault line a decision rather than a place you avoid forever.
+    const float BaseQuakeChance = 0.05f;
     // Quake reach around the epicentre, in cells (clamped from a fraction of map width so a big map
     // doesn't shake end to end).
     const float QuakeRadiusFrac = 0.16f;
     const float MinQuakeRadius = 4f, MaxQuakeRadius = 22f;
+
+    /// The most condition ONE quake can take, whatever the roll. A cap rather than a smaller range: the
+    /// range still wants its spread so a quake is not the same event every time, and the cap is what
+    /// guarantees a healthy structure survives the worst possible night.
+    const float MaxSingleHit = 0.28f;
+
+    /// A structure at or above this is never destroyed outright — a quake that would flatten it leaves
+    /// it standing here instead, wrecked and obvious. Below it, the next quake can finish the job.
+    const float CondemnedAt = 0.12f;
 
     float timer;
 
@@ -92,7 +116,7 @@ public class EarthquakeManager : MonoBehaviour
         if (hotProx < 0.25f) return;   // nothing built near an active fault this time — no damage
 
         // Magnitude scales with how hard the fault there is driving; radius is a localized patch.
-        float magnitude = Mathf.Lerp(0.15f, 0.6f, Mathf.Clamp01(hotProx));
+        float magnitude = Mathf.Lerp(0.06f, 0.22f, Mathf.Clamp01(hotProx));
         float radius = Mathf.Clamp(QuakeRadiusFrac * w, MinQuakeRadius, MaxQuakeRadius);
 
         int destroyed = 0, damaged = 0;
@@ -105,10 +129,28 @@ public class EarthquakeManager : MonoBehaviour
             if (dist > radius) continue;
 
             float falloff = 1f - dist / radius;                       // 1 at the epicentre, 0 at the edge
-            float dmg = magnitude * falloff * Random.Range(0.6f, 1.2f);
+            float dmg = Mathf.Min(MaxSingleHit, magnitude * falloff * Random.Range(0.6f, 1.2f));
             if (dmg <= 0f) continue;
 
-            pb.health -= dmg;
+            // ---- NOTHING HEALTHY IS DESTROYED OUTRIGHT ----
+            //
+            // A structure above the condemned line is left standing at it however hard it is hit. That
+            // makes losing a building a two-stage story the player can act between: the first quake
+            // wrecks it and says so, and only a SECOND one on an already-wrecked structure takes it
+            // away. Repair in between and nothing is lost but materials.
+            //
+            // Without this a single unlucky roll at the epicentre could delete a capitol, which is the
+            // kind of loss that has no counterplay and reads as the game cheating rather than as a
+            // hazard the player accepted when they sited there.
+            float next = pb.health - dmg;
+            if (next <= 0f && pb.health > CondemnedAt)
+            {
+                pb.health = CondemnedAt;
+                damaged++;
+                continue;
+            }
+
+            pb.health = next;
             if (pb.health <= 0f) { SurfaceBuildManager.Demolish(b, pb, refund: false); destroyed++; }
             else damaged++;
         }

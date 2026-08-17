@@ -3073,6 +3073,30 @@ public class PlanetViewWindow : MonoBehaviour
             return $"{n} structure(s) · {SurfaceBuildManager.Density(body) * 100f:F0}% of buildable land developed";
         });
 
+        // ONE BUTTON FOR THE WHOLE COLONY, because that is the shape of the problem a quake creates: it
+        // damages a patch, not a structure, and putting the colony back together one row at a time
+        // through a list of forty entries is busywork rather than a decision. The per-structure Repair
+        // is still there for choosing WHICH one when materials are short.
+        var fixAll = UIFactory.Button(sidePanel, "", () => { SurfaceBuildManager.RepairAll(body); lastSig = null; }, 24);
+        live.Button(fixAll, () =>
+        {
+            int hurt = 0, metal = 0, energy = 0;
+            foreach (var p in SurfaceBuildManager.On(body))
+            {
+                if (p == null || p.health >= 0.999f) continue;
+                hurt++;
+                SurfaceBuildManager.RepairCost(p, out int m, out int e);
+                metal += m; energy += e;
+            }
+            if (hurt == 0) return (false, "Nothing damaged");
+            bool afford = GameMode.DevMode || PlayerEconomy.CanAfford(metal, energy);
+            // Offered even when the full bill is unaffordable: RepairAll works cheapest-first and stops
+            // when the treasury runs out, so a partial repair is a real and useful outcome.
+            return (body.owner == FactionManager.Player,
+                    afford ? $"Repair all {hurt} damaged ({metal}m {energy}e)"
+                           : $"Repair what you can afford — {hurt} damaged, {metal}m {energy}e in full");
+        });
+
         // Grouped by category so a long list stays navigable. Headed in each category's own COLOUR, so
         // this list and the tray's tabs read as the same scheme — the yellow block is your power plant
         // whether you are choosing one or reviewing one.
@@ -3184,6 +3208,19 @@ public class PlanetViewWindow : MonoBehaviour
             bool can = SurfaceBuildManager.CanUpgradeLevel(body, cap, out string why);
             SurfaceBuildManager.LevelUpCost(cap, out int m, out int e);
             return (can, can ? $"Upgrade -> Lv{cap.level + 1} ({m}m {e}e)" : $"Upgrade — {why}");
+        });
+
+        // REPAIR sits beside Upgrade because it is the same kind of decision: spend materials on this
+        // site rather than somewhere else. It reads "Undamaged" on a healthy structure rather than
+        // vanishing, so the row does not change shape every time a quake lands and the player learns
+        // the button is there before they need it.
+        var fix = UIFactory.Button(row.transform, "", () => { SurfaceBuildManager.Repair(body, cap); lastSig = null; }, 20);
+        live.Button(fix, () =>
+        {
+            if (cap.health >= 0.999f) return (false, "Undamaged");
+            bool can = SurfaceBuildManager.CanRepair(body, cap, out string why);
+            SurfaceBuildManager.RepairCost(cap, out int m, out int e);
+            return (can, can ? $"Repair ({m}m {e}e)" : $"Repair — {why}");
         });
 
         // DEMOLISH OPENS THE MODE with this building already selected, rather than tearing it down on

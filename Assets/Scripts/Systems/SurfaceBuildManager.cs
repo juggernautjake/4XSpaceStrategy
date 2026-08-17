@@ -1149,6 +1149,90 @@ public static class SurfaceBuildManager
     // ---- Tech levels ----
     // Upgrading a structure in place: more output, more hit points. Each tier costs more than the last,
     // so a level-3 building is a real investment rather than a formality.
+    // ============================================================================================
+    // REPAIR — the other half of a structure that can be damaged
+    //
+    // `health` could only ever go DOWN. A quake knocked a mine to 40% and it stayed at 40% for the rest
+    // of the game, producing 40%, with no way to do anything about it but demolish and rebuild — which
+    // cost the full price and the tech level with it. That is not a damage system, it is slow attrition
+    // with a hidden penalty for having built anywhere interesting.
+    //
+    // So damage is now a REPAIR BILL rather than a loss. It costs materials proportional to how bad the
+    // damage is, it is instant, and it keeps the structure's level — the decision it asks is "is this
+    // site worth paying to hold", which is the question a fault line is supposed to be posing.
+    //
+    // Priced off the structure's own cost, so repairing a capitol is a serious bill and repairing a
+    // relay is not, and at a discount to rebuilding: a fully wrecked structure costs 70% of building it
+    // fresh, and a lightly scuffed one costs almost nothing. Rebuilding from scratch is still the option
+    // for a building you want to move or re-tier.
+    public const float FullRepairFraction = 0.70f;
+
+    public static void RepairCost(PlacedBuilding p, out int metal, out int energy)
+    {
+        metal = energy = 0;
+        if (p == null) return;
+
+        float missing = Mathf.Clamp01(1f - Mathf.Clamp01(p.health));
+        if (missing <= 0f) return;
+
+        var info = p.Info;
+        // Scaled by tier as well as damage: a level-3 structure is a bigger thing to put back together.
+        float mult = missing * FullRepairFraction * (0.8f + p.level * 0.2f);
+        metal = Mathf.Max(1, Mathf.RoundToInt(ColonyManager.DiscCost(info.costMetal) * mult));
+        energy = Mathf.Max(0, Mathf.RoundToInt(ColonyManager.DiscCost(info.costEnergy) * mult));
+    }
+
+    public static bool CanRepair(CelestialBody b, PlacedBuilding p, out string why)
+    {
+        why = null;
+        if (p == null) { why = "nothing selected"; return false; }
+        if (p.health >= 0.999f) { why = "undamaged"; return false; }
+        if (b == null || b.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
+        RepairCost(p, out int m, out int e);
+        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = $"need {m} metal, {e} energy"; return false; }
+        return true;
+    }
+
+    public static bool Repair(CelestialBody b, PlacedBuilding p)
+    {
+        if (!CanRepair(b, p, out _)) return false;
+        RepairCost(p, out int m, out int e);
+        if (!GameMode.DevMode && !PlayerEconomy.Spend(m, e)) return false;
+
+        p.health = 1f;
+        // A structure back to full condition is drawing and delivering full power again, and the grid's
+        // served fraction is computed from exactly that.
+        PowerGrid.Invalidate();
+        SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
+        return true;
+    }
+
+    /// Repair everything damaged on a world, cheapest first, for as long as the treasury holds out.
+    /// Returns how many were put right.
+    ///
+    /// Cheapest first rather than worst first on purpose: after a quake the player wants the colony
+    /// WORKING again, and a limited budget restores more output spread across the light damage than
+    /// spent on one wreck.
+    public static int RepairAll(CelestialBody b)
+    {
+        if (b?.placedBuildings == null) return 0;
+
+        var damaged = new List<PlacedBuilding>();
+        foreach (var p in b.placedBuildings)
+            if (p != null && p.health < 0.999f) damaged.Add(p);
+
+        damaged.Sort((x, y) =>
+        {
+            RepairCost(x, out int mx, out _);
+            RepairCost(y, out int my, out _);
+            return mx.CompareTo(my);
+        });
+
+        int done = 0;
+        foreach (var p in damaged) if (Repair(b, p)) done++;
+        return done;
+    }
+
     public static void LevelUpCost(PlacedBuilding p, out int metal, out int energy)
     {
         var info = p.Info;
