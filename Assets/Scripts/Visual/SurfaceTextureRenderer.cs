@@ -80,6 +80,127 @@ public static class SurfaceTextureRenderer
         return tex;
     }
 
+    // ============================================================================================
+    // GRID render WITH BIOME TEXTURE: N x N texels per grid cell, still exactly one CELL per cell.
+    //
+    // Same tiles, same colours, same shade jitter as BuildGrid — the only difference is that each cell
+    // is filled with its biome's grain (TerrainTextureMap) instead of one flat texel. The ONE-TO-ONE
+    // RULE in MapMetrics is untouched: the texture is a picture of the grid at N times the resolution,
+    // and nothing measures it. It is assigned to a RawImage whose UVs run 0..1 either way, so the map's
+    // on-screen size, its zoom, its overlays and every footprint test are unaffected — verified by the
+    // fact that `mapTex` is written to `mapImage.texture` and never read, measured or sampled back.
+    //
+    // WHY THIS IS A SEPARATE ENTRY POINT. BuildGrid also feeds the moon thumbnails, the moon panes and
+    // the 3D globes, and those are drawn a couple of hundred pixels across. Handing them a texture
+    // sixty-four times the size buys nothing a player can see and costs the memory on every body in the
+    // system at once. Only the Planet View map — the one you actually build on, and the only one ever
+    // zoomed in far enough to resolve a cell — asks for this.
+    //
+    // N is a power of two so the pattern downsample stays an exact box filter and the per-tile offset
+    // below can be a mask. It is the largest such size that keeps the whole texture inside the budget,
+    // so a 100x50 moon gets the art at its native 16 and a 640x320 super-earth gets 4.
+    // ============================================================================================
+
+    /// Texels the textured map may spend. 8M is 32 MB at RGBA32 — one texture, for one body, freed when
+    /// the window closes. At this budget a 400x200 world renders at 8 texels per cell (3200x1600).
+    public const int MapTexelBudget = 8 * 1024 * 1024;
+
+    public static Texture2D BuildGridTextured(CelestialBody body) => BuildGridTextured(body, MapTexelBudget);
+
+    public static Texture2D BuildGridTextured(CelestialBody body, int texelBudget)
+    {
+        if (body?.surface == null) return null;
+        int w = body.surface.width, h = body.surface.height;
+
+        int scale = ScaleFor(w, h, texelBudget);
+        // At one texel per cell there is no room for a pattern — a 1x1 patch is just the mean, which is
+        // the flat colour. Hand it straight to the plain path rather than doing the same work slower.
+        if (scale <= 1) return BuildGrid(body);
+
+        int tw = w * scale, th = h * scale;
+        var tex = new Texture2D(tw, th, TextureFormat.RGBA32, false)
+        {
+            filterMode = FilterMode.Point,   // still hard edges: this is pixel art, not a photograph
+            wrapMode = TextureWrapMode.Repeat
+        };
+
+        // One pattern lookup per TYPE rather than per tile — a 400x200 world has 80,000 tiles and 41
+        // types, and Pattern() is a dictionary hit plus a string concat.
+        int typeCount = System.Enum.GetValues(typeof(TerrainType)).Length;
+        var pattern = new float[typeCount][];
+        var colour = new Color[typeCount];
+        for (int t = 0; t < typeCount; t++)
+        {
+            var type = (TerrainType)t;
+            pattern[t] = TerrainTextureMap.Pattern(type, scale);
+            colour[t] = TerrainColorMap.Get(type);
+        }
+
+        var px = new Color32[tw * th];
+        int mask = scale - 1;
+
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                var tile = body.surface.tiles[x, y];
+                int ox = x * scale, oy = y * scale;
+
+                if (tile == null)
+                {
+                    for (int sy = 0; sy < scale; sy++)
+                        for (int sx = 0; sx < scale; sx++)
+                            px[(oy + sy) * tw + ox + sx] = new Color32(0, 0, 0, 255);
+                    continue;
+                }
+
+                int ti = (int)tile.type;
+                Color c = (uint)ti < (uint)typeCount ? colour[ti] : TerrainColorMap.Get(tile.type);
+                float[] pat = (uint)ti < (uint)typeCount ? pattern[ti] : null;
+
+                // The same per-tile shade jitter BuildGrid uses, so the two views still look like the
+                // same world — and so a field of one biome is not a field of one repeated stamp.
+                float b = Mathf.Lerp(0.86f, 1.12f, tile.shade);
+                float cr = c.r * b * 255f, cg = c.g * b * 255f, cb = c.b * b * 255f;
+
+                // Slide the pattern by a per-tile amount. The art tiles seamlessly, so any offset is a
+                // valid window onto it, and without one every cell of a continent is the same stamp and
+                // the grid reads as wallpaper. Hashed off the coordinates so it is stable across rebuilds
+                // — the map must not shimmer when a terraform redraws it.
+                uint hash = (uint)(x * 73856093) ^ (uint)(y * 19349663);
+                int px0 = (int)(hash & (uint)mask), py0 = (int)((hash >> 8) & (uint)mask);
+
+                for (int sy = 0; sy < scale; sy++)
+                {
+                    int row = (oy + sy) * tw + ox;
+                    int prow = ((sy + py0) & mask) * scale;
+                    for (int sx = 0; sx < scale; sx++)
+                    {
+                        float m = pat != null ? pat[prow + ((sx + px0) & mask)] : 1f;
+                        px[row + sx] = new Color32(
+                            (byte)Mathf.Clamp(cr * m, 0f, 255f),
+                            (byte)Mathf.Clamp(cg * m, 0f, 255f),
+                            (byte)Mathf.Clamp(cb * m, 0f, 255f),
+                            255);
+                    }
+                }
+            }
+
+        tex.SetPixels32(px);
+        tex.Apply();
+        return tex;
+    }
+
+    /// Texels per cell edge: the largest power of two, capped at the art's own size, whose square times
+    /// the cell count still fits the budget.
+    static int ScaleFor(int w, int h, int texelBudget)
+    {
+        long cells = (long)w * h;
+        if (cells <= 0) return 1;
+        int s = TerrainTextureMap.ArtSize;
+        while (s > 1 && cells * s * s > texelBudget) s >>= 1;
+        return s;
+    }
+
     public static Texture2D Build(CelestialBody body)
     {
         // From MapMetrics, which is also what the grid is built at — so this renders exactly one texel

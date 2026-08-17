@@ -769,15 +769,20 @@ public class PlanetViewWindow : MonoBehaviour
     {
         if (body == null) return;
 
-        // One texel per build cell, read straight off the grid — so a 1x1 structure covers exactly one
-        // terrain pixel. The grid is now as fine as the detail render (see MapMetrics.Subdiv), so this
+        // One CELL per build cell, read straight off the grid — so a 1x1 structure covers exactly one
+        // terrain cell. The grid is now as fine as the detail render (see MapMetrics.Subdiv), so this
         // is the detailed map AND the build grid at once, rather than two maps six times apart.
+        //
+        // Textured rather than flat: each cell is filled with its biome's grain instead of one flat
+        // texel. That changes the texture's RESOLUTION, not the grid — the one-to-one rule is intact,
+        // this window's zoom and hit-testing work in cells and never touch texel counts, and the
+        // renderer falls back to the flat build on any world too big to afford the extra texels.
         //
         // Rebuilt on every open rather than cached by body id, because terraforming can remodel a
         // world's terrain outright and a cache keyed only on identity would show the planet it used
         // to be.
         if (mapTex != null) Destroy(mapTex);
-        mapTex = SurfaceTextureRenderer.BuildGrid(body);
+        mapTex = SurfaceTextureRenderer.BuildGridTextured(body);
         mapImage.texture = mapTex;
         titleText.text = $"Planet View — {body.name}";
         ApplyMapSize();
