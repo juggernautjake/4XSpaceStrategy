@@ -18,6 +18,13 @@ public class StarSystemData
     public Faction owner;      // null == unclaimed
     public bool isHome;
 
+    /// How close a ship has to get before this system gives up what it is. 0 means "derive it" — see
+    /// SystemPresence.DetectionRadius, which puts it a margin beyond the outermost world's orbit.
+    ///
+    /// Stored rather than always derived because the Dev sandbox can drag it, and a value somebody tuned
+    /// by hand should survive a save. A generated system never writes this; only the slider does.
+    public float detectionRadiusOverride;
+
     /// Has the player ever had anything here — a ship, a station, a claim?
     ///
     /// The system-level fog of war turns on this: until it is true the only thing drawn is the star,

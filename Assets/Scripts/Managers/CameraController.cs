@@ -313,12 +313,21 @@ public class CameraController : MonoBehaviour
                      || (StartMenu.Instance != null && StartMenu.Instance.IsOpen);
         bool planetViewOpen = PlanetViewWindow.Instance != null && PlanetViewWindow.Instance.IsOpen;
 
-        // WASD pans the world camera whenever the keys aren't wanted elsewhere: not while the pause menu is
-        // open, not while actively FOLLOWING a body (the camera is locked to it — press F again or click
-        // away to release), and not while the full-screen Planet View is up (it has its own map). Selecting
-        // a planet no longer blocks panning — the old mini-map tile cursor that used to claim WASD is gone,
+        // WASD pans the world camera whenever the keys aren't wanted elsewhere: not while the pause menu
+        // is open, and not while the full-screen Planet View is up (it has its own map). Selecting a
+        // planet does not block panning — the old mini-map tile cursor that used to claim WASD is gone,
         // so a selected planet pans just like a selected star.
-        bool canPan = !following && !menuOpen && !planetViewOpen;
+        //
+        // FOLLOWING NO LONGER BLOCKS IT EITHER, and that is the point. This used to read
+        // `!following && ...` on the reasoning that the camera is locked to the body and you release it
+        // with F or by clicking away. But HandlePanning's first act is to release the follow, so the gate
+        // was preventing the very code written to handle this case from ever running: a player watching a
+        // world and pressing W got nothing at all, with no hint that some other key was the way out.
+        //
+        // Pressing a direction IS the player asking for the camera, and it is answered by handing it to
+        // them and moving that way in the same frame. ClearFocus carries the zoom over rather than the
+        // camera's world height (see EndFollowRebase), so the view does not lurch on the way out.
+        bool canPan = !menuOpen && !planetViewOpen;
         if (canPan) HandlePanning();
 
         // Rotation is allowed even while following a body — spinning around what you are watching is the

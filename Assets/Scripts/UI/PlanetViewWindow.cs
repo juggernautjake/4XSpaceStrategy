@@ -189,6 +189,11 @@ public class PlanetViewWindow : MonoBehaviour
     readonly Dictionary<CelestialBody, RectTransform> moonFrame = new Dictionary<CelestialBody, RectTransform>();
     readonly Dictionary<CelestialBody, RawImage> moonImg = new Dictionary<CelestialBody, RawImage>();
     readonly Dictionary<CelestialBody, Texture2D> moonTex = new Dictionary<CelestialBody, Texture2D>();
+
+    // A moon is surveyed exactly as a planet is, so its pane needs the same blackout. Its own layer and
+    // its own texture per moon, because each moon has its own grid and its own survey progress.
+    readonly Dictionary<CelestialBody, RawImage> moonFog = new Dictionary<CelestialBody, RawImage>();
+    readonly Dictionary<CelestialBody, Texture2D> moonFogTex = new Dictionary<CelestialBody, Texture2D>();
     readonly Dictionary<CelestialBody, float> moonTilePx = new Dictionary<CelestialBody, float>();   // px/cell, like the host's tilePx
     readonly Dictionary<CelestialBody, Vector2> moonPan = new Dictionary<CelestialBody, Vector2>();
 
@@ -4471,6 +4476,13 @@ public class PlanetViewWindow : MonoBehaviour
         var reveal = Survey.RevealOf(body, kind);
         int maxBand = reveal.complete ? steps - 1 : Mathf.Min(reveal.pass, steps - 1);
 
+        // The sweep head, same as the level-1 blackout has. Without it a level-2 pass is a picture that
+        // quietly fills in, and the player cannot tell whether anything is happening or where — which is
+        // the whole reason the survey is drawn while it runs rather than reported when it ends.
+        var activeMark = new Color32(240, 246, 255, 150);
+        int deepShips = Mathf.Max(1, Survey.ShipsOn(body, true));
+        bool sweeping = !reveal.complete && reveal.started;
+
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
@@ -4493,6 +4505,14 @@ public class PlanetViewWindow : MonoBehaviour
                 step[i] = band;
                 fill[i] = SurfaceIndex.Highlight(kind, t);
                 edgeOf[i] = SurfaceIndex.Outline(kind, t);
+
+                // Under the sweep head, the cell is drawn white instead of its band colour — it is being
+                // read right now, and what it is worth is not settled until the head has passed.
+                if (sweeping && Survey.BeingSurveyed(body, x, y, reveal.frac, deepShips))
+                {
+                    fill[i] = activeMark;
+                    edgeOf[i] = activeMark;
+                }
 
                 // NAMED ORE DEPOSITS, on the mineral map only, and the one thing here that is a find
                 // rather than a field: drawn in the ore's own colour at near-full strength so a seam
@@ -4746,18 +4766,17 @@ public class PlanetViewWindow : MonoBehaviour
     /// uncovered cell is the terrain at full vibrance with no tint over it at all.
     const byte FogAlpha = 255;
 
-    void RefreshSurveyFog()
+    /// Does this world's map need blacking out at all?
+    static bool WantsFog(CelestialBody b) =>
+        b?.surface != null && !GameMode.DevMode && !b.Surveyed;
+
+    /// Paint one world's blackout into `tex`, creating or resizing it as needed. Returns the texture.
+    ///
+    /// Shared by the host map and every moon pane, because a moon is surveyed exactly as a planet is and
+    /// two implementations of "which cells are still dark" is two places for them to disagree.
+    Texture2D BuildFogTexture(CelestialBody b, Texture2D tex)
     {
-        bool want = body?.surface != null && !GameMode.DevMode && !body.Surveyed;
-        if (surveyFogImage == null) return;
-
-        if (!want)
-        {
-            if (surveyFogImage.gameObject.activeSelf) surveyFogImage.gameObject.SetActive(false);
-            return;
-        }
-
-        int w = body.surface.width, h = body.surface.height;
+        int w = b.surface.width, h = b.surface.height;
         if (surveyFogPx == null || surveyFogPx.Length != w * h) surveyFogPx = new Color32[w * h];
 
         var covered = new Color32(3, 4, 7, FogAlpha);
@@ -4768,27 +4787,66 @@ public class PlanetViewWindow : MonoBehaviour
         // the covered ground, which is what a survey sweep should look like.
         var active = new Color32(235, 242, 255, 96);
 
-        float p = Mathf.Clamp01(body.explorationProgress);
-        int ships = Mathf.Max(1, Survey.ShipsOn(body, false));
+        float p = Mathf.Clamp01(b.explorationProgress);
+        int ships = Mathf.Max(1, Survey.ShipsOn(b, false));
 
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
                 surveyFogPx[y * w + x] =
-                    Survey.Reached(body, x, y, p) ? clear
-                    : Survey.BeingSurveyed(body, x, y, p, ships) ? active
+                    Survey.Reached(b, x, y, p) ? clear
+                    : Survey.BeingSurveyed(b, x, y, p, ships) ? active
                     : covered;
 
-        if (surveyFogTex == null || surveyFogTex.width != w || surveyFogTex.height != h)
+        if (tex == null || tex.width != w || tex.height != h)
         {
-            if (surveyFogTex != null) Destroy(surveyFogTex);
-            surveyFogTex = new Texture2D(w, h, TextureFormat.RGBA32, false)
+            if (tex != null) Destroy(tex);
+            tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
             { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
         }
 
-        surveyFogTex.SetPixels32(surveyFogPx);
-        surveyFogTex.Apply();
-        surveyFogImage.texture = surveyFogTex;
-        if (!surveyFogImage.gameObject.activeSelf) surveyFogImage.gameObject.SetActive(true);
+        tex.SetPixels32(surveyFogPx);
+        tex.Apply();
+        return tex;
+    }
+
+    void RefreshSurveyFog()
+    {
+        // ---- The host map ----
+        if (surveyFogImage != null)
+        {
+            bool want = WantsFog(body);
+            if (!want)
+            {
+                if (surveyFogImage.gameObject.activeSelf) surveyFogImage.gameObject.SetActive(false);
+            }
+            else
+            {
+                surveyFogTex = BuildFogTexture(body, surveyFogTex);
+                surveyFogImage.texture = surveyFogTex;
+                if (!surveyFogImage.gameObject.activeSelf) surveyFogImage.gameObject.SetActive(true);
+            }
+        }
+
+        // ---- And every open moon pane, on its own progress ----
+        foreach (var kv in moonFog)
+        {
+            var m = kv.Key;
+            var img = kv.Value;
+            if (img == null) continue;
+
+            bool want = WantsFog(m);
+            if (!want)
+            {
+                if (img.gameObject.activeSelf) img.gameObject.SetActive(false);
+                continue;
+            }
+
+            moonFogTex.TryGetValue(m, out var mtex);
+            mtex = BuildFogTexture(m, mtex);
+            moonFogTex[m] = mtex;
+            img.texture = mtex;
+            if (!img.gameObject.activeSelf) img.gameObject.SetActive(true);
+        }
     }
 
     /// Texels per tile for the power overlay. See the rim note in RefreshPowerOverlay for why this is
@@ -7264,7 +7322,11 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 if (moonFrame.TryGetValue(m, out var f) && f != null) Destroy(f.gameObject);
                 if (moonTex.TryGetValue(m, out var t) && t != null) Destroy(t);
+                // Same reasoning as ClearMoonPanes: the fog image dies with the frame, its texture does
+                // not belong to a GameObject and has to go by hand or it leaks per closed tab.
+                if (moonFogTex.TryGetValue(m, out var ft) && ft != null) Destroy(ft);
                 moonFrame.Remove(m); moonImg.Remove(m); moonTex.Remove(m);
+                moonFog.Remove(m); moonFogTex.Remove(m);
             }
 
         foreach (var m in openMaps)
@@ -7296,7 +7358,21 @@ public class PlanetViewWindow : MonoBehaviour
             crt.pivot = new Vector2(0.5f, 0.5f);
             crt.anchoredPosition = Vector2.zero;
 
-            moonFrame[m] = frame; moonImg[m] = img; moonTex[m] = tex;
+            // ---- THE SAME BLACKOUT THE HOST GETS ----
+            //
+            // A moon is surveyed exactly as a planet is, so an unsurveyed moon has to be exactly as
+            // blank. Without its own mask layer a moon pane sat there showing every coastline of a world
+            // nobody had been to, beside a host planet correctly blacked out — and the pane is the same
+            // scrollable map, so it gave away everything the host's mask was protecting.
+            //
+            // A child of the map image, stretched over it, so it pans and zooms with the terrain for free.
+            var fogGO = UIFactory.NewUI(crt, "MoonFog");
+            var mfog = fogGO.AddComponent<RawImage>();
+            UIFactory.Stretch(mfog.rectTransform);
+            mfog.raycastTarget = false;
+            fogGO.SetActive(false);
+
+            moonFrame[m] = frame; moonImg[m] = img; moonTex[m] = tex; moonFog[m] = mfog;
         }
     }
 
@@ -7304,7 +7380,11 @@ public class PlanetViewWindow : MonoBehaviour
     {
         foreach (var kv in moonFrame) if (kv.Value != null) Destroy(kv.Value.gameObject);
         foreach (var kv in moonTex) if (kv.Value != null) Destroy(kv.Value);
+        // The fog IMAGE is a child of the frame and dies with it; its TEXTURE is not owned by any
+        // GameObject and leaks one per moon per world change if it is not destroyed here by hand.
+        foreach (var kv in moonFogTex) if (kv.Value != null) Destroy(kv.Value);
         moonFrame.Clear(); moonImg.Clear(); moonTex.Clear();
+        moonFog.Clear(); moonFogTex.Clear();
     }
 
     // Fit a moon map inside its fixed frame and apply its own zoom (px per cell), clipped by the frame's

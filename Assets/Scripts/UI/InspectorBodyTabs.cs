@@ -16,13 +16,41 @@ public partial class InspectorWindow
 {
     void CollectBodyTabs()
     {
+        // ============================================================================================
+        // WHAT A WORLD WILL TELL YOU, AND WHEN
+        //
+        // Three gates, in the order the player crosses them:
+        //
+        //   nothing        — a black sphere with a name and an orbit. Overview only, and most of that
+        //                    reads Unknown. Every other tab is greyed: they exist, they are about this
+        //                    world, and none of them has anything true to say yet.
+        //   in the system  — a ship crossed the detection threshold. The world has a TYPE and a face,
+        //                    and Orbit opens: what is in orbit around it is a thing you can see from
+        //                    across a solar system.
+        //   survey level 1 — the ground is mapped. Climate and Terraform open, because both are about
+        //                    the surface and neither has an answer before there is one.
+        //
+        // GREYED, not hidden. A tab that vanishes teaches nothing and makes the window change shape as
+        // the player explores; a greyed one shows the road and names the missing step when clicked.
+        // ============================================================================================
         tabs.Add(new InspectorTab("Overview", BuildBodyOverview));
-        tabs.Add(new InspectorTab("Climate", BuildBodyClimate));
+
+        tabs.Add(new InspectorTab("Climate", BuildBodyClimate, null,
+            () => target.body != null && target.body.Surveyed,
+            () => "Survey this world first — its climate is read off the surface map."));
+
         tabs.Add(new InspectorTab("Ores", BuildBodyOres, () => target.body != null && target.body.Surveyed));
         tabs.Add(new InspectorTab("Society", BuildBodySociety, () => target.body != null && target.body.owner == FactionManager.Player));
         tabs.Add(new InspectorTab("Production", BuildBodyProduction, () => target.body != null && target.body.owner == FactionManager.Player));
-        tabs.Add(new InspectorTab("Orbit", BuildBodyObjects));
-        tabs.Add(new InspectorTab("Terraform", BuildBodyTerraform, () => target.body != null && target.body.type != CelestialBodyType.GasGiant));
+
+        tabs.Add(new InspectorTab("Orbit", BuildBodyObjects, null,
+            () => target.body != null && SystemPresence.Revealed(target.body),
+            () => "Send a ship into this system — you cannot see what is in orbit from outside it."));
+
+        tabs.Add(new InspectorTab("Terraform", BuildBodyTerraform,
+            () => target.body != null && target.body.type != CelestialBodyType.GasGiant,
+            () => target.body != null && target.body.Surveyed,
+            () => "Survey this world first — there is nothing to plan against until its surface is mapped."));
     }
 
     // ---------------- Overview ----------------
@@ -70,12 +98,20 @@ public partial class InspectorWindow
         // Atmospheres sits with type: it is the same kind of observation, made with the same telescope.
         bool seen = SystemPresence.Revealed(b);
 
+        // TYPE is the one thing a telescope gives you. That a world is frozen, or an ocean, or a gas
+        // giant is legible from across a solar system the moment there is something in it to look with.
         Stat(card, "Type", () => seen ? TerraformDiagnosis.Pretty(b) : "<color=#7E8B9C>Unknown</color>");
-        Stat(card, "Atmospheres", () => seen
+
+        // EVERYTHING ELSE IS A MEASUREMENT, and a measurement needs a ship on station. Air pressure, who
+        // holds the ground, whether anyone is living on it — none of these are readable from a
+        // silhouette, and showing them the moment a scout crosses the system boundary would make the
+        // level-1 survey a formality rather than the thing that buys the world's numbers.
+        Stat(card, "Atmospheres", () => b.Surveyed
             ? $"{b.atmospheres:0.#} <size=10><color=#9FB4C8>({AtmosphereRules.Describe(b)})</color></size>"
-            : "<color=#7E8B9C>Unknown</color>");
+            : "<color=#7E8B9C>Not surveyed</color>");
         Stat(card, "Owner", () =>
         {
+            if (!b.Surveyed) return "<color=#7E8B9C>Not surveyed</color>";
             string hex = "#" + ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(b.owner));
             return $"<color={hex}>{FactionManager.OwnerLabel(b.owner)}</color>";
         });
@@ -90,6 +126,7 @@ public partial class InspectorWindow
         // mid-game, so it's stated rather than left to be inferred from whether a city happens to exist.
         Stat(card, "Status", () =>
         {
+            if (!b.Surveyed) return "<color=#7E8B9C>Not surveyed</color>";
             var st = Claim.StageOf(b);
             string hex = "#" + ColorUtility.ToHtmlStringRGB(Claim.StageColor(st));
             string note = st == WorldStage.Claimed

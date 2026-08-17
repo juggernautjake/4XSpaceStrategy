@@ -207,9 +207,46 @@ public partial class InspectorWindow
                 () => DevReset.FitOrbitsToStar(target.system.bodies, target.star), 26);
         }
 
+        // Dev-Mode: where this system stops being a row of black spheres.
+        if (GameMode.DevMode && target.system != null)
+            BuildDetectionEditor(p, target.system);
+
         // Dev-Mode star editor: size / mass / density (interconnected) and the star's light.
         if (GameMode.DevMode && s != null && !s.isBlackHole)
             BuildStarEditor(p, s);
+    }
+
+    // ============================================================================================
+    // THE DETECTION THRESHOLD — DEV MODE ONLY
+    //
+    // The radius a player ship has to cross before this system identifies itself (SystemPresence). It is
+    // drawn as an amber ring around the system while Dev Mode is on, and this is the handle on it.
+    //
+    // A slider rather than a number field because the question it answers is visual — "does that circle
+    // sit far enough outside the last planet" — and the ring redraws live as it moves, so the answer is
+    // on screen rather than in arithmetic.
+    //
+    // Writing to `detectionRadiusOverride` rather than to the derived value, so Reset means something:
+    // clearing the override hands the system back to the rule that puts the ring a margin beyond its
+    // outermost orbit, whatever that orbit becomes later.
+    // ============================================================================================
+    void BuildDetectionEditor(Transform p, StarSystemData sys)
+    {
+        Header(p, "DETECTION THRESHOLD (DEV)");
+        var card = Card(p);
+        Note(card, "How close one of your ships has to come before this system stops being black spheres. " +
+                   "Shown as the amber ring while Dev Mode is on.");
+
+        float natural = SystemPresence.NaturalDetectionRadius(sys);
+        float current = SystemPresence.DetectionRadius(sys);
+
+        // The range is anchored on what this system would choose for itself, so the slider is useful on a
+        // tight red dwarf and on a system whose outermost world orbits ten times further out.
+        UIFactory.LabeledSlider(card, "Radius", natural * 0.25f, natural * 3f, current,
+            v => sys.detectionRadiusOverride = v, "F0");
+
+        Stat(card, "Default for this system", () => $"{natural:F0}");
+        UIFactory.Button(card, "Reset to default", () => { sys.detectionRadiusOverride = 0f; Rebuild(); }, 24);
     }
 
     // ===== System-wide orbit ring visibility =====

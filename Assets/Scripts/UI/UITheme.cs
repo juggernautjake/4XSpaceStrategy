@@ -20,6 +20,10 @@ public static class UITheme
     public static readonly Color Text        = new Color(0.88f, 0.94f, 1.00f, 1.00f);
     public static readonly Color SubText     = new Color(0.58f, 0.70f, 0.84f, 1.00f);
 
+    /// A control that exists, is about this subject, and is not available YET. Deliberately a step
+    /// dimmer and flatter than SubText: "not the tab you are on" and "not unlocked" must not look alike.
+    public static readonly Color Disabled    = new Color(0.36f, 0.42f, 0.50f, 1.00f);
+
     public static readonly Color ButtonBg    = new Color(0.12f, 0.20f, 0.30f, 1.00f);
     public static readonly Color ButtonHover = new Color(0.19f, 0.33f, 0.47f, 1.00f);
     public static readonly Color ButtonActive= new Color(0.26f, 0.50f, 0.70f, 1.00f);

@@ -76,6 +76,10 @@ public class SystemVisualizer : MonoBehaviour
         for (int i = 0; i < galaxy.systems.Count; i++)
         {
             RenderSystem(galaxy.systems[i]);
+            // The Dev-only detection ring. Built here so it exists for every system whether or not Dev
+            // Mode is on right now — it hides itself, and building it lazily on the first toggle would
+            // mean the toggle had to know how to walk the galaxy.
+            DetectionRingVisual.Ensure(galaxy.systems[i]);
             report?.Invoke(0.55f * (i + 1) / galaxy.systems.Count, $"Placing {galaxy.systems[i].name}");
             yield return null;
         }

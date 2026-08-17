@@ -63,8 +63,27 @@ public class InspectorTab
     public Action<Transform> build;
     public Func<bool> visible;   // null = always shown
 
-    public InspectorTab(string title, Action<Transform> build, Func<bool> visible = null)
-    { this.title = title; this.build = build; this.visible = visible; }
+    // ---- SHOWN BUT DEAD, which is a different statement from ABSENT ----
+    //
+    // `visible` removes a tab that has nothing to do with this subject at all — a Production tab on a
+    // world you do not own is not a locked feature, it is not a feature. `enabled` is for a tab that IS
+    // about this subject and is not available YET: Climate on a world nobody has surveyed. Hiding those
+    // teaches the player nothing and makes the window's shape change as they explore; greying them out
+    // shows the road ahead and says which step is missing.
+    //
+    // `lockNote` is what the greyed tab says when clicked. A dead control that will not explain itself
+    // is the thing this whole gating pass exists to avoid.
+    public Func<bool> enabled;   // null = always usable
+    public Func<string> lockNote;
+
+    public InspectorTab(string title, Action<Transform> build, Func<bool> visible = null,
+                        Func<bool> enabled = null, Func<string> lockNote = null)
+    {
+        this.title = title; this.build = build; this.visible = visible;
+        this.enabled = enabled; this.lockNote = lockNote;
+    }
+
+    public bool IsEnabled => enabled == null || enabled();
 }
 
 // ============================================================================================
@@ -380,6 +399,16 @@ public partial class InspectorWindow : MonoBehaviour
         if (shown.Count == 0) return;
         activeTab = Mathf.Clamp(activeTab, 0, shown.Count - 1);
 
+        // ...and it can also become LOCKED between rebuilds — the player is reading Climate on a
+        // surveyed world and clicks an unsurveyed one, and the window would otherwise build the content
+        // of a tab whose whole point is that there is nothing to build yet. Fall back to the first tab
+        // that is actually usable, which is Overview in every case that exists today.
+        if (!shown[activeTab].IsEnabled)
+        {
+            activeTab = 0;
+            for (int i = 0; i < shown.Count; i++) if (shown[i].IsEnabled) { activeTab = i; break; }
+        }
+
         BuildTabStrip(shown);
         shown[activeTab].build(content);
     }
@@ -470,7 +499,23 @@ public partial class InspectorWindow : MonoBehaviour
         {
             int idx = i;
             bool active = i == activeTab;
-            var btn = UIFactory.Button(tabStrip, shown[i].title, () => { activeTab = idx; lastSig = null; }, 22);
+            var tab = shown[i];
+            bool on = tab.IsEnabled;
+
+            // A locked tab still takes the click — it just answers with the reason instead of switching.
+            // Left genuinely non-interactable it would swallow the click silently, and a control that
+            // does nothing and says nothing is the worst of the three options.
+            var btn = UIFactory.Button(tabStrip, tab.title, () =>
+            {
+                if (!on)
+                {
+                    string why = tab.lockNote != null ? tab.lockNote() : null;
+                    if (!string.IsNullOrEmpty(why))
+                        NotificationManager.Instance?.Push($"{tab.title} unavailable", why, null, NotifKind.Info);
+                    return;
+                }
+                activeTab = idx; lastSig = null;
+            }, 22);
 
             // The active tab is the one place a persistent highlight is correct: it's state, not hover.
             var colors = btn.colors;
@@ -483,7 +528,11 @@ public partial class InspectorWindow : MonoBehaviour
             if (label != null)
             {
                 label.fontSize = UITheme.SmallSize;
-                label.color = active ? Color.white : UITheme.SubText;
+                // Three states, not two: active, available, and locked. The locked one is dimmer than
+                // merely inactive, so "not this tab" and "not yet" do not look the same.
+                label.color = !on ? UITheme.Disabled
+                            : active ? Color.white
+                            : UITheme.SubText;
             }
         }
     }

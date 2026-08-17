@@ -55,6 +55,52 @@ public static class SystemPresence
         return result;
     }
 
+    // ============================================================================================
+    // THE DETECTION THRESHOLD — a circle you cross, not a place you land
+    //
+    // A system gives itself up when a ship gets close enough to look at it properly, which is a
+    // DISTANCE, not an arrival. Sitting a scout a hair outside the outermost orbit and learning nothing
+    // is the wrong answer; so is having to fly all the way to a planet before the system stops being a
+    // row of black spheres.
+    //
+    // So the radius sits a margin beyond the furthest world's orbit: cross it and everything inside is
+    // identified. That also makes the reveal happen while the ship is still MOVING, which is when the
+    // player is looking at it.
+    // ============================================================================================
+
+    /// A margin past the outermost orbit, so the threshold is comfortably outside the system rather
+    /// than sitting on top of its last planet.
+    const float DetectionMargin = 1.25f;
+
+    /// A floor, for a system whose worlds all huddle close to their star — and for one with no bodies
+    /// at all, where the radius would otherwise be zero and could never be crossed.
+    const float DetectionMinRadius = 12f;
+
+    /// How close a ship must come to identify what is in this system.
+    public static float DetectionRadius(StarSystemData sys)
+    {
+        if (sys == null) return 0f;
+        if (sys.detectionRadiusOverride > 0f) return sys.detectionRadiusOverride;
+
+        float far = 0f;
+        if (sys.bodies != null)
+            foreach (var b in sys.bodies)
+                if (b != null) far = Mathf.Max(far, b.orbitRadius);
+
+        return Mathf.Max(DetectionMinRadius, far * DetectionMargin);
+    }
+
+    /// The default, ignoring any Dev override — what the slider resets to.
+    public static float NaturalDetectionRadius(StarSystemData sys)
+    {
+        if (sys == null) return DetectionMinRadius;
+        float far = 0f;
+        if (sys.bodies != null)
+            foreach (var b in sys.bodies)
+                if (b != null) far = Mathf.Max(far, b.orbitRadius);
+        return Mathf.Max(DetectionMinRadius, far * DetectionMargin);
+    }
+
     static bool Scan(StarSystemData sys)
     {
         if (sys.owner == FactionManager.Player) return true;
@@ -66,6 +112,22 @@ public static class SystemPresence
             if (b.units != null)
                 foreach (var u in b.units)
                     if (u != null && u.owner == FactionManager.Player) return true;
+        }
+
+        // ...and anything of the player's that has crossed the threshold without having arrived at a
+        // body yet: a ship in transit, or one parked in open space inside the system.
+        var um = UnitManager.Instance;
+        if (um != null && sys.pivot != null)
+        {
+            float r = DetectionRadius(sys);
+            float r2 = r * r;
+            Vector3 centre = sys.pivot.position;
+            foreach (var u in um.Units)
+            {
+                if (u == null || u.owner != FactionManager.Player) continue;
+                if (u.location != null) continue;              // already counted above
+                if ((um.UnitPos(u) - centre).sqrMagnitude <= r2) return true;
+            }
         }
         return false;
     }

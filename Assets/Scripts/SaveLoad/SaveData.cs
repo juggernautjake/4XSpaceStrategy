@@ -152,6 +152,11 @@ public class SystemDTO
     /// anything here, so a system they are already standing in comes back known on the first frame.
     public bool visited;
 
+    /// A Dev-tuned detection radius, or 0 for "use the rule". Saved because somebody dragged it on
+    /// purpose and a value set by hand should outlive the session that set it; a generated system never
+    /// writes anything but 0 here.
+    public float detectionRadiusOverride;
+
     // Concealment (see Visibility.cs): 0 = visible, 1 = Dev, 2 = Cloaked, 3 = Undiscovered. Held as an
     // int because JsonUtility serializes enums as ints anyway and an int is what an older save missing
     // this field deserializes to — 0, i.e. visible, which is the correct reading of a save written

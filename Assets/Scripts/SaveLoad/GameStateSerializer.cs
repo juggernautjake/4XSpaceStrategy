@@ -97,6 +97,7 @@ public static class GameStateSerializer
             ownerId = sys.owner != null ? sys.owner.id : -1,
             isHome = sys.isHome,
             visited = sys.visited,
+            detectionRadiusOverride = sys.detectionRadiusOverride,
             hideReason = Persist(sys.hideReason)
         };
         foreach (var s in sys.stars) sd.starTypes.Add((int)s.type);
@@ -295,6 +296,7 @@ public static class GameStateSerializer
                 isBlackHole = sd.isBlackHole,
                 isHome = sd.isHome,
                 visited = sd.visited,
+                detectionRadiusOverride = sd.detectionRadiusOverride,
                 owner = sd.ownerId >= 0 ? FactionManager.Get(sd.ownerId) : null,
                 hideReason = Restore(sd.hideReason)
             };
