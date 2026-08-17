@@ -40,9 +40,19 @@ public class BodyFog : MonoBehaviour
         ApplyFog();
     }
 
-    void ApplyFog()
+    /// Strip a sphere down to an unidentified silhouette.
+    ///
+    /// STATIC AND SHARED, because there are two places a world is drawn: out in the system, and on the
+    /// Inspector's globe. The globe used to apply the real appearance unconditionally, so a world the
+    /// player had never been near sat there in the Overview tab wearing its true surface while every
+    /// readout beside it said "Unknown" — the panel contradicting itself, and giving away exactly what
+    /// the fog exists to withhold. One definition of "featureless" means they cannot disagree.
+    public static void PaintSilhouette(GameObject go)
     {
+        if (go == null) return;
+        var rend = go.GetComponent<Renderer>();
         if (rend == null) return;
+
         var m = rend.material;
         m.mainTexture = null;
         if (m.HasProperty("_BaseMap")) m.SetTexture("_BaseMap", null);
@@ -55,9 +65,11 @@ public class BodyFog : MonoBehaviour
         m.color = c;
         if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
 
-        var atm = transform.Find("Atmosphere");
+        var atm = go.transform.Find("Atmosphere");
         if (atm != null) atm.gameObject.SetActive(false);
     }
+
+    void ApplyFog() => PaintSilhouette(gameObject);
 
     void Update()
     {

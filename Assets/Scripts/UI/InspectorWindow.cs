@@ -329,6 +329,19 @@ public partial class InspectorWindow : MonoBehaviour
         if (b != null)
         {
             sb.Append(b.id).Append('|').Append((int)b.type).Append('|').Append(b.Surveyed ? 1 : 0).Append('|');
+
+            // WHAT THE PLAYER IS ALLOWED TO KNOW IS PART OF THIS PANEL'S SHAPE.
+            //
+            // Half the Overview reads Unknown, several tabs are greyed, and the globe is a silhouette —
+            // all of it keyed on whether a ship has reached the system and how far a survey has got. None
+            // of that was in the signature, so a scout crossing the detection threshold with the window
+            // open changed nothing until something unrelated happened to force a rebuild.
+            //
+            // Survey progress is quantised rather than raw: this rebuilds the whole panel, and it must
+            // not do that every frame for the sake of the third decimal place of a progress bar.
+            sb.Append(SystemPresence.Revealed(b) ? 1 : 0).Append('|');
+            sb.Append(Mathf.FloorToInt(b.explorationProgress * 20f)).Append('|');
+            sb.Append(Mathf.FloorToInt(b.deepProgress * 20f)).Append('|');
             sb.Append(b.shipyardLevel).Append('|').Append(b.researchCenterLevel).Append('|').Append(b.cities).Append('|');
             sb.Append(b.owner != null ? b.owner.id : -1).Append('|');
             foreach (int id in b.buildings) sb.Append(id).Append(',');

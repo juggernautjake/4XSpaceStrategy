@@ -3410,14 +3410,21 @@ public class PlanetViewWindow : MonoBehaviour
     {
         Header("POINTS OF INTEREST");
 
-        var pois = body.pointsOfInterest;
-        if (pois == null || pois.Count == 0)
+        // Filtered to what this world has actually given up. Anomalies and rare seams are a level-2
+        // finding — see Survey.SiteRevealed, which the map markers use too, so the list and the map
+        // always name the same set.
+        var pois = new List<PointOfInterest>();
+        if (body.pointsOfInterest != null)
+            foreach (var poi in body.pointsOfInterest)
+                if (Survey.SiteRevealed(body, poi.type)) pois.Add(poi);
+
+        if (pois.Count == 0)
         {
             Note("Nothing of note found here. A deep survey by a research ship sometimes turns up what an orbital pass missed.");
             return;
         }
 
-        if (!body.deepSurveyed)
+        if (Survey.LevelOf(body) < 2)
             Note("<color=#FFBF4D>Orbital survey only.</color> Send a research ship to study this world on the ground — some sites can't be seen from orbit at all, and anomalies can't be identified from up there.");
 
         foreach (var poi in pois)
@@ -3541,6 +3548,11 @@ public class PlanetViewWindow : MonoBehaviour
 
         foreach (var poi in body.pointsOfInterest)
         {
+            // An anomaly or a rare seam is a READING, not a sighting — the level-2 pass finds those.
+            // See Survey.SiteRevealed, which is also what the Survey tab's list filters on, so the map
+            // and the list cannot disagree about what has been found.
+            if (!Survey.SiteRevealed(body, poi.type)) continue;
+
             // An UNIDENTIFIED anomaly is drawn faintly — you can see something is there, not what.
             // Keyed off `explored`, the same flag SiteTitle and SiteMark use, so the patch and the words
             // next to it can never disagree about how much is known.

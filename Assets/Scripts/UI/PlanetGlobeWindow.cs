@@ -211,6 +211,20 @@ public class PlanetGlobeWindow : MonoBehaviour
     void ApplyAppearance()
     {
         if (globe == null || body == null) return;
+
+        // A WORLD NOBODY HAS BEEN NEAR IS A BLACK SPHERE HERE TOO.
+        //
+        // This used to apply the real appearance unconditionally, which made the Inspector contradict
+        // itself: Type, Atmospheres, Owner and Status all reading "Unknown" beside a globe showing the
+        // world's actual continents. The fog is only worth having if every view of a body agrees about
+        // it, and this is one of the two places a body is drawn.
+        if (!SystemPresence.Revealed(body))
+        {
+            BodyFog.PaintSilhouette(globe.gameObject);
+            globe.localScale = Vector3.one * GlobeScale;
+            return;
+        }
+
         // Reuse the same appearance the system view uses, so the globe is the SAME planet rather than a
         // second interpretation of it — same surface texture, same material treatment, same atmosphere.
         PlanetAppearance.Apply(body, globe.gameObject);

@@ -287,19 +287,28 @@ public static class UnitDatabase
         _all[(int)UnitType.HyperRelay] = hyper;
 
         // ---- Survey speed (see UnitInfo.surveyRate) ----
-        // The progression that keeps exploration a tech ladder: every hull finishes a world in one order,
-        // but a purpose-built scout does it in a fraction of the time a colony ship takes squinting at it
-        // on the way past. Scouts lead, because that is their whole job.
-        Rate(UnitType.Scout, 1.60f);
-        Rate(UnitType.ScoutII, 2.10f);
-        Rate(UnitType.ScoutIII, 2.80f);
-        Rate(UnitType.Explorer, 2.40f);
-        Rate(UnitType.ResearchShip, 1.10f);
-        Rate(UnitType.ResearchShipII, 1.45f);
-        Rate(UnitType.ResearchShipIII, 1.90f);
-        Rate(UnitType.ScienceVessel, 2.20f);
-        Rate(UnitType.ColonyShip, 0.55f);      // it can look, but it isn't a survey ship
-        Rate(UnitType.Terraformer, 0.70f);
+        //
+        // THE SCIENCE LINE LEADS, AND THAT IS A REVERSAL. This used to read "scouts lead, because that is
+        // their whole job" — a scout mapped a world faster than a research ship did. That made sense when
+        // surveying was one number: the scout was the survey hull and the research ship was for the
+        // separate deep pass afterwards.
+        //
+        // It stopped making sense when the survey became two LEVELS of the same job. A research ship is
+        // the only hull that can reach level 2 at all, so having it also be the slower one at level 1
+        // meant the correct play was always to send a scout first and the science ship second — the
+        // specialist arriving to redo ground the cheap hull had already covered. Now the science line is
+        // fastest at both levels, and the scout's case is what it should be: cheap, early, fast to GET
+        // there, and enough on its own if all you need is the map.
+        Rate(UnitType.Scout, 1.00f);
+        Rate(UnitType.ScoutII, 1.30f);
+        Rate(UnitType.ScoutIII, 1.65f);
+        Rate(UnitType.Explorer, 1.50f);
+        Rate(UnitType.ResearchShip, 1.80f);
+        Rate(UnitType.ResearchShipII, 2.30f);
+        Rate(UnitType.ResearchShipIII, 2.85f);
+        Rate(UnitType.ScienceVessel, 3.20f);
+        Rate(UnitType.ColonyShip, 0.45f);      // it can look, but it isn't a survey ship
+        Rate(UnitType.Terraformer, 0.60f);
     }
 
     static void Rate(UnitType t, float r) { if (_all[(int)t] != null) _all[(int)t].surveyRate = r; }

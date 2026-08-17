@@ -84,9 +84,19 @@ public static class Survey
         return ReferenceCells * Mathf.Pow(cells / ReferenceCells, SizeExponent);
     }
 
-    /// A level-2 pass is quicker per cell than mapping the ground — the ship is already in orbit with
-    /// the terrain in hand, and it is reading one field rather than charting a coastline.
-    public const float DeepSecondsPerCellScale = 0.55f;
+    /// How a level-2 pass is priced against a level-1 one, per cell.
+    ///
+    /// It was 0.55 — cheaper, on the reasoning that the ship is already in orbit with the terrain in
+    /// hand and is reading one field rather than charting a coastline. True per pass, and the wrong
+    /// number overall once the research hulls became the FAST ones at level 1 too: their higher rate and
+    /// the crew-quality multiplier compounded, and the whole six-index deep survey collapsed to between
+    /// twelve seconds and two minutes. That is not the long second look it is described as anywhere else
+    /// in the game.
+    ///
+    /// At 1.6 the deep survey runs about 35 seconds for the best hull on a small moon and six minutes
+    /// for a basic research ship on a 400x200 world, with level 1 unchanged at 4-56 seconds. The per-PASS
+    /// reasoning survives in the pass weights, where each band costs half the one before it.
+    public const float DeepSecondsPerCellScale = 1.6f;
 
     /// The technology hook. Survey speed is meant to improve as the empire does, and this is the one
     /// place that decides by how much: every tier of Empire Tech takes a slice off the per-cell time,
@@ -375,6 +385,25 @@ public static class Survey
         int n = 0;
         foreach (var u in b.units) if (u != null && u.status == want) n++;
         return n;
+    }
+
+    /// Which surface sites a world will admit to at the level it has been read to.
+    ///
+    /// A level-1 survey is a MAP: it charts the things you can see by looking — ruins standing on the
+    /// surface, a settlement, the shape of the ground. What it cannot do is tell you that a patch of
+    /// rock is an anomaly, or that a seam is an exceptional one rather than an ordinary one; both of
+    /// those are a reading rather than a sighting, and readings are what the level-2 pass buys.
+    ///
+    /// That also gives the deep survey something to find. Before this, one orbital pass handed over
+    /// every site on the world and the six index overlays were the only thing left to earn.
+    public static bool SiteRevealed(CelestialBody b, POIType type)
+    {
+        if (b == null) return false;
+        if (GameMode.DevMode || b.owner == FactionManager.Player) return true;
+        if (!b.Surveyed) return false;
+
+        if (type == POIType.Mystery || type == POIType.SpecialResource) return LevelOf(b) >= 2;
+        return true;
     }
 
     /// May the player open this world's Surface View at all?
