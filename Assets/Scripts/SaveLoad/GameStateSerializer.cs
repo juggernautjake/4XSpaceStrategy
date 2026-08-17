@@ -202,7 +202,6 @@ public static class GameStateSerializer
             visited = b.visited, explorationProgress = b.explorationProgress,
             claimProgress = b.claimProgress, researchProgress = b.researchProgress,
             deepProgress = b.deepProgress,
-            deepProgress = b.deepProgress,
             hideReason = Persist(b.hideReason), ringHideReason = Persist(b.ringHideReason)
         };
 
