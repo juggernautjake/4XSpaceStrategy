@@ -13,6 +13,7 @@ public static class GameStateSerializer
         var game = new SaveGame
         {
             saveName = saveName,
+            formatVersion = SaveGame.CurrentVersion,
             savedAtIso = System.DateTime.UtcNow.ToString("o"),
             speciesIndex = SpeciesManager.CurrentIndex,
             difficulty = (int)GameConfig.CurrentDifficulty,
@@ -198,6 +199,7 @@ public static class GameStateSerializer
             clueIndex = b.clueIndex, cityGrowthTimer = b.cityGrowthTimer,
             birthrightClaim = b.birthrightClaim, settled = b.settled,
             visited = b.visited, explorationProgress = b.explorationProgress,
+            claimProgress = b.claimProgress, researchProgress = b.researchProgress,
             hideReason = Persist(b.hideReason), ringHideReason = Persist(b.ringHideReason)
         };
 
@@ -205,7 +207,28 @@ public static class GameStateSerializer
             foreach (var kv in b.resources.resources)
                 dto.resources.Add(new ResourceDTO { type = (int)kv.Key, amount = kv.Value });
 
+        // The plate layout, so the overlay and the earthquakes come back as the geology that actually
+        // raised this world's mountains rather than as whatever the current algorithm derives.
+        var tec = TectonicsMap.Export(b);
+        if (tec != null) dto.tectonics = tec;
+
         if (b.surface != null)
+        {
+            // The biome of every cell, row-major from (0,0). This is the thing that makes a reload
+            // give back the world that was saved: a change to the terrain generator moves continents,
+            // and a colony's farms should not find themselves on a mountainside because the noise
+            // improved. See GridCodec for the packing, and SaveData for the reasoning.
+            var cells = new byte[b.surface.width * b.surface.height];
+            for (int y = 0; y < b.surface.height; y++)
+                for (int x = 0; x < b.surface.width; x++)
+                {
+                    var t = b.surface.tiles[x, y];
+                    cells[y * b.surface.width + x] = (byte)(t != null ? (int)t.type : 0);
+                }
+            dto.terrain = GridCodec.Encode(cells);
+            dto.terrainW = b.surface.width;
+            dto.terrainH = b.surface.height;
+
             for (int x = 0; x < b.surface.width; x++)
                 for (int y = 0; y < b.surface.height; y++)
                 {
@@ -213,6 +236,7 @@ public static class GameStateSerializer
                     if (t != null && t.HasOre)
                         dto.ores.Add(new OreCellDTO { x = x, y = y, ore = (int)t.ore, richness = t.oreRichness });
                 }
+        }
 
         foreach (var p in b.pointsOfInterest)
             dto.pois.Add(new POIDTO
@@ -232,6 +256,17 @@ public static class GameStateSerializer
     public static void Apply(SaveGame game)
     {
         if (game == null) return;
+
+        // Say it out loud rather than letting it be a mystery later. A save from before terrain and
+        // plates were stored can only have them REGENERATED, so if the generator has moved on since,
+        // that world's continents will not be the ones the player left — and the first sign of it
+        // would otherwise be a farm sitting on a mountain with nothing in the log to explain it.
+        // Saving the game again writes the current world out properly and settles it for good.
+        if (game.formatVersion < 1)
+            Debug.LogWarning($"Loading '{game.saveName}': save format {game.formatVersion}, current is " +
+                             $"{SaveGame.CurrentVersion}. Terrain and plate layouts are not stored in it " +
+                             "and will be regenerated, so they may differ from when it was saved. " +
+                             "Re-saving will store them.");
 
         GameConfig.CurrentDifficulty = (Difficulty)Mathf.Clamp(game.difficulty, 0, 2);
         if (!string.IsNullOrEmpty(game.factionName) && FactionManager.Player != null)
@@ -425,6 +460,12 @@ public static class GameStateSerializer
             hasTectonics = dto.hasTectonics,
             birthrightClaim = dto.birthrightClaim, settled = dto.settled,
             visited = dto.visited, explorationProgress = dto.explorationProgress,
+            // Work in progress, not a derived value. A save from before these were stored reads 0,
+            // which is what such a save effectively recorded — the reload used to zero them anyway.
+            // For a SETTLED world claimProgress is recomputed from the colony each tick, so restoring
+            // it there is harmless; for a colony ship part-way through a claim it is the only record.
+            claimProgress = Mathf.Clamp01(dto.claimProgress),
+            researchProgress = Mathf.Clamp01(dto.researchProgress),
             hideReason = Restore(dto.hideReason), ringHideReason = Restore(dto.ringHideReason)
         };
         // Saves written before `settled` existed have it false everywhere, which would silently
@@ -551,7 +592,42 @@ public static class GameStateSerializer
         b.naturalOrbitRadius = dto.naturalOrbitRadius > 0f ? dto.naturalOrbitRadius : b.orbitRadius;
         b.lastTerraformRenderHab = b.habitability;   // don't regenerate on the first tick after loading
 
+        // BEFORE the surface is baked, because the generator samples the plate belts while it raises
+        // mountains. Importing afterwards would leave the overlay describing a geology the ground was
+        // not built from. Returns false for a world with nothing stored — a save older than this, or
+        // one whose grid has since been resized — and that world builds its own layout as it always
+        // did.
+        //
+        // The explicit Invalidate on the failure path matters because the layout cache is keyed by
+        // body ID and outlives a game: loading twice in one session, the second load's body would
+        // otherwise inherit whatever the first load left under its id. Get's seed/size checks catch
+        // most of that, but clearing it is exact and costs nothing.
+        if (!TectonicsMap.Import(b, dto.tectonics)) TectonicsMap.Invalidate(b);
+
         b.surface = PlanetTerrainGenerator.GenerateSurface(b);
+
+        // ---- THE SAVED GROUND WINS ----
+        //
+        // The generator has just produced a surface from this world's seed and parameters, which is
+        // where `shade` and the elevation-derived overlays come from and is the whole surface for a
+        // save that predates this. But the BIOMES are restored from the save on top of it, because a
+        // save is a record of a world and not a recipe for one: without this, improving the terrain
+        // generator silently rewrites the ground under every colony in every existing game.
+        //
+        // Refused rather than stretched if the world's grid is no longer the size it was — see
+        // GridCodec.Decode — in which case the generated terrain stands and the world is at least
+        // internally consistent.
+        if (b.surface != null && dto.terrainW == b.surface.width && dto.terrainH == b.surface.height)
+        {
+            var cells = GridCodec.Decode(dto.terrain, b.surface.width * b.surface.height);
+            if (cells != null)
+                for (int y = 0; y < b.surface.height; y++)
+                    for (int x = 0; x < b.surface.width; x++)
+                    {
+                        var t = b.surface.tiles[x, y];
+                        if (t != null) t.type = (TerrainType)cells[y * b.surface.width + x];
+                    }
+        }
 
         // The surface regenerates from its seed, so its `occupied` flags come back cleared. Re-stamp
         // them from the structures that are standing — otherwise the grid would happily let you build

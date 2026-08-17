@@ -1,8 +1,37 @@
 using System.Collections.Generic;
 
 // Plain serializable DTOs for JsonUtility. No dictionaries / 2D arrays / polymorphism.
-// Terrain is NOT stored tile-by-tile: it regenerates deterministically from terrainSeed, so we only
-// persist the seed plus the randomly-placed ores and points of interest.
+//
+// ---- WHAT A SAVE IS FOR --------------------------------------------------------------------
+// Loading a save must give back the game that was saved. Not a game generated from the same seeds —
+// THE SAME GAME. Those two used to be the same thing and quietly stopped being it: terrain, plates
+// and everything downstream of them were re-derived on load from `terrainSeed`, so the day a
+// generation algorithm was improved, every existing save's continents moved. Buildings kept their
+// grid coordinates while the ground under them changed biome; the tectonic overlay stopped agreeing
+// with the mountains it had raised.
+//
+// So DERIVED STATE THE PLAYER CAN SEE IS NOW STORED, and the loader trusts the save over the
+// generator. That is `terrain` (the biome of every cell) and `tectonics` (the plate layout) below.
+// Both are compact — see GridCodec for why the terrain grid costs kilobytes rather than megabytes.
+//
+// The seeds are still stored and still used: for a body a save predates, for a world the Dev sandbox
+// rerolls, and for everything genuinely cosmetic and stable — per-tile shade, the survey index
+// overlays — which are pure functions of position and seed and have no memory to lose.
+//
+// A field added here must ALSO be readable when absent, because older saves exist. The convention
+// throughout is a sentinel the generator cannot produce (-1 for a value that is legally 0, an empty
+// string, an empty list) plus a fallback in GameStateSerializer that says what an old save meant.
+
+/// Just the fields the load menu shows. JsonUtility ignores everything else in the file, so listing
+/// a folder of saves no longer has to allocate three hundred BodyDTOs per save to read a date.
+[System.Serializable]
+public class SaveHeader
+{
+    public string saveName;
+    public string savedAtIso;
+    public string summary;
+    public int formatVersion;
+}
 
 [System.Serializable]
 public class SaveGame
@@ -10,6 +39,18 @@ public class SaveGame
     public string saveName;
     public string savedAtIso;
     public string summary;          // short human description for the load list
+
+    /// What this file is known to contain. Read it as "at least": a save at version N has every field
+    /// versions 1..N added. 0 means a save written before versioning, i.e. before terrain and plates
+    /// were stored — the loader regenerates those and says so.
+    ///
+    ///   1  terrain grids, tectonic layouts, ship travel/mission state, colony claim progress
+    ///
+    /// NO INITIALIZER, deliberately. JsonUtility leaves a field the JSON does not mention at whatever
+    /// the initializer set, so defaulting this to CurrentVersion would make every save ever written
+    /// claim to be current — which is precisely the question it exists to answer. Capture sets it.
+    public const int CurrentVersion = 1;
+    public int formatVersion;
     public int speciesIndex = 0;
     public int difficulty = 1;              // 0 easy, 1 medium, 2 hard
     public string factionName = "Your Empire";
@@ -221,6 +262,34 @@ public class BodyDTO
     public int hideReason;
     public int ringHideReason;
 
+    /// Colonisation and deep-research progress on this world, 0..1. Both were missing, and both are
+    /// real elapsed player time: a colony ship two thirds of the way through a claim, or a research
+    /// ship most of the way through a survey, had its work silently reset to zero by a reload.
+    public float claimProgress;
+    public float researchProgress;
+
+    // ---- The surface, as it actually is -------------------------------------------------------
+    //
+    // The biome of every cell, run-length encoded and base64'd by GridCodec, row-major from (0,0).
+    // Empty in a save written before this existed, and empty for a body with no surface — the loader
+    // falls back to generating one, which is what every save used to do.
+    //
+    // The DIMENSIONS travel with it. They are recomputed on load from the body's mass, and a stored
+    // grid whose size no longer matches is refused rather than stretched over the new one — see
+    // GridCodec.Decode.
+    //
+    // Only `type` is stored. A tile's `shade` is a pure function of position and seed with no history
+    // to lose, `occupied` is re-stamped from the buildings standing on it, and `ore` has always had
+    // its own list below.
+    public string terrain = "";
+    public int terrainW, terrainH;
+
+    /// The plate layout this world's geology was built from. Stored so the tectonic overlay, the
+    /// motion arrows and the earthquake belts come back as the ones that raised the mountains in
+    /// `terrain` above, rather than as whatever the current algorithm would derive from the seed.
+    /// Empty for a world without tectonics, and for a save written before this existed.
+    public TectonicsDTO tectonics = new TectonicsDTO();
+
     public List<ResourceDTO> resources = new List<ResourceDTO>();
     public List<OreCellDTO> ores = new List<OreCellDTO>();
     public List<POIDTO> pois = new List<POIDTO>();
@@ -231,6 +300,37 @@ public class BodyDTO
     // "Serialization depth limit 10 exceeded at 'BodyDTO.buildings'" on every single save and load.
     // A flat list with a parent id has no recursive type, so the limit is never reached.
     public int parentId = -1;
+}
+
+// ============================================================================================
+// A world's plate layout, flattened.
+//
+// Held as flat float lists rather than a list of little structs on purpose: JsonUtility writes a
+// nested serializable class as a full JSON object per element, so eighty cells would cost eighty
+// `{"x":..,"y":..,"z":..}` blocks where three flat numbers do. The stride is fixed and documented
+// per list, and TectonicsMap.Export/Import are the only two places that pack or unpack it.
+//
+// Everything here is geometry the layout cannot re-derive: where the Voronoi cells sit, which plate
+// each belongs to, how each plate is moving, and the two noise bases that bend and roughen the
+// margins. The band widths are stored too, because they are calibrated against the grid height and
+// a world whose size changed should not silently redraw its faults at a different thickness.
+// ============================================================================================
+[System.Serializable]
+public class TectonicsDTO
+{
+    public int plateCount;
+    public int heightTiles;                              // the grid this was calibrated against
+    public float faultTiles, beltTiles, minCos;
+
+    public List<float> cellSites = new List<float>();    // stride 3: x, y, z (unit vector)
+    public List<int> cellPlate = new List<int>();        // one per cell: which plate it belongs to
+    public List<float> plates = new List<float>();       // stride 7: site xyz, motion xyz, strength
+    public List<float> warp = new List<float>();         // stride 8: freq xyz, dir xyz, amp, phase
+    public List<float> edge = new List<float>();         // stride 5: freq xyz, amp, phase
+
+    /// A layout that actually describes something. An absent field deserializes to empty lists, which
+    /// is exactly what a save written before this existed, and a world with no tectonics, both mean.
+    public bool HasLayout => plateCount > 0 && cellSites.Count >= 3 && cellPlate.Count > 0;
 }
 
 [System.Serializable]
@@ -304,6 +404,34 @@ public class UnitDTO
     public bool queuePaused;
     public List<int> samples = new List<int>();
     public List<OrderDTO> orders = new List<OrderDTO>();
+
+    /// The ship's name. It used to be rebuilt on load as "<class> <id>", which is what a ship is
+    /// called when it rolls off the stocks — so a renamed ship lost its name, and any ship whose id
+    /// had been reused read as a different vessel.
+    public string name = "";
+
+    /// Service record. `experience` was saved and these two were not, so a veteran's battle count and
+    /// research contribution reset to zero every reload while its rank stayed.
+    public int battles;
+    public float researchContributed;
+
+    // ---- What the ship was in the middle of doing --------------------------------------------
+    //
+    // All of this was dropped: every unit loaded Idle, at its destination or its park position, with
+    // its timers cleared. A ship three quarters of the way across a system restarted the crossing; a
+    // research ship most of the way through a survey began again. The order queue was saved, so the
+    // work restarted rather than being lost outright — which made it look like a stutter rather than
+    // a bug, and is why it survived this long.
+    //
+    // `status` is the UnitStatus enum as an int. -1 means a save from before this existed, and the
+    // loader falls back to Idle, which is what those saves effectively recorded.
+    public int status = -1;
+    public int travelTargetId = -1;               // -1 = travelling to a point, or not travelling
+    public float travelElapsed, travelDuration;
+    public float fromX, fromY, fromZ;             // travelFrom
+    public float toX, toY, toZ;                   // travelTo
+    public float missionTimer;
+    public float researchTimer;
 }
 
 // One queued ship order.

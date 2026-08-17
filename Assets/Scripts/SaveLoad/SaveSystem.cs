@@ -34,7 +34,11 @@ public static class SaveSystem
     {
         try
         {
-            string json = JsonUtility.ToJson(game, true);
+            // COMPACT, not pretty-printed. JsonUtility's pretty printer puts every element of a list on
+            // its own indented line, and a save now carries terrain grids and flattened plate layouts —
+            // thousands of numbers per world. Pretty-printing roughly doubled the file and the time to
+            // parse it back, in exchange for readability a multi-megabyte file does not have anyway.
+            string json = JsonUtility.ToJson(game, false);
             File.WriteAllText(PathFor(game.saveName), json);
             Debug.Log($"Saved '{game.saveName}' -> {PathFor(game.saveName)}");
         }
@@ -66,14 +70,20 @@ public static class SaveSystem
     }
 
     // Lightweight listing for the load menu — reads each file's header fields.
-    public static List<SaveGame> ListSaves()
+    //
+    // Deserialized as SaveHeader, NOT as SaveGame. JsonUtility ignores fields the target type does not
+    // have, so this reads the same files while allocating four strings instead of the entire galaxy.
+    // That mattered the moment saves started carrying terrain grids: this runs once per file every
+    // time the menu opens, and building three hundred BodyDTOs per save to display a date is work
+    // nobody asked for.
+    public static List<SaveHeader> ListSaves()
     {
-        var result = new List<SaveGame>();
+        var result = new List<SaveHeader>();
         foreach (var file in Directory.GetFiles(Dir, "*.json"))
         {
             try
             {
-                var g = JsonUtility.FromJson<SaveGame>(File.ReadAllText(file));
+                var g = JsonUtility.FromJson<SaveHeader>(File.ReadAllText(file));
                 if (g != null)
                 {
                     if (string.IsNullOrEmpty(g.saveName))

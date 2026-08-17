@@ -1119,7 +1119,22 @@ public class UnitManager : MonoBehaviour
                 experience = u.experience,
                 worldsExplored = u.worldsExplored,
                 serviceTime = u.serviceTime,
-                queuePaused = u.queuePaused
+                queuePaused = u.queuePaused,
+
+                // The ship's own record and whatever it is in the middle of. All of this used to be
+                // dropped, so every fleet loaded idle at its destination with its timers cleared and
+                // its name rebuilt from its class and id.
+                name = u.name,
+                battles = u.battles,
+                researchContributed = u.researchContributed,
+                status = (int)u.status,
+                travelTargetId = u.travelTarget != null ? u.travelTarget.id : -1,
+                travelElapsed = u.travelElapsed,
+                travelDuration = u.travelDuration,
+                fromX = u.travelFrom.x, fromY = u.travelFrom.y, fromZ = u.travelFrom.z,
+                toX = u.travelTo.x, toY = u.travelTo.y, toZ = u.travelTo.z,
+                missionTimer = u.missionTimer,
+                researchTimer = u.researchTimer
             };
             if (u.location == null) { var p = UnitPos(u); d.inSpace = true; d.px = p.x; d.py = p.y; d.pz = p.z; }
             foreach (var s in u.samples) d.samples.Add(s);
@@ -1189,13 +1204,48 @@ public class UnitManager : MonoBehaviour
                     type = (UnitType)d.type,
                     owner = d.isPlayer ? FactionManager.Player : null,
                     location = at,
-                    status = UnitStatus.Idle,
                     experience = d.experience,
                     worldsExplored = d.worldsExplored,
                     serviceTime = d.serviceTime,
-                    queuePaused = d.queuePaused
+                    queuePaused = d.queuePaused,
+                    battles = d.battles,
+                    researchContributed = d.researchContributed,
+                    missionTimer = d.missionTimer,
+                    researchTimer = d.researchTimer
                 };
-                u.name = $"{UnitDatabase.Get(u.type).name} {u.id}";
+
+                // A save from before names were stored has an empty string here, and the name it would
+                // have had is the one the shipyard gives a hull of this class — which is what this line
+                // used to compute unconditionally, renaming every ship the player had renamed.
+                u.name = string.IsNullOrEmpty(d.name) ? $"{UnitDatabase.Get(u.type).name} {u.id}" : d.name;
+
+                // ---- Put it back mid-journey ----
+                //
+                // `status` is -1 in a save written before it was stored; Idle is what those saves
+                // effectively recorded, since that is what the loader used to assign to everything.
+                //
+                // A Traveling ship needs a duration for Travel() to run its clock against; without one
+                // `travelElapsed < travelDuration` is false on the first tick and it "arrives" instantly
+                // from wherever it was put down. So a crossing that cannot be described is dropped back
+                // to Idle, and the order queue — which has always been saved — sends the ship off again.
+                // That is exactly the old behaviour, so the fallback is the thing this used to do.
+                //
+                // A travelTargetId naming a body that is no longer there needs no special case: it
+                // leaves travelTarget null, and Travel() already treats a null target on arrival as a
+                // move to a point in space and holds position at travelTo.
+                u.status = d.status >= 0 ? (UnitStatus)d.status : UnitStatus.Idle;
+                if (d.travelTargetId >= 0 && byId != null) byId.TryGetValue(d.travelTargetId, out u.travelTarget);
+                u.travelElapsed = d.travelElapsed;
+                u.travelDuration = d.travelDuration;
+                u.travelFrom = new Vector3(d.fromX, d.fromY, d.fromZ);
+                u.travelTo = new Vector3(d.toX, d.toY, d.toZ);
+                if (u.status == UnitStatus.Traveling && u.travelDuration <= 0f)
+                {
+                    u.status = UnitStatus.Idle;
+                    u.travelTarget = null;
+                    u.travelElapsed = u.travelDuration = 0f;
+                }
+
                 if (at == null && d.inSpace) { u.inSpace = true; u.parkPosition = new Vector3(d.px, d.py, d.pz); }
                 if (d.samples != null) foreach (var s in d.samples) u.samples.Add(s);
                 if (d.orders != null)

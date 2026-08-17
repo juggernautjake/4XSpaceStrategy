@@ -111,7 +111,7 @@ public class SaveLoadMenu : MonoBehaviour
             BuildRow(g);
     }
 
-    void BuildRow(SaveGame g)
+    void BuildRow(SaveHeader g)
     {
         var row = UIFactory.Panel(list, "Row", UITheme.RowBg);
         UIFactory.AddLayout(row.gameObject, 58);
