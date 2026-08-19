@@ -636,3 +636,28 @@ stored tile-by-tile — it regenerates from `terrainSeed`; only ores + POIs are 
 `SystemTester` (R = regen), `MouseRaycastDebugger`, and the many `Debug.Log` calls in the generators,
 visualizers and save system are deliberately retained for tracing. The HUD status line and
 `PostFxController`/`SpaceBackground` also log their state on start.
+
+## Tooling (`tools/`)
+
+**`Check-Scripts.ps1`** — a structural tripwire over `Assets/Scripts`. Not a compiler; Unity is the
+real check and always will be.
+
+```
+powershell -ExecutionPolicy Bypass -File tools/Check-Scripts.ps1
+```
+
+It exists for the case Unity cannot cover — work done on a machine with no editor and no .NET SDK,
+where the first sign a file is broken is the next person opening the project. Three checks:
+
+* **HEAD** — the first non-blank line of a file must look like the top of a C# file. Catches text
+  dropped in above the `using` directives.
+* **BALANCE** — braces and parens must balance and never dip below zero on the way. Catches a
+  truncated or duplicated block anywhere.
+* **ENUMS** — every `SomeEnum.Member` reference must name a real member (2,100-odd of them, across 38
+  enums).
+
+The third earns its keep because the other two cannot see a *truncated identifier*. The stray line
+that once reached `main` above PlanetViewWindow's usings read
+`... activeIndex == SurfaceIndexKind.Minera ||` — perfectly balanced, and wrong. Comments, strings,
+verbatim strings and char literals are stripped before counting, with newlines preserved so reported
+line numbers are true. Exit code 0 clean, 1 with findings.
