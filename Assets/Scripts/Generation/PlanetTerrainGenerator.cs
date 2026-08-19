@@ -914,9 +914,27 @@ public static class PlanetTerrainGenerator
         // classifier's Mountains test (0.82 on Terran/Barren, 0.85 on Airless) with room to spare, while
         // still clearing Barren's Badlands cut at 0.5 — so a dead world reads as varied rock rather than
         // as one flat biome, which is what it looked like when ridge was geology-only.
-        float rough = t * NoiseRoughnessMax;
+        //
+        // ...AND THE CEILING IS APPLIED AFTER `ridgeScale`, WHICH IS THE WHOLE POINT.
+        //
+        // `Max(shaped, rough) * ridgeScale` scaled the noise floor along with the geology, so the
+        // guarantee this function advertises — "no mountain is reachable on a dead world by any route" —
+        // held only while ridgeScale stayed at or below 1.32. Nothing rolls it away from 1 any more, so
+        // that reads safe, and for a newly generated world it is.
+        //
+        // It is not safe on a LOADED one. `ridge` is in the save format, TerrainVariance used to roll it
+        // as a per-world "ruggedness" reaching about 1.5, and GameStateSerializer faithfully restores
+        // whatever the file says. At 1.5 the floor comes back as 0.93, over every Mountains threshold in
+        // the file — so every geologically dead world in every pre-rework save grew mountain ranges out
+        // of pure noise the moment it was loaded. The exact artefact this rework exists to remove,
+        // reintroduced silently, on precisely the worlds nobody would think to re-examine.
+        //
+        // Scaling first and capping second keeps both halves honest: a project that genuinely flattens a
+        // world (ridgeScale below 1) still calms the background rock, and no value above 1 can push the
+        // noise past a ceiling whose name says it is one.
+        float rough = Mathf.Min(t * NoiseRoughnessMax * ridgeScale, NoiseRoughnessMax);
 
-        return Mathf.Clamp(Mathf.Max(shaped, rough) * ridgeScale, 0f, 2f);
+        return Mathf.Clamp(Mathf.Max(shaped * ridgeScale, rough), 0f, 2f);
     }
 
     /// The most `ridge` the texture noise may reach on its own. Deliberately below every Mountains

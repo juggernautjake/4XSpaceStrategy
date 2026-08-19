@@ -98,7 +98,19 @@ public class EarthquakeManager : MonoBehaviour
 
     /// When each world was last checked, in days. Per-body rather than one global timer so a world
     /// discovered late does not inherit a century of accumulated risk on its first tick.
+    ///
+    /// KEYED ON A BODY REFERENCE, which is the same hazard GameManager clears SurfaceIndex, TectonicsMap
+    /// and GeothermalMap for when a galaxy is replaced: without a matching clear this dictionary keeps
+    /// every world of every galaxy the session ever generated alive for the rest of the session, and each
+    /// world holds its whole surface grid. See ResetAll.
     readonly Dictionary<CelestialBody, double> lastChecked = new Dictionary<CelestialBody, double>();
+
+    /// The next day the whole-galaxy sweep is allowed to run.
+    ///
+    /// Update() walks EVERY body in the galaxy, and the thing it is looking for moves on a scale of
+    /// decades — so doing that once a frame was a few hundred iterations per frame to discover, almost
+    /// always, that not a single world was due. One gate at the top costs one comparison instead.
+    double nextSweepDay = double.NegativeInfinity;
 
     public static void Create()
     {
@@ -108,11 +120,22 @@ public class EarthquakeManager : MonoBehaviour
 
     void Awake() { Instance = this; }
 
+    /// Forget every world. Called when a galaxy is generated or loaded, alongside the other per-body
+    /// caches — the bodies in here belong to the galaxy being replaced.
+    public static void ResetAll()
+    {
+        if (Instance == null) return;
+        Instance.lastChecked.Clear();
+        Instance.nextSweepDay = double.NegativeInfinity;
+    }
+
     void Update()
     {
         if (SystemContext.Galaxy == null) return;
 
         double now = GameCalendar.TotalDays;
+        if (now < nextSweepDay) return;
+        nextSweepDay = now + CheckIntervalDays;
 
         foreach (var b in SystemContext.AllBodies())
         {
@@ -125,9 +148,25 @@ public class EarthquakeManager : MonoBehaviour
 
             if (!lastChecked.TryGetValue(b, out double last)) { lastChecked[b] = now; continue; }
 
+            // CAPPED AT ONE INTERVAL, and this is a correctness fix rather than a tuning one.
+            //
+            // The two `continue`s above deliberately do NOT stamp lastChecked, so a world's clock keeps
+            // running while it has nothing to damage or no geothermal ground. That is fine for a few
+            // months and wrong for a few centuries: `expected` below is `elapsed / periodDays`, used
+            // directly as a probability, and once elapsed passes the return period that probability
+            // exceeds 1 and `Random.value < expected` stops being a roll and becomes a certainty.
+            //
+            // A colony that was levelled and rebuilt a hundred years later therefore ate a guaranteed
+            // major quake in its first month back — and so did any world that only BECAME geothermally
+            // active later, which a Dev reseed or a remodel to a volcanic type can do at any time.
+            //
+            // Risk should accrue while there is something to lose, and there was nothing. Taking at most
+            // one interval's worth per check says exactly that, and errs downward, which is the safe
+            // direction for a mechanic whose whole promise is that siting off the red keeps you safe.
             double elapsed = now - last;
             if (elapsed < CheckIntervalDays) continue;
             lastChecked[b] = now;
+            if (elapsed > CheckIntervalDays) elapsed = CheckIntervalDays;
 
             // MORE ACTIVE GROUND SHAKES MORE OFTEN, but only within half a factor either way: the return
             // periods above are the design, and letting activity swing them by an order of magnitude

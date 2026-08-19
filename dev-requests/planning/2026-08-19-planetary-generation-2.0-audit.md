@@ -103,6 +103,45 @@ Year 0001. Construction, travel and research durations all read through it.
 
 ---
 
+## Post-audit correctness review
+
+The audit above asks "does the code do what the spec says". This asks "is the code right". Three
+defects, all fixed, all validated numerically through Node ports rather than by reading.
+
+**1. Mountains from pure noise on any pre-rework save.** `RidgeFromRelief` computed
+`Max(shaped, rough) * ridgeScale`, so the noise floor scaled with `ridge` along with the geology. The
+floor is 0.62 and every Mountains threshold is 0.82, so the guarantee held only while `ridge` stayed
+at or below 1.32. Nothing rolls it away from 1 any more — but `ridge` is *in the save format*,
+`TerrainVariance` used to roll it as a per-world ruggedness reaching about 1.5, and the loader
+restores whatever the file says. At 1.5 the floor came back as 0.93, and every geologically dead
+world in every old save grew mountain ranges out of noise the moment it loaded.
+
+Now `Max(shaped * ridgeScale, min(rough * ridgeScale, NoiseRoughnessMax))`. Measured: a dead world
+caps at 0.620 at *every* scale from 0.30 to 2.0; a flattening project still calms the background;
+real geology still makes mountains at every scale; and at `ridge = 1` — every world generated today —
+the output is bit-identical over 200,000 random samples.
+
+**2. A guaranteed major earthquake on any rebuilt colony.** `EarthquakeManager` skips a world with no
+buildings without stamping `lastChecked`, so its clock keeps running. `expected` is
+`elapsed / periodDays` used directly as a probability, so once elapsed passes the return period that
+probability exceeds 1 and the roll stops being a roll. A colony levelled and rebuilt a century later
+ate a certain major quake in its first month — as did any world that only *became* geothermally
+active later, which a Dev reseed or a remodel to a volcanic type can do at any time. Elapsed is now
+capped at one check interval, which errs downward.
+
+**3. Every galaxy the session ever generated, kept alive.** `EarthquakeManager.lastChecked` is keyed
+on `CelestialBody` references and was never cleared. `GameManager` documents this exact hazard where
+it clears `SurfaceIndex`, `TectonicsMap` and `GeothermalMap` on generate and on load — the quake
+clock was simply missed, and each retained body holds its whole surface grid. It now clears with the
+others. The same sweep also gained a one-comparison gate at the top: it walked every body in the
+galaxy *every frame* to look for something that moves on a scale of decades.
+
+Two things that looked wrong and are not, checked rather than assumed: `GeothermalMap.Hash01` is a
+`sin`-based hash fed arguments up to ~31,000, where float precision usually degenerates — measured
+over 20,000 worlds it stays uniform, decorrelates between neighbouring seeds, and puts 41.5% below
+the dead cut, matching the "a little under half" the design asks for. And `GameCalendar`'s month/day
+arithmetic is exact because 360 is a whole number of 30-day months.
+
 ## Open items
 
 ### A. The 3D globe and the 2D map draw the same terrain differently

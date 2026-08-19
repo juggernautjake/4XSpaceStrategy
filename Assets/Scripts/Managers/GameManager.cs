@@ -143,6 +143,7 @@ public class GameManager : MonoBehaviour
         // geometry and the geothermal field are all derived from the same worlds.
         SurfaceIndex.InvalidateAll();
         TectonicsMap.InvalidateAll();
+        EarthquakeManager.ResetAll();   // ...and the quake clock, which is keyed on bodies too
 
         int count = GalaxyGenerator.ClampSystems(systemCount);
         var galaxy = GalaxyGenerator.Begin(solarSystemGenerator);
@@ -413,6 +414,7 @@ public class GameManager : MonoBehaviour
         // geometry and the geothermal field are all derived from the same worlds.
         SurfaceIndex.InvalidateAll();
         TectonicsMap.InvalidateAll();
+        EarthquakeManager.ResetAll();   // ...and the quake clock, which is keyed on bodies too
         Galaxy = GalaxyGenerator.Generate(solarSystemGenerator, systemCount, SpeciesManager.Current);
         FocusedSystem = Galaxy.Home;
 
