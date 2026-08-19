@@ -11,9 +11,9 @@ public static class POIGenerator
     { "the Velari", "the Themis Compact", "Old Kadesh", "the Sunken Choir", "the Iron Prophets",
       "the Umbral Dynasty", "the First Builders", "the Ashen Court", "the Lattice Kings", "the Pale Synod" };
 
-    static readonly string[] ColonyNames =
-    { "New Meridian", "Port Absalom", "Halcyon Reach", "Fort Kestrel", "Tycho Landing",
-      "Serevin City", "Camp Dauntless", "Elysium Station", "Bastion Hollow", "Cradle Point" };
+    // ColonyNames lived here and named the settlement anomalies. Those are no longer generated (see
+    // below), and the list went with them — a table of names nothing draws from is a hint that the
+    // feature is coming back, and it is not. Real settlements take their names from CityGrowth.
 
     // kind, hover title, hover blurb, report on completion, base duration (s), ore reward (or None)
     struct MysterySpec
@@ -97,22 +97,24 @@ public static class POIGenerator
             }
         }
 
-        // --- Current settlements: only on genuinely habitable worlds ---
-        if (solid && body.isHabitable)
-        {
-            int colonies = Random.Range(1, 4);
-            for (int i = 0; i < colonies; i++)
-            {
-                if (!TryFindLand(body, out float u, out float v)) break;
-                pois.Add(new PointOfInterest
-                {
-                    type = POIType.Settlement, u = u, v = v, kind = "Settlement",
-                    title = ColonyNames[Random.Range(0, ColonyNames.Length)],
-                    description = "An active settlement of a living civilization, trading and expanding.",
-                    explored = true
-                });
-            }
-        }
+        // ============================================================================================
+        // SETTLEMENT ANOMALIES ARE NOT GENERATED ANY MORE
+        //
+        // A habitable world used to be seeded with one to three green "C" markers standing for towns of
+        // a living civilisation. They were map decoration from before there was a surface to build on:
+        // an icon floating at a normalised (u,v), owned by nobody, occupying no tiles, doing nothing,
+        // and — the part that made them actively misleading — indistinguishable at a glance from the
+        // Settlement STRUCTURES the player now places on the grid, which are real, have footprints,
+        // house population and can be shaken down by an earthquake.
+        //
+        // A city is a building now (SurfaceBuildingType.Settlement, and CityGrowth grows more of them).
+        // Two things called a settlement on the same planet, one of which is a fiction, is one too many.
+        //
+        // POIType.Settlement STAYS in the enum and everything that renders it stays with it. The
+        // ordinal is serialized, so removing it would shift SpecialResource and Mystery underneath every
+        // existing save; and an old save that already holds these markers has to keep drawing them
+        // rather than showing blanks. Nothing NEW gets one.
+        // ============================================================================================
 
         // --- Ancient ruins ---
         if (solid)

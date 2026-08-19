@@ -77,21 +77,56 @@ side panel, the Inspector's seven tabs, or the HUD.
 
 | # | Request | Status |
 |---|---|---|
-| E1 | Geothermal Index must show the continental plate lines again — the red border grids are gone while the push arrows still draw | [ ] |
-| E2 | Cause is likely the global 70% visibility floor; make an exception for this index | [ ] |
-| E3 | Lowest visible Geothermal value becomes **40%** — the plate-line grids | [ ] |
-| E4 | Shorten the Geothermal Index description — enough to understand its purpose, no more | [ ] |
-| E5 | Show text inside the Geothermal Index, in red, when the world has continental plates | [ ] |
-| E6 | Remove the Geothermal Index from the Survey tab entirely when the body has no volcanoes and no geothermal activity | [ ] |
-| E7 | Remove the Hydro/Water Index when the body has no water at all — restore it if terraforming adds water later | [ ] |
-| E8 | Remove the Fertility Index when there is no biosphere at all | [ ] |
-| E9 | **Remove, do not grey out.** They still exist for future use; they must not waste the player's time on a level-2 survey that can reveal nothing | [ ] |
+| E1 | Geothermal Index must show the continental plate lines again — the red border grids are gone while the push arrows still draw | [x] |
+| E2 | Cause is likely the global 70% visibility floor; make an exception for this index | [x] |
+| E3 | Lowest visible Geothermal value becomes **40%** — the plate-line grids | [x] |
+| E4 | Shorten the Geothermal Index description — enough to understand its purpose, no more | [x] |
+| E5 | Show text inside the Geothermal Index, in red, when the world has continental plates | [x] |
+| E6 | Remove the Geothermal Index from the Survey tab entirely when the body has no volcanoes and no geothermal activity | [x] |
+| E7 | Remove the Hydro/Water Index when the body has no water at all — restore it if terraforming adds water later | [x] |
+| E8 | Remove the Fertility Index when there is no biosphere at all | [x] |
+| E9 | **Remove, do not grey out.** They still exist for future use; they must not waste the player's time on a level-2 survey that can reveal nothing | [x] |
+
+E1–E3 were one cause, and Jacob's diagnosis was right: `ShowFloor` (70%) answered both "what does this
+ground yield" and "should this be painted", and a plate margin reads exactly 40. The two questions are
+now separate — `SurfaceIndex.DrawFloor(kind)` is 40 for Geothermal and 70 for everything else, while
+`ShowFloor` keeps deciding yield and buildability. The earthquake promise is untouched: quakes still
+only damage structures on 70%+ ground.
+
+E6–E9 also made the survey **shorter**. A level-2 sweep runs the indexes in order and spends real time
+on each, so a dry, dead rock was spending a third of it mapping hydrology and farmland that cannot
+exist. The running order is per-world now (`Survey.PresentCount` / `IndexSlot(b, k)`), so slots close
+up: four usable indexes means each takes a quarter of the sweep instead of a sixth.
 
 ## F. Points of interest
 
 | # | Request | Status |
 |---|---|---|
-| F1 | Stop spawning green **City** anomalies — deprecated. Cities are placed buildings on a body's surface grid now | [ ] |
+| F1 | Stop spawning green **City** anomalies — deprecated. Cities are placed buildings on a body's surface grid now | [x] |
+
+## H. Worlds and inhabitants (2026-08-19, third message)
+
+| # | Request | Status |
+|---|---|---|
+| H1 | Probes may be **ancient-civilisation** machines **or space monsters** — give them an origin, not just stats | [ ] |
+| H2 | New celestial body type: an **Infected world**. Water/organic-friendly at heart, overrun by an invasive parasitic infestation | [ ] |
+| H3 | Infected worlds want a gnarly surface: ooze, tendrils, visibly diseased ground | [ ] |
+| H4 | Occasionally a world carries a **dormant robot civilisation** | [ ] |
+| H5 | Once woken it builds its own units and ships | [ ] |
+| H6 | Fragile and easy to beat early | [ ] |
+| H7 | Left alone long enough it researches tech, gathers resources, and becomes a real threat | [ ] |
+
+Notes for H2/H3: `CelestialBodyType` is serialized **by ordinal** (`GameStateSerializer` writes the
+enum as an int), so a new type must be **appended**, never inserted. It also needs: a
+`TerrainColorMap` entry per new terrain, `TerrainTextureMap` grain generated to the same seamless
+contrast ladder as the rest of the set (see `biome-tile-art` notes in `CODEBASE_GUIDE.md`), a
+`WorldClassifier` route in, `Habitability`/`Terraformability` scoring, and an `AtmosphereRules` line.
+The infestation is a good candidate for a real terrain family (ooze plains, tendril mats, spore
+blooms) rather than a recolour.
+
+Notes for H4–H7: this is a faction that grows, so it belongs alongside `FactionAI` rather than being
+invented separately. The interesting design question is what "given enough time" is measured in —
+`GameCalendar` years is the honest unit now that one exists.
 
 ---
 

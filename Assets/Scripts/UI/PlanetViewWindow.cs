@@ -4074,14 +4074,24 @@ public class PlanetViewWindow : MonoBehaviour
 
         Header("INDEX OVERLAYS");
         Note("Each overlay paints the grid with where a kind of building actually belongs. Survey a world to read its minerals; a deep survey by a research ship unlocks the rest.");
-        Note($"<color=#9FB4C8>Nothing under <b>{SurfaceIndex.ShowFloor * 100f:F0}%</b> is drawn, and nothing under " +
-             $"<b>{SurfaceIndex.ShowFloor * 100f:F0}%</b> yields anything or can be built on — a world's resources sit in a " +
-             $"few patches rather than spread thinly over all of it. Every <b>{SurfaceIndex.BandStep * 100f:F0}%</b> above that " +
-             $"is a brighter step with its own outline, so the best ground is the innermost, brightest ring. " +
-             $"Zoom in near the cursor for the exact numbers.</color>");
+        // The blanket claim used to be "nothing under 70% is drawn". That is no longer true of the
+        // Geothermal Index, which paints its plate boundaries from 40 — so the sentence is split into
+        // the two statements it was always making, and only the YIELD one is universal.
+        Note($"<color=#9FB4C8>Nothing under <b>{SurfaceIndex.ShowFloor * 100f:F0}%</b> yields anything or can be " +
+             $"built on — a world's resources sit in a few patches rather than spread thinly over all of it. " +
+             $"Every <b>{SurfaceIndex.BandStep * 100f:F0}%</b> above that is a brighter step with its own outline, " +
+             $"so the best ground is the innermost, brightest ring. The Geothermal Index also draws its plate " +
+             $"boundaries down at <b>{SurfaceIndex.PlateLineFloor * 100f:F0}%</b>, which mark where the crust is " +
+             $"moving rather than where it is hot. Zoom in near the cursor for the exact numbers.</color>");
 
         AddIndexToggle(SurfaceIndexKind.None, "None (plain terrain)");
-        foreach (var k in SurfaceIndex.All) AddIndexToggle(k, null);
+        // PRESENT, not All. An index this world has nothing for — hydrology on a dry rock, farmland on a
+        // sterile one, geothermal on a world with no plates and no plumes — is not offered at all. It is
+        // not locked and it is not greyed: greying says "not yet", and there is no yet. See
+        // SurfaceIndex.Present, which is re-asked every rebuild, so terraforming water onto a world makes
+        // its Hydro row appear.
+        foreach (var k in SurfaceIndex.All)
+            if (SurfaceIndex.Present(body, k)) AddIndexToggle(k, null);
 
         // The power grid — folded from the retired Power tab. Its map overlay is a Survey overlay now,
         // reachable from this toggle (mutually exclusive with the index ramps); the diagnostic panel is
@@ -4132,12 +4142,35 @@ public class PlanetViewWindow : MonoBehaviour
                 lrt.anchorMin = new Vector2(0.86f, 0f); lrt.anchorMax = Vector2.one;
                 lrt.offsetMin = Vector2.zero; lrt.offsetMax = Vector2.zero;
 
-                var lab = UIFactory.Text(qrt, $"{(SurfaceIndex.ShowFloor + i * SurfaceIndex.BandStep) * 100f:F0}",
+                // The FIRST swatch of the Geothermal ramp is labelled 40, not 70, and that is not a
+                // fudge — it is what the map draws. Geothermal paints from 40 (a plate margin) and
+                // `Band` returns 0 for everything under 70, so this one cell genuinely covers 40 through
+                // 79. Labelling it 70 would point at a colour and name a value that colour does not
+                // start at, which is the one thing a legend must never do.
+                float lo = i == 0 ? SurfaceIndex.DrawFloor(k) : SurfaceIndex.ShowFloor + i * SurfaceIndex.BandStep;
+                var lab = UIFactory.Text(qrt, $"{lo * 100f:F0}",
                                          9, new Color(0f, 0f, 0f, 0.75f), TextAlignmentOptions.Center);
                 lab.raycastTarget = false;
                 UIFactory.Stretch(lab.rectTransform);
             }
             Note(card, SurfaceIndex.Describe(k));
+
+            // ---- PLATES GET SAID OUT LOUD ----
+            //
+            // Whether a world has continental plates is the single most consequential fact the
+            // Geothermal Index carries: it decides where the mountains came from, where the rifts are,
+            // where quakes can reach, and whether those faint 40% lines on the map are boundaries or
+            // just quiet ground. It was legible only by looking at the map and knowing what to look
+            // for. In the index's own red, so it reads as part of the overlay rather than as a caption.
+            if (k == SurfaceIndexKind.Geothermal && body != null)
+            {
+                string hex = ColorUtility.ToHtmlStringRGB(SurfaceIndex.Outline(SurfaceIndexKind.Geothermal));
+                Note(card, TectonicsMap.Active(body)
+                    ? $"<color=#{hex}><b>Continental plates.</b> The faint lines are plate boundaries; " +
+                      $"where two drive together the ground is hottest and the quakes are worst.</color>"
+                    : $"<color=#{hex}><b>No plates.</b> Whatever heat this world has comes from hotspots " +
+                      $"venting straight up through the crust.</color>");
+            }
         }
 
         // Picking an index no longer switches the grid off — they draw on separate layers now, and the
@@ -7089,6 +7122,10 @@ public class PlanetViewWindow : MonoBehaviour
         foreach (var k in SurfaceIndex.All)
         {
             if (k == except) continue;
+            // An index this world has no use for is not "locked" — there is nothing behind it. Skipping
+            // it silently keeps it out of the cursor readout's "N more locked" tally, which would
+            // otherwise promise readings that will never exist.
+            if (!SurfaceIndex.Present(b, k)) continue;
             if (!SurfaceIndex.Unlocked(b, k)) { locked++; continue; }
 
             float v = SurfaceIndex.Get(b, k, x, y);

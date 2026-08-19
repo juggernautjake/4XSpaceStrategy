@@ -36,8 +36,13 @@ public static class Survey
     /// Bands in the shown range: 70s, 80s, 90s. Each is one PASS of a level-2 index survey.
     public static int Bands => Mathf.Max(1, Mathf.RoundToInt((1f - SurfaceIndex.ShowFloor) / SurfaceIndex.BandStep));
 
-    /// Total level-2 passes: every index, every band.
+    /// Total level-2 passes on a world that uses every index. The per-world figure is
+    /// `PresentCount(b) * Bands`; this is the ceiling, kept for readouts that describe the system
+    /// rather than a particular planet.
     public static int TotalPasses => SurfaceIndex.All.Length * Bands;
+
+    /// Total level-2 passes THIS world will actually run.
+    public static int TotalPassesOn(CelestialBody b) => PresentCount(b) * Bands;
 
     // ---- How long a cell takes ------------------------------------------------------------------
     //
@@ -148,7 +153,10 @@ public static class Survey
         float perIndex = 0f;
         for (int p = 0; p < Bands; p++) perIndex += Mathf.Pow(0.5f, p);
 
-        float total = SweepSeconds(b, u, deep) * (deep ? perIndex * SurfaceIndex.All.Length : 1f);
+        // PresentCount, not All.Length: a deep survey only sweeps the indexes this world has a use for,
+        // so a world with four of them finishes in two thirds the time. This is the line that turns
+        // "stop showing me empty indexes" into "stop charging me for them".
+        float total = SweepSeconds(b, u, deep) * (deep ? perIndex * PresentCount(b) : 1f);
         return total <= 0f ? 1f : dt / total;
     }
 
@@ -205,11 +213,13 @@ public static class Survey
         if (GameMode.DevMode || b.deepProgress >= 1f || b.owner == FactionManager.Player)
             return new Reveal { started = true, pass = Bands - 1, frac = 1f, complete = true };
 
-        int slot = IndexSlot(k);
+        // -1 means this world has no use for this index at all — no plates and no plumes, no water, no
+        // biosphere. It is never reached because it is never visited, which is the point.
+        int slot = IndexSlot(b, k);
         if (slot < 0) return r;
 
-        // Each index gets an equal share of the whole; within it, the passes are weighted.
-        int n = SurfaceIndex.All.Length;
+        // Each index this world HAS gets an equal share of the whole; within it, the passes are weighted.
+        int n = PresentCount(b);
         float mine = Mathf.Clamp01(b.deepProgress) * n - slot;        // 0..1 through THIS index
 
         if (mine <= 0f) return r;                                     // not reached yet
@@ -246,8 +256,47 @@ public static class Survey
         return total <= 0f ? 1f : Mathf.Pow(0.5f, p) / total;
     }
 
-    /// Position of an index in the level-2 running order. SurfaceIndex.All IS the order — Mineral,
-    /// Heat, Fertile, Wind, Solar, Water — so reordering the survey is reordering that array.
+    // ============================================================================================
+    // THE RUNNING ORDER IS PER WORLD, NOT GLOBAL
+    //
+    // SurfaceIndex.All is still the ORDER — Mineral, Geothermal, Fertile, Wind, Solar, Water — but a
+    // sweep only visits the indexes this particular world has any use for (SurfaceIndex.Present). A dry,
+    // dead rock has no hydrology and no farmland, and it used to spend a third of a level-2 survey
+    // mapping both of them before reporting, twice, that there was nothing there. The player paid real
+    // minutes for an answer that was knowable before the ship arrived.
+    //
+    // Slots therefore CLOSE UP. On a world with four usable indexes each takes a quarter of the sweep
+    // rather than a sixth, so removing the dead ones makes the survey shorter AND makes every remaining
+    // index finish sooner — which is the right shape: less time, same information.
+    //
+    // No allocation on any of these. They are asked while drawing and, through RevealOf, potentially per
+    // tile; `Present` is O(1) behind two caches, and iterating a static array is not an allocation.
+    // ============================================================================================
+
+    /// How many indexes this world's survey will actually visit. Never zero — Mineral, Wind and Solar
+    /// are present on everything solid, so the floor is defensive rather than reachable.
+    public static int PresentCount(CelestialBody b)
+    {
+        int n = 0;
+        foreach (var k in SurfaceIndex.All) if (SurfaceIndex.Present(b, k)) n++;
+        return Mathf.Max(1, n);
+    }
+
+    /// Position of an index in THIS WORLD's running order, or -1 if this world has no use for it.
+    public static int IndexSlot(CelestialBody b, SurfaceIndexKind k)
+    {
+        int i = 0;
+        foreach (var kk in SurfaceIndex.All)
+        {
+            if (!SurfaceIndex.Present(b, kk)) continue;
+            if (kk == k) return i;
+            i++;
+        }
+        return -1;
+    }
+
+    /// Position in the canonical order, with no world in hand. Only for callers that genuinely mean
+    /// "where does this index sit in the list" rather than "where does this survey reach it".
     public static int IndexSlot(SurfaceIndexKind k)
     {
         for (int i = 0; i < SurfaceIndex.All.Length; i++) if (SurfaceIndex.All[i] == k) return i;
@@ -258,9 +307,17 @@ public static class Survey
     public static SurfaceIndexKind CurrentIndex(CelestialBody b)
     {
         if (b == null || b.deepProgress <= 0f || b.deepProgress >= 1f) return SurfaceIndexKind.None;
-        int n = SurfaceIndex.All.Length;
-        int slot = Mathf.Clamp(Mathf.FloorToInt(b.deepProgress * n), 0, n - 1);
-        return SurfaceIndex.All[slot];
+        int n = PresentCount(b);
+        int want = Mathf.Clamp(Mathf.FloorToInt(b.deepProgress * n), 0, n - 1);
+
+        int i = 0;
+        foreach (var k in SurfaceIndex.All)
+        {
+            if (!SurfaceIndex.Present(b, k)) continue;
+            if (i == want) return k;
+            i++;
+        }
+        return SurfaceIndexKind.None;
     }
 
     // ---- Which cells have been reached ----------------------------------------------------------

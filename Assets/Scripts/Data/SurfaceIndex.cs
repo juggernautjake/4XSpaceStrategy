@@ -41,6 +41,105 @@ public static class SurfaceIndex
         SurfaceIndexKind.Wind, SurfaceIndexKind.Solar, SurfaceIndexKind.Water
     };
 
+    // ============================================================================================
+    // AN INDEX A WORLD HAS NO USE FOR IS NOT SHOWN AT ALL
+    //
+    // Three of the six describe something a world may simply not have. A world with no plates and no
+    // hotspots has no geothermal ground; a world with no water has no hydrology; a sterile world has no
+    // soil. Those indexes are not "low" on such a world — they are ABSENT, and there is nothing a
+    // survey could ever reveal.
+    //
+    // They used to be listed anyway, greyed or empty. That is worse than it sounds, because a level-2
+    // survey reads the indexes IN ORDER and spends real time on each: a research ship parked over a dry,
+    // dead rock spent a third of its sweep mapping the hydrology and the farmland of a world that has
+    // neither, and then reported nothing, twice. The player pays in time for an answer that was known
+    // before the ship arrived.
+    //
+    // REMOVED, NOT GREYED — and that is the opposite of the doctrine everywhere else in this codebase
+    // (see InspectorWindow, which greys a tab rather than hiding it so the player can see the road
+    // ahead). The distinction is that greying answers "not yet"; there is no yet here. Nothing the
+    // player can do reveals the hydrology of a world with no water, so a greyed row would be a
+    // permanent advertisement for a thing that will never happen.
+    //
+    // ...UNLESS THE WORLD CHANGES. This is a live question, re-asked every time it is drawn, never
+    // cached. Terraform water onto a dry world and the Hydro Index appears; seed a biosphere and the
+    // Fertility Index appears with it. The index never stopped existing — the world simply grew a use
+    // for it, which is exactly the moment the player should be told it is there.
+    // ============================================================================================
+
+    /// Does this world have anything for this index to describe? False means it is not offered at all.
+    public static bool Present(CelestialBody b, SurfaceIndexKind k)
+    {
+        if (b == null) return false;
+        if (GameMode.DevMode) return true;   // the sandbox shows everything; that is what a sandbox is
+
+        switch (k)
+        {
+            // No plates and no plumes: there is no heat in this crust and no boundary to draw.
+            case SurfaceIndexKind.Geothermal:
+                return GeothermalMap.Active(b);
+
+            // Read off the WATER FIELD rather than off the sea-level parameter, because the question is
+            // "is there water on the ground", and a world can carry a nominal water level whose every
+            // drop is frozen out or boiled off (see PlanetTerrainGenerator's climate coherence).
+            case SurfaceIndexKind.Water:
+                return HasAnyWater(b);
+
+            // Soil needs life. No biosphere, no farmland, at any temperature and any moisture.
+            case SurfaceIndexKind.Fertile:
+                return b.biosphereActive;
+
+            // Minerals, wind and sun are properties of any solid body — thin air and a dim star make
+            // them POOR, which is a real answer worth surveying for, not an absent one.
+            default:
+                return true;
+        }
+    }
+
+    /// The indexes worth offering on this world, in the usual order. The survey reads this rather than
+    /// `All`, so a sweep never spends a pass on something that cannot exist here.
+    public static SurfaceIndexKind[] PresentOn(CelestialBody b)
+    {
+        var list = new List<SurfaceIndexKind>(All.Length);
+        foreach (var k in All) if (Present(b, k)) list.Add(k);
+        return list.ToArray();
+    }
+
+    /// Is there any surface water at all? One tile is enough — a world with a single lake has a
+    /// hydrology worth mapping.
+    ///
+    /// CACHED, because `Present` is asked while drawing and this walks the whole grid. On a 640x320 gas
+    /// giant that is two hundred thousand tiles, and a panel that asked it once a frame would cost more
+    /// than the terrain did. Keyed on the terrain seed and invalidated by InvalidateStats, exactly like
+    /// the water field and the per-world bands — so terraforming water onto a dry world drops the entry
+    /// and the Hydro Index appears the moment the surface is rebuilt.
+    static readonly Dictionary<CelestialBody, (float seed, bool wet)> waterPresence
+        = new Dictionary<CelestialBody, (float, bool)>();
+
+    static bool HasAnyWater(CelestialBody b)
+    {
+        if (b?.surface == null) return false;
+        if (waterPresence.TryGetValue(b, out var c) && Mathf.Approximately(c.seed, b.terrainSeed))
+            return c.wet;
+
+        bool wet = false;
+        var tiles = b.surface.tiles;
+        for (int y = 0; y < b.surface.height && !wet; y++)
+            for (int x = 0; x < b.surface.width; x++)
+            {
+                var t = tiles[x, y];
+                if (t == null) continue;
+                // `type` rather than `ground`: what is ON the surface now is what a hydrology survey
+                // reads. Ice counts — frozen water is still water, and thawing it is a terraforming
+                // project rather than a discovery.
+                if (PlanetTerrainGenerator.IsWater(t.type) || t.type == TerrainType.FrozenSea ||
+                    t.type == TerrainType.Glacier || t.type == TerrainType.Ice) { wet = true; break; }
+            }
+
+        waterPresence[b] = (b.terrainSeed, wet);
+        return wet;
+    }
+
     // ---- The shared field ----
     // Read straight from the generator, so the index and the pixel you're looking at can never disagree.
     static PlanetTerrainGenerator.Sample Field(CelestialBody b, int x, int y)
@@ -77,8 +176,33 @@ public static class SurfaceIndex
     // anything. Those are two genuinely different questions and both have to be asked.
     // ============================================================================================
 
-    /// Below this an index is drawn nowhere, yields nothing, and refuses to be built on.
+    /// Below this an index YIELDS nothing and refuses to be built on. Also the drawing floor for every
+    /// index except Geothermal — see DrawFloor, which is a different question and now has its own answer.
     public const float ShowFloor = 0.70f;
+
+    // ============================================================================================
+    // DRAWING IS NOT THE SAME QUESTION AS YIELDING
+    //
+    // One number used to answer both, and for five of the six indexes that is right: ground that
+    // produces nothing is ground there is no reason to paint. Geothermal is the exception, and it
+    // became the exception when it absorbed the plate map.
+    //
+    // A CONTINENTAL PLATE MARGIN READS EXACTLY 40 (GeothermalMap.PlateLineBase). That is not a weak
+    // geothermal site — it is a plate boundary, and it is the single most informative line on the map:
+    // it is where the mountains came from, where the rifts are, and which way the crust is moving. The
+    // 70% floor was hiding all of it. The push arrows kept drawing because they are drawn from the
+    // plate LAYOUT rather than from the index, so the map ended up showing arrows shoving against a
+    // boundary that had been rubbed out — the one presentation that is worse than showing neither.
+    //
+    // So Geothermal draws from 40 and still only PRODUCES from 70. Both numbers keep meaning what they
+    // meant: a geothermal plant still needs real heat (SurfaceBuildManager), and an earthquake still
+    // only damages what stands on 70%+ ground (EarthquakeManager) — that promise is the whole reason
+    // the player is allowed to site around the red, and moving it would break it.
+    public const float PlateLineFloor = 0.40f;
+
+    /// The lowest value of this index that gets painted on the map at all.
+    public static float DrawFloor(SurfaceIndexKind k)
+        => k == SurfaceIndexKind.Geothermal ? PlateLineFloor : ShowFloor;
 
     /// The usable band is read in steps of this, so a glance at the map sorts good ground from very good
     /// ground without reading a single number. See Band / Highlight.
@@ -922,6 +1046,10 @@ public static class SurfaceIndex
         if (b == null) return;
         foreach (var k in All) { statsCache.Remove((b, k)); bands.Remove((b, k)); }
         waterFields.Remove(b);
+        // ...and whether this world has any water on it at all, which decides whether the Hydro Index is
+        // OFFERED (see Present). Terraforming water onto a dry world has to make the index appear, and
+        // it appears the moment this entry goes.
+        waterPresence.Remove(b);
         // The geothermal field caches a world's plume intensity and plate motion, and both are keyed on
         // its terrain seed and type — exactly the two things a remodel or a reseed changes. Dropped here
         // so the overlay, the earthquakes and the temperature model all stop describing the world this
@@ -933,6 +1061,7 @@ public static class SurfaceIndex
     {
         statsCache.Clear();
         waterFields.Clear();
+        waterPresence.Clear();
         bands.Clear();
         GeothermalMap.InvalidateAll();
     }
@@ -1002,7 +1131,12 @@ public static class SurfaceIndex
     {
         t = 0f;
         if (b?.surface == null || k == SurfaceIndexKind.None) return false;
-        if (v < ShowFloor) return false;
+        if (v < DrawFloor(k)) return false;
+
+        // Below the PRODUCTIVE floor, Band returns 0 — so a plate margin paints at the dimmest end of
+        // the ramp and the bright bands stay exactly where they were specified: 70+, 80+, 90+. The line
+        // is legible without competing with the heat that actually matters, which is the correct
+        // relationship between a boundary and an anomaly.
         t = Band(v);
         return true;
     }
@@ -1044,7 +1178,11 @@ public static class SurfaceIndex
         switch (k)
         {
             case SurfaceIndexKind.Mineral: return "Broken, raised crust — mountains, canyons and exposed seams, which is why the richest ground follows the plate margins. Concentrated into a few districts rather than spread over the whole crust.";
-            case SurfaceIndexKind.Geothermal: return "Heat in the CRUST, and the movement that makes it — this is the plate map and the old Heat Index in one. Plate margins read from 40% up to 100% where two plates drive head-on, and a high-activity fault radiates its heat about three tiles either side, never below 70%. Worlds with no plates can still carry volcanic HOTSPOTS: tight 90%+ cores tapering out through 80% and 70%, and a vent at 97%+ is a volcano. A world with neither has no geothermal ground at all, however cracked its mountains look.";
+            // SHORT ON PURPOSE. This one had grown into a paragraph explaining the whole mechanism —
+            // every threshold, both sources, and what each does — which is reference material, not a
+            // caption. The player needs to know what the colours mean and where to build; the numbers
+            // are on the legend beside it and the reasoning is in GeothermalMap.
+            case SurfaceIndexKind.Geothermal: return "Heat in the crust, and the plate movement that makes it. Faint lines are plate boundaries; the bright ground is where the heat actually is, and the hottest of it is volcanic. Geothermal plants go on the bright ground.";
             case SurfaceIndexKind.Fertile: return "Warm AND wet AND flat — farmland needs all three at once, not any one of them. Needs a LIVING world above all: no biosphere, no soil, and the index reads nothing.";
             case SurfaceIndexKind.Wind: return "Needs AIR, and enough of it. Under about two-thirds of an atmosphere a world never reaches a workable figure anywhere. Above that it comes as HOTSPOTS — flat, open, exposed country — and the thicker the air the more of them there are and the larger each one gets.";
             case SurfaceIndexKind.Solar: return "Dry, high ground, and long days. On a thin-aired world the poles win outright and the sun is good over huge stretches; thicken the air and the poles become the worst ground on the planet and the good sites shrink to a scattered few. A world far from its star is dim everywhere.";
@@ -1196,10 +1334,16 @@ public static class SurfaceIndex
         if (!b.Surveyed) return "survey this world first";
         if (Survey.RevealOf(b, k).started) return null;
 
-        int slot = Survey.IndexSlot(k);
+        // THIS WORLD's running order and THIS WORLD's count — a dry, sterile rock surveys four indexes,
+        // not six, so telling the player that Solar is "#5 of 6" when it is the fourth and last thing
+        // the ship will look at is a promise about the wrong amount of waiting.
+        int slot = Survey.IndexSlot(b, k);
+        if (slot < 0) return $"{Name(k)} has nothing to read on this world";
+        int total = Survey.PresentCount(b);
+
         var now = Survey.CurrentIndex(b);
         return now == SurfaceIndexKind.None
-            ? $"send a research ship — it reads the indexes in order, and {Name(k)} is #{slot + 1} of {All.Length}"
-            : $"a research ship is on the {Name(now)} index; {Name(k)} is #{slot + 1} of {All.Length}";
+            ? $"send a research ship — it reads the indexes in order, and {Name(k)} is #{slot + 1} of {total}"
+            : $"a research ship is on the {Name(now)} index; {Name(k)} is #{slot + 1} of {total}";
     }
 }
