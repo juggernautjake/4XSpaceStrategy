@@ -440,6 +440,11 @@ public class UnitDTO
     public bool inSpace;
     public float px, py, pz;         // park position when in open space
     public float experience;
+
+    /// Hit points as they stand. -1 means a save written before ships could be damaged; the loader
+    /// restores such a ship to full, which is exactly what those saves recorded — nothing could hurt one.
+    public float hp = -1f;
+
     public int worldsExplored;
     public float serviceTime;
     public bool queuePaused;

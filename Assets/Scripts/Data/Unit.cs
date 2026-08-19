@@ -47,6 +47,34 @@ public class Unit
     public CelestialBody location;         // where it currently is (null while mid-transit)
     public UnitStatus status = UnitStatus.Idle;
 
+    // ---- CONDITION ----------------------------------------------------------------------------
+    //
+    // Hit points as they stand RIGHT NOW, as opposed to EffectiveHealth, which is the maximum this hull
+    // and rank are worth. The two were the same thing until there was combat: nothing could hurt a
+    // ship, so "how much health does this class have" and "how much has this ship got left" never
+    // needed telling apart.
+    //
+    // NEGATIVE MEANS UNINITIALISED, and it has to mean something rather than defaulting to zero — a
+    // ship built before this field existed, or loaded from a save written before it, would otherwise
+    // come back at zero hit points and be destroyed by the first shot fired anywhere near it. Read it
+    // through `Health`, never directly.
+    public float hp = -1f;
+
+    /// Current hit points, filling in from the hull's maximum the first time anyone asks.
+    public float Health
+    {
+        get { if (hp < 0f) hp = EffectiveHealth; return hp; }
+        set { hp = Mathf.Clamp(value, 0f, EffectiveHealth); }
+    }
+
+    /// 0..1, for a bar. A ship that has never been shot reads exactly 1.
+    public float HealthFraction
+    {
+        get { int max = EffectiveHealth; return max <= 0 ? 1f : Mathf.Clamp01(Health / max); }
+    }
+
+    public bool IsDestroyed => Health <= 0f;
+
     // Experience & record.
     public float experience;
     public int battles;

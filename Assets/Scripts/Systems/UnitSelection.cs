@@ -26,6 +26,18 @@ public static class UnitSelection
 
     public static void Clear() { selected.Clear(); OnChanged?.Invoke(); }
 
+    /// Drop ONE unit from the selection, leaving the rest alone.
+    ///
+    /// The case this exists for is a ship dying mid-battle. Removal used to call Clear(), so losing a
+    /// single fighter out of a selected fleet of twelve deselected the other eleven — in the middle of
+    /// a fight, at the exact moment the player was about to give them an order. Silent if the unit was
+    /// not selected, so callers can use it unconditionally.
+    public static void Deselect(Unit u)
+    {
+        if (u == null) return;
+        if (selected.Remove(u)) OnChanged?.Invoke();
+    }
+
     // Selected units that share the given location (used to send a fleet from one place).
     public static List<Unit> SelectedAt(CelestialBody body)
     {

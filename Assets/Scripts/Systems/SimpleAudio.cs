@@ -108,6 +108,7 @@ public class SimpleAudio : MonoBehaviour
         cUnitSelect[(int)UnitType.FighterII]      = cUnitSelect[(int)UnitType.Fighter];
         cUnitSelect[(int)UnitType.Terraformer]    = Sweep(420f, 700f, 0.2f, 5f, 0.45f);                       // deep rising engineering tone
         cDestroyed = Explosion(0.6f);
+        BuildCombatClips();
 
         // The old fixed-partial hum loop is retired: AmbientDrone replaces it with a live synth whose
         // voices glide between chords. Keeping both would just muddy the bed with a second, static
@@ -606,6 +607,122 @@ public class SimpleAudio : MonoBehaviour
             idx += gapN; // silence between notes
         }
         var c = AudioClip.Create("seq", n, 1, sr, false); c.SetData(d, 0); return c;
+    }
+
+    // ============================================================================================
+    // COMBAT AUDIO
+    //
+    // Every weapon needs to be identifiable BY EAR, because in a real engagement the player is watching
+    // the fleet, not the shot. So the six are separated on the two axes hearing actually resolves
+    // quickly — pitch direction and attack sharpness — rather than on timbre, which needs a moment's
+    // attention nobody has mid-battle:
+    //
+    //   pulse laser   short, high, falling      the classic snap
+    //   beam laser    steady, mid, sustained    a hum rather than an event
+    //   plasma        low, rising, thick        something heavy leaving the tube
+    //   railgun       very sharp, very short    a crack with almost no body
+    //   missile       rising hiss               a whoosh, all noise and no tone
+    //   point defence tiny, dry, high           a tick; it will fire dozens of times a second
+    //
+    // ---- AND THREE SIZES OF EXPLOSION -----------------------------------------------------------
+    //
+    // One boom for every death makes a skirmish and a fleet action sound identical. Three, chosen by
+    // hull size, is enough to tell a scout popping from a dreadnought going up without needing a
+    // library — the small one is short and bright, the large one is long and almost entirely low
+    // frequency, which is what distance and mass actually do to a sound.
+    // ============================================================================================
+    AudioClip[] cWeapon;          // indexed by WeaponClass
+    AudioClip[] cBoom;            // 0 small, 1 medium, 2 large
+
+    /// A cheap guard against the one thing that makes procedural combat audio unbearable: forty ships
+    /// firing on the same frame, each triggering a PlayOneShot, all summing into a clipped roar. One
+    /// shot per weapon class per this many seconds is plenty to read the battle by.
+    const float WeaponSoundGap = 0.06f;
+    float[] weaponSoundNext;
+
+    void BuildCombatClips()
+    {
+        int classes = System.Enum.GetValues(typeof(WeaponClass)).Length;
+        cWeapon = new AudioClip[classes];
+        weaponSoundNext = new float[classes];
+
+        cWeapon[(int)WeaponClass.PulseLaser]   = Sweep(1750f, 640f, 0.09f, 26f, 0.34f);
+        cWeapon[(int)WeaponClass.BeamLaser]    = Tone(880f, 0.20f, 5f, 0.20f);
+        cWeapon[(int)WeaponClass.PlasmaCannon] = Sweep(150f, 430f, 0.26f, 9f, 0.42f);
+        cWeapon[(int)WeaponClass.Railgun]      = Crack(0.14f);
+        cWeapon[(int)WeaponClass.Missile]      = Whoosh(0.42f);
+        cWeapon[(int)WeaponClass.PointDefence] = Sweep(2600f, 1900f, 0.045f, 40f, 0.16f);
+
+        cBoom = new[] { Explosion(0.42f), Explosion(0.75f), Explosion(1.35f) };
+    }
+
+    /// Fire cue for one shot. `at` is where it happened — unused for now (the mix is 2D), but taken so
+    /// the call sites do not have to change the day this becomes positional.
+    public void PlayWeapon(WeaponClass cls, Vector3 at)
+    {
+        if (cWeapon == null) return;
+        int i = (int)cls;
+        if (i < 0 || i >= cWeapon.Length || cWeapon[i] == null) return;
+        if (Time.unscaledTime < weaponSoundNext[i]) return;      // see WeaponSoundGap
+        weaponSoundNext[i] = Time.unscaledTime + WeaponSoundGap;
+
+        // A little pitch scatter so a burst from one mount does not sound like a looped sample.
+        sfx.pitch = Random.Range(0.93f, 1.08f);
+        sfx.PlayOneShot(cWeapon[i], cls == WeaponClass.PointDefence ? 0.22f : 0.40f);
+        sfx.pitch = 1f;
+    }
+
+    /// A ship coming apart. `hullScale` is the drawn size the explosion was sized by, so the sound and
+    /// the fireball agree about how big the thing that died was.
+    public void PlayShipDestroyed(float hullScale)
+    {
+        if (cBoom == null) { PlayUnitDestroyed(); return; }
+        int i = hullScale >= 2.2f ? 2 : hullScale >= 1.0f ? 1 : 0;
+        // Bigger things are also LOWER, not merely louder — pitching the same boom down is most of what
+        // sells mass, and it costs nothing.
+        sfx.pitch = i == 2 ? Random.Range(0.72f, 0.82f)
+                  : i == 1 ? Random.Range(0.88f, 0.98f)
+                           : Random.Range(1.02f, 1.16f);
+        sfx.PlayOneShot(cBoom[i], i == 2 ? 0.95f : i == 1 ? 0.8f : 0.6f);
+        sfx.pitch = 1f;
+    }
+
+    /// A railgun: almost pure transient. Noise through a fast-decaying envelope with a short tonal
+    /// spike at the front, which is what a supersonic slug leaving a rail sounds like — the crack is
+    /// the event, and there is essentially no tail.
+    static AudioClip Crack(float dur)
+    {
+        int sr = 44100, n = (int)(sr * dur); var d = new float[n];
+        var rng = new System.Random(9137);
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)sr;
+            float env = Mathf.Exp(-48f * t);
+            float noise = (float)(rng.NextDouble() * 2 - 1);
+            float spike = Mathf.Sin(2f * Mathf.PI * 2200f * t) * Mathf.Exp(-160f * t);
+            d[i] = (noise * 0.85f + spike * 0.5f) * env * 0.55f;
+        }
+        var c = AudioClip.Create("crack", n, 1, sr, false); c.SetData(d, 0); return c;
+    }
+
+    /// A missile leaving the rack: filtered noise that rises and then falls away as it departs. No
+    /// tone at all — a whoosh with a pitch in it reads as a musical note, not as a rocket.
+    static AudioClip Whoosh(float dur)
+    {
+        int sr = 44100, n = (int)(sr * dur); var d = new float[n];
+        var rng = new System.Random(2718);
+        float lp = 0f;
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)sr, k = t / dur;
+            float noise = (float)(rng.NextDouble() * 2 - 1);
+            // A one-pole low-pass whose cutoff opens as the round accelerates away, then closes again.
+            float cutoff = Mathf.Lerp(0.02f, 0.34f, Mathf.Sin(k * Mathf.PI));
+            lp += (noise - lp) * cutoff;
+            float env = Mathf.Sin(k * Mathf.PI);       // fade in and out; nothing clicks
+            d[i] = lp * env * 0.5f;
+        }
+        var c = AudioClip.Create("whoosh", n, 1, sr, false); c.SetData(d, 0); return c;
     }
 
     // A noisy descending boom for ship destruction.

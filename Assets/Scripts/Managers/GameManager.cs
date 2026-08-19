@@ -144,6 +144,7 @@ public class GameManager : MonoBehaviour
         SurfaceIndex.InvalidateAll();
         TectonicsMap.InvalidateAll();
         EarthquakeManager.ResetAll();   // ...and the quake clock, which is keyed on bodies too
+        CombatManager.ResetAll();       // ...and every ship's firing state, plus whatever is in the air
 
         int count = GalaxyGenerator.ClampSystems(systemCount);
         var galaxy = GalaxyGenerator.Begin(solarSystemGenerator);
@@ -415,6 +416,7 @@ public class GameManager : MonoBehaviour
         SurfaceIndex.InvalidateAll();
         TectonicsMap.InvalidateAll();
         EarthquakeManager.ResetAll();   // ...and the quake clock, which is keyed on bodies too
+        CombatManager.ResetAll();       // ...and every ship's firing state, plus whatever is in the air
         Galaxy = GalaxyGenerator.Generate(solarSystemGenerator, systemCount, SpeciesManager.Current);
         FocusedSystem = Galaxy.Home;
 

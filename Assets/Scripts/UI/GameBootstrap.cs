@@ -29,6 +29,11 @@ public static class GameBootstrap
         ControlGroupInput.Create();         // Ctrl+1..9 to bind fleets, 1..9 to recall them
         FleetMovementController.Create();
         TargetIndicator.Create();           // pulsing lock-on ring for right-click sends
+        // Combat. Order matters: the renderers must exist before CombatManager's first tick, because
+        // it hands them shots rather than drawing anything itself.
+        ProjectileRenderer.Create();        // pooled bolts and beams, with rate-limited homing
+        ExplosionRenderer.Create();         // impacts, intercepts and ships coming apart
+        CombatManager.Create();             // ships fight whatever hostile comes into weapons range
         UnitTokenRenderer.Create();
         UnitModelRenderer.Create();         // 3D meshes for stations + colony ships (falls back to tokens)
         GenesisCamera.Create();             // the intro films the real world with the real camera

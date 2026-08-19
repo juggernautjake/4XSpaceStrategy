@@ -365,9 +365,22 @@ public class UnitManager : MonoBehaviour
             NotificationManager.Instance?.Push($"{u.name} self-destructed", "", null, NotifKind.Danger);
         }
 
+        RemoveUnit(u);
+    }
+
+    /// Take a ship off the board. No refund, no notification, no sound — the CALLER says what happened.
+    ///
+    /// Split out of DestroyUnit because that method is the SCRAP path: it announces a self-destruct and
+    /// plays the scuttle cue, which is exactly right for a ship the player chose to break up and
+    /// exactly wrong for one that was shot. Combat deaths have their own explosion, their own sound and
+    /// their own notification (see CombatManager.Destroy), and routing them through the scrap path told
+    /// the player their dreadnought had self-destructed.
+    public void RemoveUnit(Unit u)
+    {
+        if (u == null) return;
         if (u.location != null && u.location.units != null) u.location.units.Remove(u);
         units.Remove(u);
-        if (UnitSelection.IsSelected(u)) UnitSelection.Clear();
+        if (UnitSelection.IsSelected(u)) UnitSelection.Deselect(u);
         OnUnitsChanged?.Invoke();
     }
 
@@ -1157,6 +1170,7 @@ public class UnitManager : MonoBehaviour
                 isPlayer = u.owner == FactionManager.Player,
                 locationId = u.location != null ? u.location.id : -1,
                 experience = u.experience,
+                hp = u.hp,                       // -1 if this ship has never been touched; see Unit.Health
                 worldsExplored = u.worldsExplored,
                 serviceTime = u.serviceTime,
                 queuePaused = u.queuePaused,
@@ -1245,6 +1259,7 @@ public class UnitManager : MonoBehaviour
                     owner = d.isPlayer ? FactionManager.Player : null,
                     location = at,
                     experience = d.experience,
+                    hp = d.hp,                   // -1 from an older save, which Unit.Health fills to full
                     worldsExplored = d.worldsExplored,
                     serviceTime = d.serviceTime,
                     queuePaused = d.queuePaused,
