@@ -37,7 +37,7 @@ public class GameManager : MonoBehaviour
     }
 
     // Default new game — a small galaxy (fallback / used by the R debug key).
-    public void GenerateStartingSystem() => GenerateGalaxy(5, 4);
+    public void GenerateStartingSystem() => GenerateGalaxy(5);
 
     /// Generate a galaxy with a loading screen, a system at a time.
     ///
@@ -53,7 +53,7 @@ public class GameManager : MonoBehaviour
     /// the pause menu, above all, whose Save button would otherwise capture the galaxy mid-cinematic.
     public bool IsGenerating => generating;
 
-    public void GenerateGalaxyAsync(int systemCount, int avgPlanets, System.Action onDone = null)
+    public void GenerateGalaxyAsync(int systemCount, System.Action onDone = null)
     {
         // One at a time. SolarSystemGenerator keeps its working state on the component itself —
         // _idCounter, stars, currentStar, currentSystemName, isBlackHole — and Finalise reads several of
@@ -68,7 +68,7 @@ public class GameManager : MonoBehaviour
         // when the sequence starts, because the Skip button is live throughout generation and a request
         // made during it has to survive until the sequence exists to honour it.
         GenesisSequence.ClearSkip();
-        StartCoroutine(GenerateGalaxyRoutine(systemCount, avgPlanets, onDone));
+        StartCoroutine(GenerateGalaxyRoutine(systemCount, onDone));
     }
 
     /// The real backstop, and it has to be OUT HERE to be one.
@@ -83,9 +83,9 @@ public class GameManager : MonoBehaviour
     /// `yield return` inside a try/finally is legal in a C# iterator (only a `catch` is not), and Unity
     /// disposes the enumerator when it stops a coroutine — so this runs on the normal path, on an
     /// exception, and on a StopCoroutine alike.
-    System.Collections.IEnumerator GenerateGalaxyRoutine(int systemCount, int avgPlanets, System.Action onDone)
+    System.Collections.IEnumerator GenerateGalaxyRoutine(int systemCount, System.Action onDone)
     {
-        var inner = GenerateGalaxyBody(systemCount, avgPlanets, onDone);
+        var inner = GenerateGalaxyBody(systemCount, onDone);
         try
         {
             while (inner.MoveNext()) yield return inner.Current;
@@ -112,7 +112,7 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    System.Collections.IEnumerator GenerateGalaxyBody(int systemCount, int avgPlanets, System.Action onDone)
+    System.Collections.IEnumerator GenerateGalaxyBody(int systemCount, System.Action onDone)
     {
         if (solarSystemGenerator == null)
         {
@@ -134,9 +134,18 @@ public class GameManager : MonoBehaviour
         TechManager.Reset();
         AncientLore.Reset();
         AncientClues.Reset();
+        GameCalendar.Reset();   // a new game starts on Year 0001, Month 01, Day 01
+
+        // Every derived-per-world cache is keyed on a CelestialBody REFERENCE, so a galaxy that is being
+        // replaced would otherwise keep every one of its worlds alive in a static dictionary for the rest
+        // of the session — and, worse, a fresh body that happened to reuse an old id could read the dead
+        // world's plate layout. Cleared together because they are one family: the survey bands, the plate
+        // geometry and the geothermal field are all derived from the same worlds.
+        SurfaceIndex.InvalidateAll();
+        TectonicsMap.InvalidateAll();
 
         int count = GalaxyGenerator.ClampSystems(systemCount);
-        var galaxy = GalaxyGenerator.Begin(solarSystemGenerator, avgPlanets);
+        var galaxy = GalaxyGenerator.Begin(solarSystemGenerator);
         screen?.Report(0.03f, "Seeding " + galaxy.name);
         yield return null;
 
@@ -381,7 +390,7 @@ public class GameManager : MonoBehaviour
         TimeControl.Set(1f);
     }
 
-    public void GenerateGalaxy(int systemCount, int avgPlanets)
+    public void GenerateGalaxy(int systemCount)
     {
         if (solarSystemGenerator == null)
         {
@@ -393,8 +402,18 @@ public class GameManager : MonoBehaviour
         EmpireTech.Reset();
         TechManager.Reset();
         AncientLore.Reset();
-        AncientClues.Reset();   // a fresh galaxy re-scatters the ten Vael fragments (SeedGalaxy, in Generate)
-        Galaxy = GalaxyGenerator.Generate(solarSystemGenerator, systemCount, avgPlanets, SpeciesManager.Current);
+        AncientClues.Reset();
+        // AncientClues.Reset above re-scatters the ten Vael fragments (SeedGalaxy, in Generate).
+        GameCalendar.Reset();   // a new game starts on Year 0001, Month 01, Day 01
+
+        // Every derived-per-world cache is keyed on a CelestialBody REFERENCE, so a galaxy that is being
+        // replaced would otherwise keep every one of its worlds alive in a static dictionary for the rest
+        // of the session — and, worse, a fresh body that happened to reuse an old id could read the dead
+        // world's plate layout. Cleared together because they are one family: the survey bands, the plate
+        // geometry and the geothermal field are all derived from the same worlds.
+        SurfaceIndex.InvalidateAll();
+        TectonicsMap.InvalidateAll();
+        Galaxy = GalaxyGenerator.Generate(solarSystemGenerator, systemCount, SpeciesManager.Current);
         FocusedSystem = Galaxy.Home;
 
         // (Silenced to keep the console clean — this was a one-time generation confirmation.)

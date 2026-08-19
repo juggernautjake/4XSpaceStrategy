@@ -18,6 +18,19 @@ public static class PlanetTemperature
     // A tile's local reading: the body's baseline plus a small equator-warmer/pole-cooler swing. The
     // swing is deliberately small next to the type nudges below, so it can vary a world's own tiles
     // without ever flipping a hot world cold or vice versa.
+    // ============================================================================================
+    // THE RANGE
+    //
+    // −270 °C to 1000 °C. The cold end is a shade above absolute zero — a rock in deep space, far from
+    // any sun, with nothing to keep it warm. The hot end is a MOLTEN world: a surface of liquid rock,
+    // which is roughly where basalt melts and therefore roughly where "planet" stops meaning what it
+    // usually means.
+    //
+    // The old clamp was −200 to 400, and it was not merely narrow: it was the reason a molten world and
+    // a merely volcanic one read as the same temperature. Both saturated at 400.
+    public const float MinCelsius = -270f;
+    public const float MaxCelsius = 1000f;
+
     public static float CelsiusAt(CelestialBody b, int y)
     {
         if (b == null) return 0f;
@@ -27,28 +40,84 @@ public static class PlanetTemperature
         float latAbs = Mathf.Abs((y + 0.5f) / h - 0.5f) * 2f;   // 0 at the equator, 1 at the poles
         float latitudeSwingC = Mathf.Lerp(15f, -15f, Mathf.Clamp01(latAbs));
 
-        return Mathf.Clamp(baseC + latitudeSwingC, -200f, 400f);
+        return Mathf.Clamp(baseC + latitudeSwingC, MinCelsius, MaxCelsius);
+    }
+
+    /// The reading for a specific TILE — latitude and ELEVATION both.
+    ///
+    /// The latitude-only version above is what every readout used, and on the new terrain it is visibly
+    /// wrong: elevation moves a tile's temperature by up to ±65 °C (PlanetTerrainGenerator's altitude
+    /// lapse), which is what puts snow on a mountain in the tropics and magma in a valley on a world
+    /// whose highlands are bare rock. A readout that ignored it would tell the player a peak and the
+    /// plain beside it were the same temperature while the map plainly showed otherwise.
+    ///
+    /// Uses the SAME lapse rate the terrain generator classified the tile with, so the number under the
+    /// cursor is the number the biome was decided by.
+    public static float CelsiusAt(CelestialBody b, int x, int y)
+    {
+        if (b?.surface == null) return CelsiusAt(b, y);
+        if (x < 0 || y < 0 || x >= b.surface.width || y >= b.surface.height) return CelsiusAt(b, y);
+
+        float altDelta = b.surface.tiles[x, y].elevation - 0.5f;
+        return Mathf.Clamp(CelsiusAt(b, y) - altDelta * PlanetTerrainGenerator.AltitudeLapseC,
+                           MinCelsius, MaxCelsius);
     }
 
     // The body's overall average — no latitude swing, just the climate its heat and type describe.
     // This is the explicit "planet Temperature setting" the request asks for.
-    public static float BodyAverageCelsius(CelestialBody b) => Mathf.Clamp(BaseCelsius(b), -200f, 400f);
+    public static float BodyAverageCelsius(CelestialBody b) => Mathf.Clamp(BaseCelsius(b), MinCelsius, MaxCelsius);
 
     // How much extra warmth a thick atmosphere traps on top of what raw distance/heat would give —
     // Venus, not Mercury, despite Venus sitting farther from the sun. A vacuum world gets none of this.
     const float GreenhouseMaxC = 45f;
 
+    // ============================================================================================
+    // INTERNAL HEAT — the half of a molten world's temperature that has nothing to do with its star
+    //
+    // Everything above this line is about SUNLIGHT: how bright the star is, how far away the world sits,
+    // how much of the outgoing infrared its air traps. That law tops out around 250 °C for a world as
+    // close to its sun as these systems put one, and no amount of tuning it will produce a lava world,
+    // because a lava world is not hot for that reason. Io is nine hundred million kilometres from the
+    // Sun and is the most volcanically active body in the solar system; the heat is coming from
+    // UNDERNEATH.
+    //
+    // So it is a separate term, driven by the same geothermal field the survey overlay draws and the
+    // earthquakes shake (GeothermalMap.WorldIntensity). A body venting at full intensity runs six
+    // hundred degrees hotter than its orbit says it should, which — stacked on a close orbit and a thick
+    // greenhouse — is what lands a genuinely molten world in the 650-1000 °C band where magma fields
+    // form. A quiet one gets nothing, and its temperature is its orbit's business alone.
+    //
+    // GATED ON THE VOLCANIC TYPE, not applied to everything with a hotspot. A rocky world with an
+    // active fault has volcanoes on it and is not five hundred degrees; what the type says is that the
+    // venting is planet-wide rather than local.
+    public const float InternalMaxC = 620f;
+
+    static float InternalC(CelestialBodyType type, float geothermal01)
+        => type == CelestialBodyType.VolcanicPlanet ? Mathf.Clamp01(geothermal01) * InternalMaxC : 0f;
+
     static float BaseCelsius(CelestialBody b)
-        => BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, b.type);
+        => BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, b.type, GeothermalMap.WorldIntensity(b));
 
     // The same law from raw inputs, so terrain GENERATION can judge a tile's climate against the exact
     // figure this class shows the player — greenhouse warming and the type nudge included — and the map
     // (frozen seas, no jungle in a furnace) can never disagree with the °C readout.
+    //
+    // The three-argument form carries no internal heat, which is the right default for every caller that
+    // does not have a body to read one off — WorldClassifier deliberately asks this question with the
+    // type held at RockyPlanet precisely to keep the classification from being circular, and a molten
+    // world must not be molten because it was already classified molten.
     public static float BaseCelsius(float heat, float atmosphereThickness, CelestialBodyType type)
+        => BaseCelsius(heat, atmosphereThickness, type, 0f);
+
+    public static float BaseCelsius(float heat, float atmosphereThickness, CelestialBodyType type,
+                                    float geothermal01)
     {
-        float kelvin = ReferenceKelvin * Mathf.Sqrt(Mathf.Max(0.01f, heat));
+        // The floor is far below anything generation produces (a distant world runs ~0.07) and exists so
+        // the cold end of the range is reachable at all: at 0.01 the law bottoms out near −245 °C, which
+        // is warmer than the −270 the range is supposed to reach.
+        float kelvin = ReferenceKelvin * Mathf.Sqrt(Mathf.Max(0.00001f, heat));
         float greenhouseC = Mathf.Clamp01(atmosphereThickness) * GreenhouseMaxC;
-        return kelvin - 273.15f + TypeModifierC(type) + greenhouseC;
+        return kelvin - 273.15f + TypeModifierC(type) + greenhouseC + InternalC(type, geothermal01);
     }
 
     /// The `heat` value that would give a world of this type and atmosphere the requested average
@@ -93,25 +162,33 @@ public static class PlanetTemperature
     // Real generated ice worlds now run warmer than this floor thanks to greenhouse warming (every ice
     // world has SOME atmosphere per AtmosphereRules), so this is a safety anchor rather than a value any
     // world actually reaches — GradientColor just never gets asked to show anything colder.
-    const float StopWhite = -130f;
+    const float StopWhite = -240f;
     const float StopIceBlue = -30f;
     const float StopYellowOrange = 70f;
-    const float StopRed = 180f;
+    const float StopRed = 250f;
+    /// ...and past red, a world hot enough to GLOW. Rock at 900 °C is a dull incandescent orange in the
+    /// dark, which is exactly what a magma field is, and a molten world needs somewhere on this ramp to
+    /// live that a merely scorching one does not reach. Without it every temperature over 250 read as
+    /// the same red and the whole new upper half of the range was invisible.
+    const float StopMolten = 900f;
 
     static readonly Color ColorWhite = new Color(1.00f, 1.00f, 1.00f);
     static readonly Color ColorIceBlue = new Color(0.62f, 0.85f, 1.00f);
     static readonly Color ColorYellowOrange = new Color(1.00f, 0.62f, 0.12f);
     static readonly Color ColorRed = new Color(0.95f, 0.14f, 0.10f);
+    static readonly Color ColorMolten = new Color(1.00f, 0.86f, 0.55f);   // incandescent
 
     public static Color GradientColor(float celsius)
     {
         if (celsius <= StopWhite) return ColorWhite;
-        if (celsius >= StopRed) return ColorRed;
+        if (celsius >= StopMolten) return ColorMolten;
 
         if (celsius <= StopIceBlue)
             return Color.Lerp(ColorWhite, ColorIceBlue, Mathf.InverseLerp(StopWhite, StopIceBlue, celsius));
         if (celsius <= StopYellowOrange)
             return Color.Lerp(ColorIceBlue, ColorYellowOrange, Mathf.InverseLerp(StopIceBlue, StopYellowOrange, celsius));
-        return Color.Lerp(ColorYellowOrange, ColorRed, Mathf.InverseLerp(StopYellowOrange, StopRed, celsius));
+        if (celsius <= StopRed)
+            return Color.Lerp(ColorYellowOrange, ColorRed, Mathf.InverseLerp(StopYellowOrange, StopRed, celsius));
+        return Color.Lerp(ColorRed, ColorMolten, Mathf.InverseLerp(StopRed, StopMolten, celsius));
     }
 }

@@ -356,13 +356,24 @@ public class TerraformManager : MonoBehaviour
                 if (b.resources != null) b.resources.Add(ResourceType.Water, 220f);
                 break;
 
+            // SPINNING A WORLD UP NOW STARTS ITS DYNAMO — which is not a bonus bolted on, it is the same
+            // rule every other body follows (RotationRules). A magnetic field is a consequence of
+            // rotation, so a project whose entire purpose is to change a world's rotation has to
+            // re-derive it, or the project would visibly speed the world up and the Overview beside it
+            // would go on reporting no magnetosphere.
+            //
+            // It also cuts the other way, and deliberately: SpinDown on a world that was only just over
+            // the threshold costs it the field, halves its atmosphere ceiling, and the air above that
+            // ceiling is lost. Slowing a planet's day down is a serious thing to do to it.
             case TerraformProjectType.SpinUp:
-                b.spinSpeed = Mathf.Max(b.spinSpeed, 12f);
+                b.spinSpeed = Mathf.Max(b.spinSpeed, RotationRules.MagneticFieldSpin + 4f);
                 RefreshSpin(b);
+                ApplyRotationConsequences(b);
                 break;
             case TerraformProjectType.SpinDown:
                 b.spinSpeed = Mathf.Min(b.spinSpeed, 20f);
                 RefreshSpin(b);
+                ApplyRotationConsequences(b);
                 break;
             case TerraformProjectType.AxialCorrection:
             case TerraformProjectType.CaptureMoon:
@@ -497,7 +508,7 @@ public class TerraformManager : MonoBehaviour
         // tectonically-active remodelled world "should" have doesn't retroactively show up here; doing so
         // would mean re-rolling this world's whole terrain variance, which would break the "same
         // continents, new climate" guarantee GenerateSurface below is relying on.
-        b.hasTectonics = TectonicsRules.Roll(b.type, b.surfaceSize);
+        b.hasTectonics = TectonicsRules.Roll(b.type, b.mass);
 
         // The surface is derived from the body type, so it has to be rebuilt — deterministically, from
         // the same terrain seed, so the world keeps its identity (same continents, new climate).
@@ -595,6 +606,32 @@ public class TerraformManager : MonoBehaviour
     {
         var oc = b.visualObject != null ? b.visualObject.GetComponent<OrbitController>() : null;
         oc?.SetSpin(b.spinSpeed);
+        oc?.SetSpinDirection(b.rotationDirection);
+    }
+
+    /// Re-derive everything that hangs off a world's rotation, after something has changed it.
+    ///
+    /// One place, because there are two callers (SpinUp and SpinDown) and the consequences have to be
+    /// identical in both directions. The Magnetospheric Shield project sets `hasMagneticField` directly
+    /// and is deliberately NOT routed through here: an artificial shield is exactly the case where a
+    /// world HAS a field without turning fast enough to earn one, and re-deriving would switch it off
+    /// again the moment it was installed.
+    static void ApplyRotationConsequences(CelestialBody b)
+    {
+        if (b == null) return;
+        // A world that already carries a project-granted field keeps it — nothing about slowing down
+        // dismantles a shield somebody built.
+        if (b.terraformProjects != null &&
+            (b.terraformProjects.Contains((int)TerraformProjectType.MagneticShield) ||
+             b.terraformProjects.Contains((int)TerraformProjectType.CoreIgnition))) return;
+
+        bool field = RotationRules.GeneratesField(b);
+        if (field == b.hasMagneticField) return;
+
+        b.hasMagneticField = field;
+        // Losing the field halves the ceiling (AtmosphereRules), so the air above the new ceiling goes
+        // with it — the same consequence the Dev sandbox's magnetic-field button applies.
+        if (!field) b.atmospheres = Mathf.Min(b.atmospheres, AtmosphereRules.Ceiling(b));
     }
 
     static void RefreshOrbit(CelestialBody b)

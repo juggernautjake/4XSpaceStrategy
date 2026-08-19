@@ -165,6 +165,24 @@ public static class TectonicsMap
                                   // ragged, so ranges are not confined to the red line on the overlay
         public float convergence; // relative motion across that fault: >0 plates driven TOGETHER
                                   // (compression -> mountains/volcanoes), <0 pulled apart (a rift)
+
+        /// How hard the two plates SLIDE PAST each other across this fault, 0..1 — the component of
+        /// their relative motion ALONG the boundary rather than across it. A transform margin (the San
+        /// Andreas) has almost no convergence and enormous shear, and the Geothermal index has to read
+        /// it as an active fault: the request calls out "two neighboring continental plates pushing
+        /// past each other (shearing)" alongside head-on collision as a high-activity margin.
+        ///
+        /// Kept separate from `convergence` rather than folded into a single "activity" number because
+        /// they do different things to the GROUND: convergence lifts and rifting drops, while shear
+        /// does neither — it only shakes and vents. Terrain reads convergence; the Geothermal index and
+        /// the earthquakes read both.
+        public float shear;
+
+        /// Distance from the drawn fault line, IN TILES of this world's grid. `boundary` and `belt` are
+        /// both normalized falloffs whose width is decided here; the Geothermal index needs the raw
+        /// distance instead, because the request specifies its radiation in tiles ("up to 3 in each
+        /// direction") and a normalized falloff cannot answer that question at two different map sizes.
+        public float distanceTiles;
     }
 
     // ============================================================================================
@@ -208,10 +226,26 @@ public static class TectonicsMap
     }
 
     /// A plate holding fewer than this share of the map's tiles is not a plate, it is a speck. Absorbed.
-    const float MinPlateFraction = 0.004f;
+    ///
+    /// RAISED FROM 0.004, and the old value is worth understanding because it looked harmless. A world
+    /// carries four to thirteen plates, so an average plate holds 8-25% of the map; 0.4% is therefore not
+    /// "a small plate", it is a plate one fiftieth the size of its neighbours. Rendered, a region that
+    /// small is not a landmass with a border — it is entirely border, because every one of its tiles
+    /// touches another plate. It draws as a solid clump of red, and a clump of red in a picture whose
+    /// whole language is "red means the CRACK between two plates" says something that isn't true.
+    ///
+    /// Two percent still lets a world have genuinely small plates (a Juan de Fuca beside a Pacific), and
+    /// MinPlatesOnMap below still stops the absorption from flattening a world into two continents.
+    const float MinPlateFraction = 0.02f;
 
     /// ...and never fewer than this many tiles, so a small world's plates aren't all specks by fraction.
-    const int MinPlateTiles = 12;
+    ///
+    /// This is the floor that was actually binding on the worlds where the artefact showed. A 60x30 moon
+    /// is 1,800 cells, so the fraction above asked for 7 tiles and this asked for 12 — and a 12-tile
+    /// region on a 60-wide map is a five-by-three blob with no interior at all. Thirty tiles is about the
+    /// smallest region that can have a couple of cells nothing can see the edge of, which is the real
+    /// requirement: a plate has to have an INSIDE, or it is a spot rather than a plate.
+    const int MinPlateTiles = 30;
 
     /// How many tiles a region must have that are COMPLETELY surrounded by their own plate. A region with
     /// none is one tile wide somewhere along its whole length — a sliver — and a sliver wedged between two
@@ -729,6 +763,57 @@ public static class TectonicsMap
 
     /// A uniformly-distributed direction on the sphere. Uniform in z (NOT in latitude) — sampling latitude
     /// uniformly would crowd the poles, which is precisely the bias this whole file exists to avoid.
+    // ============================================================================================
+    // CONTINENTAL vs OCEANIC CRUST — where the continents come from on a plate world
+    //
+    // The request's terrain rework asks for the continents of a tectonic world to be drawn from the
+    // Voronoi/cell system rather than from a noise field. That is exactly what a plate map already is:
+    // the plates ARE the cells, and all that was missing was the one property that makes some of them
+    // land and the rest sea floor. A plate of continental crust rides high; a plate of oceanic crust
+    // sits low, and the water collects in it. That is not an analogy — it is the actual reason Earth
+    // has an Atlantic and an Africa rather than an even scatter of both.
+    //
+    // DERIVED, NOT STORED, and that is deliberate rather than lazy. `Export`/`Import` flatten a layout
+    // at a fixed stride of seven floats per plate, and a save written by an older build must keep
+    // loading; adding an eighth field would have made every existing world fall back to rebuilding its
+    // plates, which is the one thing that serialization exists to prevent. A pure function of the
+    // layout's own seed and the plate's index answers identically for a built layout and an imported
+    // one, so there is nothing to keep in step.
+    //
+    // Roughly a third of plates come out continental, which is about Earth's land fraction once the
+    // continental shelves are counted — and, more to the point, it is the ratio that reliably gives a
+    // world a couple of real landmasses in a real ocean rather than either a waterworld or a pangaea.
+    public static float PlateCrust(Layout l, int plateId)
+    {
+        if (l == null || plateId < 0) return 0f;
+        float h = Hash01(l.builtForSeed * 0.7331f + plateId * 37.19f + 11.3f);
+
+        // Skewed, not centred. Below the cut the plate is ocean floor and how far below decides how
+        // DEEP; above it the plate is land and how far above decides how HIGH. The cut sits at 0.62 so
+        // ~38% of plates are continental.
+        const float Cut = 0.62f;
+        return h < Cut
+            ? -Mathf.InverseLerp(Cut, 0f, h)          //  0 .. -1  ocean basin
+            :  Mathf.InverseLerp(Cut, 1f, h);         //  0 ..  1  continent
+    }
+
+    /// The crust height at a point, from whichever plate actually owns it. The one call the terrain
+    /// generator makes; everything about which plate that is lives in `Sample`.
+    public static float CrustAt(CelestialBody b, in Hit hit)
+    {
+        if (hit.owner < 0) return 0f;
+        var l = Get(b);
+        return l == null ? 0f : PlateCrust(l, hit.owner);
+    }
+
+    /// A stable 0..1 from a float. Same sin-based construction AtmosphereRules uses for its
+    /// seed-derived values, so "deterministic variation from a seed" means one thing in this codebase.
+    static float Hash01(float seed)
+    {
+        float v = Mathf.Sin(seed * 12.9898f + 78.233f) * 43758.5453f;
+        return Mathf.Clamp01(v - Mathf.Floor(v));
+    }
+
     static Vector3 RandomDirection(System.Func<float> R)
     {
         float z = R() * 2f - 1f;
@@ -837,7 +922,14 @@ public static class TectonicsMap
             else if (pi != plateA && c > c2) { c2 = c; cellB = i; }
         }
 
-        Hit hit = new Hit { plateA = plateA, plateB = -1, owner = plateA, boundary = 0f, belt = 0f, convergence = 0f };
+        Hit hit = new Hit
+        {
+            plateA = plateA, plateB = -1, owner = plateA,
+            boundary = 0f, belt = 0f, convergence = 0f, shear = 0f,
+            // No fault in reach is not "on a fault" — it has to read as FAR, or the Geothermal index
+            // would light the whole of a one-plate world up at the fault-line value.
+            distanceTiles = float.MaxValue
+        };
         if (cellB < 0) return hit;   // only one plate on this world: no faults anywhere
 
         hit.plateB = l.cellPlate[cellB];
@@ -913,6 +1005,7 @@ public static class TectonicsMap
         float tilesPerRad = Mathf.Sqrt((tE / cosl) * (tE / cosl) + tN * tN) * l.heightTiles / Mathf.PI;
         if (tilesPerRad < 1e-4f) tilesPerRad = l.heightTiles / Mathf.PI;
         float distTiles = angReal * tilesPerRad;
+        hit.distanceTiles = distTiles;
 
         // The drawn line. Its width breathes a little along its length — real margins are not drafted with
         // a ruler — but the jitter is bounded, so the band stays inside its one-to-three tile budget. The
@@ -944,7 +1037,16 @@ public static class TectonicsMap
         {
             nrm.Normalize();
             Vector3 vrel = l.plates[hit.plateA].motion - l.plates[hit.plateB].motion;
-            hit.convergence = Mathf.Clamp(Vector3.Dot(vrel, nrm) * 0.5f, -1f, 1f);
+            float across = Vector3.Dot(vrel, nrm);
+            hit.convergence = Mathf.Clamp(across * 0.5f, -1f, 1f);
+
+            // SHEAR is what is left of the relative motion once the across-the-fault part is removed:
+            // the two plates grinding along each other. Measured in the tangent plane at A, so the
+            // radial component (which is not motion on the surface at all) never leaks into it. Same
+            // 0.5 scaling as convergence so the two are on one scale and can be compared directly.
+            Vector3 along = vrel - nrm * across;
+            along -= A * Vector3.Dot(along, A);
+            hit.shear = Mathf.Clamp01(along.magnitude * 0.5f);
         }
         return hit;
     }
@@ -1004,7 +1106,17 @@ public static class TectonicsMap
         // that is exactly what the absorption pass exists to sweep up.
         TrimSlivers(map);
         Absorb(map, plateCount);
+
+        // A region can pass every test above and still be RINGED: too small to hold anything the drawn
+        // line does not touch, so the line closes around it and the map shows a red loop with a couple
+        // of tiles trapped inside. Caught here rather than in Absorb because the test is about the
+        // BORDER, which does not exist until it is marked. See AbsorbRinged.
+        AbsorbRinged(map, plateCount);
+
         MarkBorders(map);
+        // ...and the last word on the picture itself: red is a LINE. Whatever the plates came out as,
+        // the raster must not contain a filled patch of red or a line that stops in mid-air.
+        ThinBorders(map);
 
         for (int i = 0; i < n; i++) map.plateDrawn[map.plate[i]] = true;
         return map;
@@ -1308,6 +1420,271 @@ public static class TectonicsMap
         share.TryGetValue(p, out int c);
         share[p] = c + 1;
     }
+    // ============================================================================================
+    // RINGED REGIONS — the red loop with nothing inside it
+    //
+    // Absorb measures a region by tile count and by whether it has an interior. Both tests can pass on a
+    // region that still comes out as a solid blob of red, because neither of them knows how WIDE the
+    // drawn line is. The line is one tile, plus whatever the corner-squaring adds, and it is drawn on
+    // ONE side of each boundary — so a region roughly four or five tiles across has every one of its own
+    // tiles either red or touching red, and what the player sees is a closed red loop with two or three
+    // stranded cells in the middle of it. Both circled artefacts in the report are this: one where the
+    // region carried the red itself (the clump), one where its neighbours did (the ring with a hole).
+    //
+    // The test is therefore about the PICTURE, not about the partition: how many tiles of this region
+    // would a player see as ordinary ground — neither drawn as a boundary nor immediately beside one? A
+    // region with almost none of those is not a landmass with a margin around it, it is a margin. It
+    // joins the neighbour it shares the most edge with, and its boundary becomes part of theirs, which
+    // is what "absorbed into the nearby faultlines" means.
+    //
+    // Which is why this runs AFTER the border has been marked, and re-marks it every pass: absorbing one
+    // ringed region changes which tiles are boundary, and can leave the region that ate it ringed in
+    // turn.
+    // ============================================================================================
+
+    /// How many tiles a region must have that are neither drawn as a boundary nor adjacent to one. Three
+    /// is the same "does it have an inside" bar MinPlateCore sets, asked of the rendered map instead of
+    /// the partition.
+    const int MinUnringedTiles = 3;
+
+    /// A backstop, not a budget — the loop exits the moment a pass moves nothing.
+    const int RingPasses = 5;
+
+    static void AbsorbRinged(TileMap map, int plateCount)
+    {
+        int w = map.width, h = map.height, n = w * h;
+
+        var label = new int[n];
+        var sizes = new List<int>();
+        var stack = new Stack<int>();
+        var share = new Dictionary<int, int>();
+        var tilesPerPlate = new int[plateCount];
+
+        for (int pass = 0; pass < RingPasses; pass++)
+        {
+            // A provisional line, so the test can be asked of the drawing. Cleared first because
+            // MarkBorders only ever adds.
+            System.Array.Clear(map.border, 0, n);
+            MarkBorders(map);
+            LabelRegions(map, label, sizes, stack);
+
+            var free = new int[sizes.Count];
+            var tilesOf = new List<int>[sizes.Count];
+            for (int id = 0; id < sizes.Count; id++) tilesOf[id] = new List<int>(sizes[id]);
+
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int i = y * w + x;
+                    tilesOf[label[i]].Add(i);
+                    if (map.border[i] || TouchesBorder(map, x, y)) continue;
+                    free[label[i]]++;
+                }
+
+            System.Array.Clear(tilesPerPlate, 0, tilesPerPlate.Length);
+            for (int i = 0; i < n; i++) tilesPerPlate[map.plate[i]]++;
+            int present = 0;
+            for (int p = 0; p < plateCount; p++) if (tilesPerPlate[p] > 0) present++;
+
+            // Smallest first, for the same reason Absorb does it: a speck joins the continent beside it
+            // before that continent is itself measured.
+            var offenders = new List<int>();
+            for (int id = 0; id < sizes.Count; id++) if (free[id] < MinUnringedTiles) offenders.Add(id);
+            if (offenders.Count == 0) break;
+            offenders.Sort((a, b) => sizes[a].CompareTo(sizes[b]));
+
+            bool moved = false;
+            foreach (int id in offenders)
+            {
+                var tiles = tilesOf[id];
+                if (tiles.Count == 0) continue;
+                int mine = map.plate[tiles[0]];
+
+                // Never delete the last plate the map can spare, and never take a plate's only region
+                // when doing so would drop the count below the floor — the same guard Absorb applies.
+                if (present - 1 < MinPlatesOnMap && tilesPerPlate[mine] == tiles.Count) continue;
+
+                share.Clear();
+                foreach (int i in tiles)
+                {
+                    int x = i % w, y = i / w;
+                    Share(map, label, share, id, x + 1, y);
+                    Share(map, label, share, id, x - 1, y);
+                    Share(map, label, share, id, x, y + 1);
+                    Share(map, label, share, id, x, y - 1);
+                }
+
+                int into = -1, best = -1;
+                foreach (var kv in share) if (kv.Key != mine && kv.Value > best) { best = kv.Value; into = kv.Key; }
+                if (into < 0) continue;
+
+                foreach (int i in tiles) map.plate[i] = into;
+                tilesPerPlate[mine] -= tiles.Count;
+                tilesPerPlate[into] += tiles.Count;
+                if (tilesPerPlate[mine] == 0) present--;
+                moved = true;
+            }
+
+            if (!moved) break;
+        }
+
+        // The line is re-marked by the caller from the FINAL plate map; anything left here describes an
+        // arrangement of plates that no longer exists.
+        System.Array.Clear(map.border, 0, n);
+    }
+
+    static bool TouchesBorder(TileMap map, int x, int y)
+    {
+        int w = map.width, h = map.height;
+        if (map.border[y * w + Wrap(x + 1, w)]) return true;
+        if (map.border[y * w + Wrap(x - 1, w)]) return true;
+        if (y + 1 < h && map.border[(y + 1) * w + x]) return true;
+        if (y - 1 >= 0 && map.border[(y - 1) * w + x]) return true;
+        return false;
+    }
+
+    // ============================================================================================
+    // THINNING — red is a LINE, and the raster has to prove it
+    //
+    // Everything above works on the PARTITION and hopes the drawing follows. This works on the drawing
+    // directly, and it exists because the two failure modes the report names are both statements about
+    // the picture rather than about the plates:
+    //
+    //   A FILLED PATCH OF RED. A boundary is a crack between two landmasses. A solid block of it is not
+    //   a crack that got wider, it is a shape — and a shape drawn in the colour reserved for "edge"
+    //   reads as a landmass made of edge, which is not a thing.
+    //   A LINE THAT STOPS. Boundaries close: they run into another boundary at a junction, or they run
+    //   around and meet themselves. A red line trailing off into open ground announces a plate margin
+    //   that goes nowhere, which no partition of a sphere can actually contain.
+    //
+    // THE ONE INVARIANT that must survive both passes: every pair of adjacent tiles belonging to
+    // DIFFERENT plates has at least one red tile in it. `Separates` asks exactly that question of a
+    // single tile, live against the current raster, and no tile that answers yes is ever removed — so
+    // the thinning can never open a gap between two plates however far it erodes.
+    // ============================================================================================
+
+    /// Backstops. Each loop exits the moment a pass changes nothing; twelve is enough to erode a solid
+    /// five-by-five patch down to a line from its corners inward.
+    const int ThinPasses = 12;
+    const int StubPasses = 12;
+
+    // MEASURED (Node port of these passes, 24 worlds: 60x30 through 400x200, four to six seeds each,
+    // against the same rasters run through the old thresholds and no cleanup at all):
+    //
+    //   2x2 blocks of red   13.0 per world  ->  1.3      and 94% of what survives is a genuine
+    //                                           three-plate junction, which really is thicker than a
+    //                                           line and is left alone on purpose.
+    //   dead-end tiles       2.4 per world  ->  0.75     of which a sixth are on a pole row, where the
+    //                                           map's edge genuinely IS where the boundary stops.
+    //   unseparated pairs    0              ->  0        the invariant, never broken by either pass.
+    //   plates on the map    unchanged in 20 of 24; one fewer in 4, which is the ringed absorption
+    //                        doing exactly what it is for.
+    //
+    // The stubs that survive are single tiles that ARE separators — a one-cell flip of ownership, where
+    // removing the red would put two plates in contact with nothing between them. Under one per world,
+    // one tile each, and not removable without breaking the thing the line is for.
+
+    static void ThinBorders(TileMap map)
+    {
+        int w = map.width, h = map.height;
+
+        // ---- 1) No filled patches ----
+        //
+        // Break every 2x2 block of red by dropping ONE of its corners. Whichever three remain form an L,
+        // which is still 4-connected, so this can never sever the line through the block itself — and
+        // the corner chosen is one with no red neighbour OUTSIDE the block, so it cannot sever anything
+        // attached to the block either. If no corner qualifies, the block is a genuine triple junction
+        // where three margins meet, and it is left alone: that really is thicker than a line, and
+        // drawing it thinner would be the lie.
+        for (int pass = 0; pass < ThinPasses; pass++)
+        {
+            bool changed = false;
+            for (int y = 0; y + 1 < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int xr = Wrap(x + 1, w);
+                    int tl = y * w + x, tr = y * w + xr, bl = (y + 1) * w + x, br = (y + 1) * w + xr;
+                    if (!map.border[tl] || !map.border[tr] || !map.border[bl] || !map.border[br]) continue;
+
+                    int drop = -1;
+                    if (Droppable(map, tl, x, y, -1, -1)) drop = tl;
+                    else if (Droppable(map, tr, xr, y, 1, -1)) drop = tr;
+                    else if (Droppable(map, bl, x, y + 1, -1, 1)) drop = bl;
+                    else if (Droppable(map, br, xr, y + 1, 1, 1)) drop = br;
+                    if (drop < 0) continue;
+
+                    map.border[drop] = false;
+                    changed = true;
+                }
+            if (!changed) break;
+        }
+
+        // ---- 2) No dead ends ----
+        //
+        // A red tile with at most one red neighbour is a leaf: nothing routes THROUGH it, so removing it
+        // cannot disconnect the network. Repeated, this retracts a whole trailing stub one tile at a
+        // time back to the junction it grew out of. Separator tiles are exempt, so a one-tile plate
+        // margin that genuinely has to be drawn stays drawn.
+        for (int pass = 0; pass < StubPasses; pass++)
+        {
+            bool changed = false;
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    int i = y * w + x;
+                    if (!map.border[i]) continue;
+                    if (Separates(map, i)) continue;
+                    if (BorderDegree(map, x, y) > 1) continue;
+                    map.border[i] = false;
+                    changed = true;
+                }
+            if (!changed) break;
+        }
+    }
+
+    /// May this corner of a 2x2 red block be dropped? Only if removing it opens no gap between two
+    /// plates (`Separates`) AND it has no red neighbour outside the block — the two directions it does
+    /// not share with the block are given as (dx, dy).
+    static bool Droppable(TileMap map, int i, int x, int y, int dx, int dy)
+    {
+        if (Separates(map, i)) return false;
+        int w = map.width, h = map.height;
+        if (map.border[y * w + Wrap(x + dx, w)]) return false;
+        int ny = y + dy;
+        if (ny >= 0 && ny < h && map.border[ny * w + x]) return false;
+        return true;
+    }
+
+    /// Would removing this red tile leave two neighbouring plates touching with nothing drawn between
+    /// them? Asked LIVE against the current raster, which is what lets two adjacent red tiles on
+    /// opposite sides of one margin protect each other: drop the first and the second immediately
+    /// becomes the separator, so the second can no longer be dropped.
+    static bool Separates(TileMap map, int i)
+    {
+        int w = map.width;
+        int x = i % w, y = i / w;
+        int me = map.plate[i];
+        return NeedsMe(map, me, x + 1, y) || NeedsMe(map, me, x - 1, y)
+            || NeedsMe(map, me, x, y + 1) || NeedsMe(map, me, x, y - 1);
+    }
+
+    static bool NeedsMe(TileMap map, int me, int x, int y)
+    {
+        if (y < 0 || y >= map.height) return false;
+        int i = y * map.width + Wrap(x, map.width);
+        return map.plate[i] != me && !map.border[i];
+    }
+
+    static int BorderDegree(TileMap map, int x, int y)
+    {
+        int w = map.width, h = map.height, d = 0;
+        if (map.border[y * w + Wrap(x + 1, w)]) d++;
+        if (map.border[y * w + Wrap(x - 1, w)]) d++;
+        if (y + 1 < h && map.border[(y + 1) * w + x]) d++;
+        if (y - 1 >= 0 && map.border[(y - 1) * w + x]) d++;
+        return d;
+    }
+
     // ---- The line ------------------------------------------------------------------------------
     static void MarkBorders(TileMap map)
     {

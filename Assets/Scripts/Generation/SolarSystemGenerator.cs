@@ -3,8 +3,28 @@ using UnityEngine;
 
 public class SolarSystemGenerator : MonoBehaviour
 {
-    public int minBodies = 2;
-    public int maxBodies = 6;
+    // ============================================================================================
+    // HOW MANY WORLDS A SYSTEM GETS — a budget, not a count
+    //
+    // There used to be a min/max body count, set from the New Game menu's "average planets per system"
+    // slider. Both are gone, and the slider with them, because the two ways of deciding actively fought
+    // each other: a slider that says "four planets" and a mass allowance that says "one gas giant, and
+    // that is the whole allowance" cannot both be obeyed, and whichever won made the other meaningless.
+    //
+    // A system is now built by SPENDING. It gets a Solar System Mass allowance — 100 per solar mass of
+    // its star or stars (MassRules.SystemBudget) — and lays down lanes outward from the star, taking the
+    // cost of each world and each of its moons out of the pot, until the pot cannot fund another body.
+    // A binary really does get to build a bigger system than a lone red dwarf; a lone red dwarf really
+    // does end up with three or four small worlds. Nobody had to choose that; it falls out of the sum.
+    //
+    // The allowance is a CEILING and the generator is never required to reach it. What it guarantees is
+    // the other direction: nothing is generated past it.
+    // ============================================================================================
+
+    /// The most orbital lanes a system will ever lay out, whatever it can still afford. A backstop
+    /// against a very heavy cluster sprawling past what the camera can frame, not a target — most
+    /// systems run out of budget well before this.
+    public const int MaxLanes = 10;
 
     public StarType currentStarType;
     public StarData currentStar;     // combined physical data for the cluster (light/heat/HZ/orbits)
@@ -54,10 +74,14 @@ public class SolarSystemGenerator : MonoBehaviour
 
         RollStarSystem();
 
-        // Body count honours minBodies/maxBodies (the galaxy generator sets these from "avg planets").
-        int lo = Mathf.Max(1, minBodies);
-        int hi = Mathf.Max(lo, maxBodies);
-        int bodyCount = Mathf.Clamp(Random.Range(lo, hi + 1), 1, 10);
+        // THE ALLOWANCE. Everything below spends out of this and nothing may be generated once it is
+        // gone — planets, their moons and every asteroid all come out of the same pot.
+        float budget = MassRules.SystemBudget(stars);
+
+        // Belt lane ids start at 1; 0 means "not in a belt", so the first belt in a system cannot be
+        // confused with a body that has never been in one.
+        int nextBeltId = 1;
+
         string systemName = NameGenerator.UniqueSystemName();
         currentSystemName = systemName;
         NameStars(systemName);
@@ -72,115 +96,226 @@ public class SolarSystemGenerator : MonoBehaviour
         float currentRadius = starRadius + OrbitSafety.StarClearance + Random.Range(1f, 4f);
         float prevOuterReach = 0f;                     // outermost point the previous planet's system reaches
 
-        for (int i = 0; i < bodyCount; i++)
+        for (int lane = 0; lane < MaxLanes; lane++)
         {
-            // A 0..1 SIZE RANK. It now feeds MassRules.ByBand, which orders bodies within a band from
-            // small to large — the biggest in the cold outer bands become gas giants, the smallest
-            // asteroids, exactly the request's "gas giants are the largest of planet sizes". Mass is the
-            // first attribute set; everything else, including the type, is derived from it downstream.
-            float sizeRank = Random.value;
+            // OUT OF ALLOWANCE. The cheapest thing a lane can hold is a single 0.1 asteroid, so once
+            // even that is unaffordable the system is finished however many lanes are left. This is the
+            // hard ceiling the request asks for: "generate no more mass after this point".
+            if (budget < MassRules.AsteroidMin) break;
 
-            // ATTRIBUTE-FIRST. Mass comes from the orbital band (MassRules.ByBand), then the whole
-            // pipeline sets field, tectonics, climate, water and air and CLASSIFIES the type from them —
-            // rather than the old path of picking a type and deriving mass from it.
+            // How far out this lane sits, as a multiple of the star's Earth-warmth distance. Everything
+            // about what the lane may CONTAIN is decided from this one number — see ChooseLane.
             float rel = currentRadius / Mathf.Max(0.5f, TempReference(currentStar));
+            LaneKind kind = ChooseLane(rel, budget);
 
-            CelestialBody body = new(CelestialBodyType.RockyPlanet) { id = _idCounter++ };
-            body.name = NameGenerator.PlanetName(systemName, i);
-            body.distanceFromStar = currentRadius;
-            body.orbitRadius = currentRadius;
-            body.mass = MassRules.ByBand(rel, sizeRank);
+            // How far the lane's contents reach either side of its orbit line. Filled in by whichever
+            // branch runs, and used to step outward to the next lane.
+            float laneReach = 0f;
 
-            ApplyWorldPipeline(body, rel, isMoon: false);
-            ResourceGenerator.GenerateResources(body);   // type is settled, so resources match it
-            // STEPPED. A world's terrain is by far the most expensive step in the whole load, and built
-            // in one go it was a single frame lasting as long as generating an entire planet. Now it
-            // yields every few milliseconds from inside its own loop, so one enormous frame becomes
-            // dozens of ordinary ones and the loading screen animates at a normal rate throughout.
+            if (kind == LaneKind.AsteroidBelt)
             {
-                var surf = PlanetTerrainGenerator.BuildStepped(body, body.terrainParams,
-                                                              PlanetTerrainGenerator.Octaves,
-                                                              s => body.surface = s);
-                while (surf.MoveNext()) yield return surf.Current;
-            }
-            yield return null;
-            // Ore is populated against the REAL baked surface, here — not earlier, when there is no
-            // surface to seed it into yet.
-            OreGenerator.Populate(body);
-            body.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
-            body.spinSpeed = OrbitalMechanics.Spin(body, Random.Range(0.7f, 1.3f));
-            body.orbitPhase = Random.Range(0f, 360f);
-            body.orbitDirection = Random.value < 0.9f ? 1 : -1;
-            body.inclination = Random.Range(-7f, 7f);
-            body.eccentricity = Random.Range(0f, 0.14f);
+                // ============================================================================
+                // A BELT — several bodies sharing ONE orbit
+                //
+                // "There can be multiple asteroids on the same orbit line; give them the same orbit
+                // speed as each other so we don't get overlapping models." Both halves matter, and the
+                // second is what makes the first safe: identical radius AND identical angular speed
+                // means every rock holds its angle relative to every other rock forever. They can never
+                // converge, so they never need to be spaced apart in radius the way two planets do.
+                // ============================================================================
+                int beltId = nextBeltId++;
+                string beltName = NameGenerator.PlanetName(systemName, lane);
+                int wanted = Random.Range(3, 8);
 
-            ApplyHabitability(body);
-            POIGenerator.Populate(body);
+                // Taken ONCE, outside the loop, and copied to every member. Deriving it per rock would
+                // give the same answer today and would be exactly the line somebody later "fixes" into
+                // a per-body value, at which point the belt slowly shears itself apart.
+                float beltSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
 
-            // Moons.
-            // The first moon has to clear the PLANET'S OWN SURFACE, which the old fixed 2.6 start did
-            // not: a large world's visual radius is surfaceSize * 0.08 * 0.5, so a big gas giant's
-            // surface reached past 2.6 and its innermost moon flew through it.
-            int moonCount = RollMoonCount(body.type);
-            float planetVisRadius = Mathf.Max(0.6f, body.surfaceSize * 0.08f) * 0.5f;
-            float moonR = planetVisRadius + MaxMoonVisRadius + MoonSurfaceGap;
-            for (int m = 0; m < moonCount; m++)
-            {
-                CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
-                moon.name = NameGenerator.MoonName(body.name, m);
-                // A moon's MASS comes from its host planet: at most 40% of the host, rarely that high (see
-                // MassRules.ForMoon) — so a big gas giant can have a sizeable moon, a small planet only
-                // tiny ones. Everything after mass runs through the SAME pipeline a planet does.
-                moon.mass = MassRules.ForMoon(body.mass);
-                moon.distanceFromStar = body.distanceFromStar;   // shares the planet's solar distance
-                // Set BEFORE the pipeline so the moon's grid size cap (MapMetrics keys off parentBody) and
-                // its classification both see the relationship.
-                moon.parentBody = body;
-
-                // ONE PIPELINE, moons included. `isMoon: true` is the only difference — it keeps a tiny or
-                // cold moon a Moon rather than an Asteroid/Barren, but a moon that ends up massive,
-                // magnetised, temperate and wet classifies to the same temperate world a planet would.
-                // That is the spec's headline: a big moon of a gas giant in the habitable zone can be a
-                // Terran world.
-                float moonRel = moon.distanceFromStar / Mathf.Max(0.5f, TempReference(currentStar));
-                ApplyWorldPipeline(moon, moonRel, isMoon: true);
+                int placed = 0;
+                for (int a = 0; a < wanted; a++)
                 {
-                    var msurf = PlanetTerrainGenerator.BuildStepped(moon, moon.terrainParams,
-                                                                   PlanetTerrainGenerator.Octaves,
-                                                                   s => moon.surface = s);
-                    while (msurf.MoveNext()) yield return msurf.Current;
+                    if (budget < MassRules.AsteroidMin) break;
+
+                    CelestialBody rock = new(CelestialBodyType.Asteroid) { id = _idCounter++ };
+                    rock.name = $"{beltName} {(char)('a' + a)}";
+                    rock.mass = MassRules.RollAsteroid(budget);
+                    budget -= rock.mass;
+                    rock.distanceFromStar = currentRadius;
+                    rock.orbitRadius = currentRadius;
+                    rock.beltId = beltId;
+
+                    ApplyWorldPipeline(rock, rel, isMoon: false);
+                    ResourceGenerator.GenerateResources(rock);
+                    {
+                        var rsurf = PlanetTerrainGenerator.BuildStepped(rock, rock.terrainParams,
+                                                                       PlanetTerrainGenerator.Octaves,
+                                                                       s => rock.surface = s);
+                        while (rsurf.MoveNext()) yield return rsurf.Current;
+                    }
+                    yield return null;
+                    OreGenerator.Populate(rock);
+
+                    rock.orbitSpeed = beltSpeed;                       // identical, by construction
+                    rock.orbitPhase = Random.Range(0f, 360f);          // spread around the ring
+                    rock.orbitDirection = 1;                           // ...and all going the same way
+                    // A LITTLE tilt and eccentricity, and the same amount for every member: a belt whose
+                    // rocks had individual inclinations would sweep through each other vertically even
+                    // though their radii never differ.
+                    rock.inclination = 0f;
+                    rock.eccentricity = 0f;
+                    rock.spinSpeed = RotationRules.Roll(rock.mass, isMoon: false);
+                    rock.rotationDirection = RotationRules.RollDirection(isMoon: false);
+                    rock.showRing = a == 0;    // one ring drawn for the lane, not five on top of each other
+
+                    ApplyHabitability(rock);
+                    POIGenerator.Populate(rock);
+
+                    system.Add(rock);
+                    laneReach = Mathf.Max(laneReach, OrbitSafety.DiscRadius(rock));
+                    placed++;
+                }
+
+                if (placed == 0) break;   // could not afford even one rock: nothing more will fit
+            }
+            else
+            {
+                // ============================================================================
+                // A PLANET
+                //
+                // ATTRIBUTE-FIRST, as before: mass is settled here and the whole pipeline then sets
+                // rotation, field, tectonics, climate, water and air and CLASSIFIES the type from them —
+                // rather than picking a type and deriving mass from it. What changed is where the mass
+                // comes from: the orbital band and the remaining allowance, rather than a size rank.
+                // ============================================================================
+                CelestialBody body = new(CelestialBodyType.RockyPlanet) { id = _idCounter++ };
+                body.name = NameGenerator.PlanetName(systemName, lane);
+                body.distanceFromStar = currentRadius;
+                body.orbitRadius = currentRadius;
+
+                if (kind == LaneKind.GasGiant)
+                {
+                    // Reserve a tenth for its moons before rolling, so a giant that eats the entire
+                    // allowance still leaves itself something to be orbited by. Falls back to a
+                    // terrestrial if the reservation puts the smallest giant out of reach.
+                    float giant = MassRules.RollGasGiant(budget * 0.92f);
+                    body.mass = giant > 0f ? giant : MassRules.RollTerrestrial(TerrestrialBandMax(rel), budget);
+                }
+                else
+                {
+                    body.mass = MassRules.RollTerrestrial(TerrestrialBandMax(rel), budget);
+                }
+                budget -= body.mass;
+
+                ApplyWorldPipeline(body, rel, isMoon: false);
+                ResourceGenerator.GenerateResources(body);   // type is settled, so resources match it
+                // STEPPED. A world's terrain is by far the most expensive step in the whole load, and
+                // built in one go it was a single frame lasting as long as generating an entire planet.
+                // Now it yields every few milliseconds from inside its own loop, so one enormous frame
+                // becomes dozens of ordinary ones and the loading screen animates at a normal rate.
+                {
+                    var surf = PlanetTerrainGenerator.BuildStepped(body, body.terrainParams,
+                                                                  PlanetTerrainGenerator.Octaves,
+                                                                  s => body.surface = s);
+                    while (surf.MoveNext()) yield return surf.Current;
                 }
                 yield return null;
-                OreGenerator.Populate(moon);
-                ResourceGenerator.GenerateResources(moon);
+                // Ore is populated against the REAL baked surface, here — not earlier, when there is no
+                // surface to seed it into yet.
+                OreGenerator.Populate(body);
+                body.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
+                body.orbitPhase = Random.Range(0f, 360f);
+                body.orbitDirection = Random.value < 0.9f ? 1 : -1;
+                body.inclination = Random.Range(-7f, 7f);
+                body.eccentricity = Random.Range(0f, 0.14f);
 
-                moon.orbitRadius = moonR;
-                moon.orbitSpeed = OrbitalMechanics.MoonAngularSpeed(body, moonR);
-                moon.spinSpeed = OrbitalMechanics.Spin(moon, Random.Range(0.7f, 1.3f));
-                moon.orbitPhase = Random.Range(0f, 360f);
-                moon.orbitDirection = Random.value < 0.85f ? 1 : -1;
-                moon.inclination = Random.Range(-15f, 15f);
-                moon.eccentricity = Random.Range(0f, 0.2f);
-                ApplyHabitability(moon);
-                POIGenerator.Populate(moon);
+                ApplyHabitability(body);
+                POIGenerator.Populate(body);
 
-                body.moons.Add(moon);
-                // Consecutive moons must clear each other's discs, not just be "some distance" apart.
-                moonR += MaxMoonVisRadius * 2f + Random.Range(1.6f, 2.6f);
+                // ---- Moons, out of this planet's own allowance ----
+                //
+                // A terrestrial world may spend half its mass on moons, a gas giant a tenth of its (see
+                // MassRules.MoonBudget) — and neither may spend more than the SYSTEM has left, because
+                // moons come out of the same pot as everything else. Like the system allowance, it is a
+                // ceiling: most worlds spend a fraction of it and some spend none at all.
+                float moonPot = Mathf.Min(MassRules.MoonBudget(body.mass), budget);
+                bool giantHost = body.mass >= WorldClassifier.GasGiantMassFloor;
+                // NOT EVERY WORLD HAS MOONS. Deliberately not too high a chance — the request's own
+                // framing — and lower for a giant, which is exactly the arrangement in our system: the
+                // four giants have dozens of moons between them and two of the four terrestrials have none.
+                if (Random.value < (giantHost ? 0.15f : 0.34f)) moonPot = 0f;
+
+                int maxMoons = giantHost ? 5 : 3;
+                float planetVisRadius = OrbitSafety.DiscRadius(body);
+                float moonR = planetVisRadius + MaxMoonVisRadius + MoonSurfaceGap;
+
+                for (int m = 0; m < maxMoons; m++)
+                {
+                    if (moonPot < MassRules.AsteroidMin) break;
+                    // ...and a chance to simply stop, so the allowance is genuinely a maximum rather
+                    // than a quota that always gets filled to the last decimal. At 0.30 a Sun-like system
+                    // came out with thirteen moons across it (measured); 0.42 lands it near nine, which
+                    // is a system you can read at a glance and still one where the giants clearly have
+                    // retinues and the rocky worlds mostly do not.
+                    if (m > 0 && Random.value < 0.42f) break;
+
+                    float moonMass = MassRules.RollMoon(moonPot);
+                    if (moonMass < MassRules.AsteroidMin) break;
+
+                    CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
+                    moon.name = NameGenerator.MoonName(body.name, m);
+                    moon.mass = moonMass;
+                    moonPot -= moonMass;
+                    budget -= moonMass;
+                    moon.distanceFromStar = body.distanceFromStar;   // shares the planet's solar distance
+                    // Set BEFORE the pipeline so the moon's grid size cap (MapMetrics keys off
+                    // parentBody) and its classification both see the relationship.
+                    moon.parentBody = body;
+
+                    // ONE PIPELINE, moons included. `isMoon: true` is the only difference — it keeps a
+                    // tiny or cold moon a Moon rather than an Asteroid/Barren, but a moon that ends up
+                    // massive, magnetised, temperate and wet classifies to the same temperate world a
+                    // planet would. That is the spec's headline: a big moon of a gas giant in the
+                    // habitable zone can be a Terran world.
+                    float moonRel = moon.distanceFromStar / Mathf.Max(0.5f, TempReference(currentStar));
+                    ApplyWorldPipeline(moon, moonRel, isMoon: true);
+                    {
+                        var msurf = PlanetTerrainGenerator.BuildStepped(moon, moon.terrainParams,
+                                                                       PlanetTerrainGenerator.Octaves,
+                                                                       s => moon.surface = s);
+                        while (msurf.MoveNext()) yield return msurf.Current;
+                    }
+                    yield return null;
+                    OreGenerator.Populate(moon);
+                    ResourceGenerator.GenerateResources(moon);
+
+                    moon.orbitRadius = moonR;
+                    moon.orbitSpeed = OrbitalMechanics.MoonAngularSpeed(body, moonR);
+                    moon.orbitPhase = Random.Range(0f, 360f);
+                    moon.orbitDirection = Random.value < 0.85f ? 1 : -1;
+                    moon.inclination = Random.Range(-15f, 15f);
+                    moon.eccentricity = Random.Range(0f, 0.2f);
+                    ApplyHabitability(moon);
+                    POIGenerator.Populate(moon);
+
+                    body.moons.Add(moon);
+                    // Consecutive moons must clear each other's discs, not just be "some distance" apart.
+                    moonR += MaxMoonVisRadius * 2f + Random.Range(1.6f, 2.6f);
+                }
+
+                system.Add(body);
+                laneReach = OuterReach(body);   // moons already assigned -> real reach
             }
 
-            system.Add(body);
-
             // ---- Step outward to the next LANE ----
-            // A planet doesn't occupy a line, it occupies a BAND: its own disc plus the whole reach of
-            // its moon system, which sweeps inward and outward as the planet goes round.
+            // A lane doesn't occupy a line, it occupies a BAND: its contents' own discs plus the whole
+            // reach of any moon system, which sweeps inward and outward as the planet goes round.
             //
             // The old step added this planet's moon extent but nothing for the NEXT planet's, so a world
             // with a big moon system reached back INTO the previous planet's band and the two sets of
             // moons flew through each other. We now reserve room for both sides plus a visible gap, and
-            // remember this body's outer reach so the next lane can clear it explicitly.
-            float outerReach = OuterReach(body);   // moons already assigned -> real reach
-            prevOuterReach = currentRadius + outerReach;
+            // remember this lane's outer reach so the next one can clear it explicitly.
+            prevOuterReach = currentRadius + laneReach;
 
             // Reserve for the next planet reaching inward: its own disc + a typical moon system, then
             // widen the whole step by this star's spread. The reserved parts are NOT scaled — a moon
@@ -217,7 +352,12 @@ public class SolarSystemGenerator : MonoBehaviour
     // Sizes and clearances come from OrbitSafety — the single authority that also enforces spacing.
     // These used to be local copies of the same magic numbers, which is precisely how the layout and
     // the renderer drifted apart in the first place.
-    const float MaxMoonVisRadius = 0.3f;    // widest moon disc: max(0.35, 12*0.05) * 0.5
+    // The widest disc a moon can render at, halved to a radius. The largest moon in the game is one a
+    // mass-40 gas giant spends its whole 4.0 allowance on, and MassRules.VisualDiameter puts that at
+    // 0.44 * cbrt(4) = 0.70 across. Rounded up a little, because this is a RESERVATION: undersizing it
+    // means the layout reserves too little room and OrbitSafety has to push the whole system outward
+    // afterwards, which is exactly the case the layout exists to avoid.
+    const float MaxMoonVisRadius = 0.4f;
     const float MoonSurfaceGap = OrbitSafety.MoonSurfaceGap;
     const float LaneGap = OrbitSafety.LaneGap;
     const float TypicalInnerReach = 8f;     // room reserved for the NEXT planet's disc + moon system
@@ -247,6 +387,13 @@ public class SolarSystemGenerator : MonoBehaviour
         CelestialBody best = null; float bestD = float.MaxValue;
         foreach (var b in system)
         {
+            // NEVER PROMOTE A BELT MEMBER. A belt's rocks are safe sharing a lane precisely because they
+            // are the same size and speed and hold their formation; turning one of them into an
+            // Earth-mass world would put a planet-sized disc in the middle of a ring of rubble it now
+            // overlaps, and OrbitSafety would then shove the whole lane apart to fix it — which is the
+            // one thing a belt must not have done to it.
+            if (b.beltId != 0) continue;
+
             float d = Mathf.Abs(b.distanceFromStar - center);
             if (d < bestD) { bestD = d; best = b; }
         }
@@ -287,16 +434,31 @@ public class SolarSystemGenerator : MonoBehaviour
         float bestRel = best.distanceFromStar / Mathf.Max(0.5f, TempReference(currentStar));
 
         // A comfortable Earth-to-super-Earth mass. "best" may have been a gas giant that happened to
-        // orbit near the zone centre, whose 7-13 mass would read absurdly on a habitable world.
-        best.mass = Random.Range(2, 6);
+        // orbit near the zone centre, whose 10-40 mass would read absurdly on a habitable world.
+        //
+        // NOT budgeted against the system allowance, deliberately. This is a REPLACEMENT rather than an
+        // addition — the body already exists and already spent its mass — and the swap is almost always
+        // downward (a giant becoming an Earth hands mass back). A promoted asteroid can cost the system
+        // a couple of Earths it had not planned for, and that is the right trade: the guaranteed
+        // liveable world is the one thing in a system that is not negotiable.
+        best.mass = MassRules.QuantizeTerrestrial(Random.Range(0.9f, 2.6f));
         best.surfaceSize = MassRules.SurfaceSize(best.mass);
+        best.beltId = 0;                                       // no longer one rock among several
 
         // The guarantees a liveable world cannot be allowed to lose on a coin flip: a magnetic field (or
         // its atmosphere halves away under the 0.6 floor and it sterilises) and tectonics rolled fresh
         // under a terrestrial mass.
+        //
+        // The field comes from ROTATION now, so it is granted by spinning the world up rather than by
+        // setting a flag — otherwise a world could carry a magnetosphere while the panel beside it
+        // reported a rotation far too slow to drive one. Rolled inside the fast population (see
+        // RotationRules) so the figure still varies between one game and the next.
+        best.spinSpeed = Mathf.Max(RotationRules.MagneticFieldSpin + 2f,
+                                   RotationRules.Roll(best.mass, isMoon: false));
+        best.rotationDirection = RotationRules.RollDirection(isMoon: false);
         best.hasMagneticField = true;
         best.type = CelestialBodyType.RockyPlanet;             // provisional, for the tectonics/air rolls
-        best.hasTectonics = TectonicsRules.Roll(best.type, best.surfaceSize);
+        best.hasTectonics = TectonicsRules.Roll(best.type, best.mass);
 
         SeedTerrain(best);
         // RE-BIAS THE CLIMATE. SeedTerrain rebuilds terrainParams (heat included) from scratch, throwing
@@ -370,8 +532,15 @@ public class SolarSystemGenerator : MonoBehaviour
         // terrestrial mass gets Rocky as a stand-in until the real classification at the end.
         body.type = ProvisionalType(body.mass, isMoon);
 
-        body.hasMagneticField = AtmosphereRules.RollMagneticField(body.type, body.mass);
-        body.hasTectonics = TectonicsRules.Roll(body.type, body.surfaceSize);
+        // ROTATION FIRST, because the magnetic field is now a CONSEQUENCE of it rather than an
+        // independent coin flip: a world turning fast enough stirs its core and runs a dynamo, and one
+        // that has been tidally braked does not. See RotationRules. Prograde by default; retrograde
+        // happens, and is stored apart from the rate so that turning backwards never costs a world its
+        // magnetosphere.
+        body.spinSpeed = RotationRules.Roll(body.mass, isMoon);
+        body.rotationDirection = RotationRules.RollDirection(isMoon);
+        body.hasMagneticField = RotationRules.GeneratesField(body.type, body.mass, body.spinSpeed);
+        body.hasTectonics = TectonicsRules.Roll(body.type, body.mass);
 
         SeedTerrain(body);                                     // seed, variance, ridge boost, capture
         BiasHeat(body, body.distanceFromStar, currentStar);    // climate follows distance
@@ -405,7 +574,8 @@ public class SolarSystemGenerator : MonoBehaviour
     static CelestialBodyType ProvisionalType(float mass, bool isMoon)
     {
         if (mass >= WorldClassifier.GasGiantMassFloor) return CelestialBodyType.GasGiant;
-        if (mass < WorldClassifier.AsteroidMassCeil) return isMoon ? CelestialBodyType.Moon : CelestialBodyType.Asteroid;
+        // <=, matching WorldClassifier: 0.5 IS an asteroid, per the request.
+        if (mass <= WorldClassifier.AsteroidMassCeil) return isMoon ? CelestialBodyType.Moon : CelestialBodyType.Asteroid;
         return CelestialBodyType.RockyPlanet;
     }
 
@@ -429,7 +599,13 @@ public class SolarSystemGenerator : MonoBehaviour
         body.terrainSeed = Random.Range(0f, 10000f);
         body.continentFrequency = Mathf.Clamp(body.surfaceSize * 0.32f, 2.5f, 8f);
         TerrainVariance.Apply(body);   // give every world a distinct terrain character
-        if (body.hasTectonics) TectonicsRules.BoostRidge(body);   // active plates fold up more mountains
+        // TectonicsRules.BoostRidge USED TO RUN HERE, multiplying a tectonic world's ridge amplitude so
+        // it folded up more mountains "everywhere". That was the best available stand-in while ridge was
+        // an independent noise field and there was no fault GEOMETRY to place ranges along. There is now:
+        // ridge is derived from the ground the plates actually raised (PlanetTerrainGenerator.
+        // RidgeFromRelief), so a tectonic world gets its mountains AT ITS MARGINS rather than as a
+        // world-wide roughness bonus — and applying the old multiplier on top would raise them everywhere
+        // else as well, which is the exact artefact the rework removes.
         // The climate nature gave it. Terraforming lerps FROM here (TerraformVisuals), so it has to be
         // captured before anything moves it.
         TerraformVisuals.CaptureNatural(body);
@@ -443,18 +619,75 @@ public class SolarSystemGenerator : MonoBehaviour
         body.terraformability = Habitability.Terraformability(currentStar, species, body);
     }
 
-    int RollMoonCount(CelestialBodyType type)
+    // ============================================================================================
+    // WHAT GOES IN A LANE — the frost line, made mechanical
+    //
+    // The request's physics, in one function:
+    //
+    //   "Closer to the star, less material is available, restricting planets to smaller rocky sizes."
+    //   "Frost line: beyond this threshold, water freezes into solid ice, allowing cores to grow fast
+    //    and capture massive gas envelopes."
+    //   "Allow for rare exclusions that let a large CB spawn closer."
+    //
+    // So: past the frost line a lane is usually a giant, inside it a giant is a one-in-twenty surprise,
+    // and everywhere else the lane is either a terrestrial world or a belt of rubble that never became
+    // one. Nothing here consults a planet COUNT — a lane is decided from where it is and what the system
+    // can still afford, and the system stops when it can no longer afford anything.
+    // ============================================================================================
+    enum LaneKind { Terrestrial, GasGiant, AsteroidBelt }
+
+    /// How often a lane past the frost line comes out as a gas giant, when the allowance can fund one.
+    ///
+    /// Past the line there is enough solid ice for a core to run away and capture an envelope, so this is
+    /// high — that is what the outer system is FOR. Not higher, and the reason is arithmetic rather than
+    /// taste: a giant averages 25 of a Sun-like system's 100-mass allowance, so at 0.58 a G-type came out
+    /// with three and a half giants and spent 81% of everything it had on them (measured, Node port,
+    /// 4,000 systems). Four giants IS our own solar system, but it is our own solar system with a much
+    /// bigger sun's worth of budget behind it, and it left nothing for anything else to be interesting
+    /// with. At 0.42 a Sun-like system runs about two and a half giants and still has room for its rocky
+    /// worlds, its moons and a belt.
+    const float OuterGiantChance = 0.42f;
+
+    static LaneKind ChooseLane(float rel, float budgetLeft)
     {
-        switch (type)
+        bool beyondFrost = rel >= WorldClassifier.FrostLineRel;
+
+        // A giant is only on the table if the allowance can actually fund the smallest one.
+        if (MassRules.GiantCeiling(budgetLeft * 0.92f) > 0f)
         {
-            case CelestialBodyType.GasGiant: return Random.Range(0, 5);
-            case CelestialBodyType.RockyPlanet:
-            case CelestialBodyType.VolcanicPlanet:
-            case CelestialBodyType.IcePlanet: return Random.Range(0, 3);
-            case CelestialBodyType.BarrenPlanet:
-            case CelestialBodyType.OceanPlanet: return Random.Range(0, 2);
-            default: return 0;
+            float giantChance = beyondFrost ? OuterGiantChance : WorldClassifier.HotGiantChance;
+            if (Random.value < giantChance) return LaneKind.GasGiant;
         }
+
+        // A BELT is a lane whose material never accreted into anything. Two places that happens:
+        //
+        //   AT THE FROST LINE, where our own belt sits — near a giant, whose gravity keeps stirring the
+        //   material and stops it sticking together. Not a coincidence, and the reason the odds spike
+        //   in the band either side of the line rather than being flat across the system.
+        //   AT THE END OF THE BUDGET, where there is simply not enough left to make a world out of. A
+        //   lane that can no longer afford a planet is not an empty lane; it is a belt, which is the
+        //   honest thing to do with the change left in the pot.
+        float beltChance = 0.10f;
+        if (rel > WorldClassifier.FrostLineRel * 0.75f && rel < WorldClassifier.FrostLineRel * 1.45f)
+            beltChance = 0.28f;
+        if (budgetLeft < MassRules.TerrestrialMax) beltChance = 0.50f;
+        if (budgetLeft < MassRules.TerrestrialMin * 2f) return LaneKind.AsteroidBelt;
+
+        return Random.value < beltChance ? LaneKind.AsteroidBelt : LaneKind.Terrestrial;
+    }
+
+    /// The largest terrestrial world this orbital band can build.
+    ///
+    /// Inside the habitable zone the young star's wind cleared out the volatiles and there was never
+    /// much solid material to begin with, so the worlds are small — Mercury, Venus, Earth and Mars are
+    /// all at or under one Earth mass except Earth itself. Further out there is more to work with, so a
+    /// super-Earth is possible without being the norm (MassRules.RollTerrestrial still centres its roll
+    /// on 1 whatever the ceiling).
+    static float TerrestrialBandMax(float rel)
+    {
+        if (rel < WorldClassifier.HotRel) return 1.4f;                 // scorched inner: small rock
+        if (rel <= WorldClassifier.TemperateRelMax) return 2.6f;       // the zone: Earth to super-Earth
+        return MassRules.TerrestrialMax;                               // outer: the full range
     }
 
     /// The distance at which this star's warmth is Earth-normal — the yardstick every climate roll and

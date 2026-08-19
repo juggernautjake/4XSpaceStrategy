@@ -47,18 +47,40 @@ public static class TerraformVisuals
         // ocean world be a drowning hazard or a paradise" — the same question, so the same answer.
         p.moisture = s.PrefersDry ? 0.55f : 1.35f;
 
-        // A balanced land/sea split and gentler ground. Nobody's ideal world is all mountain.
-        //
-        // Two knobs now, and they say different things: ordinary relief (so there ARE hills and valleys
-        // to live among) with the sea sitting at a middling height (so roughly half of it is land). The
-        // "balanced split" used to be expressed as elevation alone, which produced a flat world rather
-        // than a temperate one.
-        p.elevation = 1.0f;
+        // A balanced land/sea split: the sea sitting at a middling height, so roughly half the world is
+        // land. That is the ONE thing terraforming does to the shape of a world, and it does not change
+        // the shape at all — it changes where the waterline sits across it.
         p.seaLevel = s.PrefersDry ? 0.42f : 0.52f;
-        p.ridge = 0.75f;
 
-        // NOTE: `scale` is meaningless here and Blend never reads it. Feature scale is the world's own
-        // geography — how big its continents are — and terraforming does not move continents.
+        // ELEVATION AND RIDGE ARE NOT SET HERE ANY MORE, and Blend no longer moves them.
+        //
+        // They used to be: `elevation = 1.0` and `ridge = 0.75`, on the reasoning that nobody's ideal
+        // world is all mountain. That is a fair thing to want and the wrong way to get it, because it
+        // makes RELIEF a function of how terraformed a world is — so raising a world's temperature or
+        // pouring an ocean onto it also, invisibly, flattened its mountains.
+        //
+        //   "When a CB's temperature is increased, or the water level is increased, or the atmosphere is
+        //    increased, the terrain elevation should stay constant. Terraforming should not alter the
+        //    elevation of a grid map unless explicitly stated to do so."
+        //
+        // A world's relief comes from its geology now — its plates, its collisions, its volcanic vents
+        // (see PlanetTerrainGenerator's elevation pipeline) — and none of that is something an
+        // atmosphere processor or a comet bombardment can move. Terraform an ice world flat-out and its
+        // mountains are exactly where they were, standing over whatever the water level leaves.
+        //
+        // The "all mountain" worry is answered at the source instead: mountains now require a collision
+        // or a vent, so a world is only mountainous if its geology made it so, and no amount of
+        // terraforming was ever going to be the right tool for that.
+        //
+        // A project that says outright that it reshapes the ground is a different matter and is left the
+        // room to do it — see the elevation/ridge deltas on TerraformClimate.ClimateDelta, which every
+        // shipped project leaves at zero. Note that PLANETARY REMODELLING is deliberately NOT one of
+        // those: it changes what a world IS, not what shape it is, and "an ice world with many mountains,
+        // terraformed to be extremely hot, keeps its mountains" is the request's own worked example.
+        //
+        // NOTE: `scale` is meaningless here and Blend never reads it, for the same reason. Feature scale
+        // is the world's own geography — how big its continents are — and terraforming does not move
+        // continents.
         return p;
     }
 
@@ -111,33 +133,37 @@ public static class TerraformVisuals
         var p = natural;
         p.heat = Mathf.Lerp(natural.heat, ideal.heat, t);
         p.moisture = Mathf.Lerp(natural.moisture, ideal.moisture, t);
-        p.elevation = Mathf.Lerp(natural.elevation, ideal.elevation, t);
         // The sea moves with the rest of the climate. Blended from the neutral-safe accessor so a world
         // loaded from a pre-seaLevel save does not lerp from a literal zero and dry itself out.
         p.seaLevel = Mathf.Lerp(natural.SeaLevelOrNeutral, ideal.SeaLevelOrNeutral, t);
-        p.ridge = Mathf.Lerp(natural.ridge, ideal.ridge, t);
-        // scale is NOT blended — see Ideal. The continents stay put.
+        // ELEVATION, RIDGE AND SCALE ARE NOT BLENDED — see Ideal. The ground keeps its shape; only the
+        // climate and the waterline move across it. This is the line that makes "terraforming does not
+        // alter the elevation of a grid map" true rather than aspirational, and it is the reason a
+        // mountain range survives its world being melted, drowned or frozen.
         return p;
     }
 
     /// The climate a world of a given TYPE tends to have — the terrainParams a directed remodel walks
-    /// toward, so the map's temperature, moisture and relief match the world it is BECOMING. Amplitude
-    /// knobs against the Default of 1.0 (PlanetTerrainGenerator.NoiseParams); `scale` (continent size) is
-    /// left alone, exactly as Ideal does.
+    /// toward, so the map's temperature, moisture and waterline match the world it is BECOMING.
+    ///
+    /// CLIMATE ONLY. `elevation`, `ridge` and `scale` are all left at their defaults, and Blend does not
+    /// read any of them — so remodelling a world changes what it IS without changing what SHAPE it is.
+    /// That is the request's own worked example: an ice world with many mountains, terraformed to be
+    /// extremely hot, loses its water and grows magma fields, and keeps every one of its mountains.
     public static PlanetTerrainGenerator.NoiseParams TypeClimate(CelestialBodyType t)
     {
         var p = PlanetTerrainGenerator.NoiseParams.Default;
         switch (t)
         {
-            case CelestialBodyType.VolcanicPlanet: p.heat = 1.85f; p.moisture = 0.35f; p.elevation = 1.10f; p.ridge = 1.35f; p.seaLevel = 0.20f; break;
+            case CelestialBodyType.VolcanicPlanet: p.heat = 1.85f; p.moisture = 0.35f; p.seaLevel = 0.20f; break;
             // An ocean world is DROWNED, not FLAT — high sea level over ordinary relief, so its islands
             // are real mountain tops rather than the last bumps of a world sanded down.
-            case CelestialBodyType.OceanPlanet:    p.heat = 1.05f; p.moisture = 1.70f; p.elevation = 0.95f; p.ridge = 0.70f; p.seaLevel = 0.80f; break;
-            case CelestialBodyType.IcePlanet:      p.heat = 0.50f; p.moisture = 1.00f; p.elevation = 1.00f; p.ridge = 0.95f; p.seaLevel = 0.60f; break;
-            case CelestialBodyType.RockyPlanet:    p.heat = 1.00f; p.moisture = 1.20f; p.elevation = 1.00f; p.ridge = 0.90f; p.seaLevel = 0.50f; break;
-            case CelestialBodyType.BarrenPlanet:   p.heat = 1.25f; p.moisture = 0.20f; p.elevation = 1.00f; p.ridge = 1.05f; p.seaLevel = 0.12f; break;
+            case CelestialBodyType.OceanPlanet:    p.heat = 1.05f; p.moisture = 1.70f; p.seaLevel = 0.80f; break;
+            case CelestialBodyType.IcePlanet:      p.heat = 0.50f; p.moisture = 1.00f; p.seaLevel = 0.60f; break;
+            case CelestialBodyType.RockyPlanet:    p.heat = 1.00f; p.moisture = 1.20f; p.seaLevel = 0.50f; break;
+            case CelestialBodyType.BarrenPlanet:   p.heat = 1.25f; p.moisture = 0.20f; p.seaLevel = 0.12f; break;
             case CelestialBodyType.Moon:
-            case CelestialBodyType.Asteroid:       p.heat = 0.90f; p.moisture = 0.15f; p.elevation = 1.00f; p.ridge = 1.15f; p.seaLevel = 0.08f; break;
+            case CelestialBodyType.Asteroid:       p.heat = 0.90f; p.moisture = 0.15f; p.seaLevel = 0.08f; break;
             // GasGiant has no solid surface to reclassify toward; leave default.
         }
         return p;
@@ -180,6 +206,14 @@ public static class TerraformVisuals
         p.moisture  = Mathf.Clamp(p.moisture  + d.moisture  * power, 0.20f, 2.00f);
         // The SEA is what water projects move — the land keeps its shape. See TerraformClimate.ClimateDelta.
         p.seaLevel = Mathf.Clamp01(p.SeaLevelOrNeutral + d.seaLevel * power);
+
+        // THE ONLY PLACE TERRAFORMING MAY MOVE THE GROUND, and every shipped project leaves both deltas
+        // at zero — so in practice this is inert and a world's relief is exactly what its geology made.
+        // It is here rather than absent because the request explicitly reserves the case ("maybe you
+        // want to flatten a map with a very specific terraforming technology"), and a project that says
+        // outright that it reshapes the ground should not have to rewrite this pipeline to do it.
+        p.elevation = Mathf.Clamp(p.elevation + d.elevation * power,
+                                  PlanetTerrainGenerator.ElevationMin, PlanetTerrainGenerator.ElevationMax);
         p.ridge     = Mathf.Clamp(p.ridge     + d.ridge     * power, 0.30f, 2.00f);
         return p;
     }

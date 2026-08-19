@@ -131,10 +131,35 @@ public static class OrbitSafety
         float starRadius = StarRadius(star);
         float prevOuter = starRadius + StarClearance;
 
+        // ---- BELTS SHARE A LANE, AND THAT IS THE ONE CASE SHARING IS SAFE ----
+        //
+        // The guarantee this whole file provides is built on giving every body a band of radius nobody
+        // else occupies. An asteroid belt breaks that rule on purpose: its rocks sit at the SAME radius
+        // and — crucially — turn at the SAME angular speed, so they hold their formation exactly and can
+        // never converge however long the game runs. Pushing them apart would not make them safer, it
+        // would spread one belt across five lanes and eat the rest of the system.
+        //
+        // So a belt is walked as ONE lane: the first member decides where the lane sits, every other
+        // member is snapped to that same radius and speed, and the lane reserves the widest reach any of
+        // them needs. `beltRadius` is what carries that decision from the first member to the rest.
+        int currentBelt = 0;
+        float beltRadius = 0f, beltSpeed = 0f;
+
         foreach (var b in sorted)
         {
             if (b == null) continue;
             float reach = SystemReach(b);
+
+            // A later member of a belt already placed: copy, do not re-place.
+            if (b.beltId != 0 && b.beltId == currentBelt)
+            {
+                b.orbitRadius = beltRadius;
+                b.distanceFromStar = beltRadius;
+                b.orbitSpeed = beltSpeed;
+                prevOuter = Mathf.Max(prevOuter, beltRadius + reach + LaneGap);
+                continue;
+            }
+
             float minRadius = prevOuter + reach;
 
             if (b.orbitRadius < minRadius)
@@ -145,6 +170,13 @@ public static class OrbitSafety
                 // Moons share their planet's solar distance, and their climate is derived from it.
                 if (b.moons != null)
                     foreach (var m in b.moons) if (m != null) m.distanceFromStar = minRadius;
+            }
+
+            if (b.beltId != 0)
+            {
+                currentBelt = b.beltId;
+                beltRadius = b.orbitRadius;
+                beltSpeed = b.orbitSpeed;
             }
 
             prevOuter = b.orbitRadius + reach + LaneGap;
@@ -221,6 +253,11 @@ public static class OrbitSafety
 
         for (int i = 1; i < sorted.Count; i++)
         {
+            // Two rocks of the same belt are SUPPOSED to overlap in radius — they share the lane and the
+            // speed, so they hold their formation and never meet. Flagging that as a fault would make
+            // this warn on every system with a belt in it, which is how a diagnostic stops being read.
+            if (sorted[i].beltId != 0 && sorted[i].beltId == sorted[i - 1].beltId) continue;
+
             Band(sorted[i - 1], out _, out float prevOuter);
             Band(sorted[i], out float inner, out _);
             if (inner < prevOuter)

@@ -31,6 +31,34 @@ public class Species
     // not off-limits, just uninhabitable without technology — domes, pressure suits, sealed cities.
     public float minAtmospheres = 1f, maxAtmospheres = 4f;
 
+    // ============================================================================================
+    // THE CRADLE'S MASS — stated per species rather than solved for
+    //
+    // A homeworld's mass used to be back-derived from the species' breathing range, because atmosphere
+    // was one atmosphere per unit of mass and that was the only way to guarantee a Pyrothian cradle held
+    // Pyrothian air. It cannot be any more: terrestrial worlds run 0.6 to 4 Earths now, and the
+    // Pyrothians want five to nine atmospheres, so no legal terrestrial mass produces their pressure.
+    //
+    // The two are DECOUPLED instead, and that is more honest than the derivation was. A cradle's
+    // atmosphere is granted outright — it is the one world in the galaxy that is exactly what its
+    // inhabitants need — and its MASS is a separate fact about the species' origin, stated here.
+    // Pyrothians come from a heavy world and Cryithn from a light one because that is who they are, and
+    // you can read it off the Overview.
+    //
+    // THE TERRAN CRADLE IS EXACTLY ONE. "1 Mass would be 1 Earth", and the Terran homeworld is Earth —
+    // which is the anchor the entire mass scale is calibrated against, so it is the one value here that
+    // is a definition rather than a choice.
+    public float cradleMass = 1f;
+
+    /// This species' home star is pinned to a G-type — a Sol.
+    ///
+    /// True only for the Terrans, and for the same reason their cradle is exactly one Earth: their start
+    /// is the game's reference point, the thing every other world and star is implicitly compared
+    /// against, and a reference point that came out an orange dwarf half the time is not one. A flag on
+    /// the species rather than a name comparison in the galaxy generator, so the rule lives with the
+    /// thing it is a fact about and a sixth species can opt in without editing generation code.
+    public bool solHomeStar = false;
+
     /// How well this world's air suits this species: 1 inside the band, falling off outside it.
     ///
     /// The falloff is scaled by `tolerance`, so the adaptable Sylvans and the armoured Pyrothians are
@@ -115,7 +143,10 @@ public static class SpeciesDatabase
             iq = 9, longevity = 5, fertility = 5, durability = 5, adaptability = 6,
             idealTemp = 0.50f, tolerance = 1.0f,
             // Oxygen-nitrogen breathers: Earth-normal, and domes beyond 4.
-            minAtmospheres = 1f, maxAtmospheres = 4f
+            minAtmospheres = 1f, maxAtmospheres = 4f,
+            // Earth, around Sol. The anchor the whole mass scale — and the star catalogue — is
+            // calibrated against, so neither gets a variance roll.
+            cradleMass = 1f, solHomeStar = true
         };
         SetAff(terrans, rocky: 1.0f, ocean: 0.9f, ice: 0.4f, volcanic: 0.25f, barren: 0.35f, gas: 0.15f, moon: 0.5f, ast: 0.2f);
 
@@ -132,7 +163,9 @@ public static class SpeciesDatabase
             idealTemp = 0.42f, tolerance = 1.15f,
             // Gilled and permeable-skinned — thin air dries them out, and deep pressure is fine but
             // they are shallow-water dwellers rather than deep-ocean ones.
-            minAtmospheres = 1f, maxAtmospheres = 3f
+            minAtmospheres = 1f, maxAtmospheres = 3f,
+            // A shade heavier than Earth: more water to hold, and more gravity holding it.
+            cradleMass = 1.2f
         };
         SetAff(aquarii, rocky: 0.6f, ocean: 1.0f, ice: 0.7f, volcanic: 0.2f, barren: 0.2f, gas: 0.1f, moon: 0.4f, ast: 0.15f);
 
@@ -148,7 +181,15 @@ public static class SpeciesDatabase
             iq = 5, longevity = 7, fertility = 3, durability = 10, adaptability = 7,
             idealTemp = 0.85f, tolerance = 1.5f,
             // Silicate crystal under real pressure: a Terran-normal world is a near-vacuum to them.
-            minAtmospheres = 5f, maxAtmospheres = 9f
+            // NARROWED FROM 5-9, and it had to be. Atmosphere is one per unit of mass plus at most two
+            // from tectonic outgassing (AtmosphereRules), and terrestrial worlds now stop at four Earths —
+            // so six atmospheres is the most any world a Pyrothian could stand on will ever hold, and a
+            // 5-9 band left them a galaxy in which nothing was habitable and nothing could be terraformed
+            // to become so. 4-7 keeps them the crushing-pressure species relative to the Terrans' 1-4
+            // while being a band worlds can actually reach.
+            minAtmospheres = 4f, maxAtmospheres = 7f,
+            // A heavy world: silicate bodies under a crushing sky need the gravity to keep it there.
+            cradleMass = 3.5f
         };
         SetAff(pyrothians, rocky: 0.5f, ocean: 0.15f, ice: 0.1f, volcanic: 1.0f, barren: 0.8f, gas: 0.2f, moon: 0.55f, ast: 0.45f);
 
@@ -165,7 +206,9 @@ public static class SpeciesDatabase
             idealTemp = 0.16f, tolerance = 1.35f,
             // Subsurface burrowers, so surface pressure matters less; ammonia needs some air to stay
             // liquid, but they are the only species comfortable below Earth-normal.
-            minAtmospheres = 0.8f, maxAtmospheres = 3.5f
+            minAtmospheres = 0.8f, maxAtmospheres = 3.5f,
+            // A small, cold world out on the edge of its system.
+            cradleMass = 0.9f
         };
         SetAff(cryithn, rocky: 0.5f, ocean: 0.4f, ice: 1.0f, volcanic: 0.1f, barren: 0.7f, gas: 0.2f, moon: 0.6f, ast: 0.4f);
 
@@ -181,7 +224,9 @@ public static class SpeciesDatabase
             iq = 5, longevity = 6, fertility = 8, durability = 4, adaptability = 9,
             idealTemp = 0.55f, tolerance = 1.6f,
             // Photosynthetic and famously adaptable — the widest band of anyone.
-            minAtmospheres = 0.9f, maxAtmospheres = 5f
+            minAtmospheres = 0.9f, maxAtmospheres = 5f,
+            // A big garden world: deep air, long days, and room for a forest to cover it.
+            cradleMass = 1.8f
         };
         SetAff(sylvans, rocky: 0.9f, ocean: 0.9f, ice: 0.5f, volcanic: 0.4f, barren: 0.5f, gas: 0.3f, moon: 0.55f, ast: 0.3f);
 

@@ -283,7 +283,7 @@ public class ShipyardWindow : MonoBehaviour
             string costHex = ColorUtility.ToHtmlStringRGB(affordable ? UITheme.SubText : UITheme.Bad);
             string costText = $"<color=#{costHex}>{cm} metal · {ce} energy</color>   " +
                               $"<color=#8FD0FF>{info.buildPower} build power</color>   " +
-                              $"<color=#9FB4C8>{info.buildTime * TechEffects.BuildTimeMult:F0}s</color>";
+                              $"<color=#9FB4C8>{GameCalendar.Duration(info.buildTime * TechEffects.BuildTimeMult)}</color>";
             if (costText != c.lastCostText)
             {
                 c.lastCostText = costText;
@@ -422,7 +422,7 @@ public class ShipyardWindow : MonoBehaviour
             switch (o.state)
             {
                 case BuildState.Building:
-                    state = $"<color=#4DFF6E>Building</color> — {o.Progress * 100f:F0}% ({o.Remaining:F0}s left)";
+                    state = $"<color=#4DFF6E>Building</color> — {o.Progress * 100f:F0}% ({GameCalendar.Duration(o.Remaining)} left)";
                     barColor = UITheme.Accent; break;
                 case BuildState.Paused:
                     state = $"<color=#FFBF4D>Paused</color> at {o.Progress * 100f:F0}% — its {o.Power} power went to the next ship";

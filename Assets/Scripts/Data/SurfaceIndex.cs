@@ -3,7 +3,10 @@ using UnityEngine;
 
 // The map overlays you survey a world for. Each is a 0..1 score per surface tile that says how well a
 // given kind of building would do there.
-public enum SurfaceIndexKind { None, Mineral, Heat, Fertile, Wind, Solar, Water }
+// NOTE: `Geothermal` was called `Heat`. It is the SAME overlay, merged with the plate-tectonics view
+// (see GeothermalMap) — one index for "where is the crust hot and moving", because two separate systems
+// describing the same ground could and did disagree with each other.
+public enum SurfaceIndexKind { None, Mineral, Geothermal, Fertile, Wind, Solar, Water }
 
 // ============================================================================================
 // PER-TILE SURVEY INDEXES
@@ -34,7 +37,7 @@ public static class SurfaceIndex
 {
     public static readonly SurfaceIndexKind[] All =
     {
-        SurfaceIndexKind.Mineral, SurfaceIndexKind.Heat, SurfaceIndexKind.Fertile,
+        SurfaceIndexKind.Mineral, SurfaceIndexKind.Geothermal, SurfaceIndexKind.Fertile,
         SurfaceIndexKind.Wind, SurfaceIndexKind.Solar, SurfaceIndexKind.Water
     };
 
@@ -96,7 +99,7 @@ public static class SurfaceIndex
         switch (kind)
         {
             case SurfaceIndexKind.Mineral: return Mineral(f, t);
-            case SurfaceIndexKind.Heat: return Heat(b, f);
+            case SurfaceIndexKind.Geothermal: return Geothermal(b, f, u, v);
             case SurfaceIndexKind.Fertile: return Fertile(b, f);
             case SurfaceIndexKind.Wind: return Wind(b, f, u, v);
             case SurfaceIndexKind.Solar: return Solar(b, f, u, v);
@@ -105,11 +108,31 @@ public static class SurfaceIndex
         }
     }
 
+    // ============================================================================================
+    // THE ONE INDEX THAT IS NOT CONSOLIDATED
+    //
+    // Every other index is a relative judgement — "how good is this ground FOR THIS WORLD" — so it is
+    // put through a per-world percentile band that promotes the best few percent and buries the rest
+    // (see the consolidation note above). That is right for minerals, farmland, wind and sun: there is
+    // no absolute scale on which a mineral score of 0.62 means a specific thing.
+    //
+    // Geothermal is different, and it became different when it merged with the plate map. Its numbers
+    // are SPECIFIED: a plate line reads 40, the radiated band around a high-activity fault bottoms out
+    // at 70, a volcanic vent is 97 or above. Those are the values that decide where mountains rise,
+    // where quakes do damage and where volcanoes are — four systems agreeing on one field. Running them
+    // through a percentile remap would rescale every one of them to a distribution, so a quiet world's
+    // best plate line would be promoted to 100 and a genuinely volcanic world's vents would be
+    // compressed, and the number on the readout would stop meaning the thing every other system
+    // computed from it.
+    static bool IsAbsolute(SurfaceIndexKind k) => k == SurfaceIndexKind.Geothermal;
+
     /// What the game actually reads: the raw score, consolidated into this world's usable band.
     public static float Get(CelestialBody b, SurfaceIndexKind kind, int x, int y)
     {
         if (b?.surface == null || kind == SurfaceIndexKind.None) return 0f;
         if (x < 0 || y < 0 || x >= b.surface.width || y >= b.surface.height) return 0f;
+
+        if (IsAbsolute(kind)) return Mathf.Clamp01(Raw(b, kind, x, y));
 
         var fld = FieldFor(b, kind);
         if (fld == null || fld.rawMax <= 0.0001f) return 0f;
@@ -202,7 +225,10 @@ public static class SurfaceIndex
     // property of the ground you happen to be standing on, and the whole point of the change is the
     // former. Solar and Weather take theirs from the atmosphere instead — see the two functions below.
     const float MineralCoverage = 0.12f;
-    const float HeatCoverage    = 0.09f;
+    // Geothermal has no coverage budget of its own — it is read absolutely (see IsAbsolute), so the
+    // consolidation never asks. Kept so the switch below is total rather than falling through to a
+    // default that would silently start meaning something.
+    const float GeothermalCoverage = 0.09f;
     const float FertileCoverage = 0.15f;
     const float WaterCoverage   = 0.15f;
 
@@ -211,7 +237,7 @@ public static class SurfaceIndex
         switch (k)
         {
             case SurfaceIndexKind.Mineral: return MineralCoverage;
-            case SurfaceIndexKind.Heat: return HeatCoverage;
+            case SurfaceIndexKind.Geothermal: return GeothermalCoverage;
             case SurfaceIndexKind.Fertile: return FertileCoverage;
             case SurfaceIndexKind.Water: return WaterCoverage;
             case SurfaceIndexKind.Solar: return SolarCoverage(b);
@@ -232,7 +258,7 @@ public static class SurfaceIndex
         switch (k)
         {
             case SurfaceIndexKind.Mineral: return Quality(rawMax, 0.30f, 0.62f);
-            case SurfaceIndexKind.Heat: return Quality(rawMax, 0.28f, 0.62f);
+            case SurfaceIndexKind.Geothermal: return Quality(rawMax, 0.28f, 0.62f);
             case SurfaceIndexKind.Fertile: return Quality(rawMax, 0.30f, 0.68f);
             case SurfaceIndexKind.Water: return Quality(rawMax, 0.30f, 0.70f);
             // Both of these are capped by the AIR before anything about the ground is considered — an
@@ -277,25 +303,40 @@ public static class SurfaceIndex
         }
     }
 
-    // ---- HEAT: where a geothermal plant pays ----
-    // Two separate sources, and keeping them apart is what makes this read correctly:
-    //   SURFACE heat — the sun. Latitude and distance from the star. A desert is hot, a pole is not.
-    //   GEOTHERMAL heat — the crust. Volcanoes and geysers, which are hot even at a frozen pole.
-    // A geothermal plant mostly cares about the second, which is why a volcano on an ice world is still
-    // the best site on it.
-    static float Heat(CelestialBody b, PlanetTerrainGenerator.Sample f)
+    // ============================================================================================
+    // GEOTHERMAL: the merged index — where the crust is HOT AND MOVING
+    //
+    // This was the Heat Index, and separately there was a plate-tectonics overlay. They were two
+    // pictures of one thing. The Heat Index was "heat in the CRUST, not the air" from the day it was
+    // written; the tectonics overlay drew the fault lines that heat comes out of. Keeping them apart
+    // meant a world could show a red fault line running across ground the Heat Index called cold, and a
+    // geothermal plant sited by one map could be wrong according to the other.
+    //
+    // The field itself lives in GeothermalMap and is shared with the terrain generator (which folds the
+    // ground up along the same margins), the earthquakes (which only damage what stands on highlighted
+    // ground) and the temperature model (a world's internal heat). Whatever this overlay paints red is
+    // the ground that rose, the ground that shakes, and the ground the plant wants.
+    //
+    // READ STRAIGHT THROUGH, uniquely among the indexes — see IsAbsolute below. The numbers here are
+    // specified in absolute terms (40 along a plate line, 70 in the radiated band, 97+ at a volcanic
+    // vent), so putting them through the per-world percentile consolidation every other index uses would
+    // rescale exactly the values that were chosen to mean something.
+    // ============================================================================================
+    static float Geothermal(CelestialBody b, PlanetTerrainGenerator.Sample f, float u, float v)
     {
-        float crust = CrustHeat(f.terrain);
+        float geo = GeothermalMap.At(b, u, v);
 
-        // A volcanic world is hot underneath everywhere, not just at its vents.
-        float planetCrust = b.type == CelestialBodyType.VolcanicPlanet ? 0.45f : 0.06f;
+        // WHAT IS ACTUALLY ON THE TILE can only raise the reading, never lower it. A volcano or a geyser
+        // field is direct evidence of heat under this exact spot — the field says where the heat is, and
+        // a vent says it has already found its way out here.
+        geo = Mathf.Max(geo, CrustHeat(f.terrain));
 
-        // Deep ocean bleeds heat away; you don't build a geothermal plant on the sea floor.
-        float waterPenalty = f.water ? 0.55f : 1f;
+        // A deep sea floor bleeds its heat into the water above it long before a plant could take any.
+        // Applied last, so it cuts the finished figure rather than one of its inputs — a fault under an
+        // ocean is still a fault, it is just not a building site.
+        if (f.water) geo *= 0.55f;
 
-        float v = Mathf.Max(crust, planetCrust) * 0.72f     // the crust dominates
-                + f.temperature * 0.28f;                    // the sun contributes a little
-        return Mathf.Clamp01(v * waterPenalty);
+        return Mathf.Clamp01(geo);
     }
 
     static float CrustHeat(TerrainType t)
@@ -881,6 +922,11 @@ public static class SurfaceIndex
         if (b == null) return;
         foreach (var k in All) { statsCache.Remove((b, k)); bands.Remove((b, k)); }
         waterFields.Remove(b);
+        // The geothermal field caches a world's plume intensity and plate motion, and both are keyed on
+        // its terrain seed and type — exactly the two things a remodel or a reseed changes. Dropped here
+        // so the overlay, the earthquakes and the temperature model all stop describing the world this
+        // one used to be at the same moment the other overlays do.
+        GeothermalMap.Invalidate(b);
     }
 
     public static void InvalidateAll()
@@ -888,6 +934,7 @@ public static class SurfaceIndex
         statsCache.Clear();
         waterFields.Clear();
         bands.Clear();
+        GeothermalMap.InvalidateAll();
     }
 
     /// Where this tile ranks on this world, 0 (worst) .. 1 (best).
@@ -966,7 +1013,7 @@ public static class SurfaceIndex
         switch (k)
         {
             case SurfaceIndexKind.Mineral: return "Mineral Index";
-            case SurfaceIndexKind.Heat: return "Heat Index";
+            case SurfaceIndexKind.Geothermal: return "Geothermal Index";
             case SurfaceIndexKind.Fertile: return "Fertile Index";
             case SurfaceIndexKind.Wind: return "Weather Index";
             case SurfaceIndexKind.Solar: return "Solar Index";
@@ -983,7 +1030,7 @@ public static class SurfaceIndex
         switch (k)
         {
             case SurfaceIndexKind.Mineral: return "Mineral";
-            case SurfaceIndexKind.Heat: return "Heat";
+            case SurfaceIndexKind.Geothermal: return "Geothermal";
             case SurfaceIndexKind.Fertile: return "Fertile";
             case SurfaceIndexKind.Wind: return "Weather";
             case SurfaceIndexKind.Solar: return "Solar";
@@ -997,7 +1044,7 @@ public static class SurfaceIndex
         switch (k)
         {
             case SurfaceIndexKind.Mineral: return "Broken, raised crust — mountains, canyons and exposed seams, which is why the richest ground follows the plate margins. Concentrated into a few districts rather than spread over the whole crust.";
-            case SurfaceIndexKind.Heat: return "Heat in the CRUST, not the air: volcanoes and geyser fields. A volcano on an ice world is still that world's best geothermal site — but a world with no volcanism has no geothermal ground at all, however cracked its mountains look.";
+            case SurfaceIndexKind.Geothermal: return "Heat in the CRUST, and the movement that makes it — this is the plate map and the old Heat Index in one. Plate margins read from 40% up to 100% where two plates drive head-on, and a high-activity fault radiates its heat about three tiles either side, never below 70%. Worlds with no plates can still carry volcanic HOTSPOTS: tight 90%+ cores tapering out through 80% and 70%, and a vent at 97%+ is a volcano. A world with neither has no geothermal ground at all, however cracked its mountains look.";
             case SurfaceIndexKind.Fertile: return "Warm AND wet AND flat — farmland needs all three at once, not any one of them. Needs a LIVING world above all: no biosphere, no soil, and the index reads nothing.";
             case SurfaceIndexKind.Wind: return "Needs AIR, and enough of it. Under about two-thirds of an atmosphere a world never reaches a workable figure anywhere. Above that it comes as HOTSPOTS — flat, open, exposed country — and the thicker the air the more of them there are and the larger each one gets.";
             case SurfaceIndexKind.Solar: return "Dry, high ground, and long days. On a thin-aired world the poles win outright and the sun is good over huge stretches; thicken the air and the poles become the worst ground on the planet and the good sites shrink to a scattered few. A world far from its star is dim everywhere.";
@@ -1017,7 +1064,7 @@ public static class SurfaceIndex
             // Brighter at the top than the old muddy tan, which was the one ramp whose best ground read as
             // dirt rather than as a find. Orange, and clearly not Heat's red.
             case SurfaceIndexKind.Mineral: c = Color.Lerp(new Color(0.28f, 0.16f, 0.06f), new Color(1.00f, 0.60f, 0.16f), t); break;
-            case SurfaceIndexKind.Heat: c = Color.Lerp(new Color(0.85f, 0.45f, 0.10f), new Color(1.00f, 0.10f, 0.05f), t); break;
+            case SurfaceIndexKind.Geothermal: c = Color.Lerp(new Color(0.85f, 0.45f, 0.10f), new Color(1.00f, 0.10f, 0.05f), t); break;
             case SurfaceIndexKind.Fertile: c = Color.Lerp(new Color(0.05f, 0.22f, 0.08f), new Color(0.30f, 1.00f, 0.25f), t); break;
             // PURPLE. It was a slate-to-whitish blue, which failed twice over: a pale desaturated blue
             // barely separates from the terrain underneath it, and it was near enough to Water's
@@ -1090,7 +1137,7 @@ public static class SurfaceIndex
         switch (k)
         {
             case SurfaceIndexKind.Mineral: return new Color(1.00f, 0.68f, 0.22f, 1f);   // bright orange
-            case SurfaceIndexKind.Heat:    return new Color(1.00f, 0.30f, 0.20f, 1f);   // bright red
+            case SurfaceIndexKind.Geothermal:    return new Color(1.00f, 0.30f, 0.20f, 1f);   // bright red
             case SurfaceIndexKind.Fertile: return new Color(0.48f, 1.00f, 0.38f, 1f);   // bright green
             case SurfaceIndexKind.Wind:    return new Color(0.88f, 0.52f, 1.00f, 1f);   // bright purple
             case SurfaceIndexKind.Solar:   return new Color(1.00f, 0.97f, 0.42f, 1f);   // bright yellow
@@ -1117,7 +1164,7 @@ public static class SurfaceIndex
         switch (k)
         {
             case SurfaceIndexKind.Mineral: return 0;
-            case SurfaceIndexKind.Heat:
+            case SurfaceIndexKind.Geothermal:
             case SurfaceIndexKind.Fertile: return 1;
             case SurfaceIndexKind.Wind:
             case SurfaceIndexKind.Solar: return 2;

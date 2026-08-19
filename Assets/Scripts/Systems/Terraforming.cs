@@ -76,7 +76,7 @@ public class TerraformProjectInfo
 
     public string requiredTech;         // tech id that unlocks it (null = available from the start)
     public int costMetal, costEnergy, costWater;
-    public float duration;              // seconds of work
+    public float duration;              // seconds of game time == in-game DAYS (see GameCalendar)
     public float ceilingGain;           // habitability points added to this world's ceiling
 
     // Which worlds this project even makes sense on. Null = any body the problem was diagnosed on.
@@ -97,9 +97,69 @@ public class TerraformProjectInfo
 // ---------------------------------------------------------------------------------------------
 public static class BiosphereRules
 {
-    // Heuristic liquid-water band. No evaporation/vapour-pressure model exists anywhere in this codebase,
-    // so this is a plain "warm enough, not boiling away" Celsius window rather than a physically exact
-    // curve — good enough to gate Microbial Seeding and the sandbox's BioSphere slider.
+    // ============================================================================================
+    // THE LIQUID-WATER WINDOW — now a function of PRESSURE, not two constants
+    //
+    // Water boils when its vapour pressure reaches the pressure of the air above it, so how hot water
+    // can get before it stops being water is a property of the ATMOSPHERE, not of water. A pressure
+    // cooker is the everyday demonstration; Venus, where 92 atmospheres would keep water liquid past
+    // 300°C if there were any left, is the planetary one.
+    //
+    // Two anchors, given: at 1 atmosphere the window is 1°C to 100°C, and at 4 atmospheres it is 0°C to
+    // 144°C. Everything else is interpolated through them.
+    //
+    //   BOILING  — logarithmic in pressure, which is the shape the real vapour-pressure curve has and
+    //              also the only shape that passes through both anchors and stays sane at the ends:
+    //              100 + 44·log4(P). Half an atmosphere boils at 78°C, ten at 173°C, a gas-giant-deep
+    //              twenty at 195°C. A linear fit through the same two points would have a 12-atmosphere
+    //              world boiling at 261°C and a 40-atmosphere one at 672°C, which is nonsense.
+    //   FREEZING — the anchors move it by one degree across three atmospheres, so this is very nearly
+    //              flat and is modelled as such: a gentle linear droop, floored so a crushing atmosphere
+    //              cannot push it absurdly cold. (Real water's melting point genuinely barely moves with
+    //              pressure — it is the one place the two anchors are describing a real, small effect.)
+    //
+    // Below the life floor there is no liquid surface water at any temperature: the air is too thin to
+    // hold it and it sublimates straight off. Both functions collapse to an empty window there, which is
+    // what makes `HasLiquidWaterClimate` false on an airless world without a separate special case.
+    public const float BoilingAtEarth = 100f;      // °C at 1 atmosphere
+    public const float BoilingAtFourAtm = 144f;    // °C at 4 atmospheres — the second anchor
+    public const float FreezingAtEarth = 1f;       // °C at 1 atmosphere
+    public const float FreezingAtFourAtm = 0f;     // °C at 4 atmospheres
+
+    /// The temperature at which surface water boils away, in °C, at this pressure.
+    public static float BoilingC(float atmospheres)
+    {
+        if (atmospheres < MinAtmosphere) return AbsoluteZeroC;   // no window at all
+        float p = Mathf.Max(0.01f, atmospheres);
+        return BoilingAtEarth + (BoilingAtFourAtm - BoilingAtEarth) * Mathf.Log(p, 4f);
+    }
+
+    /// The temperature at which surface water freezes, in °C, at this pressure.
+    public static float FreezingC(float atmospheres)
+    {
+        if (atmospheres < MinAtmosphere) return AbsoluteZeroC;
+        float p = Mathf.Max(0.01f, atmospheres);
+        // One degree lost per three atmospheres, from the anchors; floored so the crushing end of the
+        // range does not drift into fiction.
+        return Mathf.Clamp(FreezingAtEarth + (FreezingAtFourAtm - FreezingAtEarth) * (p - 1f) / 3f, -8f, 4f);
+    }
+
+    /// This world's own window. Convenience for the many callers that have a body rather than a pressure.
+    public static void LiquidRange(CelestialBody b, out float freeze, out float boil)
+    {
+        float a = b != null ? b.atmospheres : 0f;
+        freeze = FreezingC(a);
+        boil = BoilingC(a);
+    }
+
+    /// Absolute zero, and the cold end of every temperature clamp in the game.
+    public const float AbsoluteZeroC = -270f;
+
+    // The COMFORT band for living things, which is a narrower question than whether water is liquid.
+    // Boiling water is still water and an ocean at 130°C on a four-atmosphere world is a real ocean; it
+    // is not somewhere a biosphere starts. These two are what the cradle climate and the biosphere
+    // ceiling are solved against, and they are deliberately left as constants — life's tolerances are a
+    // fact about life, not about pressure.
     public const float MinLiquidC = 0f, MaxLiquidC = 50f;
     public const float MinWaterLevel = 0.15f;   // needs real coverage, not a token puddle
 
@@ -167,9 +227,25 @@ public static class BiosphereRules
         return b.terrainParams.heat > 1f ? "it is too hot for liquid water" : "it is too cold for liquid water";
     }
 
+    /// Can water actually be LIQUID on this world's surface as it stands? The physical window, so a
+    /// four-atmosphere world really does hold oceans at 130°C and a thin-aired one really does not hold
+    /// them at 90°C.
+    public static bool HasLiquidWater(CelestialBody b)
+    {
+        if (b == null) return false;
+        LiquidRange(b, out float freeze, out float boil);
+        if (boil <= freeze) return false;                     // no air, no window
+        float c = PlanetTemperature.BodyAverageCelsius(b);
+        return c >= freeze && c <= boil;
+    }
+
+    /// Is this world's climate one LIFE could start in? Narrower than the above on purpose — it wants
+    /// the comfort band as well as liquid water, because a boiling ocean is still an ocean and still
+    /// not a nursery. This is the one the biosphere gates read.
     public static bool HasLiquidWaterClimate(CelestialBody b)
     {
         if (b == null) return false;
+        if (!HasLiquidWater(b)) return false;
         float c = PlanetTemperature.BodyAverageCelsius(b);
         return c >= MinLiquidC && c <= MaxLiquidC;
     }
@@ -387,6 +463,11 @@ public static class TerraformFeasibility
 // ---------------------------------------------------------------------------------------------
 public static class TerraformDiagnosis
 {
+    /// Below this many Earth masses a world is diagnosed with low gravity. Mars is 0.11 and is the
+    /// worked example of what that costs you; 0.8 is where a world stops being able to hold a decent
+    /// atmosphere against a normal amount of heat.
+    public const float LowGravityMass = 0.8f;
+
     // Does this species actually need liquid water? The silicon-based Pyrothians famously don't, so
     // a bone-dry world simply isn't a problem for them.
     public static bool NeedsWater(Species s) => s != null && s.Affinity(CelestialBodyType.OceanPlanet) >= 0.3f;
@@ -587,19 +668,31 @@ public static class TerraformDiagnosis
             });
 
         // ---- Rotation ----
+        // ---- Rotation ----
+        //
+        // BOTH THRESHOLDS MOVED, and the slow one now sits exactly on the dynamo line
+        // (RotationRules.MagneticFieldSpin). That is not a coincidence being exploited, it is the point:
+        // a world turning too slowly for a magnetic field is a world whose atmosphere is being stripped,
+        // so "rotates too slowly" and "has no magnetosphere" are the same fault seen from two sides, and
+        // Rotational Acceleration is the project that fixes both at once.
+        //
+        // The old cuts were 3 and 45, and neither could fire correctly any more: rotation is rolled in
+        // 0.4..40 now, so nothing ever exceeded 45, and 3 only caught the very deepest tidal locks —
+        // leaving the whole braked population, which genuinely has no field and no air, undiagnosed.
         float spin = Mathf.Abs(b.spinSpeed);
-        if (spin < 3f)
+        if (spin < RotationRules.MagneticFieldSpin)
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.DayTooLong,
-                severity = Mathf.Clamp01(1f - spin / 3f),
-                detail = "Turns so slowly that one face bakes while the other freezes."
+                severity = Mathf.Clamp01(1f - spin / RotationRules.MagneticFieldSpin),
+                detail = $"Turns once every {RotationRules.RotationPeriodDays(spin):0.#} days — too slowly " +
+                         "to run a dynamo, so it has no magnetic field and its air is being stripped away."
             });
-        else if (spin > 45f)
+        else if (spin > RotationRules.MaxSpin * 0.85f)
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.DayTooShort,
-                severity = Mathf.Clamp01((spin - 45f) / 45f),
+                severity = Mathf.Clamp01((spin - RotationRules.MaxSpin * 0.85f) / (RotationRules.MaxSpin * 0.15f)),
                 detail = "Spins violently fast — punishing storms and a brutal day/night cycle."
             });
 
@@ -632,12 +725,19 @@ public static class TerraformDiagnosis
         }
 
         // ---- Gravity ----
-        if (b.surfaceSize <= 4)
+        //
+        // Stated in MASS now, because that is what gravity is a fact about, and because the size class
+        // this used to read moved underneath it: `surfaceSize` is six per Earth rather than three, so
+        // "<= 4" quietly went from meaning "under 1.3 Earths" to "under 0.67". Below 0.8 of an Earth a
+        // world is genuinely marginal — that is Mars territory, and Mars is the worked example of a
+        // world that could not hold onto its air.
+        if (b.mass < LowGravityMass)
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.LowGravity,
-                severity = Mathf.Clamp01((5f - b.surfaceSize) / 4f),
-                detail = "Too small to hold decent gravity — or an atmosphere — on its own."
+                severity = Mathf.Clamp01((LowGravityMass - b.mass) / LowGravityMass),
+                detail = $"At {MassRules.Format(b.mass)} Earth masses it is too small to hold decent " +
+                         "gravity — or an atmosphere — on its own."
             });
 
         return list;
@@ -810,11 +910,11 @@ public static class TerraformProjectDatabase
 
         P(new TerraformProjectInfo(TerraformProjectType.SpinUp, "Rotational Acceleration", TerraformProblem.DayTooLong, "X10",
             640, 780, 0, 95f, 12f,
-            "Mass drivers fire along the equator for years on end, spinning a sluggish world up until it has real days and nights instead of a baked face and a frozen one."));
+            "Mass drivers fire along the equator for years on end, spinning a sluggish world up until it has real days and nights instead of a baked face and a frozen one. Past the dynamo threshold this also RESTARTS ITS MAGNETIC FIELD, which doubles the atmosphere it can hold."));
 
         P(new TerraformProjectInfo(TerraformProjectType.SpinDown, "Rotational Braking", TerraformProblem.DayTooShort, "X10",
             640, 780, 0, 95f, 12f,
-            "The same mass drivers run in reverse, bleeding off a violent world's spin until its storms die down to something survivable."));
+            "The same mass drivers run in reverse, bleeding off a violent world's spin until its storms die down to something survivable. Take it too far and the dynamo stops: below the threshold the world loses its magnetic field and half the air it could hold."));
 
         P(new TerraformProjectInfo(TerraformProjectType.AxialCorrection, "Axial Correction", TerraformProblem.UnstableAxis, "X10",
             580, 700, 0, 85f, 9f,

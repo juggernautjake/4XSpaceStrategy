@@ -23,8 +23,10 @@ public class SurfaceBuildJob
     public SurfaceBuildingType type;
     public List<Vector2Int> cells = new List<Vector2Int>();
 
-    public float elapsed;          // seconds of work done
-    public float duration;         // seconds of work needed, at full Labor
+    // Both in SECONDS of game time, which is DAYS on the calendar (see GameCalendar) — the readouts
+    // convert, the simulation does not.
+    public float elapsed;          // work done
+    public float duration;         // work needed, at full Labor
     public bool paused;
 
     /// Exactly what was paid, so a cancellation refunds that rather than a re-derived price — costs

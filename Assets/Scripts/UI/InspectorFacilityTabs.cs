@@ -146,7 +146,7 @@ public partial class InspectorWindow
             {
                 bool can = mgr.CanUpgradeShipyard(b, out string why, out _);
                 return (can, can
-                    ? $"Upgrade -> Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {ColonyManager.ShipyardUpgradeTime(next):F0}s) -> {BuildPower.ForLevel(next)} build power"
+                    ? $"Upgrade -> Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {GameCalendar.Duration(ColonyManager.ShipyardUpgradeTime(next))}) -> {BuildPower.ForLevel(next)} build power"
                     : $"Upgrade -> Lv{next} — {why}");
             });
             Note(p, $"Level {next}: {Colony.ShipyardPerk(next)}.");
@@ -208,7 +208,7 @@ public partial class InspectorWindow
                 bool afford = GameMode.DevMode || PlayerEconomy.CanAfford(m, e);
                 string hex = ColorUtility.ToHtmlStringRGB(afford ? UITheme.SubText : UITheme.Bad);
                 return $"<color=#{hex}>{m} metal · {e} energy</color>   <color=#8FD0FF>{info.buildPower} build power</color>   " +
-                       $"<color=#9FB4C8>{info.buildTime * TechEffects.BuildTimeMult:F0}s</color>";
+                       $"<color=#9FB4C8>{GameCalendar.Duration(info.buildTime * TechEffects.BuildTimeMult)}</color>";
             });
 
             var btn = UIFactory.Button(card, "", () => { UnitManager.Instance?.QueueBuild(t); lastSig = null; }, 24);
@@ -241,7 +241,7 @@ public partial class InspectorWindow
                 string state;
                 switch (cap.state)
                 {
-                    case BuildState.Building: state = $"<color=#4DFF6E>Building</color> — {cap.Progress * 100f:F0}% ({cap.Remaining:F0}s)"; break;
+                    case BuildState.Building: state = $"<color=#4DFF6E>Building</color> — {cap.Progress * 100f:F0}% ({GameCalendar.Duration(cap.Remaining)})"; break;
                     case BuildState.Paused: state = $"<color=#FFBF4D>Paused</color> at {cap.Progress * 100f:F0}%"; break;
                     case BuildState.Impossible: state = $"<color=#FF6659>Needs {cap.Power} power — more than your yards supply</color>"; break;
                     default: state = $"<color=#9FB4C8>Queued</color> — waiting for {cap.Power} power"; break;
@@ -306,7 +306,7 @@ public partial class InspectorWindow
             {
                 bool can = mgr.CanUpgradeLab(b, out string why, out _);
                 return (can, can
-                    ? $"Upgrade -> Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {ColonyManager.LabUpgradeTime(next):F0}s) -> {ResearchCapacity.ForLevel(next)} capacity"
+                    ? $"Upgrade -> Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {GameCalendar.Duration(ColonyManager.LabUpgradeTime(next))}) -> {ResearchCapacity.ForLevel(next)} capacity"
                     : $"Upgrade -> Lv{next} — {why}");
             });
         }

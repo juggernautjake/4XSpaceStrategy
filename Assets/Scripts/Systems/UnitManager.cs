@@ -984,7 +984,7 @@ public class UnitManager : MonoBehaviour
                 string blurb = !string.IsNullOrEmpty(poi.description) ? poi.description : poi.title;
                 reports.Append($"\n\n<b>{poi.title}</b>\n{blurb}\n" +
                                $"<color=#8FD0FF>Study: {poi.researchPointCost} research points, " +
-                               $"~{Mathf.RoundToInt(poi.researchDuration)}s</color>");
+                               $"~{GameCalendar.Duration(poi.researchDuration)}</color>");
             }
 
         // One closing report, so what the survey produced is legible as a list of things to now DO.

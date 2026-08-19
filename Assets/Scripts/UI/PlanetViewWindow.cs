@@ -1,3 +1,4 @@
+        ((tab == Tab.Survey && activeIndex == SurfaceIndexKind.Minera ||
 ﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -280,7 +281,7 @@ public class PlanetViewWindow : MonoBehaviour
         // downgraded the Mineral view: it still looked mineral-coloured, but fell through to the plain
         // ramp and lost the NAMED ORE DEPOSITS, which this is the only place that draws. A map that
         // looks the same and silently stops answering the question is the worst kind of regression.
-        ((tab == Tab.Survey && !showTectonicsOverlay && activeIndex == SurfaceIndexKind.Mineral) ||
+        ((tab == Tab.Survey && activeIndex == SurfaceIndexKind.Mineral) ||
          (tab == Tab.Build && CarryingMiningPiece));
     int rotation;
     Vector2Int hoverCell = new Vector2Int(-1, -1);
@@ -323,11 +324,6 @@ public class PlanetViewWindow : MonoBehaviour
     const int MoonPaneTexelBudget = 2 * 1024 * 1024;
 
     bool showPowerOverlay;
-    // The plate-tectonics overlay — another bespoke Survey overlay (not an index ramp): it washes the map
-    // white, paints the fault lines red, and draws a push-direction arrow per plate. Mutually exclusive
-    // with the index ramps AND the power overlay, and only offered on a world that has active tectonics.
-    bool showTectonicsOverlay;
-
     readonly LiveSet live = new LiveSet();
     string lastSig = null;
     Texture2D overlayTex;
@@ -714,7 +710,6 @@ public class PlanetViewWindow : MonoBehaviour
         hoverCell = new Vector2Int(-1, -1);
         hoverValid = false;
         showPowerOverlay = false;   // a fresh world opens on the plain map, not the last world's power view
-        showTectonicsOverlay = false;   // ...nor the last world's tectonics view (also a survey-gated overlay)
         CancelPlace();          // a confirm from the last world means nothing on this one
         // ...and neither does a half-drawn footprint. The session holds cells in the OLD world's grid
         // coordinates, so carrying it over would draw a shape on this world at cells that mean nothing
@@ -1250,7 +1245,7 @@ public class PlanetViewWindow : MonoBehaviour
         // the heading — so entering or leaving it has to rebuild the side panel. Without this the tray
         // would still be telling you to click a structure to pick it up while the map was in demolition.
         sb.Append(BuildDemolition.IsFor(body) ? 1 : 0).Append('|');
-        sb.Append((int)activeIndex).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(showTectonicsOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
+        sb.Append((int)activeIndex).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
 
         // A SURVEY IN PROGRESS IS A CHANGING PICTURE, and the whole point of it is that you can watch.
         // Quantised rather than raw so this is not a rebuild every frame: 200 steps across a level is
@@ -1540,7 +1535,7 @@ public class PlanetViewWindow : MonoBehaviour
                             int cm = Mathf.RoundToInt(ColonyManager.DiscCost(info.costMetal) * mult);
                             int ce = Mathf.RoundToInt(ColonyManager.DiscCost(info.costEnergy) * mult);
                             sb.Append($"<b>{info.name}</b> — <b>{tiles}</b> tile{(tiles == 1 ? "" : "s")}");
-                            sb.Append($"  <color=#9FB4C8>{cm}m {ce}e · {info.buildTime * mult * TechEffects.BuildTimeMult:F0}s</color>");
+                            sb.Append($"  <color=#9FB4C8>{cm}m {ce}e · {GameCalendar.Duration(info.buildTime * mult * TechEffects.BuildTimeMult)}</color>");
                             sb.Append($"  <color=#8FD0FF>x{BuildScaling.OutputMultiplier(tiles):0.0} output</color>");
                         }
 
@@ -1639,6 +1634,14 @@ public class PlanetViewWindow : MonoBehaviour
                         if (activeIndex == SurfaceIndexKind.Wind)
                             sur.Append($"  <color=#9FB4C8>·</color> <b>{SurfaceIndex.WeatherLabel(body)}</b> " +
                                        $"<size=10><color=#9FB4C8>at {body.atmospheres:0.#} atmospheres</color></size>");
+
+                        // ...and for Geothermal, whose map is decided by two facts about the whole world:
+                        // whether it has plates at all, and how strong its volcanic hotspots are. A world
+                        // with neither shows an empty map, and "there is nothing here" and "there will
+                        // never be anything here" are answers a player has to be able to tell apart
+                        // before deciding whether to bring a science ship back.
+                        if (activeIndex == SurfaceIndexKind.Geothermal)
+                            sur.Append($"  <color=#9FB4C8>·</color> <b>{GeothermalMap.Label(body)}</b>");
 
                         // Same for Solar, where pressure sets a hard ceiling on the best tile.
                         if (activeIndex == SurfaceIndexKind.Solar)
@@ -2079,7 +2082,7 @@ public class PlanetViewWindow : MonoBehaviour
                            : CityGrowth.MaxTier(body) == 2 ? "towns" : "small settlements";
             return $"{have}/{cap} settlements · this world can grow <b>{ceiling}</b>\n" +
                    $"<size=10><color=#9FB4C8>At {body.habitability:F0}% habitability, a new one roughly every " +
-                   $"{CityGrowth.SpawnInterval(body):F0}s once there are people to fill it.</color></size>";
+                   $"{GameCalendar.Duration(CityGrowth.SpawnInterval(body))} once there are people to fill it.</color></size>";
         });
 
         // ---- Society & Production (folded from the retired Colony window) ----
@@ -2245,7 +2248,7 @@ public class PlanetViewWindow : MonoBehaviour
             live.Button(cityBtn, () =>
             {
                 bool can = mgr.CanEstablishCity(b, out string why);
-                return (can, can ? $"Establish City ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {ColonyManager.CityBuildTime:F0}s)"
+                return (can, can ? $"Establish City ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {GameCalendar.Duration(ColonyManager.CityBuildTime)})"
                                  : $"Establish City — {why}");
             });
         }
@@ -2346,7 +2349,7 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 bool can = mgr.CanUpgradeLab(body, out string why, out _);
                 return (can, can
-                    ? $"Upgrade -> Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {ColonyManager.LabUpgradeTime(next):F0}s) -> {ResearchCapacity.ForLevel(next)} capacity"
+                    ? $"Upgrade -> Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {GameCalendar.Duration(ColonyManager.LabUpgradeTime(next))}) -> {ResearchCapacity.ForLevel(next)} capacity"
                     : $"Upgrade -> Lv{next} — {why}");
             });
         }
@@ -2412,7 +2415,7 @@ public class PlanetViewWindow : MonoBehaviour
                     {
                         bool can = mgr.CanUpgradeShipyard(body, out string why, out _);
                         return (can, can
-                            ? $"Upgrade -> Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {ColonyManager.ShipyardUpgradeTime(next):F0}s) -> {BuildPower.ForLevel(next)} build power"
+                            ? $"Upgrade -> Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {GameCalendar.Duration(ColonyManager.ShipyardUpgradeTime(next))}) -> {BuildPower.ForLevel(next)} build power"
                             : $"Upgrade -> Lv{next} — {why}");
                     });
                 }
@@ -2452,7 +2455,7 @@ public class PlanetViewWindow : MonoBehaviour
                 var cap = u;
                 var card = Card();
                 var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.SubText);
-                live.Text(t, () => $"<b>{cap.name}</b> — arriving in {Mathf.Max(0f, cap.travelDuration - cap.travelElapsed):F0}s");
+                live.Text(t, () => $"<b>{cap.name}</b> — arriving in {GameCalendar.Duration(Mathf.Max(0f, cap.travelDuration - cap.travelElapsed))}");
                 UIFactory.Button(card, "Select »", () => UnitSelection.SelectOnly(cap), 22);
             }
         }
@@ -2519,20 +2522,35 @@ public class PlanetViewWindow : MonoBehaviour
     }
 
     // The world's MASS VALUE as the player sees it — a descriptor plus the number (Earth-like ~2, gas
-    // giants 7-13, moons/asteroids below 1). This replaces the old surfaceSize "size class" readout.
+    // giants 10-40, moons/asteroids at or under 0.5). This replaces the old surfaceSize "size class" readout.
     static string MassWord(float mass)
     {
-        string w = mass < 0.5f ? "Tiny" : mass < 1.5f ? "Small" : mass < 4f ? "Medium" : mass < 7f ? "Large" : "Giant";
+        // Against the Earth-relative scale: 1 IS Earth, so "Small" has to straddle it rather than sit
+        // below it, and the old cuts (which assumed Earth was 2) called an Earth-mass world Small and a
+        // 4-mass super-Earth Medium.
+        string w = mass <= MassRules.AsteroidMax ? "Tiny"
+                 : mass < 0.9f ? "Small"
+                 : mass < 1.6f ? "Earth-sized"
+                 : mass < 3f ? "Large"
+                 : mass < WorldClassifier.GasGiantMassFloor ? "Super-Earth"
+                 : "Giant";
         return $"{w} ({MassRules.Format(mass)})";
     }
 
     static string WeatherProse(CelestialBody b)
     {
         var sb = new System.Text.StringBuilder();
+        // Against the rotation the generator actually produces (RotationRules: 0.4..40, dynamo line at
+        // 12). The old cuts were 3 and 45, and neither could fire: nothing ever exceeded 45, and 3 only
+        // caught the very deepest tidal locks — so a braked world with no magnetosphere and no air was
+        // described as having "a steady day/night cycle".
         float spin = Mathf.Abs(b.spinSpeed);
-        sb.Append(spin < 3f ? "Barely turns — one face bakes, the other freezes. "
-                : spin > 45f ? "Spins violently; the storms never stop. "
-                : "A steady day/night cycle. ");
+        float dayLength = RotationRules.RotationPeriodDays(spin);
+        sb.Append(spin < RotationRules.MagneticFieldSpin
+                    ? $"Turns once every {dayLength:0.#} days — one face bakes while the other freezes, and it is too slow to run a dynamo. "
+                : spin > RotationRules.MaxSpin * 0.85f
+                    ? $"A {dayLength:0.#}-day rotation; it spins violently and the storms never stop. "
+                    : $"A steady {dayLength:0.#}-day cycle of day and night. ");
         sb.Append(Mathf.Abs(b.inclination) > 28f ? "Its severe axial tilt gives it savage seasons. " : "Mild seasons. ");
         // Read the water actually on the surface (its Water Level), not the disconnected Water resource
         // number — so a world covered in ocean tiles never reads "bone dry".
@@ -2780,8 +2798,10 @@ public class PlanetViewWindow : MonoBehaviour
         float s = SurfaceBuildQueue.Eta(body, job);
         if (float.IsInfinity(s) || float.IsNaN(s)) return "held";
         if (s < 1f) return "finishing";
-        if (s < 60f) return $"~{s:0}s left";
-        return $"~{Mathf.FloorToInt(s / 60f)}m {Mathf.FloorToInt(s % 60f):00}s left";
+        // "~3m 20s left" was the last place in the game still speaking in minutes and seconds, and it was
+        // the exact one the request names: "placing a building on a planet surface would, instead of
+        // taking minutes or seconds, take months and days".
+        return $"~{GameCalendar.Duration(s)} left";
     }
 
     /// Whether a structure is offered in the build tray at all. The capitol and the grounded colony ship
@@ -3477,7 +3497,7 @@ public class PlanetViewWindow : MonoBehaviour
                 sb.AppendLine($"<color=#{hex}><b>{SiteMark(cap)}</b></color>  <b>{SiteTitle(cap)}</b>");
                 sb.AppendLine($"<size=10><color=#9FB4C8>{SiteBlurb(cap)}</color></size>");
                 if (cap.IsResearchable)
-                    sb.AppendLine($"<size=10><color=#8FD0FF>Study: {cap.researchPointCost} pts · ~{cap.researchDuration:F0}s · " +
+                    sb.AppendLine($"<size=10><color=#8FD0FF>Study: {cap.researchPointCost} pts · ~{GameCalendar.Duration(cap.researchDuration)} · " +
                                   $"pays {cap.researchReward} pts{(cap.yieldsSchematic ? " · may yield a schematic" : "")}</color></size>");
                 return sb.ToString().TrimEnd();
             });
@@ -3652,7 +3672,7 @@ public class PlanetViewWindow : MonoBehaviour
         if (!p.surveyed && p.type == POIType.Mystery)
             sb.AppendLine("<size=10><color=#FFBF4D>Not yet identified — a research ship must deep-survey this world.</color></size>");
         else if (p.IsResearchable)
-            sb.AppendLine($"<size=10><color=#8FD0FF>Study: {p.researchPointCost} pts · ~{p.researchDuration:F0}s</color></size>");
+            sb.AppendLine($"<size=10><color=#8FD0FF>Study: {p.researchPointCost} pts · ~{GameCalendar.Duration(p.researchDuration)}</color></size>");
         else if (p.explored)
             sb.AppendLine("<size=10><color=#9FB4C8>Already studied.</color></size>");
         return sb.ToString().TrimEnd();
@@ -3723,7 +3743,18 @@ public class PlanetViewWindow : MonoBehaviour
     // NOTE: on a body with active terraforming (body.terraforming == true), TerraformVisuals.Compose
     // clamps heat back to [0.30, 2.20] every tick, so a sandbox value below 0.30 won't stick on a world
     // that's actively terraforming — only on one that isn't.
-    const float TempMin = 0.05f, TempMax = 2.2f;
+    // WIDENED, to reach both ends of the new −270 °C .. 1000 °C range (PlanetTemperature).
+    //
+    // The old 0.05 .. 2.2 could not: the temperature law is 288.15·√heat, so 2.2 tops out around 155 °C
+    // before greenhouse and type, and a developer could not build a molten world to look at even though
+    // the terrain generator now lays magma fields down above 650 °C. Eight reaches ~542 °C on its own,
+    // which with a thick atmosphere and a volcanic world's internal heat covers the whole molten band;
+    // 0.02 bottoms out near −232 °C, which with an ice world's own modifier reaches the floor.
+    //
+    // NOTE: on a body with active terraforming (body.terraforming == true), TerraformVisuals.Compose
+    // clamps heat back to its own range every tick, so an extreme sandbox value won't stick on a world
+    // that's actively terraforming — only on one that isn't.
+    const float TempMin = 0.02f, TempMax = 8f;
 
     // The BioSphere slider drives terrainParams.moisture, whose barren floor is 0.3 and whose lush
     // maximum is 2.0. Named because the 0..1 BioSphere ceiling has to be mapped onto that range in three
@@ -3750,17 +3781,25 @@ public class PlanetViewWindow : MonoBehaviour
         SliderRow("Water Level", "dry world <-> even the peaks drowned", 0f, 1f,
             PlanetTerrainGenerator.WaterLevelFromSeaLevel(p.SeaLevelOrNeutral),
             v => SetTerrain(5, PlanetTerrainGenerator.SeaLevelFromWaterLevel(v)));
-        // ---- The two SURFACE-RELIEF sliders ----
+        // ---- THE ONE SURFACE-RELIEF SLIDER ----
         //
-        // Elevation range and Ruggedness both describe the shape of solid ground — basins, peaks, how
-        // broken the mountain country is — and a gas giant has no solid ground for them to describe.
-        // TerraformDiagnosis says so in as many words on the same world ("A gas giant: there is no ground
-        // to stand on"), so offering sliders that sculpt its terrain contradicts the game's own reading of
-        // what the body is.
+        // There used to be two, "Elevation range" and "Ruggedness", and between them they could put a
+        // mountain anywhere: Ruggedness drove an independent mountain-building noise field that peaked
+        // wherever it liked, including in the middle of a plain and in the middle of an ocean. Both are
+        // gone, replaced by this — and the replacement is not a rename, it is a different KIND of control.
         //
-        // Hidden rather than disabled: a greyed-out control still asserts the axis exists and is merely
-        // unavailable right now. These do not apply to this class of body at all, which is a different
-        // statement, and the honest way to make it is for them not to be there.
+        // ELEVATION ACCENTUATES WHAT IS ALREADY THERE. A world's shape comes from its geology now: its
+        // plates draw its continents, its convergent margins fold up its mountains, its volcanic hotspots
+        // pile up their cones (see PlanetTerrainGenerator's elevation pipeline). This slider scales that
+        // shape's deviation from sea level, so high ground goes higher and low ground goes lower and
+        // ground at the waterline does not move at all. Turn it up and the mountains this world HAS
+        // become dramatic; it cannot make one appear where the ground was flat, because there is nothing
+        // there to accentuate. That is the request in one sentence.
+        //
+        // Relief is meaningless on a gas giant — TerraformDiagnosis says so in as many words on the same
+        // world ("A gas giant: there is no ground to stand on") — so the control is HIDDEN there rather
+        // than greyed. A greyed control asserts the axis exists and is merely unavailable; this axis does
+        // not apply to that class of body at all, which is a different statement.
         //
         // Deliberately NOT extended to the other sliders. Atmosphere, Temperature and Feature scale all
         // remain meaningful on a gas giant — it is very much made of atmosphere at a temperature, and the
@@ -3768,7 +3807,7 @@ public class PlanetViewWindow : MonoBehaviour
         bool hasSolidSurface = body.type != CelestialBodyType.GasGiant;
 
         if (hasSolidSurface)
-            SliderRow("Elevation range", "flat world <-> deep basins and high peaks",
+            SliderRow("Elevation", "flatten toward sea level <-> accentuate this world's own peaks and basins",
                 PlanetTerrainGenerator.ElevationMin, PlanetTerrainGenerator.ElevationMax, p.elevation,
                 v => SetTerrain(1, v));
 
@@ -3840,15 +3879,27 @@ public class PlanetViewWindow : MonoBehaviour
             SetAtmosphere();
         }, 24);
 
-        // Relief. SetTerrain already had a ridge case (index 4) and nothing had ever been wired to it, so
-        // the one axis that decides how mountainous a world is was the one axis the sandbox could not
-        // touch. Ridge is the mountain-building field: the classifiers test it directly (`ridge > 0.8` is
-        // Mountains on most world types), so raising it converts more of the map to peaks and lowering it
-        // flattens the world toward plains.
-        // Gated with Elevation range above, and for the same reason — see `hasSolidSurface`. Ridge is the
-        // mountain-building field; there are no mountains on a body with no ground.
-        if (hasSolidSurface)
-            SliderRow("Ruggedness", "smooth ground <-> broken, jagged mountain country", 0.3f, 2.5f, p.ridge, v => SetTerrain(4, v));
+        // THE RUGGEDNESS SLIDER USED TO BE HERE, and it is gone rather than moved.
+        //
+        // It drove `ridge`, an independent mountain-building noise field that the classifiers thresholded
+        // directly (`ridge > 0.82` is Mountains on most world types). That field is what put mountains in
+        // the middle of plains and on the floors of oceans: it peaked wherever the noise peaked, with no
+        // relationship to how the ground got there. Ridge is DERIVED now — from the height the geology
+        // produced, plus the collision or the vent that produced it (PlanetTerrainGenerator.
+        // RidgeFromRelief) — so there is no longer an independent axis for a slider to drive, and adding
+        // one back would mean adding the artefact back with it.
+        //
+        // What the slider was really for is served by Elevation above: a world with dramatic mountains is
+        // a world whose existing peaks are accentuated, not one with extra roughness sprinkled over it.
+
+        Header("GEOLOGY");
+        var geo = Card();
+        Stat(geo, "Plate tectonics", () => body.hasTectonics
+            ? "<color=#FF8F5C>active</color> — its plates draw its continents and fold its mountains"
+            : "<color=#9FB4C8>none</color> — no plates, so no continental margins");
+        Stat(geo, "Geothermal", () => GeothermalMap.Label(body));
+        Stat(geo, "Rotation", () => RotationRules.Describe(body) +
+            (body.hasMagneticField ? " — fast enough for a magnetic field" : " — too slow for a magnetic field"));
 
         Header("SEED");
         var seed = Card();
@@ -3905,6 +3956,11 @@ public class PlanetViewWindow : MonoBehaviour
                 break;
             }
             case 3: p.heat = v; break;
+            // Ridge no longer has a slider — it is derived from the ground the geology raised (see the
+            // note where the Ruggedness slider used to be). The case survives because `ridge` is still a
+            // real field in the save format and in every world's captured natural params, and a future
+            // terraforming project that genuinely flattens or roughens a whole world would come through
+            // here. Nothing in the UI reaches it today.
             case 4: p.ridge = v; break;
             // Sea level — the height the water sits at, independent of how tall the land is.
             case 5: p.seaLevel = Mathf.Clamp01(v); break;
@@ -4012,7 +4068,8 @@ public class PlanetViewWindow : MonoBehaviour
         // reachable from this toggle (mutually exclusive with the index ramps); the diagnostic panel is
         // shown below for a world of yours that's settled, since a grid only exists once something's built.
         AddPowerToggle();
-        AddTectonicsToggle();
+        // "Show tectonics" USED TO BE A TOGGLE HERE. The plate lines and push arrows come up with the
+        // Geothermal index now — see the note where AddTectonicsToggle was.
         if (body.owner == FactionManager.Player && body.settled)
             BuildPowerPanel();
 
@@ -4067,10 +4124,10 @@ public class PlanetViewWindow : MonoBehaviour
         // Picking an index no longer switches the grid off — they draw on separate layers now, and the
         // exclusivity was asymmetric anyway: index-then-power worked, power-then-index killed the grid
         // with nothing on screen to explain why.
-        var btn = UIFactory.Button(card, "", () => { activeIndex = k; showTectonicsOverlay = false; lastSig = null; }, 24);
+        var btn = UIFactory.Button(card, "", () => { activeIndex = k; lastSig = null; }, 24);
         live.Button(btn, () =>
         {
-            bool on = activeIndex == k && !showTectonicsOverlay;   // an index and the grid can both be up
+            bool on = activeIndex == k;   // an index and the power grid can both be up
             string nm = labelOverride ?? SurfaceIndex.Name(k);
             if (k == SurfaceIndexKind.None) return (true, on ? $"• {nm}" : nm);
             if (!SurfaceIndex.Unlocked(body, k)) return (false, $"{nm} — {SurfaceIndex.LockReason(body, k)}");
@@ -4090,8 +4147,7 @@ public class PlanetViewWindow : MonoBehaviour
         {
             showPowerOverlay = !showPowerOverlay;
             // The power grid no longer clears the chosen index — it has its own layer above the pieces
-            // and the two are legible together. Tectonics still takes the whole map, so it still yields.
-            if (showPowerOverlay) showTectonicsOverlay = false;
+            // and the two are legible together.
             lastSig = null;
         }, 24);
         live.Button(btn, () =>
@@ -4102,30 +4158,28 @@ public class PlanetViewWindow : MonoBehaviour
         }, group);
     }
 
-    // The plate-tectonics overlay toggle — a Survey overlay like the power grid, not an index ramp. Only
-    // meaningful on a world that actually HAS active plates (hasTectonics is known from a survey), so it
-    // disables itself with the reason on the button everywhere else. Picking it clears any index ramp and
-    // the power overlay; picking either of those clears it.
-    void AddTectonicsToggle()
-    {
-        var card = Card();
-        var group = card.gameObject.AddComponent<CanvasGroup>();
-        // No ➤ (U+27A4) here: the runtime font (LiberationSans SDF) has no glyph for it, so it rendered as
-        // a tofu box and spammed a TMP warning every time this card drew. Describe the arrows in words.
-        Note(card, "<color=#DCE2EA>■</color> plates   <color=#F22B2B>■</color> fault lines   <color=#F22B2B>red arrows</color> = push direction & strength — where quakes, mountains and volcanoes cluster.");
-        var btn = UIFactory.Button(card, "", () =>
-        {
-            showTectonicsOverlay = !showTectonicsOverlay;
-            if (showTectonicsOverlay) { activeIndex = SurfaceIndexKind.None; showPowerOverlay = false; }
-            lastSig = null;
-        }, 24);
-        live.Button(btn, () =>
-        {
-            if (!TectonicsMap.Active(body)) return (false, "Tectonics — this world has no active plate tectonics");
-            if (!body.Surveyed) return (false, "Tectonics — survey this world first");
-            return (true, showTectonicsOverlay ? "• Tectonics (showing)" : "Show tectonics");
-        }, group);
-    }
+    // ============================================================================================
+    // THE PLATE VIEW — no longer a toggle of its own
+    //
+    // There used to be a "Show tectonics" button here, mutually exclusive with the index ramps: picking
+    // it cleared the chosen index and picking an index cleared it. That WAS the two-systems problem, in
+    // UI form. A player wanting to know where the crust was hot had one map, a player wanting to know
+    // where the plates were had a different one, and the two could not be looked at together — which is
+    // exactly how a red fault line ended up running across ground the Heat Index called cold.
+    //
+    // Selecting the GEOTHERMAL index now draws the plate lines and the per-plate push arrows over its own
+    // ramp (see RefreshIndexOverlay / PaintPlateLines / DrawPlateArrows). One map, and it answers both
+    // questions at once, because they were always one question.
+    //
+    // The one thing genuinely lost is the plate-OWNERSHIP wash — a flat tint per plate. It is not missed:
+    // the plates are still bounded by their own drawn margins and still carry their arrows, so which
+    // continent is which reads off the lines. Putting a per-plate tint under an index ramp would mean two
+    // colour scales competing for the same pixels, and the index is the one carrying the numbers.
+    //
+    // What remains of that overlay — RefreshTectonicsOverlay — is kept and unreferenced rather than
+    // deleted, because "show me the raw plate partition" is a fair thing for a future Dev-Mode tool to
+    // want and it is thirty lines.
+    // ============================================================================================
 
     // ---- Folded from the Inspector body window (Climate / Ores / Terraform) ----
 
@@ -4143,7 +4197,7 @@ public class PlanetViewWindow : MonoBehaviour
         var orbit = Card();
         Stat(orbit, "Distance from star", () => $"{b.distanceFromStar:F1} units");
         Stat(orbit, "Orbital radius", () => $"{b.orbitRadius:F1}");
-        Stat(orbit, "Year", () => $"{OrbitalMechanics.PeriodSeconds(b.orbitSpeed):F1}s");
+        Stat(orbit, "Year", () => GameCalendar.Duration(OrbitalMechanics.PeriodSeconds(b.orbitSpeed)));
         Stat(orbit, "Eccentricity", () => $"{b.eccentricity:F2}");
         Stat(orbit, "Average Temperature", () =>
         {
@@ -4152,12 +4206,15 @@ public class PlanetViewWindow : MonoBehaviour
             return $"<color=#{hex}>{PlanetTemperature.Label(c)}</color>";
         });
         Stat(orbit, "Axial tilt", () => $"{b.inclination:F0}°" + (Mathf.Abs(b.inclination) > 28f ? "  <color=#FFBF4D>(severe seasons)</color>" : ""));
+        // The DAY, in days, plus which way round it turns and whether that is enough to run a dynamo.
+        // Degrees per second is the stored unit and was never a figure a player could reason about; a
+        // rotation period in the same days the rest of the game now counts in is (see GameCalendar).
         Stat(orbit, "Day length", () =>
         {
-            float spin = Mathf.Abs(b.spinSpeed);
-            if (spin < 3f) return $"{spin:F1}°/s  <color=#FFBF4D>(near tidally locked)</color>";
-            if (spin > 45f) return $"{spin:F1}°/s  <color=#FFBF4D>(violently fast)</color>";
-            return $"{spin:F1}°/s";
+            string s = RotationRules.Describe(b);
+            if (Mathf.Abs(b.spinSpeed) < RotationRules.MagneticFieldSpin)
+                return s + "  <color=#FFBF4D>(too slow for a magnetic field)</color>";
+            return s;
         });
 
         if (b.hostStar != null)
@@ -4383,19 +4440,6 @@ public class PlanetViewWindow : MonoBehaviour
         //  SURVEY — the same index map, chosen by hand.
         // Both are the SAME drawing now (RefreshIndexOverlay), so picking up a farm shows exactly what
         // the Fertile overlay shows, and the survey you did is the survey you build from.
-        // The power grid and the tectonics map are each their own overlay entirely: not a ramp over an
-        // index but a purpose-drawn map (what the electricity reaches; where the plates and faults are), so
-        // each gets its own pass rather than being forced through Ramp(). Both are Survey overlays chosen
-        // by their toggle rather than a dedicated tab.
-        if (tab == Tab.Survey && showTectonicsOverlay && body.surface != null && body.Surveyed && TectonicsMap.Active(body))
-        {
-            overlayImage.gameObject.SetActive(true);
-            SetOverlayBelowPieces();   // ground, not grid — buildings stand on top of it
-            RefreshTectonicsOverlay();
-            DrawPlateArrows();
-            return;
-        }
-
         // ============================================================================================
         // POWER IS NO LONGER EXCLUSIVE WITH THE GROUND MAPS
         //
@@ -4439,6 +4483,13 @@ public class PlanetViewWindow : MonoBehaviour
         if (!show) return;
 
         RefreshIndexOverlay(kind);
+
+        // The plate PUSH ARROWS come up with the Geothermal index too, not only with the dedicated
+        // tectonics view. Which way each plate is driving is the fact that explains the map: it is why
+        // one margin reads 100% and shakes and the margin on the other side of the same continent reads
+        // 45% and does not. Without the arrows the index is a picture of consequences with the cause left
+        // out, and the player has to switch views to find it.
+        if (kind == SurfaceIndexKind.Geothermal && TectonicsMap.Active(body)) DrawPlateArrows();
     }
 
     // ============================================================================================
@@ -4621,9 +4672,56 @@ public class PlanetViewWindow : MonoBehaviour
                     }
             }
 
+        // ============================================================================================
+        // THE PLATE LINES BELONG TO THE GEOTHERMAL INDEX
+        //
+        // "If a planet has Tectonic Activity (continental plates), then when viewing the Heat Index —
+        // either in the survey tab, or while a science ship is doing a level 2 survey — the Tectonic
+        // Plate Lines should appear."
+        //
+        // They are not a separate view any more, because they were never describing separate ground. The
+        // index's own gradient already reaches its brightest exactly along a convergent margin (that is
+        // what puts a head-on collision at 100%), so the line drawn here is a GUIDELINE over the top of
+        // it: it says precisely where the boundary runs, which the smooth field can only imply.
+        //
+        // Drawn after the bands and their outlines, so it sits over them, and only on tiles the survey
+        // has already resolved — a plate map handed over before the survey reached that ground would be
+        // giving away the very thing the survey is for.
+        if (kind == SurfaceIndexKind.Geothermal && TectonicsMap.Active(body))
+            PaintPlateLines(px, tw, th, sub, step);
+
         overlayTex.SetPixels32(px);
         overlayTex.Apply();
         overlayImage.texture = overlayTex;
+    }
+
+    /// The fault lines, painted over a finished Geothermal overlay.
+    ///
+    /// Reads the SAME TectonicsMap.Tiles raster the standalone tectonics view does — one plate map, so
+    /// the line cannot be in one place on one overlay and somewhere else on the other. `step` carries
+    /// which tiles the survey has resolved; a tile at -1 has not been read yet and gets no line.
+    void PaintPlateLines(Color32[] px, int tw, int th, int sub, int[] step)
+    {
+        var map = TectonicsMap.Tiles(body);
+        if (map == null) return;
+        int w = body.surface.width, h = body.surface.height;
+        if (map.width != w || map.height != h) return;
+
+        // Slightly deeper and more opaque than anything the Geothermal ramp itself can reach, so the line
+        // reads as a line over the field rather than as the field's own hottest contour.
+        var fault = new Color32(255, 40, 34, 250);
+
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int i = y * w + x;
+                if (!map.border[i]) continue;
+                if (step[i] < 0) continue;      // not surveyed yet — nothing to annotate
+
+                for (int sy = 0; sy < sub; sy++)
+                    for (int sx = 0; sx < sub; sx++)
+                        px[(y * sub + sy) * tw + (x * sub + sx)] = fault;
+            }
     }
 
     /// Park the ground overlay at the very bottom of the map stack.
@@ -5807,7 +5905,7 @@ public class PlanetViewWindow : MonoBehaviour
                      : selected.HasValue ? SurfaceBuildingDatabase.Get(selected.Value) : null;
             return info?.index ?? SurfaceIndexKind.None;
         }
-        if (tab == Tab.Survey && !showTectonicsOverlay) return activeIndex;
+        if (tab == Tab.Survey) return activeIndex;
         return SurfaceIndexKind.None;
     }
 
@@ -5962,7 +6060,7 @@ public class PlanetViewWindow : MonoBehaviour
         else
             sb.Append($"<color=#{hex}>•</color> <b>{info.name}</b> — {tiles} tile{(tiles == 1 ? "" : "s")}\n");
         sb.Append($"<size=10><color=#9FB4C8>{m} metal · {e} energy · " +
-                  $"{info.buildTime * mult * TechEffects.BuildTimeMult:F0}s · " +
+                  $"{GameCalendar.Duration(info.buildTime * mult * TechEffects.BuildTimeMult)} · " +
                   $"x{BuildScaling.OutputMultiplier(tiles):0.0} output</color></size>");
         if (!ok) sb.Append($"\n<size=10><color=#FF6659>{why}</color></size>");
         placeText.text = sb.ToString();
@@ -6898,10 +6996,34 @@ public class PlanetViewWindow : MonoBehaviour
         string typeHex = ColorUtility.ToHtmlStringRGB(TerrainColorMap.Get(tile.type));
         sb.Append($"<b><color=#{typeHex}>{tile.type}</color></b>");
 
+        // WHAT IS UNDERNEATH, when this tile is water, sea ice or snow. Those are covers, not biomes —
+        // "if I wanted to remove the water, it will still be there" — and since terraforming cannot move
+        // a tile's elevation, draining or thawing this one really would uncover exactly this. Saying so
+        // here is what lets a player judge a terraforming project before paying for it, instead of
+        // finding out what was under the ice by melting it.
+        if (tile.HasCover)
+        {
+            string underHex = ColorUtility.ToHtmlStringRGB(TerrainColorMap.Get(tile.ground));
+            sb.Append($" <size=10><color=#9FB4C8>over</color> <color=#{underHex}>{tile.ground}</color></size>");
+        }
+
         if (tile.HasOre && ResearchManager.IsDiscovered(tile.ore))
             sb.Append($"\n<color=#8FD0FF>{OreDatabase.Get(tile.ore).displayName}</color> ({tile.oreRichness * 100f:F0}% rich)");
 
-        float celsius = PlanetTemperature.CelsiusAt(b, y);
+        // ---- ELEVATION, as a band and as a number ----
+        //
+        // "You could see information such as 'Mountain, [elevation], [Temperature]' inside the mouse
+        // window." The band is the word the terrain used to be NAMED after (Highlands, Hills) before
+        // those stopped being biomes and became what they always were: a statement about height. The
+        // metres are measured against this world's own waterline, so the number means what a player
+        // expects it to mean whether the world is drowned or bone dry.
+        float metres = PlanetTerrainGenerator.ElevationMetres(b, tile.elevation);
+        string band = PlanetTerrainGenerator.ElevationBand(b, tile.elevation);
+        sb.Append($"\n<color=#B8C6D4>{band}</color> <size=10><color=#9FB4C8>{metres:N0} m</color></size>");
+
+        // Elevation included — a peak and the plain beside it are not the same temperature, and the map
+        // plainly shows they are not.
+        float celsius = PlanetTemperature.CelsiusAt(b, x, y);
         string tempHex = ColorUtility.ToHtmlStringRGB(PlanetTemperature.GradientColor(celsius));
         sb.Append($"\n<color=#{tempHex}>{PlanetTemperature.Label(celsius)}</color>");
 
@@ -7826,7 +7948,15 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
     // PlanetViewWindow.MassWord). Kept identical so a moon reads the same in the hover card as in the panel.
     static string MassWord(float mass)
     {
-        string w = mass < 0.5f ? "Tiny" : mass < 1.5f ? "Small" : mass < 4f ? "Medium" : mass < 7f ? "Large" : "Giant";
+        // Against the Earth-relative scale: 1 IS Earth, so "Small" has to straddle it rather than sit
+        // below it, and the old cuts (which assumed Earth was 2) called an Earth-mass world Small and a
+        // 4-mass super-Earth Medium.
+        string w = mass <= MassRules.AsteroidMax ? "Tiny"
+                 : mass < 0.9f ? "Small"
+                 : mass < 1.6f ? "Earth-sized"
+                 : mass < 3f ? "Large"
+                 : mass < WorldClassifier.GasGiantMassFloor ? "Super-Earth"
+                 : "Giant";
         return $"{w} ({MassRules.Format(mass)})";
     }
 

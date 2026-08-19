@@ -70,8 +70,9 @@ public class GameHUD : MonoBehaviour
         var le = slHolder.AddComponent<LayoutElement>(); le.preferredWidth = 130; le.minWidth = 130;
         timeSlider = UIFactory.Slider(slHolder.transform, 0f, TimeControl.Max, 1f, v => { if (!suppress) TimeControl.Set(v); });
         UIFactory.Stretch(timeSlider.GetComponent<RectTransform>(), 0, 0, 6, 6);
-        speedReadout = UIFactory.Text(bar.transform, "1.0x", UITheme.SmallSize, UITheme.Accent, TextAlignmentOptions.Center);
-        var sle = speedReadout.gameObject.AddComponent<LayoutElement>(); sle.preferredWidth = 40; sle.minWidth = 40;
+        // Wide enough for "0001-01-01  1.0x" — this carries the DATE now, not just the multiplier.
+        speedReadout = UIFactory.Text(bar.transform, "0001-01-01  1.0x", UITheme.SmallSize, UITheme.Accent, TextAlignmentOptions.Center);
+        var sle = speedReadout.gameObject.AddComponent<LayoutElement>(); sle.preferredWidth = 122; sle.minWidth = 122;
 
         statusText = UIFactory.Text(bar.transform, "", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.Right);
         var stle = statusText.gameObject.AddComponent<LayoutElement>();
@@ -174,8 +175,34 @@ public class GameHUD : MonoBehaviour
 
     void UpdateSpeed()
     {
-        if (speedReadout != null) speedReadout.text = TimeControl.IsPaused ? "Paused" : $"{Time.timeScale:0.#}x";
+        if (speedReadout != null) speedReadout.text = SpeedLabel();
         if (timeSlider != null) { suppress = true; timeSlider.value = Time.timeScale; suppress = false; }
+    }
+
+    /// The speed control's caption: the DATE, with the multiplier after it.
+    ///
+    /// The date leads because it is the number that answers a question the player has ("how long has
+    /// this taken?", "how long until the colony ship lands?"), while the multiplier answers one they
+    /// already know the answer to — they set it. One second of game time is one in-game day
+    /// (GameCalendar), so this advances visibly at 1x rather than being a decoration that only moves
+    /// when fast-forwarding.
+    static string SpeedLabel()
+    {
+        string date = GameCalendar.Short();
+        return TimeControl.IsPaused ? $"{date}  ❚❚" : $"{date}  {Time.timeScale:0.#}x";
+    }
+
+    // The date changes on its own, without anything raising an event the HUD subscribes to — so unlike
+    // every other readout here it has to be polled. Cheap: two integer divisions and a string, once a
+    // frame, and only when the whole-day number has actually moved.
+    int lastShownDay = -1;
+
+    void Update()
+    {
+        int day = (int)GameCalendar.TotalDays;
+        if (day == lastShownDay) return;
+        lastShownDay = day;
+        if (speedReadout != null) speedReadout.text = SpeedLabel();
     }
 
     void OnDestroy()

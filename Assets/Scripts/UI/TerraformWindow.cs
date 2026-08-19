@@ -242,7 +242,7 @@ public class TerraformWindow : MonoBehaviour
             r.fill.color = j.paused ? UITheme.Warn : UITheme.Good;
             r.label.text = j.paused
                 ? $"<b>{info.name}</b> — <color=#FFBF4D>paused</color> at {j.Progress * 100f:F0}%"
-                : $"<b>{info.name}</b> — {j.Progress * 100f:F0}% ({j.Remaining:F0}s left) · +{info.ceilingGain:F0}% ceiling on completion";
+                : $"<b>{info.name}</b> — {j.Progress * 100f:F0}% ({GameCalendar.Duration(j.Remaining)} left) · +{info.ceilingGain:F0}% ceiling on completion";
             if (r.pauseLabel != null) r.pauseLabel.text = j.paused ? "Resume" : "Pause";
         }
     }
@@ -281,7 +281,7 @@ public class TerraformWindow : MonoBehaviour
                     int m = TerraformProjects.MetalCost(p, body), e = TerraformProjects.EnergyCost(p, body), w = TerraformProjects.WaterCost(p, body);
                     float dur = TerraformProjects.Duration(p, body);
                     costLine.text = $"<color=#9FB4C8>{m} metal · {e} energy" + (w > 0 ? $" · {w} water" : "") +
-                                    $" · {dur:F0}s · <color=#4DFF6E>+{p.ceilingGain:F0}% ceiling</color></color>";
+                                    $" · {GameCalendar.Duration(dur)} · <color=#4DFF6E>+{p.ceilingGain:F0}% ceiling</color></color>";
 
                     var tm = TerraformManager.Instance;
                     if (tm == null) return (false, "unavailable");

@@ -27,11 +27,19 @@ public static class MapMetrics
 
     // ---- Surface grid dimensions, derived from MASS ----------------------------------------------
     //
-    // Width is ~100 cells per unit of mass and height is always half of it, so every world is 2:1 and a
-    // body's map size is a direct read of how big the body is:
+    // Height is always half the width, so every world is 2:1 and a body's map size is a direct read of
+    // how big the body is. The cells-per-mass rate is NOT constant, and the kink is deliberate:
     //
-    //     mass 0.1 -> 10x5      mass 0.5 -> 50x25     mass 1 -> 100x50
-    //     mass 2   -> 200x100   mass 4   -> 400x200
+    //     mass 0.1 -> 10x5      mass 0.3 -> 30x15     mass 0.5 -> 50x25
+    //     mass 1   -> 200x100   mass 2   -> 400x200   mass 4   -> 560x280 (knee)
+    //
+    // Below asteroid size the rate is 100 cells per mass; at and above one Earth it is 200, with the
+    // gap between them bridged smoothly. That is not a curve for its own sake — it is what the two ends
+    // actually need. A PLANET is a place you build a city on, and 200x100 is the smallest grid on which
+    // a tetromino-footprint city is a puzzle rather than a shove; anything less and an Earth-mass world
+    // reads as cramped next to the moons orbiting it. A MOON or an asteroid is a place you put one mine,
+    // and doubling its grid too would have made a 0.3 pebble 60 cells wide, which is a lot of map for
+    // very little world and a lot of cells to bake for a body most players glance at once.
     //
     // WHY THIS REPLACED surfaceSize. The old form was `clamp(surfaceSize * 12, 96, 384)`, and the lower
     // clamp was doing almost all the work: surfaceSize is `round(mass * 3)`, so every body under mass ~2.7
@@ -43,16 +51,25 @@ public static class MapMetrics
     // unrelated systems calibrated against its 3..32 range — atmosphere and tectonics gates, orbit
     // spacing, claim cost, population, spin, terraforming severity — so widening it to track mass would
     // have moved all of them at once. Mass is the honest input; surfaceSize keeps its old meaning.
-    const float CellsPerMass = 100f;
+    /// Cells per unit of mass below asteroid size, and at planet size. See the table above.
+    const float CellsPerMassSmall = 100f;
+    const float CellsPerMassPlanet = 200f;
+
+    /// Where the small rate stops applying and where the planet rate takes over. Between the two the
+    /// width is interpolated, so there is no step at either end — a 0.51 moon is not suddenly twice the
+    /// map a 0.49 one is.
+    const float SmallMassMax = 0.5f;      // == MassRules.AsteroidMax
+    const float PlanetMassMin = 1f;       // == MassRules.TerrestrialDefault
 
     // Where the linear mapping stops and compresses.
     //
     // Below this the numbers are exact. Above it they taper, and that is a deliberate limit rather than
     // a taste call: the eager-generation path, the per-cell ore data in the save file, and several
     // O(width*height) passes (SurfaceBuildManager.FindSpot, CityGrowth.FindSettlementSpot, the Survey and
-    // Power overlays) all have cliffs somewhere past this point. A mass-13 gas giant at a literal 1300x650
-    // is 845,000 cells: ~40 MB of TerrainTile objects, ~25,000 saved ore cells, and a FindSpot that runs
-    // into the billions of iterations on every load.
+    // Power overlays) all have cliffs somewhere past this point. A mass-40 gas giant at a literal 8000x4000
+    // is thirty-two MILLION cells; even the old mass-13 case (1300x650) was 845,000 — ~40 MB of TerrainTile
+    // objects, ~25,000 saved ore cells, and a FindSpot that runs into the billions of iterations on every
+    // load. The knee is what keeps a giant merely large.
     //
     // 400 is chosen because it is where today's shipped ceiling already sits (384), so everything at or
     // below it is known-affordable. Raise KneeWidth/MaxWidth once those call sites are fixed — they are
@@ -68,7 +85,12 @@ public static class MapMetrics
     public static int WidthForMass(float mass)
     {
         if (mass <= 0.0001f) mass = 0.1f;
-        float raw = mass * CellsPerMass;
+
+        float raw;
+        if (mass <= SmallMassMax) raw = mass * CellsPerMassSmall;
+        else if (mass >= PlanetMassMin) raw = mass * CellsPerMassPlanet;
+        else raw = Mathf.Lerp(SmallMassMax * CellsPerMassSmall, PlanetMassMin * CellsPerMassPlanet,
+                              Mathf.InverseLerp(SmallMassMax, PlanetMassMin, mass));
 
         // Soft knee: exact up to KneeWidth, then a square-root taper so bigger worlds still read as
         // bigger without the cell count running away.
@@ -102,8 +124,9 @@ public static class MapMetrics
         float jitter = (unit * 2f - 1f) * 0.06f;
         int w = Mathf.RoundToInt(baseW * (1f + jitter));
 
-        // A moon is never more than half its host's map, mirroring how its MASS is capped at 40% of the
-        // host. Mass alone very nearly guarantees this already; the clamp makes it exact, including for
+        // A moon is never more than half its host's map, mirroring how its MASS is capped by the host's
+        // moon allowance (MassRules.MoonBudget — half the host for a terrestrial, a tenth for a giant).
+        // Mass alone very nearly guarantees this already; the clamp makes it exact, including for
         // hand-edited bodies in the sandbox where mass can be set freely.
         if (b.parentBody != null)
         {

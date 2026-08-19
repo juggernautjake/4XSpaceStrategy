@@ -23,14 +23,27 @@ must have a colour in `TerrainColorMap`.
 
 ### CelestialBody.cs
 The core runtime model for a planet/moon/star-body.
-- Fields: `id, name, type, resources, surfaceSize, surface`, `moons`, terrain identity
+- Fields: `id, name, type, resources, **mass**, surfaceSize, surface`, `moons`, terrain identity
   (`terrainSeed, continentFrequency`), `pointsOfInterest`, orbit params
   (`orbitRadius, orbitSpeed, orbitPhase, orbitDirection, inclination, eccentricity, verticalOffset,
-  spinSpeed, showRing`), habitability (`distanceFromStar, habitability, isHabitable`), and
-  non-serialized `visualObject`, `parentBody`.
+  spinSpeed, rotationDirection, beltId, showRing`), habitability
+  (`distanceFromStar, habitability, isHabitable`), and non-serialized `visualObject`, `parentBody`.
+- **`mass` is in EARTHS** (default 1) and is the thing everything else derives from: grid size, visual
+  size, atmosphere ceiling, tectonics odds, size class.
+- **`spinSpeed` is a RATE and is always positive**; `rotationDirection` carries prograde/retrograde
+  separately, because the dynamo that gives a world its magnetic field cares how fast the core is
+  stirred and not which way. A signed spin would have made "turns backwards" and "has no magnetosphere"
+  the same fact.
+- **`beltId`** — which asteroid belt this body shares an orbital lane with, 0 for none. See `OrbitSafety`.
 - `CelestialBody(type)` — ctor, sets defaults.
 
 ### TerrainTile.cs  *(note: lives in Scripts root — see below)*
+One surface cell. Beyond `type / occupied / ore / oreRichness / shade` it now carries:
+- **`ground`** — the biome UNDER any water, sea ice, snow or glacier. Those are COVERS, not biomes:
+  elevation is decided by geology alone and no terraforming moves it, so draining a sea really would
+  uncover exactly this. `HasCover` is `ground != type`, and the tile readout says "Ocean over Steppe".
+- **`elevation`** — the ground's own height, 0..1. Stored rather than re-derived because the hover
+  readout wants it every frame and re-deriving means re-running the whole noise field for one cell.
 
 ### OreTypes.cs
 Enum `OreType` (None + 14 ores from Ferralite → Xenocryst).
@@ -74,22 +87,69 @@ Enum `OreType` (None + 14 ores from Ferralite → Xenocryst).
 
 ## Generation (`Assets/Scripts/Generation/`)
 
+### MassRules.cs  *(the scale everything else is measured against)*
+**1 Mass is 1 Earth.** Terrestrial worlds 0.6–4 to one decimal, gas giants 10–40 in multiples of five,
+anything at or under 0.5 not orbiting a planet is an asteroid. `SurfaceSize = mass × 6` (so an Earth is
+6, the same size class every downstream threshold was tuned against back when Earth was mass 2).
+- **`SystemBudget(stars)`** — the SOLAR SYSTEM MASS allowance: 100 per solar mass, clamped 45–400. This
+  replaced the New Game menu's "average planets per system" slider entirely. A system is built by
+  SPENDING it outward — planets, their moons and every asteroid out of one pot — and stops when it can
+  no longer afford anything. A binary really is richer than a red dwarf, by arithmetic rather than by
+  a setting.
+- **`RollGasGiant / RollTerrestrial / RollAsteroid / RollMoon`**, `MoonBudget(hostMass)` (half a
+  terrestrial's mass, a tenth of a giant's), and the `Quantize*` family.
+- **`VisualDiameter`** is a CUBE root now, not a square root: mass is a volume, and the square root put a
+  40-mass giant far enough across that OrbitSafety pushed every outer orbit off the screen.
+- Measured distributions and per-star-class system census are recorded in the file.
+
+### RotationRules.cs  *(rotation, and the magnetic field it drives)*
+A magnetic field is a CONSEQUENCE of spin now, not a coin flip: **`GeneratesField(type, mass, spin)`**
+gates on `MagneticFieldSpin` (12°/s). `Roll` draws from two populations — spun-up and tidally braked —
+weighted by mass, so bigger worlds still usually have fields but you can see why. `RollDirection`
+(prograde default, retrograde ~10%), `RotationPeriodDays`, `Describe`.
+
+### GeothermalMap.cs  *(the merged Heat Index + Tectonics field)*
+One 0..1 field per surface point, from two sources, whichever is stronger:
+- **FAULTS** — a plate margin reads 40%, up to 100% head-on, radiating up to 3 tiles and never under
+  70% inside that band (all four figures measured and recorded in the file).
+- **HOTSPOTS** — focused mantle plumes: a small 90%+ core, an 80%+ ring, a 70%+ skirt, and a vent at
+  97%+ IS a volcano. Present with or without plates, so a plate-less world can be covered in volcanoes.
+- **`At / HotspotAt / FaultActivity / WorldIntensity / Active / Label`**, `Invalidate`.
+- Read by FOUR systems, which is the point: the survey overlay, the terrain generator's elevation, the
+  earthquakes, and `PlanetTemperature`'s internal-heat term. They cannot disagree.
+
 ### PlanetTerrainGenerator.cs  *(resolution-independent, deterministic)*
-- `struct NoiseParams` / `struct Sample`.
-- **`GenerateSurface(body)`** — low-res tile grid for the viewer/gameplay.
-- **`GenerateSurfaceWithParams(...)`** — same but with the Terrain Editor's slider values.
-- **`SampleNormalized(body, u, v, params, octaves)`** — THE shared sampler; both the grid and the
-  detailed texture call it, which is why both views share the same continents.
-- `IsWater(type)`, `FBm(...)`, and per-type biome classifiers (`Terran, OceanWorld, Ice, Volcanic,
-  Barren, Airless, GasGiant`).
+- `struct NoiseParams` / `struct Sample` (now carries `ground` — what is under any water/ice/snow).
+- **`GenerateSurface(body)`** / **`BuildStepped(...)`** — the tile grid; stepped version time-slices.
+- **`SampleNormalized(body, u, v, params, octaves)`** — THE shared sampler.
+- **ELEVATION IS GEOLOGY-FIRST.** A world starts FLAT. Its plates draw its continents (continental
+  crust rides high, oceanic sits low — this is the Voronoi continent generation); convergent margins
+  fold mountains up and rifts drop troughs; volcanic hotspots pile domes; and only THEN a small noise
+  pass adds variation. The Elevation slider scales deviation from sea level, so it accentuates what is
+  there and cannot invent a peak where the ground was flat.
+- **`RidgeFromRelief`** — "how broken is this ground" is DERIVED from how the geology raised it, not a
+  separate noise field. That field is what used to put mountains in the middle of plains and on the sea
+  floor. Computed from the PRE-slider height, so turning Elevation up makes peaks taller without
+  manufacturing new ones.
+- `ElevationBand / ElevationMetres` — the words Hills/Highlands used to be, as a separate fact.
+- `IsWater(type)`, `IsCover(type)` (sea/ice/snow are modifiers over real ground), `FBm`, `WorldNoise`,
+  and per-type biome classifiers (`Terran, OceanWorld, Ice, Volcanic, Barren, Airless, GasGiant`).
+- `ClimateCoherence(t, tileC, freezeC, boilC)` — the liquid-water window is the WORLD'S OWN and depends
+  on its pressure (1 atm → 1–100 °C, 4 atm → 0–144 °C); above boiling a sea leaves salt flats, at
+  650 °C+ the ground itself is magma.
 
 ### SolarSystemGenerator.cs
-- **`GenerateSystem()`** — rolls a star, lays out bodies with distances/orbits, generates surfaces,
-  ores, resources, POIs, moons, habitability, and procedural names. Sets `currentStar`.
-- `MakeBody(type)` / `SeedTerrain(body)` — create a body and give it a stable terrain seed BEFORE
-  generating its surface.
-- `ApplyHabitability(body)` — scores a body for the current species.
-- `RollMoonCount, RollBodyByDistance, RollStarType, RollSurfaceSize`.
+- **`GenerateSystemStepped()`** — rolls a star cluster, takes its Solar System Mass allowance, and lays
+  out LANES outward until the allowance runs out (or `MaxLanes`). Each lane is a gas giant, a
+  terrestrial world or an ASTEROID BELT.
+- `ChooseLane(rel, budget)` — the frost line, made mechanical: past `WorldClassifier.FrostLineRel` a
+  lane is usually a giant; inside it a giant is a 5% surprise (hot Jupiters). `TerrestrialBandMax(rel)`
+  keeps inner worlds small.
+- **Belts share one orbit**: same radius AND same angular speed, different phase, so the rocks hold
+  formation forever and can never converge. `CelestialBody.beltId` is how `OrbitSafety` knows a shared
+  lane is deliberate.
+- `ApplyWorldPipeline` — mass → rotation → magnetic field → tectonics → seed → climate → water → air →
+  CLASSIFY. `SeedTerrain(body)`, `ApplyHabitability(body)`, `RollStarType`.
 
 ### ResourceGenerator.cs
 - **`GenerateResources(body)`** — bulk Metal/Energy/Water per body type (now covers every type).
@@ -130,8 +190,24 @@ WASD pan + mouse-wheel height, fixed 55° pitch, ignores input over UI.
 
 ## Systems (`Assets/Scripts/Systems/`)
 
+### GameCalendar.cs  *(one second of game time is one in-game DAY)*
+30-day months, 12-month years, the game opens on **Year 0001, Month 01, Day 01**.
+- **`TotalDays`** (the only state, a `double`; saved as `SaveGame.calendarDays`), `Year / Month / Day`,
+  `Stamp()` / `Short()`, `Reset()` / `SetTotalDays()`, `OnDayChanged`.
+- **`Duration(seconds)`** — the conversion every readout goes through: "18 days", "4 months", "1 year
+  3 months". Nothing about the SIMULATION changed; durations were always in seconds of scaled game
+  time, and this changes only the language they are reported in.
+- **`GameClock`** — the one component allowed to advance it, so it cannot be double-counted.
+
 ### TimeController.cs  *(legacy; Space toggles 1×/5×)*
 Writes `Time.timeScale = timeScale` every frame — the HUD sets `TimeController.timeScale` to stay in sync.
+
+### EarthquakeManager.cs  *(on a geological clock, and only on marked ground)*
+Return periods, not a per-second chance: **small ~every 25 years, moderate ~50, major ~100** (three
+independent rolls, so the numbers mean what they say). A quake damages ONLY what stands on ground the
+Geothermal Index has highlighted (≥70%) — a promise the player can verify by turning the overlay on,
+which is what makes a fault line a decision rather than a tax. Damage is repairable and nothing healthy
+is destroyed outright.
 
 ### SystemContext.cs
 Global handle to the current system.
@@ -364,8 +440,12 @@ Drag a window by its title bar; brings it to front on click.
 
 ### OrbitControlPanel.cs  *(real-time orbit editor)*
 - **`ShowFor(body)`** — follows the selection; loads slider values.
-- Live edits: size, radius (updates habitability for planets), speed, phase, inclination,
-  eccentricity, vertical offset, spin, direction, ring visibility.
+- Live edits: **mass** (quantized to whichever class it lands in), radius (updates habitability for
+  planets), orbital speed, phase, inclination, eccentricity, vertical offset, **rotation speed**,
+  **rotation direction (prograde/retrograde)**, orbit direction, ring visibility.
+- **Rotation is not cosmetic.** Dragging spin below `RotationRules.MagneticFieldSpin` costs the world
+  its magnetic field, which halves its atmosphere ceiling and sheds the air above it — and a live note
+  under the slider says so. Spinning it back up returns all of it.
 - **`RecomputeRealistic()`** — reset speed to the Kepler default. `Toggle/Hide`.
 
 ### StarInfoPanel.cs
@@ -396,10 +476,19 @@ Hover is POLLED (`ScreenToCell`), not `IPointerMoveHandler`, whose dispatch depe
 ### SurfaceIndex.cs
 Per-tile survey overlays, **derived not stored** — a stable hash of the terrain seed + position means
 they cost nothing to save and survive a reload untouched (the same guarantee terrain already makes).
-- `SurfaceIndexKind` — Mineral · Heat · Fertile · Weather. `Get / Ramp / Name / Describe`.
-- **`Unlocked(b, kind)`** — Mineral needs a survey (you see seams from orbit); Heat/Fertile/Weather
-  need `body.deepSurveyed`, set when a research ship studies the world. That's the reason to go back.
-- Ramps: brown (mineral), orange→red (heat), dark→vibrant green (fertile), blue→white (weather).
+- `SurfaceIndexKind` — Mineral · **Geothermal** · Fertile · Weather · Solar · Water.
+  `Get / Ramp / Name / Describe`.
+- **`Geothermal` was `Heat`, and it absorbed the tectonics overlay.** One index for "where is the crust
+  hot and moving", because two systems describing the same ground could and did disagree — a red fault
+  line could run across ground the Heat Index called cold. The field lives in `GeothermalMap`; selecting
+  this index also draws the plate lines and the per-plate push arrows over it.
+- **It is the one index read ABSOLUTELY** (`IsAbsolute`), bypassing the per-world percentile
+  consolidation every other index goes through. Its numbers are specified — 40 on a plate line, 70
+  radiated, 97+ a volcano — and four systems compute from them, so remapping them to a distribution
+  would make the readout stop meaning what the terrain, the quakes and the temperature model used.
+- **`Unlocked(b, kind)`** — Mineral needs a survey (you see seams from orbit); the rest fill in as a
+  science ship reads the world. That's the reason to go back.
+- Ramps: brown (mineral), orange→red (geothermal), dark→vibrant green (fertile), blue→white (weather).
 
 ### SurfaceBuilding.cs + SurfaceBuildManager.cs
 - `SurfaceBuildingType` / `SurfaceBuildingInfo` — footprint `shape`, driving `index`, cost, output.

@@ -35,7 +35,10 @@ public class UnitInfo
     public string description;
 
     public int costMetal, costEnergy;
-    public float buildTime;    // seconds to build
+    /// How long this hull takes to build, in SECONDS of game time — which is DAYS on the game calendar
+    /// (GameCalendar: one second of game time is one in-game day). The simulation still counts in
+    /// seconds; only the readouts speak in days and months.
+    public float buildTime;
 
     public int armor, health, speed, research, attack;
 

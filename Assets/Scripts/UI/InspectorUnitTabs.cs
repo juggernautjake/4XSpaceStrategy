@@ -168,7 +168,7 @@ public partial class InspectorWindow
         {
             case UnitStatus.Traveling:
                 task = $"Traveling to {(u.travelTarget != null ? u.travelTarget.name : "a point in space")} " +
-                       $"({Mathf.Max(0f, u.travelDuration - u.travelElapsed):F0}s)"; break;
+                       $"({GameCalendar.Duration(Mathf.Max(0f, u.travelDuration - u.travelElapsed))})"; break;
             case UnitStatus.Exploring: task = $"Surveying {(u.location != null ? u.location.name : "?")}"; break;
             case UnitStatus.Colonizing: task = $"Colonizing {(u.location != null ? u.location.name : "?")}"; break;
             case UnitStatus.Researching: task = $"Researching {(u.location != null ? u.location.name : "?")}"; break;
@@ -248,13 +248,13 @@ public partial class InspectorWindow
         Stat(rec, "Rank", () => $"<color=#FFD24D>{u.RankName}</color>");
         Stat(rec, "Experience", () => $"{u.experience:F0} XP");
         Stat(rec, "Worlds visited", () => u.worldsExplored.ToString());
-        Stat(rec, "Time in service", () => $"{u.serviceTime:F0}s");
+        Stat(rec, "Time in service", () => $"{GameCalendar.Duration(u.serviceTime)}");
 
         Header(p, "CLASS");
         var cls = Card(p);
         Stat(cls, "Build cost", () => $"{ColonyManager.DiscCost(info.costMetal)} metal · {ColonyManager.DiscCost(info.costEnergy)} energy");
         Stat(cls, "Build power", () => $"{info.buildPower}");
-        Stat(cls, "Build time", () => $"{info.buildTime * TechEffects.BuildTimeMult:F0}s");
+        Stat(cls, "Build time", () => $"{GameCalendar.Duration(info.buildTime * TechEffects.BuildTimeMult)}");
         Note(cls, info.description);
     }
 

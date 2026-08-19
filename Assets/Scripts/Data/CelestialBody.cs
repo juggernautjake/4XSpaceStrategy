@@ -8,14 +8,16 @@ public class CelestialBody
     public CelestialBodyType type;
     public ResourceDeposit resources;
 
-    // MASS VALUE — the player-facing measure of how big this world is (gas giants 7-13, moons/asteroids
-    // below 1 in first-decimal steps). Set at generation from MassRules; surfaceSize below is DERIVED
-    // from it (MassRules.SurfaceSize = mass x 3). This is what the info windows show as the world's size.
+    // MASS VALUE, IN EARTHS — 1 is one Earth, and that is the anchor the whole scale hangs off.
+    // Terrestrial worlds run 0.6 to 4 to one decimal place; gas giants run 10 to 40 in multiples of five;
+    // anything at or below 0.5 that is not orbiting a planet is an asteroid. Set at generation from
+    // MassRules; surfaceSize below is DERIVED from it (MassRules.SurfaceSize = mass x 6). This is what
+    // the info windows show as the world's size.
     //
     // The DEFAULT only applies to a body nothing has rolled a mass for — a hand-constructed one, or an
-    // older save. 3 rather than 2, so such a body lands on a 9-cell grid with room to build on rather
-    // than the 6-cell minimum.
-    public float mass = 3f;
+    // older save that predates Mass entirely. One Earth: the most ordinary thing a world can be, and the
+    // value every threshold in the game is calibrated against.
+    public float mass = 1f;
 
     // Grid/visual size — still the number the whole engine sizes maps, orbits and atmosphere from, but now
     // a function of `mass` (MassRules.SurfaceSize) rather than an independent roll. Kept as its own field so
@@ -70,7 +72,29 @@ public class CelestialBody
     public float inclination = 0f;      // orbital tilt in degrees
     public float eccentricity = 0f;     // 0 = circle, up to ~0.6 = ellipse
     public float verticalOffset = 0f;   // lifts the orbit plane up/down
-    public float spinSpeed = 0f;        // axial rotation, degrees per second
+    public float spinSpeed = 0f;        // axial rotation RATE, degrees per second — always positive
+
+    /// Which way the body turns on its axis: +1 prograde (the default and by far the commonest), -1
+    /// retrograde. Kept APART from spinSpeed rather than folded into its sign, because everything except
+    /// the renderer cares about the rate and not the direction — the dynamo that gives a world its
+    /// magnetic field (see RotationRules) is driven by how fast the core is stirred, and a retrograde
+    /// world stirs its core exactly as hard as a prograde one. A signed spinSpeed would have made
+    /// "turns backwards" and "has no magnetosphere" the same fact, which they are not.
+    ///
+    /// Distinct from `orbitDirection`, which is which way the body goes AROUND its parent. Venus orbits
+    /// prograde and rotates retrograde; they are independent, and the Dev orbit panel exposes both.
+    public int rotationDirection = 1;
+
+    /// Which asteroid BELT this body belongs to, or 0 for none.
+    ///
+    /// A belt is a set of bodies sharing one orbital lane: the same radius and — critically — the same
+    /// orbital speed, so they hold their relative positions forever and can never drift into each other
+    /// however long the game runs. That is why they may share a lane at all, and it is why OrbitSafety
+    /// has to know about this: its whole guarantee is built on giving every body a radius band nobody
+    /// else occupies, and a belt is the one case where sharing is correct rather than a collision
+    /// waiting to happen.
+    public int beltId = 0;
+
     public bool showRing = true;
 
     // --- Habitability (relative to this body's host star) ---

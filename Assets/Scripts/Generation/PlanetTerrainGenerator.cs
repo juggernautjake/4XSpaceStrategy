@@ -102,6 +102,22 @@ public static class PlanetTerrainGenerator
     public struct Sample
     {
         public TerrainType terrain;
+
+        /// THE GROUND UNDERNEATH, when `terrain` is water, ice or snow.
+        ///
+        /// "Snow biomes and ice biomes are really just types of water biomes, only frozen, so biomes such
+        /// as these should not be THE biome, but more like a modifier. Like when an ocean grows in grid
+        /// size, the terrain that was enveloped still exists — if I wanted to remove the water, it will
+        /// still be there."
+        ///
+        /// It genuinely still is there, because elevation is decided by geology alone and no terraforming
+        /// touches it (see the elevation pipeline in SampleNormalized). This field just makes that
+        /// legible: the tile readout says "Ocean over Steppe" rather than only "Ocean", so the player can
+        /// see what draining a sea would uncover before spending a project on finding out.
+        ///
+        /// Equal to `terrain` on a tile that is neither flooded nor frozen. Never itself a water type.
+        public TerrainType ground;
+
         public float shade;      // 0..1 per-pixel brightness jitter
         public float elevation;  // 0..1
         public bool water;
@@ -117,11 +133,56 @@ public static class PlanetTerrainGenerator
         public float latitude;     // 0 equator .. 1 pole
     }
 
+    // ---- THE ELEVATION BUDGET ---------------------------------------------------------------------
+    //
+    // Four terms, deliberately in descending order of authority, so that reading them tells you what
+    // decides a world's shape: its plates first, then its faults and vents, then noise last and least.
+    // Every one of them is measured in the same 0..1 landHeight units the classifiers threshold against,
+    // so their sizes can be compared directly against each other and against those thresholds.
+
+    /// How far a continental plate rides above — or an oceanic plate sits below — the mean surface.
+    ///
+    /// The single largest term, and it should be: on a world with plates, WHICH PLATE you are standing on
+    /// is the first-order fact about how high you are. At 0.26 a continental plate lands around 0.76 and
+    /// an ocean basin around 0.24, so a neutral sea (which stands at 0.36 in these units) drowns the
+    /// basins and leaves the continents dry — a world with real coastlines, drawn by its own geology,
+    /// before a single line of noise is involved.
+    const float ContinentalRelief = 0.26f;
+
     // How much a convergent plate boundary lifts the ridge (mountain-building) field at the fault. A
-    // strong head-on collision (boundary≈1, convergence≈1) adds this much, enough to push mid-ridge ground
-    // over the Mountains threshold; a divergent boundary subtracts it (a thinning rift). Tuned by eye —
-    // there is no Editor here to calibrate against.
+    // strong head-on collision (belt≈1, convergence≈1) adds this much, enough to push raised ground
+    // over the Mountains threshold; a divergent boundary subtracts it (a thinning rift).
     const float TectonicRidgeGain = 0.6f;
+
+    /// How high a volcanic hotspot piles its dome. Applied to the SQUARE of the hotspot field, so the
+    /// 97%+ vent gets nearly all of it and the surrounding 70% skirt gets about half — a cone, rather
+    /// than a plateau with a mountain somewhere on it.
+    const float HotspotUpliftGain = 0.30f;
+
+    // ---- THE VARIATION PASS ------------------------------------------------------------------------
+    //
+    // "And then the terrain generation can apply some more variation to elevation across the grid map."
+    // Its job is BASINS, not peaks: somewhere for water to collect that the plates did not already
+    // provide. It cannot raise a mountain at any setting, because `ridge` is computed from the GEOLOGY
+    // lift and never sees this term at all (see RidgeFromRelief).
+    //
+    // SIZED AGAINST THE MEASURED NOISE, not against its nominal range. The field has a standard
+    // deviation of 0.124, not 0.5, so a "gain of 0.30" moves the ground by ±0.075 in practice — a
+    // twentieth of what the waterline sweeps across. Measured (Node port, four worlds of 200x100, the
+    // water level rolled across its full 0.10..1.00 generation range):
+    //
+    //                                  share of water rolls giving a 15-85% ocean world
+    //     dead world, gain 0.30                   17%     <- almost every world bone dry or drowned
+    //     dead world, gain 0.45                   26%
+    //     dead world, gain 0.55                   32%
+    //
+    // A plate world does not have this problem — its continental and oceanic crust are half a unit apart
+    // by construction, so it sits at 63% either way — which is exactly why the two gains differ. On a
+    // world with no plates the noise is the ONLY thing drawing a coastline, so it has to do more of the
+    // work. At 0.55 a dead world runs 18% ocean at water level 0.5, 40% at 0.6 and 71% at 0.7: a
+    // gradient you can terraform along rather than a switch.
+    const float VariationGain = 0.24f;
+    const float DeadWorldVariationGain = 0.55f;
 
     // How much a plate boundary moves the GROUND ITSELF, as a fraction of the world's relief.
     //
@@ -222,7 +283,10 @@ public static class PlanetTerrainGenerator
                 float u = (x + 0.5f) / width;
                 float v = (y + 0.5f) / height;
                 Sample s = SampleNormalized(body, u, v, p, octaves);
-                surface.tiles[x, y] = new TerrainTile(s.terrain, s.shade);
+                // The ground under any water/ice and the tile's elevation travel with it: the readout
+                // wants both every frame the cursor moves, and re-deriving them means re-running the
+                // whole noise field for one cell.
+                surface.tiles[x, y] = new TerrainTile(s.terrain, s.ground, s.shade, s.elevation);
             }
 
             // Checked per COLUMN, not per cell: Stopwatch.Elapsed is not free, and a single column is a
@@ -423,6 +487,19 @@ public static class PlanetTerrainGenerator
                             || (y + 1 < h && isOcean[x, y + 1]) || (y - 1 >= 0 && isOcean[x, y - 1]);
                 if (coastal) tiles[x, y].type = TerrainType.Beach;
             }
+
+        // ---- 3) Keep `ground` honest ----
+        //
+        // Both passes above rewrite `type` — a lake becomes an ocean, a jungle becomes a beach — without
+        // touching `ground`, which is right for the water cases (the seabed did not change when we
+        // decided the pool was part of the sea) and wrong for the land ones: a tile that is now a beach
+        // is not a beach lying ON something, it IS a beach, and leaving `ground` pointing at the jungle
+        // it used to be would have the readout announce "Beach over Jungle" forever.
+        //
+        // The rule is the invariant `ground` is defined by: a tile with no cover on it is its own ground.
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++)
+                if (!IsCover(tiles[x, y].type)) tiles[x, y].ground = tiles[x, y].type;
     }
 
     static void PushWater(TerrainTile[,] tiles, bool[,] visited, Stack<int> stack, int nx, int ny, int h)
@@ -471,32 +548,123 @@ public static class PlanetTerrainGenerator
         // value at u=0, by construction rather than by luck. Wrapped on a globe the two edges are the same
         // meridian, so anything sampled on a flat plane leaves a hard seam there — a continent chopped in
         // half, a coastline that stops dead, a climate band that jumps. See WrapU.
-        // RELIEF around the mid-line, and the SEA standing at its own height across it — two independent
-        // things that never touch each other.
+        // ============================================================================================
+        // ELEVATION COMES FROM GEOLOGY. THE WORLD STARTS FLAT.
         //
-        // `p.elevation` scales the land's variation about 0.5, so raising it makes deeper valleys AND
-        // higher peaks while leaving the average ground where it was. `seaLevel` says nothing about the
-        // ground at all: it only decides how high the water stands against it, so raising it drowns the
-        // lowlands first and finally the summits without moving a single contour.
+        // This used to be one noise field: continents, mountains, basins and all, drawn straight out of
+        // Perlin and then decorated with a tectonic uplift on top. That produced terrain that looked
+        // plausible and meant nothing — mountains in the middle of plains, coastlines with no reason to
+        // be where they were, and a world whose shape had no relationship to anything else about it.
         //
-        // Two earlier versions of this got it wrong in two different ways. Multiplying the raw field made
-        // "more water" mean "less relief", so a maximally wet world was a flat one. Subtracting the sea
-        // from the field before classifying kept the relief but slid the LAND thresholds with it, so
-        // flooding a world demoted its mountains to highlands and draining one promoted its plains into
-        // mountains. The land and the waterline are separate values now, and only water tests see both.
-        float rawElev = WrapU(u, freq * 2f, 1f, fy, seed, seed * 1.3f, octaves);
+        // It is built in the order the request lays out, and each step only ever ADDS to a flat sheet:
+        //
+        //   1. FLAT. A world with no plates and no volcanism really is a featureless ball, and the only
+        //      relief it gets is step 4's variation.
+        //   2. CONTINENTS, FROM THE PLATES. A tectonic world's plates are its landmasses: each plate
+        //      carries continental crust (which rides high) or oceanic crust (which sits low), so the
+        //      shape of a continent IS the shape of a plate. This is the Voronoi/cell continent
+        //      generation the request asks for, and it is the same partition the fault overlay draws.
+        //   3. FAULTS FOLD IT. Two plates driving together have nowhere to put the crust but up; two
+        //      pulling apart leave a trough between them. Volcanic hotspots pile a dome over their vent,
+        //      the hottest cell being the highest — which is the whole of "if there are no continents,
+        //      look to the geothermal hotspots".
+        //   4. ...AND ONLY THEN, VARIATION. A gentle noise field so the ground is not glass. It is
+        //      deliberately too small to make a mountain: mountains come from step 3 or they do not
+        //      exist, which is the request's "I don't want mountains appearing from points that should
+        //      be lower".
+        //
+        // WHY TERRAFORMING CANNOT MOVE ANY OF IT. Not one term here reads temperature, water level or
+        // atmosphere. Those decide what the ground IS — sea, ice, magma, jungle — but the ground is
+        // already the height it is by the time they are consulted. Heat a frozen world until its oceans
+        // boil away and its mountains are still exactly where they were, standing over a dry basin.
+        //
+        // MEASURED (Node port of this pipeline; a neutral sea stands at 0.36 in these units, and the
+        // Mountains threshold is ridge > 0.82):
+        //
+        //                                  land    lift   ridge
+        //   dead world, noise floor       -0.050   0.000   0.62   submerged — an ocean basin
+        //   dead world, noise ceiling      1.050   0.000   0.62   land, and NOT a mountain
+        //   ...the same at Elevation 2     1.600   0.000   0.62   taller, and still not a mountain
+        //   oceanic plate                  0.240  -0.260   0.62   submerged
+        //   continental plate              0.760   0.260   0.67   dry land, and not a mountain
+        //   continent + head-on fault      1.076   0.480   1.95   MOUNTAINS
+        //   ...the same at Elevation 2     1.652   0.480   1.95   taller mountains, same classification
+        //   oceanic plate + full rift     -0.076  -0.480   0.62   submerged — a trench
+        //   volcanic vent, no plates       0.800   0.300   1.31   MOUNTAINS
+        //
+        // So water collects in ocean basins and rift valleys, continents stand clear of it, and the only
+        // two things that produce a mountain are a collision and a vent. The highest ridge reachable
+        // anywhere with NO geology at all, at any texture value and any Elevation setting, is 0.62 —
+        // comfortably under every Mountains threshold in the file, by construction rather than by tuning.
+        // ============================================================================================
 
-        // THE LAND'S OWN HEIGHT — relief only, sea level nowhere in it. This is the terrain's real
-        // shape, and it is what Sample.elevation reports, so a drowned mountain range is still a
-        // mountain range to everything that asks: the Mineral index still finds the ore in its ridges,
-        // the temperature model still cools its peaks, and dropping the sea back down uncovers exactly
-        // the terrain that was always there.
-        // NOT clamped. At full Elevation Range this spans roughly -0.5..1.5, and that headroom is the
-        // point: clamping here would pin every high peak to exactly 1 and every deep basin to exactly 0,
-        // turning both ends of the world into flat plateaus at precisely the setting the player chose in
-        // order to get dramatic terrain. The classifiers only ever compare against thresholds, so
-        // out-of-range values are meaningful — a 1.4 summit really is higher than a 1.0 one.
-        float landHeight = 0.5f + (rawElev - 0.5f) * p.elevation;
+        // ---- 2) THE PLATES, if this world has any ----
+        // Sampled ONCE. This is the most expensive call in world generation and every later use of it
+        // below reads this same hit.
+        bool hasPlates = TectonicsMap.Active(body);
+        TectonicsMap.Hit tec = default;
+        if (hasPlates) tec = TectonicsMap.Sample(body, u, v);
+
+        // HOW FAR GEOLOGY LIFTED THIS GROUND, kept apart from the finished height all the way through.
+        //
+        // This is the number `ridge` is computed from, and separating it is what makes "mountains come
+        // from collisions and vents, never from noise" a structural guarantee rather than a matter of
+        // keeping the noise small enough. See RidgeFromRelief.
+        float geologyLift = 0f;
+
+        if (hasPlates)
+        {
+            // CONTINENT OR OCEAN FLOOR. A per-plate property, so the boundary between a continent and an
+            // ocean basin is a plate margin — which is exactly where a real continental shelf is.
+            geologyLift += TectonicsMap.CrustAt(body, tec) * ContinentalRelief;
+
+            // A convergent margin (convergence > 0) lifts the crust; a divergent one drops it. `belt`,
+            // NOT `boundary`: the red line the Survey overlay draws is a one-to-three tile annotation,
+            // while an orogenic belt is a wide ragged skirt either side of it, and reading the drawn
+            // line here would confine every range to the width of its own map symbol.
+            geologyLift += tec.belt * tec.convergence * TectonicUpliftGain;
+        }
+
+        // ---- 3) VOLCANIC HOTSPOTS pile a dome over their vent ----
+        // Read from the HOTSPOT field specifically rather than from the finished Geothermal Index: on a
+        // plate world the index is mostly the fault field, and the faults have already had their say two
+        // lines up. Adding the index whole would count a convergent margin's uplift twice and, worse,
+        // would raise the ground along a RIFT — where the same index is high and the land should be
+        // dropping into a trough.
+        //
+        // Squared, so the highest ground is the 97%+ vent itself and the skirt falls away fast. That is
+        // the request's "the highest geothermal index grids being the highest in elevation", and it is
+        // what makes a hotspot world read as a scatter of individual cones rather than as a plateau.
+        float hotspot = GeothermalMap.HotspotAt(body, u, v);
+        if (hotspot > 0f) geologyLift += hotspot * hotspot * HotspotUpliftGain;
+
+        // The ground, so far: everything geology did to it, and nothing else.
+        float landHeight = 0.5f + geologyLift;
+
+        // ---- 4) ...AND ONLY NOW, SOME VARIATION ----
+        // A world with neither plates nor plumes gets a LARGER share of this, and that is not a fudge:
+        // without it such a world is a perfect sphere, every tile at exactly the same height, and adding
+        // any water at all floods the entire surface in one step rather than filling its low ground.
+        // Basins have to come from somewhere, and on a dead world the only thing left to draw them with
+        // is noise. It is still far too small to raise a mountain (see RidgeFromRelief).
+        float rawElev = WrapU(u, freq * 2f, 1f, fy, seed, seed * 1.3f, octaves);
+        float variationGain = hasPlates ? VariationGain : DeadWorldVariationGain;
+        landHeight += (rawElev - 0.5f) * 2f * variationGain;
+
+        // ---- THE ELEVATION SLIDER: accentuate what is already there ----
+        //
+        // Scaling the DEVIATION from the mid-line is the whole trick, and it is what the request is
+        // asking for when it says the slider should "just accentuate the already existing hills and low
+        // points into higher and lower points". High ground goes higher, low ground goes lower, and
+        // ground at the mid-line does not move at all — so turning it up cannot make a mountain appear
+        // in the middle of a plain or in the middle of an ocean, because there was nothing there to
+        // accentuate. Turning it down flattens the world toward the sheet it started as.
+        //
+        // NOT clamped. At high settings this spans roughly -0.5..1.5, and that headroom is the point:
+        // clamping here would pin every peak to exactly 1 and every basin to exactly 0, turning both
+        // ends of the world into flat plateaus at precisely the setting chosen to get dramatic terrain.
+        //
+        landHeight = 0.5f + (landHeight - 0.5f) * p.elevation;
 
         // WHERE THE SEA STANDS, in the same units as landHeight. The classifiers get the ground's REAL
         // height and this line separately, and only their WATER tests add it — so raising the Water Level
@@ -510,54 +678,58 @@ public static class PlanetTerrainGenerator
         // is under water.
         float seaShift = SeaShift(p.SeaLevelOrNeutral);
         float moisture  = WrapU(u, freq * 2f,        1.3f, fy * 1.3f, seed + 31f, seed + 17f,  octaves) * p.moisture;
-        float ridge     = WrapU(u, freq * 2f,        2.2f, fy * 2.2f, seed + 91f, seed + 53f,  octaves) * p.ridge;
 
         // ============================================================================================
-        // PLATE TECTONICS FOLD THE GROUND, not just roughen it
+        // RIDGE IS DERIVED FROM THE GROUND NOW, not rolled beside it
         //
-        // Read HERE, before anything downstream touches landHeight, because the uplift is part of how high
-        // the ground is and everything that asks that question has to get the same answer: the altitude
-        // cooling below, the classifier's water test, the °C readout, and Sample.elevation itself. Sampled
-        // once — this is the hottest call in world generation.
+        // `ridge` is the field every classifier tests to decide Mountains, Canyon, Badlands, Cracked
+        // Ground — "is this ground BROKEN". It used to be its own independent noise field, which is
+        // precisely why mountains turned up in places that made no sense: the field peaked wherever it
+        // felt like, including over flat plains and over the sea floor, and the classifier dutifully put
+        // a mountain range there.
         //
-        // `belt`, NOT `boundary`. The red line the Survey overlay draws is a one-to-three tile annotation;
-        // an orogenic belt is a wide, ragged skirt either side of it. Reading the drawn line here would
-        // confine every range to the width of its own map symbol.
+        // Broken ground is a CONSEQUENCE of the ground having been pushed up. So it is computed from the
+        // height the geology just produced, plus the two things that do the pushing — a convergent
+        // margin and a volcanic vent — plus a small noise term for texture, so a range has peaks and
+        // saddles along its length instead of reading as an extruded wall.
         //
-        // A convergent margin (convergence > 0) does BOTH things a collision does — it lifts the crust and
-        // it breaks it — so it adds to elevation and to ridge together, and a range comes out as high
-        // ground that is also rugged. A divergent one drops the land and thins it: a rift valley, and
-        // where the rift runs low enough, a sea in it. The classifiers test elevation for water BEFORE
-        // ridge, so a drowned fault reads as ocean (Earth's mid-ocean ridges) and only a fault crossing
-        // high ground folds up into mountains.
+        // `p.ridge` survives as a multiplier because it is in the save format and in every world's
+        // natural params, but nothing rolls it away from 1 any more and the Ruggedness slider that used
+        // to drive it is gone: an axis that moves mountains around independently of the ground they
+        // stand on is the exact thing this rework exists to remove.
+        // `geologyLift`, NOT the finished height — see RidgeFromRelief. Neither the variation pass nor
+        // the Elevation slider is in it, so neither can make a mountain.
         //
-        // Derived per-sample from the body's seed, so it costs no save state and a remodel or reseed
-        // re-derives it — and it is the same TectonicsMap the Survey overlay draws its plate borders from,
-        // so where the map says a margin is, is where the mountains are.
-        // ============================================================================================
-        bool volcanicHotspot = false;
-        if (TectonicsMap.Active(body))
-        {
-            var tec = TectonicsMap.Sample(body, u, v);
-            float press = tec.belt * tec.convergence;          // >0 driven together, <0 pulled apart
-            landHeight += press * TectonicUpliftGain;
-            ridge = Mathf.Clamp(ridge + press * TectonicRidgeGain, 0f, 2f);
-            // Volcanoes cluster where plates DRIVE TOGETHER hardest (subduction). The strongest convergent
-            // boundaries on a tectonically active world get a scattering of volcanoes among their peaks —
-            // so some rocky worlds come out "somewhat volcanic" without being full Volcanic-type worlds.
-            volcanicHotspot = press > 0.72f;
-        }
+        // `tec` is already the zeroed default on a world with no plates, so it is passed as-is: a
+        // conditional here would only restate that, and an `in` parameter fed by a ternary allocates a
+        // temporary to do it.
+        float ridgeTexture = WrapU(u, freq * 2f, 2.2f, fy * 2.2f, seed + 91f, seed + 53f, octaves);
+        float ridge = RidgeFromRelief(geologyLift, tec, hotspot, ridgeTexture, p.ridge);
+
+        // THE FINISHED GEOTHERMAL INDEX at this point — the same 0..1 the Survey overlay paints and the
+        // earthquakes shake. Assembled from the two halves already in hand (the plate sample and the
+        // hotspot field) rather than re-derived: this runs once per cell of every world in the galaxy,
+        // and re-deriving the hotspot field would cost six more Perlin lookups on each of them.
+        // Used below to decide where a volcano actually stands.
+        float geothermal = GeothermalMap.Combine(body, tec, hotspot);
 
         float lat = Mathf.Abs(v - 0.5f) * 2f;                 // 0 equator, 1 pole
         float heatNoise = WrapU(u, freq * 2f,        0.9f, fy * 0.9f, seed + 11f, seed + 7f,   2);
-        // Altitude cools the surface (atmospheric lapse rate): ground high above sea level runs colder than
-        // lowland at the same latitude, so mountains and highlands cap with snow and ice even in a warm
-        // band, and the coldest peaks freeze outright. Only ground ABOVE the mid-elevation is cooled, so
-        // seas and lowlands are untouched. `altCool` is reused for the °C reading below so the map and the
-        // temperature readout agree on how cold the heights are.
-        // landHeight: altitude cooling is about how high the GROUND is, not how deep the water over it
-        // is. Reading the sea-relative figure would have made every world colder as it flooded.
-        float altCool = Mathf.Max(0f, landHeight - 0.6f);
+
+        // ============================================================================================
+        // ELEVATION MOVES THE TEMPERATURE, IN BOTH DIRECTIONS
+        //
+        // This used to be `max(0, landHeight - 0.6)` — cooling for high ground, and nothing at all for
+        // low ground. Half of the effect was missing, and it is the half that makes a volcanic world
+        // interesting: "higher elevation will have cooler temperatures, and lower elevations will have
+        // higher temperatures", so a molten world's magma collects in its valleys and runs between its
+        // highlands as rivers rather than covering its entire equator in a sheet.
+        //
+        // Measured from the MID-LINE, so it is symmetric by construction and a world at rest (every tile
+        // at 0.5) gets no shift anywhere. Read off landHeight, not off the sea-relative figure: altitude
+        // cooling is about how high the GROUND is, not how deep the water over it is, and using the
+        // sea-relative value would make every world colder as it flooded.
+        float altDelta = landHeight - 0.5f;                   // + high (cooler), - low (warmer)
 
         // THE FLAT LATITUDE BAND BUG.
         //
@@ -576,7 +748,8 @@ public static class PlanetTerrainGenerator
         const float LatWeight = 0.75f;
         const float NoiseWeight = 0.45f;
         float band = ((1f - lat) * LatWeight + heatNoise * NoiseWeight) / (LatWeight + NoiseWeight);
-        band = Mathf.Clamp01(band - altCool * 0.55f);
+        // Symmetric in altitude, matching the °C reading below — high ground colder, low ground warmer.
+        band = Mathf.Clamp01(band - altDelta * 0.55f);
 
         // heat > 1 -> exponent < 1 -> curve bends up (warmer); heat < 1 -> exponent > 1 -> cooler.
         float heatExp = Mathf.Clamp(1f / Mathf.Max(0.05f, p.heat), 0.2f, 5f);
@@ -614,12 +787,21 @@ public static class PlanetTerrainGenerator
         TerrainType t = Classify(classifyType, landHeight, seaShift, moisture, temperature, ridge, lat,
                                  body.biosphereActive);
 
-        // A raised, actively-converging tile can be a volcano rather than a plain peak. Deterministic
-        // (heatNoise is a stable field), so it's a sparse scatter along the belt, and only on Rocky worlds
-        // — the dedicated Volcanic classifier already handles furnace worlds, and freezing/ocean/gas worlds
-        // shouldn't sprout stray cones.
-        if (volcanicHotspot && classifyType == CelestialBodyType.RockyPlanet &&
-            (t == TerrainType.Mountains || t == TerrainType.Highlands) && heatNoise > 0.55f)
+        // ============================================================================================
+        // A VOLCANO IS WHERE THE GEOTHERMAL INDEX SAYS IT IS
+        //
+        // The request draws the line precisely: "if there are Geothermal hotspots that would generate a
+        // volcano (in the 97-100 range on Geothermal Index)". So the vent is not a separate roll on top
+        // of the terrain — it is the same field the overlay paints, read at its own threshold. Whatever
+        // the map shows as 97%+ has a cone standing on it, on a fault margin and on a plate-less hotspot
+        // world alike.
+        //
+        // Not on a gas giant (no surface) and not under water (a submarine vent is not a mountain the
+        // player can see or build on). Everything else is fair game, including an ice world — Enceladus
+        // is a real place, and a cryovolcano on a frozen world is exactly the kind of thing the
+        // geothermal survey exists to find.
+        if (geothermal >= GeothermalMap.VolcanoIndex &&
+            classifyType != CelestialBodyType.GasGiant && !IsWater(t))
             t = TerrainType.Volcano;
 
         // CLIMATE COHERENCE. The classifier's `temperature` is latitude-dominated (equator warm, poles cold)
@@ -627,14 +809,49 @@ public static class PlanetTerrainGenerator
         // a liquid equatorial sea, and a globally SCORCHING one could still grow jungle. Re-judge the water
         // and vegetation tiles against the tile's ACTUAL temperature in °C — the very figure PlanetTemperature
         // shows the player — so the two always agree: a −70°C world's seas read as ice, and a 100°C world
-        // grows no rainforest. Computed from the SAME heat/atmosphere/type the readout uses, plus the standard
-        // ±15°C equator→pole swing and a small local-weather wobble from the heat noise.
-        float baseC = PlanetTemperature.BaseCelsius(p.heat, body.atmosphereThickness, classifyType);
-        float tileC = baseC + Mathf.Lerp(15f, -15f, lat) + (heatNoise - 0.5f) * 12f - altCool * AltitudeLapseC;
-        t = ClimateCoherence(t, tileC);
+        // grows no rainforest. Computed from the SAME heat/atmosphere/type/internal-heat the readout uses,
+        // plus the standard ±15°C equator→pole swing and a small local-weather wobble from the heat noise.
+        float baseC = PlanetTemperature.BaseCelsius(p.heat, body.atmosphereThickness, classifyType,
+                                                    GeothermalMap.WorldIntensity(body));
+        float tileC = baseC + Mathf.Lerp(15f, -15f, lat) + (heatNoise - 0.5f) * 12f - altDelta * AltitudeLapseC;
+
+        // THE LIQUID-WATER WINDOW IS THIS WORLD'S OWN, and it depends on its air: at one atmosphere water
+        // runs 1°C to 100°C, at four it runs 0°C to 144°C (BiosphereRules). Passing both ends in rather
+        // than baking constants into the coherence pass is what makes "higher atmospheres allow for
+        // liquid water at higher temperatures" true of the actual map instead of only of a readout.
+        BiosphereRules.LiquidRange(body, out float freezeC, out float boilC);
+        t = ClimateCoherence(t, tileC, freezeC, boilC);
+
+        // ============================================================================================
+        // WHAT IS UNDERNEATH — water and ice as MODIFIERS rather than as the biome
+        //
+        // Asked by running the very same classifier a second time against a DRAINED, THAWED reading of
+        // this tile: the sea pushed below the deepest basin and the temperature lifted just past
+        // freezing. Everything else — the elevation, the ridge, the moisture, the latitude — is the tile's
+        // own, so what comes back is literally "what this ground is, with the water and the ice taken
+        // away". That is the request's point exactly: the terrain an ocean swallowed did not stop
+        // existing, and draining the ocean would uncover it unchanged.
+        //
+        // A SECOND CLASSIFIER CALL, NOT A SECOND SAMPLE. Every expensive input — the noise fields, the
+        // plate hit — is already in hand; this is a few dozen float comparisons. Re-deriving the fields
+        // would have doubled the cost of the hottest function in world generation.
+        //
+        // Skipped entirely when the tile is neither flooded nor frozen, which is most of them.
+        TerrainType groundUnder = t;
+        if (IsCover(t))
+        {
+            groundUnder = Classify(classifyType, landHeight, SeaShiftDry, moisture,
+                                   Mathf.Max(temperature, ThawedTemperature), ridge, lat,
+                                   body.biosphereActive);
+            // A drained, thawed world should never classify back to water — but the Ice classifier can
+            // still return a Lake from its moisture test, and a bare rock is a better answer than a
+            // recursion. Guarded rather than trusted.
+            if (IsCover(groundUnder)) groundUnder = TerrainType.Barren;
+        }
 
         return new Sample
         {
+            ground = groundUnder,
             // landHeight, not the sea-relative figure: callers asking a tile's elevation want the
             // ground's real height, which does not change when the tide comes in.
             // Clamped only HERE, on the way out: Sample.elevation is documented 0..1 and SurfaceIndex
@@ -644,6 +861,139 @@ public static class PlanetTerrainGenerator
             ridge = Mathf.Clamp01(ridge), latitude = lat
         };
     }
+
+    // ============================================================================================
+    // HOW BROKEN IS THIS GROUND — derived from how it got here
+    //
+    // `ridge` is what every classifier thresholds to decide Mountains / Canyon / Badlands / Cracked
+    // Ground. It was an independent noise field, and that is the single line that produced the terrain
+    // the rework exists to replace: the field peaked wherever it liked, including over flat plains and
+    // over the sea floor, and the classifier put a mountain range there because that is what it was
+    // told. Ranges "followed the fault lines" only in the sense that the roughness did — the contours
+    // themselves were pure noise.
+    //
+    // Broken ground is a consequence of the ground having been PUSHED, so this reads the three things
+    // that push it — and it reads the GEOLOGY LIFT, not the finished height:
+    //
+    //   LIFT        — how far plates and plumes raised this ground above the mean. Steepness is what
+    //                 breaks rock, and this is the only part of a tile's height that came from a force.
+    //                 Ground the geology did not raise contributes nothing, so a basin is never rugged.
+    //   COLLISION   — a convergent margin does both things at once: it lifts the crust AND shatters it,
+    //                 which is why a range comes out as high ground that is also rough. A RIFT is not
+    //                 included: it drops the land and thins it, and what it makes is a valley.
+    //   A VENT      — a volcano is broken ground by definition.
+    //
+    // WHY THE LIFT AND NOT THE HEIGHT. Reading total height couples ruggedness to two things that have
+    // nothing to do with force: the variation noise and the Elevation slider. Measured (Node port), that
+    // coupling put ridge at 1.17 on a plate-less, volcano-less world with the slider at 1.5 and 1.56 at
+    // 2 — over the 0.82 Mountains threshold — so a geologically dead world grew a mountain range out of
+    // pure noise, which is precisely the artefact this rework exists to remove.
+    //
+    // Reading the lift makes it structural instead of a matter of keeping the noise small: `geologyLift`
+    // is zero on a dead world at every noise value and every slider setting, so no mountain is reachable
+    // there by any route. That is what freed the variation pass to be big enough to carve real ocean
+    // basins (see VariationGain) without the two trading off against each other.
+    //
+    // TEXTURE DOES TWO JOBS. It modulates the geological terms by ±18%, so a range has peaks and saddles
+    // along its length instead of reading as an extruded wall — and it supplies a small floor of its own
+    // so that a world with no geology still has canyons and badlands rather than being glass. That floor
+    // is capped BELOW the Mountains threshold by construction, and combined with `Max` rather than added,
+    // so it can never push geological ground over a line it would not have crossed anyway.
+    static float RidgeFromRelief(float geologyLift, in TectonicsMap.Hit tec, float hotspot,
+                                 float texture, float ridgeScale)
+    {
+        float t = Mathf.Clamp01(texture);
+
+        float lift = Mathf.Max(0f, geologyLift) * 2.2f;
+        float collision = Mathf.Max(0f, tec.belt * tec.convergence) * TectonicRidgeGain;
+        float vent = hotspot * 0.45f;
+
+        float shaped = (lift + collision + vent) * (0.82f + 0.36f * t);
+
+        // The noise floor: broken, weathered ground anywhere, but never a range. 0.62 sits under every
+        // classifier's Mountains test (0.82 on Terran/Barren, 0.85 on Airless) with room to spare, while
+        // still clearing Barren's Badlands cut at 0.5 — so a dead world reads as varied rock rather than
+        // as one flat biome, which is what it looked like when ridge was geology-only.
+        float rough = t * NoiseRoughnessMax;
+
+        return Mathf.Clamp(Mathf.Max(shaped, rough) * ridgeScale, 0f, 2f);
+    }
+
+    /// The most `ridge` the texture noise may reach on its own. Deliberately below every Mountains
+    /// threshold in this file: a world with no plates and no volcanism has canyons and badlands, and does
+    /// not have mountain ranges, however the noise falls.
+    const float NoiseRoughnessMax = 0.62f;
+
+    /// The temperature the "what is underneath" pass thaws a tile to — just past the classifiers' shared
+    /// 0.22 freezing line, and no further. Lifting it higher would not reveal more ground, it would
+    /// reveal a WARMER world's ground: a tundra would come back as jungle, which is a different claim
+    /// than the one being made.
+    const float ThawedTemperature = 0.32f;
+
+    /// Is this terrain a COVER over ground rather than ground itself? Water, sea ice, snow and glacier —
+    /// the things the request calls modifiers. Everything under one of these has a real biome beneath it
+    /// (Sample.ground), and removing the cover would uncover exactly that.
+    ///
+    /// Snow and Glacier are here and Ice is not, deliberately: `Ice` is used by the Ice-world classifier
+    /// for the bulk ice SHEET, which is kilometres thick and is, for every purpose the game has, the
+    /// ground. Snow lies on top of something.
+    public static bool IsCover(TerrainType t)
+    {
+        switch (t)
+        {
+            case TerrainType.Snow:
+            case TerrainType.Glacier:
+                return true;
+            default:
+                return IsWater(t);
+        }
+    }
+
+    // ============================================================================================
+    // ELEVATION AS A READABLE BAND
+    //
+    // "I don't want Highlands or Hills etc to be considered biomes, as these are more so elevation
+    // levels. We can go a step further and really show elevation levels by putting an elevation number in
+    // the mouse window information when hovering over a grid. So you could see information such as
+    // 'Mountain, [elevation], [Temperature]'."
+    //
+    // So the words survive — a player still wants to be told they are looking at highlands — but as a
+    // second, independent fact about a tile rather than as the tile's identity. A grassland at 0.79 is
+    // grassland AND highland; under the old scheme it stopped being grassland at 0.74.
+    //
+    // The bands are read against the SEA, not against the raw field, so they mean what a person means by
+    // them: "lowland" is ground barely above the water, not ground below some absolute number that has
+    // nothing to do with where the water on this particular world happens to stand.
+    // ============================================================================================
+    public static string ElevationBand(float landHeight, float waterLevel)
+    {
+        float above = landHeight - (0.36f + SeaShift(waterLevel));   // Terran's shoreline is the zero
+        if (above < 0f) return "submerged";
+        if (above < 0.06f) return "coastal";
+        if (above < 0.16f) return "lowland";
+        if (above < 0.28f) return "plains";
+        if (above < 0.40f) return "uplands";
+        if (above < 0.52f) return "highland";
+        return "alpine";
+    }
+
+    /// The band for a body's tile, from its own water level. The form nearly every caller wants.
+    public static string ElevationBand(CelestialBody b, float landHeight)
+        => ElevationBand(landHeight, b == null ? 0.5f : b.terrainParams.SeaLevelOrNeutral);
+
+    /// Elevation as a NUMBER for the readout: metres above (or below) this world's waterline.
+    ///
+    /// The internal field is a 0..1-ish abstraction and always was; multiplying it by a height gives the
+    /// player something they can compare against a number they already have a feel for. 12,000 m of span
+    /// puts a typical continental plateau around 2,000 m and a fully-accentuated peak near 10,000 —
+    /// Earth's own range, near enough, which is the only calibration this needs.
+    public const float MetresPerElevationUnit = 12000f;
+
+    public static float ElevationMetres(float landHeight, float waterLevel)
+        => (landHeight - (0.36f + SeaShift(waterLevel))) * MetresPerElevationUnit;
+
+    public static float ElevationMetres(CelestialBody b, float landHeight)
+        => ElevationMetres(landHeight, b == null ? 0.5f : b.terrainParams.SeaLevelOrNeutral);
 
     public static bool IsWater(TerrainType t)
     {
@@ -664,21 +1014,63 @@ public static class PlanetTerrainGenerator
     // The game's °C runs a little warm (greenhouse + calibration), so an Earth-like world's tropics read
     // ~40-50°C and still deserve jungle — the vegetation ceilings sit above that, and only bite on genuinely
     // hostile worlds. Easy knobs if the balance wants nudging.
-    const float FreezeC = 0f;        // liquid water / warm vegetation can't persist below this
     const float DeepFreezeC = -25f;  // below this even hardy groundcover is buried — snow, not tundra
     const float LushMaxC = 55f;      // above this, rainforest & wetland thin to hardier tropical cover
     const float ScorchC = 75f;       // above this, no vegetation survives — bare, sun-baked ground
     const float BakedC = 100f;       // above this, that bare ground reads as wasteland, not just desert
-    const float AltitudeLapseC = 55f;// °C lost per unit of elevation above the mid-line (mountain lapse rate)
 
-    // Re-judge one classified tile against its real temperature. Only water and vegetation are touched;
-    // rock, mountains, sand, lava and already-frozen tiles are left exactly as the per-type classifier
-    // decided. Deterministic and resolution-independent (pure function of the tile type and its °C), so the
+    /// °C gained or lost per unit of elevation away from the mid-line — the atmospheric lapse rate, and
+    /// its mirror image below the mid-line. Raised from 55 when it became symmetric: it now has to carry
+    /// both ends, and it is what makes a molten world's magma pool in its valleys and leave its highlands
+    /// as bare rock rather than covering the entire equator in a sheet of lava.
+    public const float AltitudeLapseC = 70f;
+
+    // ============================================================================================
+    // CLIMATE COHERENCE — the pass that makes the map agree with the thermometer
+    //
+    // Re-judges one classified tile against its real temperature. Only water and vegetation are touched;
+    // rock, mountains, sand and already-frozen tiles are left exactly as the per-type classifier decided.
+    // Deterministic and resolution-independent (a pure function of the tile type and its numbers), so the
     // grid and the detailed globe stay identical.
-    static TerrainType ClimateCoherence(TerrainType t, float tileC)
+    //
+    // THE WINDOW IS PASSED IN, and that is the change. It used to be two constants — freezing at 0°C,
+    // and no boiling test at all — and both were wrong for the same reason: how hot water can get before
+    // it stops being water is a property of the PRESSURE above it, not of water. So the caller solves
+    // this world's own window (BiosphereRules.FreezingC / BoilingC: 1-100°C at one atmosphere, 0-144°C
+    // at four) and hands both ends in.
+    //
+    // Three regimes, and the ends of the range are new:
+    //   BELOW FREEZING  — seas become ice, vegetation dies back. As before.
+    //   ABOVE BOILING   — seas are GONE, not ice and not sea. What they leave is the bed they were
+    //                     standing in: salt flats. This is the request's "water should not generate on
+    //                     grids over the boiling point", and it is enforced per TILE rather than per
+    //                     world, so a world can hold an ocean at its poles and none at its equator.
+    //   ABOVE MAGMA     — the ground itself is liquid. See WorldClassifier.MagmaMinC.
+    static TerrainType ClimateCoherence(TerrainType t, float tileC, float freezeC, float boilC)
     {
+        // --- Liquid rock. The hottest thing on the scale, and it outranks everything below. ---
+        if (tileC >= WorldClassifier.MagmaMinC && !IsWater(t))
+            return TerrainType.MagmaField;
+
+        // --- Above boiling: the sea is not here any more, and what it left behind is its own bed ---
+        if (tileC > boilC)
+        {
+            switch (t)
+            {
+                case TerrainType.Ocean:
+                case TerrainType.Lake:
+                case TerrainType.River:
+                case TerrainType.Reef:
+                case TerrainType.FrozenSea:
+                    // Evaporites: what is left when a body of water boils off is everything that was
+                    // dissolved in it. A dry seabed reads as salt, which is also what a dry seabed
+                    // reads as everywhere else in this file (see Barren).
+                    return TerrainType.SaltFlat;
+            }
+        }
+
         // --- Below freezing: liquid water turns to ice; warm vegetation dies back to frozen ground ---
-        if (tileC < FreezeC)
+        if (tileC < freezeC)
         {
             switch (t)
             {
@@ -868,7 +1260,11 @@ public static class PlanetTerrainGenerator
         // ridges do; only faults over high ground fold up into ranges.
         if (elev < 0.3f + sea) return frozen ? TerrainType.FrozenSea : TerrainType.Ocean;
         if (ridge > 0.8f)  return TerrainType.Mountains;
-        if (elev > 0.72f)  return frozen ? TerrainType.Glacier : TerrainType.Highlands;
+        // Glacier is a real terrain — a permanent ice sheet is a thing you stand on. Its thawed twin is
+        // NOT "Highlands", which is an altitude rather than a biome (see the note in Terran): melted, this
+        // ground falls through to the climate tests below and reads as whatever its temperature and
+        // moisture actually make it.
+        if (elev > 0.72f && frozen) return TerrainType.Glacier;
         if (moist > 0.72f) return frozen ? TerrainType.CrystalField : TerrainType.Lake;
         // THE EQUATOR IS THE MELT ZONE. This used to be the other way round — high ground near the
         // equator took fresh Snow while the mid-latitudes stayed Tundra — which drew a white band across
@@ -972,7 +1368,6 @@ public static class PlanetTerrainGenerator
 
         if (ridge > 0.82f) return TerrainType.Mountains;
         if (ridge > 0.7f)  return TerrainType.Canyon;
-        if (elev > 0.66f)  return TerrainType.Highlands;
 
         // SALT FLATS ARE WHAT A DRIED SEABED LEAVES BEHIND — so this threshold stays FIXED, and the water
         // test above does all the moving. The two together give exactly the right behaviour for free:
@@ -994,7 +1389,9 @@ public static class PlanetTerrainGenerator
 
     static TerrainType Airless(float elev, float sea, float temp, float ridge)
     {
-        if (ridge > 0.85f) return TerrainType.Highlands;
+        // An airless world has no weathering, so its broken ground stays broken: bare rock, not an
+        // altitude band. Mountains rather than Highlands, for the same reason as everywhere else.
+        if (ridge > 0.85f) return TerrainType.Mountains;
         if (elev > 0.7f)   return TerrainType.MetallicCrust;
         if (elev < 0.28f)  return TerrainType.Crater;
         if (ridge > 0.72f) return TerrainType.CrystalField;
@@ -1023,8 +1420,22 @@ public static class PlanetTerrainGenerator
         if (elev < 0.40f + sea) return temp < 0.22f ? TerrainType.Snow : TerrainType.Beach;
 
         if (ridge > 0.82f) return TerrainType.Mountains;
-        if (elev > 0.74f)  return TerrainType.Highlands;
-        if (elev > 0.66f)  return TerrainType.Hills;
+
+        // HIGHLANDS AND HILLS USED TO BE RETURNED HERE, at elev > 0.74 and > 0.66, and they are gone.
+        //
+        // They are not biomes. "Highland" says how high the ground is; it says nothing about whether it
+        // is forest, grassland, desert or tundra, and returning it as a terrain TYPE meant that every
+        // world's high ground was one undifferentiated brown band with no climate in it — the moment
+        // ground crossed 0.66 its temperature and moisture stopped mattering at all.
+        //
+        // High ground now falls through to the same climate tests as everything else, so a wet warm
+        // upland is forest and a dry cold one is steppe, and how high it is is reported SEPARATELY —
+        // as an elevation band and a number in the tile readout (see ElevationBand). One tile, two
+        // independent facts, which is what they always were.
+        //
+        // Mountains stay, because a mountain genuinely is a terrain rather than an altitude: bare rock,
+        // too steep and too broken to be anything else. That is why the test above it is `ridge` — how
+        // BROKEN the ground is — and not elevation.
 
         // No-biosphere flooring (CelestialBody.biosphereActive) already happened in SampleNormalized
         // before moist reached here, so this function doesn't need to know about it at all — moist is

@@ -1,24 +1,26 @@
 // ============================================================================================
 // PER-PROJECT CLIMATE PROFILES — what each terraforming project does to a world's TERRAIN KNOBS.
 //
-// TerraformVisuals already walks a world's terrainParams (heat/moisture/elevation/ridge) toward the
-// species' ideal as habitability climbs — but that morph is GENERIC: hauling water, planting forests
-// and drying a world out all pushed the same species-ideal blend, so "the action you took" was never
-// what you saw change on the map.
+// TerraformVisuals already walks a world's terrainParams — heat, moisture and SEA LEVEL, and
+// deliberately not relief (see the long note in TerraformVisuals.Ideal) — toward the species' ideal as
+// habitability climbs. But that morph is GENERIC: hauling water, planting forests and drying a world
+// out all pushed the same species-ideal blend, so "the action you took" was never what you saw change
+// on the map.
 //
-// This table fixes that. Every project declares a delta on the four amplitude knobs the terrain
-// generator (PlanetTerrainGenerator) reads, chosen against how its Classify() actually turns those
-// knobs into biomes:
+// This table fixes that. Every project declares a delta on the climate knobs the terrain generator
+// (PlanetTerrainGenerator) reads, chosen against how its Classify() actually turns those knobs into
+// biomes:
 //
-//   • ELEVATION gates open water. The generator floods LOW ground (Terran elev < 0.36 → Ocean; an
-//     ocean world is water except where elevation lifts land out). So water-IN projects LOWER
-//     elevation — low basins fill into lakes and seas first — and water-OUT projects RAISE it so land
+//   • SEA LEVEL gates open water, and it is the WATERLINE that moves rather than the land. The
+//     generator floods ground below the line (Terran elev < 0.36 + sea → Ocean), so water-IN projects
+//     RAISE the sea — low basins fill first, then the hills — and water-OUT projects lower it so land
 //     emerges. Moisture does NOT create seas; that was the trap.
 //   • MOISTURE gates vegetation: on temperate ground the generator runs desert → grassland → forest →
 //     jungle as moisture rises. So life/forest projects raise it; a dry-loving remodel lowers it.
 //   • HEAT warms or cools, moving temperate bands (and, because PlanetTemperature reads through the
 //     same knob, the world's °C and the tile hover readout move with it for free).
-//   • RIDGE / ELEVATION raise or level mountains.
+//   • ELEVATION and RIDGE would raise or level mountains — and every project below leaves them at ZERO.
+//     A world's relief is its geology's business, not terraforming's. See the note on ClimateDelta.
 //
 // A COMPLETED project contributes its full delta; a RUNNING one contributes delta × progress, which is
 // what makes seas fill WHILE a Water Convoy runs and recede WHILE Hydrosphere Venting runs. Compose()
@@ -45,18 +47,42 @@ public static class TerraformClimate
         /// SEA; they do not reshape the land. Flooding a world by flattening its elevation amplitude
         /// meant "Haul Water" quietly demolished its mountains, and reversing the project could never
         /// give them back because the relief itself had been thrown away.
-        public float heat, moisture, seaLevel, ridge;
+        public float heat, moisture, seaLevel;
+
+        // ============================================================================================
+        // THE TWO RELIEF KNOBS — the ONLY way terraforming may move the ground, and nothing uses them
+        //
+        // Terraforming no longer touches a world's shape as a side effect of anything. The background
+        // blend toward a species' ideal leaves elevation and ridge exactly where nature put them (see
+        // TerraformVisuals.Ideal), because "terrain elevation should stay constant" when a world is
+        // heated, flooded or given an atmosphere.
+        //
+        // But the request leaves one door open, and these are it: "maybe you want to flatten a map with
+        // a very specific terraforming technology, or vice versa you might want a very mountainous grid
+        // map". A project that says outright that it reshapes the ground is allowed to, and this is
+        // where it would say so.
+        //
+        // EVERY SHIPPED PROJECT LEAVES BOTH AT ZERO. That is not an oversight — it is the invariant. If
+        // a future Planetary Levelling or Orogenic Engineering project is added, it sets one of these
+        // and nothing else in the pipeline has to change; and until one exists, no combination of
+        // projects can move a mountain, which is the property the whole terrain rework rests on.
+        public float elevation, ridge;
 
         public static ClimateDelta Zero => new ClimateDelta();
 
-        public ClimateDelta(float heat, float moisture, float seaLevel = 0f, float ridge = 0f)
-        { this.heat = heat; this.moisture = moisture; this.seaLevel = seaLevel; this.ridge = ridge; }
+        public ClimateDelta(float heat, float moisture, float seaLevel = 0f,
+                            float elevation = 0f, float ridge = 0f)
+        {
+            this.heat = heat; this.moisture = moisture; this.seaLevel = seaLevel;
+            this.elevation = elevation; this.ridge = ridge;
+        }
 
         public static ClimateDelta operator +(ClimateDelta a, ClimateDelta b)
-            => new ClimateDelta(a.heat + b.heat, a.moisture + b.moisture, a.seaLevel + b.seaLevel, a.ridge + b.ridge);
+            => new ClimateDelta(a.heat + b.heat, a.moisture + b.moisture, a.seaLevel + b.seaLevel,
+                                a.elevation + b.elevation, a.ridge + b.ridge);
 
         public static ClimateDelta operator *(ClimateDelta a, float k)
-            => new ClimateDelta(a.heat * k, a.moisture * k, a.seaLevel * k, a.ridge * k);
+            => new ClimateDelta(a.heat * k, a.moisture * k, a.seaLevel * k, a.elevation * k, a.ridge * k);
     }
 
     // The signature terrain change each project drives. Review the SIGN against what the project is FOR:

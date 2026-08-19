@@ -22,7 +22,9 @@ public static class GameStateSerializer
             galaxyName = galaxy != null ? galaxy.name : "",
             galaxySeed = galaxy != null ? galaxy.visualSeed : 0,
             centerHideReason = galaxy != null && galaxy.center != null ? Persist(galaxy.center.hideReason) : 0,
-            timeScale = Time.timeScale
+            timeScale = Time.timeScale,
+            // The date. See GameCalendar — one second of game time is one in-game day.
+            calendarDays = GameCalendar.TotalDays
         };
 
         var bg = SpaceBackground.Instance;
@@ -183,6 +185,7 @@ public static class GameStateSerializer
             naturalOrbitRadius = b.naturalOrbitRadius,
             orbitDirection = b.orbitDirection, inclination = b.inclination, eccentricity = b.eccentricity,
             verticalOffset = b.verticalOffset, spinSpeed = b.spinSpeed, showRing = b.showRing,
+            rotationDirection = b.rotationDirection == 0 ? 1 : b.rotationDirection, beltId = b.beltId,
             distanceFromStar = b.distanceFromStar, habitability = b.habitability, isHabitable = b.isHabitable,
             buildings = new List<int>(b.buildings),
             shipyardLevel = b.shipyardLevel, researchCenterLevel = b.researchCenterLevel,
@@ -442,6 +445,10 @@ public static class GameStateSerializer
         float ts = Mathf.Max(0f, game.timeScale <= 0f ? 1f : game.timeScale);
         Time.timeScale = ts;
         TimeController.timeScale = ts;
+
+        // The calendar. A save written before the clock existed carries 0, which is Year 0001 Day 01 —
+        // the right answer rather than a missing one, so no migration branch is needed.
+        GameCalendar.SetTotalDays(game.calendarDays);
     }
 
     static CelestialBody FromDTO(BodyDTO dto, CelestialBody parent)
@@ -454,6 +461,8 @@ public static class GameStateSerializer
             orbitDirection = dto.orbitDirection == 0 ? 1 : dto.orbitDirection,
             inclination = dto.inclination, eccentricity = dto.eccentricity,
             verticalOffset = dto.verticalOffset, spinSpeed = dto.spinSpeed, showRing = dto.showRing,
+            // 0 means "written before rotation had a direction", and every such world was prograde.
+            rotationDirection = dto.rotationDirection == 0 ? 1 : dto.rotationDirection, beltId = dto.beltId,
             distanceFromStar = dto.distanceFromStar, habitability = dto.habitability,
             isHabitable = dto.isHabitable, habitabilityLocked = dto.habitabilityLocked,
             owner = dto.ownerId >= 0 ? FactionManager.Get(dto.ownerId) : null,
@@ -663,7 +672,17 @@ public static class GameStateSerializer
                     for (int x = 0; x < b.surface.width; x++)
                     {
                         var t = b.surface.tiles[x, y];
-                        if (t != null) t.type = (TerrainType)cells[y * b.surface.width + x];
+                        if (t == null) continue;
+                        t.type = (TerrainType)cells[y * b.surface.width + x];
+
+                        // KEEP `ground` HONEST ACROSS THE OVERWRITE. The save stores the biome and not
+                        // what is under it, so a restored tile carries a stored `type` beside a freshly
+                        // GENERATED `ground`, and the two can disagree. The invariant is the same one the
+                        // generator's own clean-up pass enforces: a tile with nothing lying on it is its
+                        // own ground. Only where the stored type really is a cover — sea, sea ice, snow,
+                        // glacier — is the generated `ground` kept, and there it is the best available
+                        // reading of what draining or thawing this tile would uncover.
+                        if (!PlanetTerrainGenerator.IsCover(t.type)) t.ground = t.type;
                     }
         }
 

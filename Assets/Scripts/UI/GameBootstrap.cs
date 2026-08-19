@@ -14,6 +14,7 @@ public static class GameBootstrap
         initialized = true;
 
         // Core managers (no canvas needed).
+        GameClock.Create();                 // the calendar: one second of game time is one in-game day
         SimpleAudio.Create();
         DevCheats.Create();                 // Dev Mode: keeps a million of everything topped up
         ResearchTaskManager.Create();

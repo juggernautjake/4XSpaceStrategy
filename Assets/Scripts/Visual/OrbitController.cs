@@ -21,7 +21,8 @@ public class OrbitController : MonoBehaviour
     public float inclination = 0f;    // tilt of orbit plane, degrees
     [Range(0f, 0.7f)] public float eccentricity = 0f;
     public float verticalOffset = 0f;
-    public float spinSpeed = 0f;      // axial rotation, degrees per second
+    public float spinSpeed = 0f;      // axial rotation RATE, degrees per second (always positive)
+    public int spinDirection = 1;     // +1 prograde, -1 retrograde — see CelestialBody.rotationDirection
 
     [Header("Ring")]
     public int segments = 128;
@@ -59,6 +60,7 @@ public class OrbitController : MonoBehaviour
         eccentricity = data.eccentricity;
         verticalOffset = data.verticalOffset;
         spinSpeed = data.spinSpeed;
+        spinDirection = data.rotationDirection == 0 ? 1 : data.rotationDirection;
         ringVisible = data.showRing;
         currentAngle = phase;
         BuildRing();
@@ -233,11 +235,15 @@ public class OrbitController : MonoBehaviour
         if (parentBody == null) return;
         // orbitSpeed is now an angular speed in deg/sec (Kepler-defaulted, dev-overridable).
         currentAngle += direction * orbitSpeed * Time.deltaTime;
-        if (spinSpeed != 0f) transform.Rotate(0f, spinSpeed * Time.deltaTime, 0f, Space.Self);
+        if (spinSpeed != 0f) transform.Rotate(0f, spinDirection * spinSpeed * Time.deltaTime, 0f, Space.Self);
         UpdatePosition();
     }
 
     public void SetSpin(float v) { spinSpeed = v; }
+
+    /// Prograde / retrograde, live. The rate is untouched — see CelestialBody.rotationDirection for why
+    /// the two are separate values rather than one signed one.
+    public void SetSpinDirection(int d) { spinDirection = d >= 0 ? 1 : -1; }
 
     public void UpdatePosition()
     {

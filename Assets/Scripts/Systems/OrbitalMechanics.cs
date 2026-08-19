@@ -53,11 +53,22 @@ public static class OrbitalMechanics
     public static float OrbitalVelocity(float primaryMass, float radius)
         => 30f * Mathf.Sqrt(primaryMass / Mathf.Max(1f, radius));
 
-    // Orbital period in real seconds given an angular speed in deg/sec.
+    /// Orbital period, in seconds of game time — which is DAYS on the game calendar (GameCalendar), so a
+    /// world with a 90-second orbit has a 90-day year. The readouts run it through GameCalendar.Duration.
     public static float PeriodSeconds(float angularSpeedDeg)
         => angularSpeedDeg > 0.001f ? 360f / angularSpeedDeg : 0f;
 
-    // Axial spin (deg/sec): smaller worlds spin a touch faster; slight per-body variance.
+    /// AXIAL SPIN IS NO LONGER ROLLED HERE — see RotationRules.Roll.
+    ///
+    /// This gave smaller worlds a faster spin, which was a reasonable placeholder while rotation was
+    /// decoration. It is not any more: rotation is what drives a world's magnetic field, and a rule that
+    /// said "smaller is faster" handed every moon and asteroid a magnetosphere and denied one to every
+    /// gas giant — the exact inverse of the truth. RotationRules rolls two populations (spun-up and
+    /// tidally braked) with the odds weighted by mass, which is the mechanism this was standing in for.
+    ///
+    /// Kept because it is a fair one-line answer to "what should this thing's spin be" for any future
+    /// caller that has no CelestialBody to hand, and because deleting it would be a diff with no reader.
+    /// Nothing in generation calls it.
     public static float Spin(CelestialBody b, float variance)
         => Mathf.Clamp(60f / Mathf.Sqrt(Mathf.Max(1f, b.surfaceSize)) * variance, 3f, 40f);
 }

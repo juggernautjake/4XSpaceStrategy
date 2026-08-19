@@ -10,10 +10,10 @@ public static class GalaxyGenerator
     /// Generate a whole galaxy in one call. Unchanged behaviour — it is now expressed as the three
     /// phases below so a loading screen can drive the same work a step at a time and report real
     /// progress. Anything that does not need progress should keep calling this.
-    public static Galaxy Generate(SolarSystemGenerator gen, int systemCount, int avgPlanets, Species homeSpecies)
+    public static Galaxy Generate(SolarSystemGenerator gen, int systemCount, Species homeSpecies)
     {
         int count = ClampSystems(systemCount);
-        var galaxy = Begin(gen, avgPlanets);
+        var galaxy = Begin(gen);
         for (int i = 0; i < count; i++) AddSystem(galaxy, gen, i, count);
         Finish(galaxy, homeSpecies, count);
         return galaxy;
@@ -22,12 +22,14 @@ public static class GalaxyGenerator
     public static int ClampSystems(int systemCount) => Mathf.Clamp(systemCount, 1, 12);
 
     /// Phase 1 — the empty galaxy: its name, its seed, its core.
-    public static Galaxy Begin(SolarSystemGenerator gen, int avgPlanets)
+    ///
+    /// NO LONGER TAKES A PLANET COUNT. It used to set the system generator's min/max body count from the
+    /// New Game menu's "average planets per system" slider. Both are gone: a system's size now falls out
+    /// of the Solar System Mass allowance its star or stars fund (see SolarSystemGenerator), and a
+    /// slider that demanded four planets from a red dwarf that could only afford two would either be
+    /// ignored or would break the ceiling — and either way one of the two rules would be a lie.
+    public static Galaxy Begin(SolarSystemGenerator gen)
     {
-        avgPlanets = Mathf.Clamp(avgPlanets, 1, 8);
-        gen.minBodies = Mathf.Max(1, avgPlanets - 1);
-        gen.maxBodies = avgPlanets + 2;
-
         NameGenerator.Reset();   // fresh unique-name registry for this galaxy
 
         var galaxy = new Galaxy();
@@ -52,13 +54,27 @@ public static class GalaxyGenerator
     // ForceHomeWorld) holding for 2 or 3 suns exactly as it does for 1: StarDatabase.Combine's summed
     // luminosity for up to three G/K stars (max ~3x a single G) never approaches the O/B range where
     // hasHabitableZone would be a lie, so the cradle never needs to be capped back down to binary.
+    //
+    // THE PRIMARY IS G FOR TERRANS, ALWAYS. "Terran Home Star should be a G type, same as our Sol in
+    // real life" — and that is the same reasoning as the mass-1 cradle a few dozen lines down. The
+    // Terran start is the game's Earth-and-Sun reference point, and a reference point that came out a K
+    // dwarf half the time would not be one. Every other species keeps the coin flip, so their cradles
+    // still vary between an orange and a yellow sun.
+    //
+    // Only the PRIMARY is pinned. A Terran binary's second sun is rolled as before, so the rare
+    // multiple-star home still reads as two different suns rather than two identical ones.
     static List<StarData> RollHomeCluster()
     {
         float c = Random.value;
         int count = c < 0.04f ? 3 : (c < 0.14f ? 2 : 1);   // ~4% trinary, ~10% binary, ~86% single
+        bool solLike = SpeciesManager.Current != null && SpeciesManager.Current.solHomeStar;
+
         var list = new List<StarData>(count);
         for (int i = 0; i < count; i++)
-            list.Add(StarDatabase.Get(Random.value < 0.5f ? StarType.G : StarType.K));
+        {
+            bool pinned = solLike && i == 0;
+            list.Add(StarDatabase.Get(pinned ? StarType.G : (Random.value < 0.5f ? StarType.G : StarType.K)));
+        }
         return list;
     }
 
@@ -263,29 +279,36 @@ public static class GalaxyGenerator
 
         planet.type = BestTypeFor(species);
 
-        // THE CRADLE'S MASS COMES FROM THE SPECIES' LUNGS.
+        // THE CRADLE'S MASS IS THE SPECIES' OWN, AND FOR TERRANS IT IS EXACTLY ONE.
         //
-        // It used to be a flat Mass 2-4 for everyone. Now that atmosphere is one atmosphere per unit of
-        // mass, that would hand every species a 2-4 atmosphere world — fine for Terrans, and a
-        // suffocating near-vacuum for the Pyrothians, who need 5-9. A species' homeworld is the one
-        // world in the galaxy guaranteed to suit it, so the mass is solved backwards from the pressure
-        // its biology wants. The visible consequence is good: Pyrothians come from a heavy world and
-        // Cryithn from a light one, and you can read that off the Overview.
+        // This used to be solved backwards from the species' breathing range, because atmosphere was one
+        // atmosphere per unit of mass and that was the only way to guarantee a Pyrothian cradle held
+        // Pyrothian air. It cannot be any more: terrestrial worlds run 0.6 to 4 Earths now, and the
+        // Pyrothians want five to nine atmospheres, so no legal terrestrial mass produces their
+        // pressure. The derivation would have had to build them a gas giant to stand on.
         //
-        // Rolled across the whole SPAN of masses that land inside the species' band rather than pinned to
-        // its midpoint, or every Terran game would open on an identical mass-2 cradle. A whole-number
-        // mass is a whole atmosphere, so the band's own bounds are the roll's bounds; the floor of 2
-        // keeps a homeworld a real planet rather than something moon-sized.
-        int massLo = Mathf.Max(2, Mathf.CeilToInt(species.minAtmospheres));
-        int massHi = Mathf.Clamp(Mathf.FloorToInt(species.maxAtmospheres), massLo, 9);
-        planet.mass = Random.Range(massLo, massHi + 1);
+        // Mass and air are decoupled instead. The mass is stated per species (Species.cradleMass) and
+        // the air is granted outright a few lines below — the cradle is the one world in the galaxy that
+        // is exactly what its inhabitants need, so defining rather than rolling its pressure is the
+        // honest form of that guarantee. "1 Mass would be 1 Earth", and a Terran homeworld IS Earth: it
+        // is the anchor the whole scale is calibrated against, and it does not get a variance roll.
+        planet.mass = MassRules.QuantizeTerrestrial(species != null ? species.cradleMass : MassRules.TerrestrialDefault);
         planet.surfaceSize = MassRules.SurfaceSize(planet.mass);
 
         // A cradle has a working dynamo. This is not a convenience: without a field the ceiling halves,
         // and the world could not hold the air its own species evolved to breathe. Life needs the shield
         // for the same reason it needs the air.
+        //
+        // GRANTED BY SPINNING IT UP, not by setting the flag. A magnetic field is a consequence of
+        // rotation now (RotationRules), so writing the flag on its own would leave the Overview reporting
+        // a magnetosphere beside a rotation figure far too slow to drive one — the world would be
+        // carrying a fact its own numbers contradict. Rolled inside the fast population, so the exact
+        // day length still differs from one game to the next.
+        planet.spinSpeed = Mathf.Max(RotationRules.MagneticFieldSpin + 2f,
+                                     RotationRules.Roll(planet.mass, isMoon: false));
+        planet.rotationDirection = 1;   // a cradle turns the right way round
         planet.hasMagneticField = true;
-        planet.hasTectonics = TectonicsRules.Roll(planet.type, planet.surfaceSize);
+        planet.hasTectonics = TectonicsRules.Roll(planet.type, planet.mass);
 
         // The full ceiling, taken as a definition rather than rolled: one atmosphere per unit of mass,
         // with the field intact and none of the 0.85-1.0 variance every other world gets. A cradle is the
@@ -298,7 +321,6 @@ public static class GalaxyGenerator
         planet.atmospheres = AtmosphereRules.Quantize(
             Mathf.Clamp(planet.mass, species.minAtmospheres, species.maxAtmospheres));
         planet.orbitPhase = Random.Range(0f, 360f);
-        planet.spinSpeed = OrbitalMechanics.Spin(planet, Random.Range(0.7f, 1.3f));
         SeedTerrain(planet);
         // The home world's climate matches the species' preferred temperature, so a Pyrothian home
         // reads hot and a Cryithn home reads frozen — the race's biology visibly shapes its cradle.
@@ -341,9 +363,17 @@ public static class GalaxyGenerator
         int nextId = 0;
         foreach (var b in home.AllBodies()) nextId = Mathf.Max(nextId, b.id);
         nextId++;
+        // The cradle's moon ALLOWANCE — half its own mass, the same rule every other terrestrial world
+        // follows (MassRules.MoonBudget). Spent down as each moon is made, so a three-moon cradle gets
+        // three genuinely small moons rather than three that each took a full independent cut of the
+        // planet. This is also why a mass-1 Terran cradle gets a Luna and not a second Earth: the whole
+        // allowance is 0.5.
+        float moonPot = MassRules.MoonBudget(planet.mass);
+
         // Start clear of the home world's own surface rather than at a fixed 2.6, which a large world
-        // (surfaceSize up to 16) came close to touching.
-        float moonR = Mathf.Max(0.6f, planet.surfaceSize * 0.08f) * 0.5f + 0.3f + 0.9f;
+        // came close to touching. Through OrbitSafety, which is the one place a body's rendered size is
+        // defined — the old inline `surfaceSize * 0.08` was a copy of it, and copies drift.
+        float moonR = OrbitSafety.DiscRadius(planet) + 0.3f + 0.9f;
         for (int m = 0; m < moonCount; m++)
         {
             var moon = new CelestialBody(CelestialBodyType.Moon)
@@ -351,10 +381,18 @@ public static class GalaxyGenerator
                 id = nextId++,
                 name = $"Homeworld-{(char)('a' + m)}"
             };
-            moon.mass = MassRules.ForMoon(planet.mass);
+            // Out of the cradle's own moon allowance (half its mass for a terrestrial world), spent down
+            // as each moon is made — so three home moons share one budget rather than each taking a full
+            // cut of the planet, which is how the old per-moon roll could hand a world three near-twins.
+            moon.mass = MassRules.RollMoon(moonPot);
+            if (moon.mass < MassRules.AsteroidMin) break;
+            moonPot -= moon.mass;
             moon.surfaceSize = MassRules.SurfaceSize(moon.mass);
-            moon.hasMagneticField = AtmosphereRules.RollMagneticField(moon.type, moon.mass);
-            moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.surfaceSize);
+            // Rotation first: the field is a consequence of it now. See RotationRules.
+            moon.spinSpeed = RotationRules.Roll(moon.mass, isMoon: true);
+            moon.rotationDirection = RotationRules.RollDirection(isMoon: true);
+            moon.hasMagneticField = RotationRules.GeneratesField(moon.type, moon.mass, moon.spinSpeed);
+            moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.mass);
             SeedTerrain(moon);
             // AFTER SeedTerrain, which is what sets terrainParams.heat — and heat is what decides how
             // much of the ceiling boils off. Rolling the air first would have been rolling it against a
@@ -373,7 +411,6 @@ public static class GalaxyGenerator
             ResourceGenerator.GenerateResources(moon);
             moon.orbitRadius = moonR;
             moon.orbitSpeed = OrbitalMechanics.MoonAngularSpeed(planet, moonR);
-            moon.spinSpeed = OrbitalMechanics.Spin(moon, Random.Range(0.7f, 1.3f));
             moon.orbitPhase = Random.Range(0f, 360f);
             moon.distanceFromStar = planet.distanceFromStar;
             moon.hostStar = home.combinedStar;
@@ -562,7 +599,13 @@ public static class GalaxyGenerator
         body.terrainSeed = Random.Range(0f, 10000f);
         body.continentFrequency = Mathf.Clamp(body.surfaceSize * 0.32f, 2.5f, 8f);
         TerrainVariance.Apply(body);
-        if (body.hasTectonics) TectonicsRules.BoostRidge(body);   // active plates fold up more mountains
+        // TectonicsRules.BoostRidge USED TO RUN HERE, multiplying a tectonic world's ridge amplitude so
+        // it folded up more mountains "everywhere". That was the best available stand-in while ridge was
+        // an independent noise field and there was no fault GEOMETRY to place ranges along. There is now:
+        // ridge is derived from the ground the plates actually raised (PlanetTerrainGenerator.
+        // RidgeFromRelief), so a tectonic world gets its mountains AT ITS MARGINS rather than as a
+        // world-wide roughness bonus — and applying the old multiplier on top would raise them everywhere
+        // else as well, which is the exact artefact the rework removes.
         // The climate nature gave it. Terraforming lerps FROM here (TerraformVisuals), so it has to be
         // captured before anything moves it.
         TerraformVisuals.CaptureNatural(body);

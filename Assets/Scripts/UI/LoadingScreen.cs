@@ -304,6 +304,11 @@ public class LoadingScreen : MonoBehaviour
         headlineBase = string.IsNullOrEmpty(headlineText) ? "Generating the universe" : headlineText;
         shown = 0f; goal = 0f; target = 0f; prevTarget = 0f; creepCeiling = 0f;
 
+        // The stall detector starts fresh with the screen. Without this the FIRST report of a load
+        // measures from whenever the last one ended — which, if the player sat on the start menu for two
+        // hours, is a two-hour "stall" logged against an empty caption. Seen exactly that.
+        lastReportAt = -1f; worstFrame = 0f; lastStage = "(start)";
+
         // Empty the sky, so every load starts from black and builds again rather than opening on the
         // last game's finished starfield.
         //
@@ -480,23 +485,44 @@ public class LoadingScreen : MonoBehaviour
         welcomeLabel.gameObject.SetActive(false);
     }
 
-    /// A frame longer than this during loading is a step that should have been sliced, and it is worth
-    /// naming rather than leaving to be inferred from where the bar stopped.
-    ///
-    /// The bar CREEPS toward a ceiling above each reported figure (see below), so a long block does not
-    /// leave it at the last number reported — it leaves it at that ceiling, which is a number nobody
-    /// wrote down anywhere. Chasing "it sticks at 63%" through the code costs far more than logging the
-    /// caption that was on screen when the frame took two seconds.
-    const float SlowFrameSeconds = 0.5f;
+    // ============================================================================================
+    // THE STALL DETECTOR — it measures the longest FRAME now, not the gap between reports
+    //
+    // It used to time from one Report to the next, and every one of the warnings that produced was
+    // false. Generation is sliced: a system takes about a second, but that second is a hundred ordinary
+    // frames with the bar moving and the dots animating throughout — which is exactly what "sliced"
+    // means and exactly what the diagnostic exists to confirm. Worse, the cinematic half of the load
+    // stops reporting once the bar is full and then legitimately WAITS out its remaining beats, so the
+    // longest "stall" in the log was reliably the part of the load that is supposed to take time.
+    //
+    // What actually matters is whether any SINGLE frame blocked, because a blocked frame is the only
+    // thing the player can see: the dots freeze, the bar stops, and the screen looks hung. So Update
+    // tracks the worst frame since the last report, and Report warns on THAT — naming the caption that
+    // was on screen when it happened, and how long the step took in total for context.
+    //
+    // The threshold is a third of a second rather than a half. At 0.5 a stall had to be bad enough to
+    // read as a hang before it was reported; a third of a second is where the animation visibly stops.
+    const float SlowFrameSeconds = 0.33f;
+
     float lastReportAt = -1f;
+    float worstFrame;
+
+    /// Called from Update while the screen is open. Cheap, and the only way to see a frame that blocked:
+    /// by the time Report is called the long frame is already over.
+    void TrackFrame(float dt)
+    {
+        if (dt > worstFrame) worstFrame = dt;
+    }
 
     public void Report(float t, string stage)
     {
         float now = Time.realtimeSinceStartup;
-        if (lastReportAt > 0f && now - lastReportAt > SlowFrameSeconds)
-            Debug.Log($"[Loading] {now - lastReportAt:F2}s spent on '{lastStage}' before reaching " +
-                      $"{t * 100f:F0}%. Slice that step if it is a step rather than a wait.");
+        if (lastReportAt > 0f && worstFrame > SlowFrameSeconds)
+            Debug.Log($"[Loading] a single frame took {worstFrame:F2}s during '{lastStage}' " +
+                      $"({now - lastReportAt:F2}s for the whole step, now at {t * 100f:F0}%). " +
+                      $"That frame is unsliced work — split it.");
         lastReportAt = now;
+        worstFrame = 0f;
 
         float next = Mathf.Clamp01(t);
         if (next > target)
@@ -529,6 +555,7 @@ public class LoadingScreen : MonoBehaviour
         if (!IsOpen) return;
 
         float dt = Time.unscaledDeltaTime;
+        TrackFrame(dt);   // the stall detector — see Report
 
         // Space fills in behind everything, paced by REAL progress rather than a clock — so the sky and
         // the bar are describing the same thing.

@@ -11,7 +11,7 @@ using UnityEngine;
 //   * A mass-6 world with a magnetic field holds ~6 atmospheres.
 //   * The same world with no field holds ~3 — no shield, half the air.
 //   * A mass-1 world with a field holds ~1; without, ~0.5.
-//   * Gas giants run to their mass, ~7..13.
+//   * Gas giants run to their mass, 10..40.
 //   * Asteroids hold nothing at all, ever.
 //
 // WHY THICKNESS STILL EXISTS. Roughly thirty call sites read atmosphereThickness as a 0..1 value —
@@ -53,20 +53,21 @@ public static class AtmosphereRules
 
     // ---- Magnetic field ------------------------------------------------------------------------
 
-    /// Rolled once at generation. Mass is the driver: a big body keeps its core molten and turning, a
-    /// small one froze solid long ago.
+    /// THE FIELD IS NO LONGER ROLLED HERE — see RotationRules.GeneratesField.
+    ///
+    /// It used to be a coin flip weighted by mass, and that was a stand-in for the real mechanism: a
+    /// dynamo needs a conducting fluid core AND rotation to stir it, and rotation is the half that
+    /// varies between worlds that are otherwise identical. Venus and Earth are nearly the same size and
+    /// made of nearly the same things; Earth turns once a day and has a magnetosphere, Venus takes 243
+    /// days and has essentially none. Mass still decides most of it — a bigger world is likelier to have
+    /// spun up and less likely to have been tidally braked — but through the rotation roll rather than
+    /// instead of it, which is what makes the Dev panel's rotation slider mean something.
+    ///
+    /// Kept as a thin forward rather than deleted: `FieldMassThreshold` below is still read by the save
+    /// loader's migration path for files written before either mechanism existed, and leaving a function
+    /// that answers the same question two different ways next to it is how the two drift apart.
     public static bool RollMagneticField(CelestialBodyType type, float mass)
-    {
-        // A gas giant's field is enormous and never in question; an asteroid has no core to speak of.
-        if (type == CelestialBodyType.GasGiant) return true;
-        if (type == CelestialBodyType.Asteroid) return false;
-
-        float chance = mass >= FieldMassThreshold
-            ? Mathf.Lerp(0.55f, 0.90f, Mathf.InverseLerp(FieldMassThreshold, 8f, mass))
-            : Mathf.Lerp(0.02f, 0.20f, Mathf.InverseLerp(0.1f, FieldMassThreshold, mass));
-
-        return Random.value < chance;
-    }
+        => RotationRules.GeneratesField(type, mass, RotationRules.Roll(mass, type == CelestialBodyType.Moon));
 
     // ---- Ceiling -------------------------------------------------------------------------------
 

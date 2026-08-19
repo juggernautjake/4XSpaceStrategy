@@ -304,15 +304,18 @@ public partial class InspectorWindow
         var orbit = Card(p);
         Stat(orbit, "Distance from star", () => $"{b.distanceFromStar:F1} units");
         Stat(orbit, "Orbital radius", () => $"{b.orbitRadius:F1}");
-        Stat(orbit, "Year", () => $"{OrbitalMechanics.PeriodSeconds(b.orbitSpeed):F1}s");
+        Stat(orbit, "Year", () => GameCalendar.Duration(OrbitalMechanics.PeriodSeconds(b.orbitSpeed)));
         Stat(orbit, "Eccentricity", () => $"{b.eccentricity:F2}");
         Stat(orbit, "Axial tilt", () => $"{b.inclination:F0}°" + (Mathf.Abs(b.inclination) > 28f ? "  <color=#FFBF4D>(severe seasons)</color>" : ""));
+        // The DAY, in days, plus which way round it turns and whether that is enough to run a dynamo.
+        // Degrees per second is the stored unit and was never a figure a player could reason about; a
+        // rotation period in the same days the rest of the game now counts in is (see GameCalendar).
         Stat(orbit, "Day length", () =>
         {
-            float spin = Mathf.Abs(b.spinSpeed);
-            if (spin < 3f) return $"{spin:F1}°/s  <color=#FFBF4D>(near tidally locked)</color>";
-            if (spin > 45f) return $"{spin:F1}°/s  <color=#FFBF4D>(violently fast)</color>";
-            return $"{spin:F1}°/s";
+            string s = RotationRules.Describe(b);
+            if (Mathf.Abs(b.spinSpeed) < RotationRules.MagneticFieldSpin)
+                return s + "  <color=#FFBF4D>(too slow for a magnetic field)</color>";
+            return s;
         });
 
         // The star it orbits, since that's what decides the whole climate.
@@ -633,7 +636,7 @@ public partial class InspectorWindow
             live.Button(cityBtn, () =>
             {
                 bool can = mgr.CanEstablishCity(b, out string why);
-                return (can, can ? $"Establish City ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {ColonyManager.CityBuildTime:F0}s)"
+                return (can, can ? $"Establish City ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {GameCalendar.Duration(ColonyManager.CityBuildTime)})"
                                  : $"Establish City — {why}");
             });
         }
@@ -700,7 +703,7 @@ public partial class InspectorWindow
                 var cap = u;
                 var card = Card(p);
                 var t = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.SubText);
-                live.Text(t, () => $"<b>{cap.name}</b> — arriving in {Mathf.Max(0f, cap.travelDuration - cap.travelElapsed):F0}s");
+                live.Text(t, () => $"<b>{cap.name}</b> — arriving in {GameCalendar.Duration(Mathf.Max(0f, cap.travelDuration - cap.travelElapsed))}");
                 UIFactory.Button(card, "Select »", () => { UnitSelection.SelectOnly(cap); }, 22);
             }
         }

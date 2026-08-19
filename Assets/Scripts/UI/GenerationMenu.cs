@@ -2,8 +2,9 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
-// New-game wizard: name your faction, pick your species and difficulty, choose galaxy size (number
-// of systems + average planets per system), then generate. The home system always gets a
+// New-game wizard: name your faction, pick your species and difficulty, choose how many star systems
+// the galaxy holds, then generate. How full each of those systems is is not a setting — it comes from
+// the mass of the system's own star (see SolarSystemGenerator). The home system always gets a
 // difficulty-appropriate habitable home world your faction owns (with its moons).
 public class GenerationMenu : MonoBehaviour
 {
@@ -11,7 +12,7 @@ public class GenerationMenu : MonoBehaviour
 
     GameObject root;
     TMP_InputField nameInput;
-    Slider systemsS, planetsS;
+    Slider systemsS;
     TMP_Text summary;
 
     int selectedSpecies = 0;
@@ -56,7 +57,22 @@ public class GenerationMenu : MonoBehaviour
 
         UIFactory.Label(col, "GALAXY", UITheme.SmallSize, UITheme.Accent, 16);
         systemsS = UIFactory.LabeledSlider(col, "Number of systems", 1f, 12f, 5f, _ => UpdateSummary(), "F0");
-        planetsS = UIFactory.LabeledSlider(col, "Average planets per system", 1f, 8f, 4f, _ => UpdateSummary(), "F0");
+
+        // "Average planets per system" USED TO BE HERE, and it is gone rather than hidden.
+        //
+        // A system's size is decided by its Solar System Mass allowance now — 100 per solar mass of its
+        // star or stars, spent outward on planets, their moons and any belts until it runs out (see
+        // SolarSystemGenerator). That makes a binary genuinely richer than a red dwarf, which is the
+        // point. A slider asking for four planets is a second, contradictory answer to the same
+        // question: a dim star that can only afford two either ignores the slider or breaks the ceiling,
+        // and there is no version of that where both rules are true.
+        //
+        // What replaced it as information is the note below — the player still gets told what decides
+        // how full their galaxy will be, which is what the slider was really communicating.
+        UIFactory.Label(col,
+            "<size=10><color=#9FB4C8>Each system's planets, moons and asteroid belts are funded by the " +
+            "mass of its own star: brighter suns and multiple-star systems build larger systems.</color></size>",
+            UITheme.SmallSize, UITheme.Text, 34);
 
         summary = UIFactory.Label(col, "", UITheme.SmallSize, UITheme.Text, 40);
 
@@ -74,7 +90,7 @@ public class GenerationMenu : MonoBehaviour
     {
         var s = SpeciesDatabase.Get(selectedSpecies);
         summary.text = $"<b>{s.name}</b> · <b>{selectedDifficulty}</b> · " +
-                       $"{Mathf.RoundToInt(systemsS.value)} systems, ~{Mathf.RoundToInt(planetsS.value)} planets each";
+                       $"{Mathf.RoundToInt(systemsS.value)} systems";
     }
 
     public void Open()
@@ -102,9 +118,6 @@ public class GenerationMenu : MonoBehaviour
         // Time stays paused until the galaxy exists. Resuming here would run the simulation against a
         // half-built world for the frames generation spans — colony ticks and faction AI on a galaxy
         // whose systems are still being added.
-        GameManager.Instance?.GenerateGalaxyAsync(
-            Mathf.RoundToInt(systemsS.value),
-            Mathf.RoundToInt(planetsS.value),
-            TimeControl.Resume);
+        GameManager.Instance?.GenerateGalaxyAsync(Mathf.RoundToInt(systemsS.value), TimeControl.Resume);
     }
 }

@@ -31,7 +31,16 @@ using UnityEngine;
 public static class WorldClassifier
 {
     // Physics-class mass gates.
+    //
+    // Nothing is GENERATED between 4 (the terrestrial ceiling) and 10 (the gas-giant floor) — that gap
+    // is the whole point of the mass scheme. The cut sits at 7, in the middle of the gap, because this
+    // function also has to classify masses nobody rolled: a body a developer typed a number into, a
+    // world a terraforming project remodelled, a save from before the scheme changed. Putting the line
+    // at 10 would call a hand-made mass-8 body a rocky planet with eight Earths of gravity; putting it
+    // at 4 would call a mass-5 one a gas giant. The middle of an empty band is the one place it cannot
+    // be wrong about anything the generator actually produces.
     public const float GasGiantMassFloor = 7f;    // a real gas giant; no solid surface
+    /// INCLUSIVE — 0.5 IS an asteroid, per the request. Everything that tests it uses <=.
     public const float AsteroidMassCeil = 0.5f;   // too little gravity to be a world
 
     // Orbital-band cuts, as a fraction of the star's Earth-warmth distance (`rel`). Shared with the
@@ -41,9 +50,40 @@ public static class WorldClassifier
     public const float TemperateRelMax = 1.5f;    // the habitable band's outer edge
     public const float CoolRelMax = 3f;           // beyond it, genuinely cold
 
+    // ============================================================================================
+    // THE FROST LINE — why gas giants live in the outer system
+    //
+    // Inside this distance a protoplanetary disc is warm enough that water, ammonia and methane stay
+    // vapour. A forming core there has only rock and metal to work with, there is not much of either,
+    // and it never gets massive enough for its gravity to start pulling in hydrogen. That is the whole
+    // reason the inner solar system is four small rocky worlds and the outer is four giants — not an
+    // aesthetic preference, a supply problem.
+    //
+    // Past the line the same water is ICE, which is both far more abundant and already solid. Cores
+    // grow fast, pass the runaway-accretion threshold, and capture enormous gas envelopes.
+    //
+    // In `rel` — distance over the star's Earth-warmth distance — 2.7 is where it sits in our own
+    // system (the asteroid belt straddles it, which is not a coincidence: that is material that never
+    // got to be a planet). It is set a little inside that here, at 2.2, purely because these systems are
+    // laid out in eight to twelve lanes rather than in AU, and 2.7 would push the first giant out to a
+    // lane most systems never reach.
+    public const float FrostLineRel = 2.2f;
+
+    /// How often a giant turns up INSIDE the frost line anyway. Hot Jupiters are real — they form out
+    /// past the line and then migrate inward through the disc — and the request asks for exactly this:
+    /// "allow for rare exclusions that let a large CB spawn closer". Rare enough that finding one is an
+    /// event; common enough that it happens across a galaxy of a dozen systems.
+    public const float HotGiantChance = 0.05f;
+
     // Water-coverage cuts.
     public const float OceanWater = 0.85f;        // spec: 85%+ is an ocean world
     public const float LandWater = 0.35f;         // below this a "temperate" world is really dry rock
+
+    /// Ground this hot is liquid rock. Basalt melts around here, so it is where "magma field" stops
+    /// being a decoration and starts being what the surface literally is — the request's 650-1000 °C
+    /// band. Shared with the terrain generator so the world's NAME and its map cannot disagree about
+    /// whether it is molten.
+    public const float MagmaMinC = 650f;
 
     /// The type-INDEPENDENT surface temperature, in Celsius — heat and greenhouse only, with the type
     /// modifier deliberately left out because the type is the very thing being decided. Classifying on
@@ -63,13 +103,17 @@ public static class WorldClassifier
     {
         if (b == null) return CelestialBodyType.BarrenPlanet;
 
-        // Size decides the extremes outright, before anything else.
+        // Size decides the extremes outright, before anything else. The asteroid test is <=, not <: the
+        // request draws the line at "0.5 and below", and a body sitting exactly on it is an asteroid.
         if (b.mass >= GasGiantMassFloor) return CelestialBodyType.GasGiant;
-        if (b.mass < AsteroidMassCeil) return isMoon ? CelestialBodyType.Moon : CelestialBodyType.Asteroid;
+        if (b.mass <= AsteroidMassCeil) return isMoon ? CelestialBodyType.Moon : CelestialBodyType.Asteroid;
 
         float c = ClassifyC(b);
         float water = Water(b);
-        bool warmEnoughForLiquid = c >= BiosphereRules.MinLiquidC && c <= BiosphereRules.MaxLiquidC;
+        // The PHYSICAL window, which depends on how much air is holding the water down — a
+        // four-atmosphere world keeps oceans well past the point a thin-aired one has lost them.
+        BiosphereRules.LiquidRange(b, out float freezeC, out float boilC);
+        bool warmEnoughForLiquid = c >= freezeC && c <= boilC;
 
         // --- Scorching / hot: right by the star ---
         // Tectonic activity vents magma to the surface — that is what makes a hot world VOLCANIC rather
@@ -85,7 +129,7 @@ public static class WorldClassifier
         {
             // Frozen despite sitting in the band — a thin-aired world here still runs cold, and its
             // water is ice. Needs real water to be an ICE world rather than a bare cold rock.
-            if (c < BiosphereRules.MinLiquidC)
+            if (c < freezeC)
                 return water >= LandWater ? CelestialBodyType.IcePlanet : CelestialBodyType.BarrenPlanet;
 
             if (warmEnoughForLiquid)
@@ -146,8 +190,12 @@ public static class WorldClassifier
         switch (physics)
         {
             case CelestialBodyType.VolcanicPlanet:
-                // A truly scorched world reads as molten; a merely hot, active one as volcanic.
-                return c > 140f ? "molten world" : "volcanic world";
+                // MOLTEN is a real threshold now, not a descriptive flourish: at and above it the
+                // terrain generator lays down magma fields, so the word and the map agree. Read off the
+                // world's ACTUAL temperature — which includes its internal heat, the term that makes a
+                // world molten in the first place — rather than off `c`, which is deliberately blind to
+                // the type it is trying to decide.
+                return PlanetTemperature.BodyAverageCelsius(b) >= MagmaMinC ? "molten world" : "volcanic world";
 
             case CelestialBodyType.IcePlanet:
                 return "frozen world";
@@ -160,7 +208,7 @@ public static class WorldClassifier
                 // Venus: a thick, poisoned sky over a baked surface.
                 if (thickAir && c > 60f) return "toxic world";
                 if (c > 90f) return "scorched world";
-                if (c < BiosphereRules.MinLiquidC) return "frozen rock";
+                if (c < BiosphereRules.FreezingC(b.atmospheres)) return "frozen rock";
                 return "barren world";
 
             case CelestialBodyType.RockyPlanet:

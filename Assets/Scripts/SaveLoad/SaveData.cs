@@ -56,6 +56,12 @@ public class SaveGame
     public string factionName = "Your Empire";
     public int homeIndex = 0;
     public float timeScale = 1f;
+
+    /// The date, as days elapsed since Year 0001 Month 01 Day 01 (see GameCalendar). A double rather
+    /// than a float because a float starts losing whole days a few in-game centuries in, and a calendar
+    /// that stops advancing is a strange thing to explain. Absent in an older save, where JsonUtility
+    /// leaves it 0 — which is Year 0001 Day 01, the correct answer for a game that predates the clock.
+    public double calendarDays;
     // The galaxy's name and the seed its deep-view spiral was generated from. Stored, not derived: the
     // spiral has to come back identical on reload. An older save has neither, so both are re-rolled on
     // load rather than left blank (see GameStateSerializer.Apply).
@@ -230,6 +236,16 @@ public class BodyDTO
     public float naturalOrbitRadius;   // the generated orbit, for Dev-Mode "Reset orbit/system"
     public int orbitDirection;
     public float inclination, eccentricity, verticalOffset, spinSpeed;
+
+    /// +1 prograde, -1 retrograde — the body's AXIAL rotation, not its orbit. Absent in an older save,
+    /// where JsonUtility leaves it 0; the loader reads 0 as prograde, which is what every world
+    /// generated before rotation had a direction actually was.
+    public int rotationDirection;
+
+    /// Which asteroid belt this body shares a lane with, 0 for none. See CelestialBody.beltId — the
+    /// orbit-safety pass needs it to know that a shared radius is deliberate here.
+    public int beltId;
+
     public bool showRing;
 
     public float distanceFromStar, habitability;

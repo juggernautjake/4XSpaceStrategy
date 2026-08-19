@@ -208,7 +208,7 @@ public class SendToWindow : MonoBehaviour
         foreach (var u in fleet) slow = Mathf.Min(slow, Mathf.Max(1, u.Speed));
 
         float seconds = dist / Mathf.Max(1, slow);
-        return $"{dist:F0} units away · about {seconds:F0}s at the fleet's slowest speed";
+        return $"{dist:F0} units away · about {GameCalendar.Duration(seconds)} at the fleet's slowest speed";
     }
 
     void Confirm()

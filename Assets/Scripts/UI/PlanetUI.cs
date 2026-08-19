@@ -200,7 +200,7 @@ public class PlanetUI : MonoBehaviour
         string ownerHex = "#" + ColorUtility.ToHtmlStringRGB(FactionManager.OwnerColor(body.owner));
         sb.AppendLine($"Owner: <color={ownerHex}>{FactionManager.OwnerLabel(body.owner)}</color>");
         sb.AppendLine($"Distance from star: {body.distanceFromStar:F1}");
-        sb.AppendLine($"Orbit: r={body.orbitRadius:F1}  period={period:F1}s");
+        sb.AppendLine($"Orbit: r={body.orbitRadius:F1}  year={GameCalendar.Duration(period)}");
 
         if (!body.Surveyed)
         {

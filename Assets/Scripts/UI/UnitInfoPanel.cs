@@ -62,7 +62,20 @@ public class UnitInfoPanel : MonoBehaviour
         nameInput.onEndEdit.AddListener(v =>
         {
             if (current != null && !string.IsNullOrWhiteSpace(v)) { current.name = v.Trim(); Refresh(); }
-            nameInput.interactable = false;
+
+            // LOCKED BACK NEXT FRAME, not here.
+            //
+            // onEndEdit fires from inside TMP_InputField.OnDeselect, which is itself running inside
+            // EventSystem's selection change. Writing `interactable = false` there re-enters Selectable's
+            // selection handling while it is already mid-flight, and Unity logs "Attempting to select
+            // while already selecting an object" every time a ship is renamed. Nothing breaks, but a
+            // warning the player's own actions produce on a normal path is one nobody can then use to
+            // find a real fault.
+            //
+            // Deferring by one frame lets the selection change finish first, and the field is only
+            // editable for that one extra frame — which nothing can reach, because the click that ended
+            // the edit has already been consumed.
+            StartCoroutine(LockNameNextFrame());
         });
         UIFactory.Button(content, "Edit Name", () =>
         {
@@ -127,6 +140,18 @@ public class UnitInfoPanel : MonoBehaviour
         scrapBtn = UIFactory.Button(row2.transform, "Scrap (20-30%)", () => { if (current != null) { UnitManager.Instance?.DestroyUnit(current, true); root.SetActive(false); } }, 28);
 
         root.SetActive(false);
+    }
+
+    /// Re-lock the name field one frame after the edit ends.
+    ///
+    /// See the note at onEndEdit: that callback runs from inside the EventSystem's own selection change,
+    /// and writing `interactable` there re-enters Selectable's selection handling — which Unity reports
+    /// as "Attempting to select while already selecting an object" on every single rename. One frame's
+    /// delay lets the selection settle first.
+    System.Collections.IEnumerator LockNameNextFrame()
+    {
+        yield return null;
+        if (nameInput != null) nameInput.interactable = false;
     }
 
     public void Show(Unit u)
@@ -238,7 +263,7 @@ public class UnitInfoPanel : MonoBehaviour
         {
             case UnitStatus.Traveling:
                 prog = u.TravelProgress;
-                task = $"Traveling to {(u.travelTarget != null ? u.travelTarget.name : "?")} ({Mathf.Max(0f, u.travelDuration - u.travelElapsed):F0}s)";
+                task = $"Traveling to {(u.travelTarget != null ? u.travelTarget.name : "?")} ({GameCalendar.Duration(Mathf.Max(0f, u.travelDuration - u.travelElapsed))})";
                 break;
             case UnitStatus.Exploring:
                 prog = u.location != null ? u.location.explorationProgress : 0f;
