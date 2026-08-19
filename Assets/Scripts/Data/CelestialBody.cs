@@ -129,20 +129,34 @@ public class CelestialBody
     //   SETTLED  (settled)        — people actually live here. Needs the world to be habitable FIRST,
     //                               which for most worlds means terraforming a claim you already hold.
     //
-    // `owner` has always meant "claimed" — the home world's moons are owner=Player from turn one and
-    // are deliberately NOT settled — but nothing recorded the second half, so "is this world colonised"
-    // was inferred from side effects like `cities > 0` or a City in `buildings`. Those are consequences
-    // of settling, not the fact of it, and inferring a fact from its consequences is how a moon ended up
-    // with a free city (see ColonyManager.TickColony).
+    // `owner` has always meant "claimed" — but nothing recorded the second half, so "is this world
+    // colonised" was inferred from side effects like `cities > 0` or a City in `buildings`. Those are
+    // consequences of settling, not the fact of it, and inferring a fact from its consequences is how a
+    // moon ended up with a free city (see ColonyManager.TickColony).
     public Faction owner;               // null == unclaimed
 
     /// People live here. Set by settling; never by owning.
     public bool settled = false;
 
-    // Claimed purely by BIRTHRIGHT (the home world and its moons) rather than by going and doing it.
-    // Skips the claim CONDITIONS — it's already yours — but grants no settlement: a birthright moon is
-    // a claim you still have to make liveable.
+    // Claimed purely by BIRTHRIGHT rather than by going and doing it — THE CRADLE, and only the cradle.
+    // Skips the claim CONDITIONS entirely; grants no settlement of its own.
+    //
+    // The cradle's MOONS used to carry this too, and they no longer do: a species that has just worked
+    // out interplanetary flight owns the planet it evolved on, not the rocks above it. Handing those
+    // over free made the first real decision in the game — where to go and what it costs — into a thing
+    // that had already happened. They are `cradleMoon` instead: fully surveyed, reachable from turn one,
+    // and yours the moment you actually go and take them.
     public bool birthrightClaim = false;
+
+    // A moon of the cradle. NOT a claim — see above — but it does carry the one guarantee the birthright
+    // used to smuggle in alongside ownership: the world is guaranteed TERRAFORMABLE to livability
+    // (GalaxyGenerator.Recompute) and needs no tech to claim (Claim.RequiredTechLevel).
+    //
+    // Those two are why this flag exists rather than the moons simply losing `birthrightClaim`. Without
+    // them a player would look up at their own moons, find one that no amount of terraforming can make
+    // liveable and another that wants tech level 5 to plant a beacon on, and the first move in the game
+    // would be to leave. The moons stop being free. They do not stop being the obvious first step.
+    public bool cradleMoon = false;
 
     // Shipyard tier on this world (0 = none, 1-5). Building a Shipyard sets it to 1; it can be upgraded
     // to 2 (unlocks Mk II ships) and 3 (unlocks the Terraformer). Higher tiers build ships faster and,

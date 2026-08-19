@@ -40,7 +40,16 @@ public partial class InspectorWindow
             () => "Survey this world first — its climate is read off the surface map."));
 
         tabs.Add(new InspectorTab("Ores", BuildBodyOres, () => target.body != null && target.body.Surveyed));
-        tabs.Add(new InspectorTab("Society", BuildBodySociety, () => target.body != null && target.body.owner == FactionManager.Player));
+        // SOCIETY NEEDS A SOCIETY. Visible on any world you hold — it is plainly about that world — but
+        // dead until somebody lives there. Owning a bare rock used to open a tab that reported a
+        // population of nobody and then explained, at length and with a factor breakdown, how satisfied
+        // that nobody was. A satisfaction score for an empty world is not a small cosmetic wrong: it is
+        // the panel asserting a colony exists, on the one screen the player uses to check whether one
+        // does.
+        tabs.Add(new InspectorTab("Society", BuildBodySociety,
+            () => target.body != null && target.body.owner == FactionManager.Player,
+            () => target.body != null && target.body.settled,
+            () => "Nobody lives here yet — this world is claimed, not settled. Land a colony ship to found one."));
         tabs.Add(new InspectorTab("Production", BuildBodyProduction, () => target.body != null && target.body.owner == FactionManager.Player));
 
         tabs.Add(new InspectorTab("Orbit", BuildBodyObjects, null,

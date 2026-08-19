@@ -2090,52 +2090,72 @@ public class PlanetViewWindow : MonoBehaviour
         // meaningless on somebody else's planet or a dead rock.
         if (body.owner == FactionManager.Player)
         {
-            Header("SOCIETY");
-            var soc = Card();
-            Stat(soc, "Population", () => $"{Population.Format(body.population)} <color=#9FB4C8>of {Population.Format(Colony.PopTarget(body))} capacity</color>");
-            Stat(soc, "Cities", () => body.cities.ToString());
-            Stat(soc, "Development", () => $"<b>{Colony.ClaimProgress(body) * 100f:F0}%</b>" +
-                (Colony.IsFullyEstablished(body) ? "  <color=#4DFF6E>fully established</color>" : ""));
-            Bar(soc, () =>
+            // ---- SOCIETY AND SATISFACTION NEED SOMEBODY TO BE SATISFIED ----
+            //
+            // Claimed is not settled (Claim.StageOf draws exactly that line), and everything under these
+            // two headings is about people: how many, how they feel, and what that does to the birth
+            // rate. On a claimed rock with nobody on it the panel reported a population of nobody and
+            // then explained, factor by factor, how content that nobody was — a satisfaction percentage
+            // for an empty world, on the screen the player uses to check whether the world is empty.
+            //
+            // CAPABILITY and OBJECTIVES below stay: "no food, no power, no research" is a true statement
+            // about a bare claim, and the objectives list is the road out of being one.
+            if (!Claim.IsSettled(body))
             {
-                int popCap = Colony.PopTarget(body);
-                float f = popCap > 0 ? body.population / (float)popCap : 0f;
-                var c = f >= 1f ? UITheme.Bad : f > 0.9f ? UITheme.Warn : UITheme.Accent;
-                return (f, $"Population {body.population}/{popCap}", c);
-            });
-            // The three ceilings are shown apart: "capacity" is a min() of three different problems, and
-            // the number alone doesn't say which one you have — land wants terraforming, housing wants
-            // building, food wants farms.
-            Stat(soc, "Land supports", () => Population.Format(Carrying.LandCap(body)));
-            Stat(soc, "Housing for", () => Population.Format(Carrying.HousingCap(body)));
-            Stat(soc, "Food", () => Carrying.FoodLine(body));
-
-            // Satisfaction, with the full reasoning — an unhappy colony should say exactly what it's
-            // unhappy about, and whether that's stalling its growth. Folded from the Inspector's Society tab.
-            Header("SATISFACTION");
-            Bar(sidePanel, () =>
+                Header("SOCIETY");
+                Note(Card(), "This world is <b>claimed, not settled</b> — it is legally yours and nobody lives " +
+                             "on it. Land a colony ship to found a settlement; population and satisfaction " +
+                             "start once there is someone here to count.");
+            }
+            else
             {
-                float sat = Satisfaction.For(body);
-                return (sat / 100f, $"{Satisfaction.Label(sat)} — {sat:F0}%", Satisfaction.Color(sat));
-            });
-            var breakdown = Card();
-            var bt = UIFactory.WrapText(breakdown, "", UITheme.SmallSize, UITheme.Text);
-            live.Text(bt, () =>
-            {
-                var sb = new System.Text.StringBuilder();
-                foreach (var f in Satisfaction.Breakdown(body))
+                Header("SOCIETY");
+                var soc = Card();
+                Stat(soc, "Population", () => $"{Population.Format(body.population)} <color=#9FB4C8>of {Population.Format(Colony.PopTarget(body))} capacity</color>");
+                Stat(soc, "Cities", () => body.cities.ToString());
+                Stat(soc, "Development", () => $"<b>{Colony.ClaimProgress(body) * 100f:F0}%</b>" +
+                    (Colony.IsFullyEstablished(body) ? "  <color=#4DFF6E>fully established</color>" : ""));
+                Bar(soc, () =>
                 {
-                    string hex = ColorUtility.ToHtmlStringRGB(f.delta >= 0f ? UITheme.Good : UITheme.Bad);
-                    sb.AppendLine($"<color=#{hex}>{(f.delta >= 0f ? "+" : "")}{f.delta:F0}</color>  <b>{f.label}</b>  <color=#9FB4C8>{f.detail}</color>");
-                }
-                float mult = Satisfaction.GrowthMultiplier(body);
-                string stall = Population.StallReason(body, InfrastructureGrowth(body));
-                sb.AppendLine(stall != null
-                    ? $"\n<color=#FF6659>Not growing — {stall}.</color>"
-                    : $"\n<color=#9FB4C8>Birth rate ×{mult:0.00} from satisfaction · " +
-                      $"{Population.Format(Mathf.RoundToInt(Population.BirthRate(body, InfrastructureGrowth(body)) * 60f))} per minute</color>");
-                return sb.ToString();
-            });
+                    int popCap = Colony.PopTarget(body);
+                    float f = popCap > 0 ? body.population / (float)popCap : 0f;
+                    var c = f >= 1f ? UITheme.Bad : f > 0.9f ? UITheme.Warn : UITheme.Accent;
+                    return (f, $"Population {body.population}/{popCap}", c);
+                });
+                // The three ceilings are shown apart: "capacity" is a min() of three different problems, and
+                // the number alone doesn't say which one you have — land wants terraforming, housing wants
+                // building, food wants farms.
+                Stat(soc, "Land supports", () => Population.Format(Carrying.LandCap(body)));
+                Stat(soc, "Housing for", () => Population.Format(Carrying.HousingCap(body)));
+                Stat(soc, "Food", () => Carrying.FoodLine(body));
+
+                // Satisfaction, with the full reasoning — an unhappy colony should say exactly what it's
+                // unhappy about, and whether that's stalling its growth. Folded from the Inspector's Society tab.
+                Header("SATISFACTION");
+                Bar(sidePanel, () =>
+                {
+                    float sat = Satisfaction.For(body);
+                    return (sat / 100f, $"{Satisfaction.Label(sat)} — {sat:F0}%", Satisfaction.Color(sat));
+                });
+                var breakdown = Card();
+                var bt = UIFactory.WrapText(breakdown, "", UITheme.SmallSize, UITheme.Text);
+                live.Text(bt, () =>
+                {
+                    var sb = new System.Text.StringBuilder();
+                    foreach (var f in Satisfaction.Breakdown(body))
+                    {
+                        string hex = ColorUtility.ToHtmlStringRGB(f.delta >= 0f ? UITheme.Good : UITheme.Bad);
+                        sb.AppendLine($"<color=#{hex}>{(f.delta >= 0f ? "+" : "")}{f.delta:F0}</color>  <b>{f.label}</b>  <color=#9FB4C8>{f.detail}</color>");
+                    }
+                    float mult = Satisfaction.GrowthMultiplier(body);
+                    string stall = Population.StallReason(body, InfrastructureGrowth(body));
+                    sb.AppendLine(stall != null
+                        ? $"\n<color=#FF6659>Not growing — {stall}.</color>"
+                        : $"\n<color=#9FB4C8>Birth rate ×{mult:0.00} from satisfaction · " +
+                          $"{Population.Format(Mathf.RoundToInt(Population.BirthRate(body, InfrastructureGrowth(body)) * 60f))} per minute</color>");
+                    return sb.ToString();
+                });
+            }
 
             // What this colony can actually DO — food/power/research/industry/housing counted across BOTH
             // colony facilities and surface structures. The Production tab's rollup, folded here.

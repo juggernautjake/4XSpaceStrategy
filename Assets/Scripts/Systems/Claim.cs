@@ -31,8 +31,10 @@ public enum WorldStage
 // "Is this world settled?" used to be answered by asking about its side effects: cities > 0, or a City in
 // `buildings`. Those are things that HAPPEN when you settle, not the fact of settling, and each caller
 // picked a different one. ColonyManager.TickColony ran for every owner==Player body and opened with
-// `if (b.cities < 1) b.cities = 1;` — so the home world's moons, which are Player-owned by birthright and
-// meant to be bare rock, were handed a city on the first tick. Free, instant, no ship, no habitability
+// `if (b.cities < 1) b.cities = 1;` — so the home world's moons, which were Player-owned by birthright
+// back then and meant to be bare rock, were handed a city on the first tick. (The moons are not owned at
+// all any more — see CelestialBody.cradleMoon — but the same bug would now fire on the first world you
+// actually claim, which is worse.) Free, instant, no ship, no habitability
 // check, no cost. The other half of the system asked politely for a colony ship and 40% habitability
 // while this handed the same thing out for nothing.
 // ============================================================================================
@@ -90,7 +92,11 @@ public static class Claim
     public static int RequiredTechLevel(CelestialBody b)
     {
         if (b == null) return 1;
-        if (b.birthrightClaim) return 1;
+        // The cradle needs no tech because it is already yours. Its MOONS need none because the whole
+        // point of them is that they are the first thing you can go and take — gating them behind the
+        // habitability curve would put a level-5 requirement on a bare rock you can see from your
+        // capital, which is the opposite of a first objective.
+        if (b.birthrightClaim || b.cradleMoon) return 1;
 
         // 0% habitability -> level 5; at/above the colonisation floor -> level 1.
         float hostile = 1f - Mathf.Clamp01(b.habitability / Mathf.Max(1f, Colony.FoundThreshold));

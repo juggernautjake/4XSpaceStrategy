@@ -277,6 +277,10 @@ public class BodyDTO
     public int clueIndex = -1;                              // which Vael fragment this world hides, -1 = none
     public float cityGrowthTimer;                           // progress toward this world's next settlement
     public bool birthrightClaim;
+    /// A moon of the cradle: guaranteed terraformable, claimable at tech 1, and NOT owned to start with.
+    /// Absent from saves written before the moons stopped being free, where it reads false — which is
+    /// exactly right, because in those saves the moons carry `birthrightClaim` and are already yours.
+    public bool cradleMoon;
     public bool settled;            // people live here (Claim.cs). Distinct from owning it.
     public bool visited;
     public float explorationProgress;

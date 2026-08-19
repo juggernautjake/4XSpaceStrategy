@@ -415,24 +415,26 @@ public static class GalaxyGenerator
             moon.distanceFromStar = planet.distanceFromStar;
             moon.hostStar = home.combinedStar;
             moon.system = home;
-            // Claimed by BIRTHRIGHT — ours from the start, and fully surveyed — but NOT yet settled
-            // (no city). They may or may not be habitable; you terraform them (easier here) then found
-            // a city to develop them.
-            moon.owner = FactionManager.Player;
-            moon.birthrightClaim = true;
+            // KNOWN, BUT NOT OWNED. These used to be owner=Player from turn one, and that was the whole
+            // early game handed over before it started: three claimed worlds, no reason to build a ship,
+            // nothing to decide. You can SEE them — a species that got as far as orbit has had telescopes
+            // on its own moons for centuries, so they arrive surveyed and fully studied, and they are
+            // where the player learns what the survey overlays even are. Taking them is a trip.
             moon.visited = true;
             moon.explorationProgress = 1f;
-            // Birthright moons are yours from turn one and surveyed with the cradle. They are also where
-            // the player learns what the survey overlays even ARE, so they arrive fully studied too.
             moon.researchLevel = CelestialBody.MaxResearchLevel;
+            // ...and the two guarantees that used to ride along with the birthright, kept: guaranteed
+            // terraformable, and claimable at tech level 1. See CelestialBody.cradleMoon.
+            moon.cradleMoon = true;
             planet.moons.Add(moon);
             moonR += 0.6f + Random.Range(1.6f, 2.6f);   // clear both moons' discs, not just "some gap"
         }
 
         planet.owner = FactionManager.Player;
         planet.birthrightClaim = true;
-        // The ONLY world that starts settled. Its moons are claimed by the same birthright but stay bare
-        // rock until you terraform and settle them — a claim is a flag, not a population.
+        // The ONLY world that starts settled — and now the only one that starts OWNED. Its moons are
+        // surveyed and reachable but unclaimed: you go and take them, which is the first thing the game
+        // gives the player to do.
         planet.settled = true;
         // The capital is an established world, not a landing site: about a million people, adjusted for
         // how the species breeds and how long it lives (see Population.HomeStart).
@@ -588,8 +590,11 @@ public static class GalaxyGenerator
                 b.terraformability = Habitability.Terraformability(b.hostStar, species, b);
 
                 // Home moons are "easier to terraform": guarantee their ceiling reaches livability so
-                // you can always make them habitable and settle them.
-                if (b.birthrightClaim)
+                // you can always make them habitable and settle them. Reads `cradleMoon` as well as the
+                // birthright now — the moons no longer carry the birthright (they are not free any
+                // more), and gating this on ownership alone would have quietly made the first world the
+                // player goes for one they can never finish.
+                if (b.birthrightClaim || b.cradleMoon)
                     b.terraformability = Mathf.Max(b.terraformability, UnitManager.ColonizeMinHabitability + 20f);
             }
     }

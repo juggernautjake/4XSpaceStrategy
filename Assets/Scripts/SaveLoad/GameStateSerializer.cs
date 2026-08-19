@@ -202,7 +202,7 @@ public static class GameStateSerializer
             placedBuildings = b.placedBuildings != null ? new List<PlacedBuilding>(b.placedBuildings) : new List<PlacedBuilding>(),
             deepSurveyed = b.deepSurveyed, researchLevel = b.researchLevel,
             clueIndex = b.clueIndex, cityGrowthTimer = b.cityGrowthTimer,
-            birthrightClaim = b.birthrightClaim, settled = b.settled,
+            birthrightClaim = b.birthrightClaim, cradleMoon = b.cradleMoon, settled = b.settled,
             visited = b.visited, explorationProgress = b.explorationProgress,
             claimProgress = b.claimProgress, researchProgress = b.researchProgress,
             deepProgress = b.deepProgress,
@@ -473,7 +473,7 @@ public static class GameStateSerializer
             biosphereActive = dto.biosphereActive,
             atmospheres = dto.atmospheres, hasMagneticField = dto.hasMagneticField,
             hasTectonics = dto.hasTectonics,
-            birthrightClaim = dto.birthrightClaim, settled = dto.settled,
+            birthrightClaim = dto.birthrightClaim, cradleMoon = dto.cradleMoon, settled = dto.settled,
             visited = dto.visited, explorationProgress = dto.explorationProgress,
             // Work in progress, not a derived value. A save from before these were stored reads 0,
             // which is what such a save effectively recorded — the reload used to zero them anyway.
