@@ -1,4 +1,3 @@
-        ((tab == Tab.Survey && activeIndex == SurfaceIndexKind.Minera ||
 ﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
