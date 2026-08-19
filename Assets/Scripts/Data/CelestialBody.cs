@@ -312,11 +312,17 @@ public class CelestialBody
     public float atmosphereThickness => Mathf.Clamp01(atmospheres / AtmosphereRules.ThicknessReference);
 
     // Does this world have active plate tectonics? Rolled once at generation (see TectonicsRules) —
-    // ~1/3 of terrestrial planets, weighted toward larger ones; gas giants/asteroids never; moons only
-    // if large enough. Currently only feeds a mountain-building bias in the terrain noise
-    // (TectonicsRules.BoostRidge); the fault-line overlay, mountain/volcano placement ALONG faults,
-    // earthquake events and the Mineral-overlay interaction the request also asks for are unbuilt — see
-    // the Advanced Planet Generation slice in the dev-request planning doc.
+    // about a fifth of terrestrial worlds at an Earth mass, climbing toward half at the 4-mass ceiling;
+    // gas giants and asteroids never; moons only if large enough.
+    //
+    // THIS ONE BOOL IS THE SEED OF THE WHOLE SURFACE. It decides whether TectonicsMap builds a plate
+    // layout for this world, and from that layout come its continents, where its mountains stand, where
+    // its rifts drop, what its Geothermal Index reads, and where an earthquake can damage anything. A
+    // world with this false is not a world with less detail — it is a different kind of world, shaped by
+    // hotspots or by nothing at all.
+    //
+    // (It used to say the fault overlay, along-fault volcano placement and quakes were unbuilt. All
+    // three exist; the note had aged into a falsehood.)
     public bool hasTectonics = false;
 
     [System.NonSerialized] public StarData hostStar;          // the star this body belongs to

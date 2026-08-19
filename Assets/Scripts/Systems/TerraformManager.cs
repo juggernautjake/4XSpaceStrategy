@@ -434,10 +434,22 @@ public class TerraformManager : MonoBehaviour
                 // Core Ignition restarts the world's core, which is also what drives plate tectonics. A
                 // dead world that gets its dynamo back gets its geology back with it — and the tectonic
                 // bonus lifts the ceiling a little further still.
-                if (t == TerraformProjectType.CoreIgnition && b.type != CelestialBodyType.GasGiant
-                    && b.type != CelestialBodyType.Asteroid)
+                //
+                // GATED ON `Possible` rather than on two hand-written type tests, so it cannot drift from
+                // the rule generation uses — and, in particular, so it stops granting plates to a moon
+                // too small to have them, which the old pair of tests let through.
+                //
+                // AND THE GROUND IS REBUILT, which it was not. Setting this flag gives the world plates,
+                // and plates are what its continents are made of; the old code set it and called
+                // RescoreType, so the world kept a baked surface with no plates in it while every live
+                // sampler read the new flag. See RebuildAfterGeologyChange.
+                if (t == TerraformProjectType.CoreIgnition && !b.hasTectonics
+                    && TectonicsRules.Possible(b.type, b.mass))
+                {
                     b.hasTectonics = true;
-                RescoreType(b);
+                    RebuildAfterGeologyChange(b);   // ...which ends in RescoreType
+                }
+                else RescoreType(b);
                 break;
 
             // WorldRemodelling is handled in Complete (dithered over the project's duration and finalized
@@ -490,6 +502,7 @@ public class TerraformManager : MonoBehaviour
     static void Reshape(CelestialBody b, CelestialBodyType to)
     {
         if (b == null || b.type == to) { RescoreType(b); return; }
+        var was = b.type;
         b.type = to;
         // ATMOSPHERE IS NO LONGER RECOMPUTED HERE, and that is the point.
         //
@@ -501,21 +514,65 @@ public class TerraformManager : MonoBehaviour
         // pointless. Tectonics is re-rolled below and legitimately shifts the ceiling, which is the one
         // channel by which a remodel can still move a world's air at all.
         //
-        // Same reasoning for Tectonics — Roll() is keyed on type (GasGiant/Asteroid always false), so a
-        // remodelled world needs a fresh roll under its NEW type rather than carrying over a flag that
-        // its old type earned. Note this does NOT re-apply TectonicsRules.BoostRidge's terrain effect —
-        // that only runs once, during SeedTerrain at initial generation, so the ridge amplitude a newly
-        // tectonically-active remodelled world "should" have doesn't retroactively show up here; doing so
-        // would mean re-rolling this world's whole terrain variance, which would break the "same
-        // continents, new climate" guarantee GenerateSurface below is relying on.
-        b.hasTectonics = TectonicsRules.Roll(b.type, b.mass);
+        // ---- TECTONICS: CHANGED ONLY WHEN THE NEW TYPE FORCES IT ----
+        //
+        // This used to be an unconditional `Roll()` under the new type, on the reasoning that a flag the
+        // old type earned should not carry over. That reasoning was sound when `hasTectonics` was a
+        // modifier on a noise field. It is not sound now, because the flag stopped being a modifier and
+        // became the SEED OF THE SURFACE: TectonicsMap builds a world's plate layout from it, and
+        // PlanetTerrainGenerator derives continents, mountains and rift basins from that layout at
+        // sample time (SampleNormalized reads TectonicsMap.Active live).
+        //
+        // So an unconditional re-roll rearranged the planet. Remodelling between two terrestrial types
+        // flips the flag about a third of the time, and on every one of those the world's landmasses,
+        // coastlines and Geothermal Index were replaced wholesale — under the player's standing
+        // buildings, which are stored by grid coordinate and do not move. A structure sited off the red
+        // could silently end up on it, which quietly breaks the one promise the earthquake system makes.
+        // The comment three lines below, promising "same continents, new climate", was describing a
+        // guarantee the code had stopped providing.
+        //
+        // The original concern survives intact, because it was only ever about IMPOSSIBILITY: a world
+        // turned into a gas giant or an asteroid has no business keeping its plates, and one turned OUT
+        // of those types has never had a real roll and deserves one. Both are handled; the case in
+        // between — rock to volcanic, ice to ocean — keeps what it had, which is what "the same world,
+        // remodelled" has to mean.
+        bool couldBefore = TectonicsRules.Possible(was, b.mass);
+        bool canNow = TectonicsRules.Possible(to, b.mass);
+        if (!canNow) b.hasTectonics = false;
+        else if (!couldBefore) b.hasTectonics = TectonicsRules.Roll(to, b.mass);
 
         // The surface is derived from the body type, so it has to be rebuilt — deterministically, from
-        // the same terrain seed, so the world keeps its identity (same continents, new climate).
+        // the same terrain seed AND the same plates, so the world keeps its identity: same continents,
+        // new climate. (When the type change does force the plates to change, the continents genuinely
+        // do go with them — becoming a gas giant is not a reskin.)
+        RebuildAfterGeologyChange(b);
+    }
+
+    // ============================================================================================
+    // THE WORLD'S GEOLOGY JUST CHANGED — rebuild everything derived from the ground
+    //
+    // Shared by Reshape and by Core Ignition, because they are the same event wearing two names. The
+    // thing that makes them the same is `hasTectonics`: TectonicsMap builds a world's plate layout from
+    // it, and PlanetTerrainGenerator derives that world's continents, mountains and rift basins from the
+    // layout AT SAMPLE TIME — SampleNormalized reads TectonicsMap.Active live, on every call.
+    //
+    // So flipping that flag without coming through here leaves the BAKED grid — the thing drawn as
+    // terrain and built on — describing a world that no longer exists, while every live sampler
+    // describes the new one. The map would show a plate-less world with fault lines drawn on top of it
+    // by the survey overlay, and the earthquake system would damage buildings standing on ground the
+    // terrain does not show as active. Core Ignition did exactly that: it set the flag and called
+    // RescoreType, which re-scores habitability and touches nothing about the ground.
+    //
+    // Ore is repopulated because GenerateSurface builds fresh TerrainTiles and ore lives on them — skip
+    // it and the world comes back stripped of every deposit rather than merely rearranged.
+    static void RebuildAfterGeologyChange(CelestialBody b)
+    {
+        if (b == null) return;
+
         b.surface = PlanetTerrainGenerator.GenerateSurface(b);
         // The survey indexes are derived from the terrain field and their per-world distributions are
-        // cached. Remodelling a world changes that field, so the cache now describes the planet this
-        // used to be — drop it or the overlays lie.
+        // cached; this also drops the geothermal field's plume intensity and plate motion. Both now
+        // describe the planet this used to be — drop them or the overlays lie.
         SurfaceIndex.InvalidateStats(b);
         OreGenerator.Populate(b);
 
