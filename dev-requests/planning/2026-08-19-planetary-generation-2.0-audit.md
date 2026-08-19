@@ -1,0 +1,183 @@
+# Planetary Generation 2.0 — build audit
+
+**Date:** 2026-08-19
+**Source:** Jacob's "Planetary Generation 2.0" spec (mass, magnetic field, tectonics, earthquakes,
+terrain, water/temperature, time scale)
+
+Every clause of the spec was checked against the code, not against notes. The verdict is that the
+spec is **built**, with one real defect (now fixed), one open engineering decision, and one place
+where the spec contradicts itself and the code had to pick.
+
+There is no Unity in this environment, so nothing below has been compiled or run. This is a
+read-of-the-source audit plus numeric validation through Node ports, which is the same standard the
+rest of this work has been held to.
+
+---
+
+## 1. Mass — built
+
+| Clause | Where | Verdict |
+|---|---|---|
+| Terran cradle always 1 Mass | `Species.cradleMass = 1f`; `GalaxyGenerator.ForceHomeWorld:295` | built |
+| Terran home star is G-type | `Species.solHomeStar = true` pins `StarType.G` (`GalaxyGenerator:76`) | built |
+| Gas giants 10–40, multiples of 5, clustered on the mean | `MassRules.RollGasGiant` + `Bell()` — measured 25 at 31%, 10 and 40 at 1.4% each | built |
+| SSM = 100 per solar mass, a **ceiling** not a target | `MassRules.SystemBudget`, clamped 45–400; the lane loop breaks when the pot cannot fund a 0.1 asteroid | built |
+| Terrestrial default 1, floor 0.6, ceiling 4, one decimal | `MassRules.RollTerrestrial` / `QuantizeTerrestrial` | built |
+| Big bodies further out, rare exceptions | `ChooseLane`: `OuterGiantChance` 0.42 past the frost line, `HotGiantChance` 0.05 inside it | built |
+| Small rocky worlds close in | `TerrestrialBandMax`: 1.4 inside the hot line, 2.6 in the zone, 4 outside | built |
+| Moons: terrestrial mass / 2, giant mass / 10 | `MassRules.MoonBudget` | built |
+| Not every planet gets moons; the allowance is a maximum | 15% of giants and 34% of terrestrials roll none; a 0.42 stop-chance per extra moon | built |
+| Mass ≤ 0.5 and not a moon ⇒ asteroid | `WorldClassifier.Physics` — `<=`, so a body exactly on 0.5 is an asteroid | built |
+| Asteroids share an orbit line at an identical speed | `beltSpeed` taken once outside the loop and copied; inclination and eccentricity forced to 0 | built |
+| Remove the "Average planets per system" slider | zero references anywhere in `Assets/Scripts` | built |
+
+## 2. Magnetic field — built
+
+`RotationRules`. Spin is rolled at generation as two populations (tidally braked / spun up), the
+field is a consequence of the rate (`MagneticFieldSpin = 12°/s`), direction is stored separately so
+retrograde never accidentally means "no dynamo", and the Dev orbit panel carries both a spin slider
+and a prograde/retrograde toggle (`OrbitControlPanel:68`).
+
+## 3. Tectonics and the Geothermal Index — built
+
+The Heat Index and the Tectonics overlay are one field (`GeothermalMap`). Every number the spec
+gives is a named constant and was validated by Node port against the real noise distribution:
+
+- `PlateLineBase = 0.40` — a quiet margin reads 40.
+- A head-on convergent margin reads **100** on the line.
+- `RadiatedFloor = 0.70` over `RadiateTiles = 3` — measured minimum anywhere inside the band, 70.0;
+  measured width of the ≥70 band, 3.01 tiles either side.
+- Hotspots on plate-less worlds are focused plumes with a 90+ core tapering through 80+ to 70+, every
+  band strictly smaller than the one below it at every intensity.
+- `VolcanoIndex = 0.97` — the spec's 97–100 vent range.
+
+The calibration note in `GeothermalMap` is worth keeping: the first cut of the hotspot shaping
+thresholded against a *nominal* 0–1 range rather than the noise field's measured distribution, and
+would have produced **no volcano anywhere in the galaxy, ever**, without erroring.
+
+## 4. Earthquakes — built
+
+`EarthquakeManager`. Return periods of 25 / 50 / 100 in-game years as three independent rolls, damage
+scaled by severity, and — the part that matters — a quake damages **only** structures standing on
+ground at or above `SurfaceIndex.ShowFloor` (0.70), the same band the survey overlay paints red.
+Checked per building on its own tile, so the promise is one the player can verify by looking at the
+map before they build.
+
+## 5. Terrain — built, with one defect (fixed)
+
+The pipeline runs in the spec's order and each step only ever adds to a flat sheet: plates give
+continents (Voronoi, the same partition the fault overlay draws) → convergent margins lift and rifts
+drop → hotspot vents pile domes → *only then* a small variation pass → the Elevation slider scales the
+deviation from the mid-line. Nothing downstream reads temperature, water or air, so terraforming
+cannot move a tile's height. Ruggedness and Elevation Range are gone; `ridge` is derived from the
+geological lift rather than rolled beside it, so the only two things that make a mountain are a
+collision and a vent. Hills and Highlands are no longer emitted as biomes — they are an elevation
+band reported under the cursor alongside metres and °C.
+
+**Defect found and fixed:** `ClimateCoherence` promoted a tile to `MagmaField` at ≥ 650 °C but never
+demoted one below it, while the per-type `Volcanic` classifier laid magma down from its own
+*normalized* heat field (`hot > 0.78`), which knows nothing about °C. A volcanic world sitting at,
+say, 540 °C therefore grew a band of liquid rock across its equator while the readout under the cursor
+correctly said the ground was three hundred degrees too cold to melt. The gate now runs both ways;
+sub-650 magma demotes to `LavaRock`, which is the word that world's own classifier already uses for
+solidified flows.
+
+## 6. Water and temperature — built
+
+Range is −270 … 1000 °C. The liquid-water window is a function of pressure, not two constants:
+`BoilingC(P) = 100 + 44·log₄(P)` through the spec's anchors, enforced **per tile** so a world can hold
+an ocean at its poles and salt flats at its equator. Below freezing, seas become `FrozenSea` and more
+water means more ice. Elevation moves a tile's temperature by up to ±70 °C at the same lapse rate the
+generator classified it with, which is what pools magma in valleys instead of sheeting the equator.
+
+> **The spec contradicts itself here and the code had to choose.** It says "liquid water can exist on
+> planets with atmosphere of 4 up to 200 C" and then, four lines later, "At 4 atmosphere the range of
+> liquid water is 0 C to 144 C". The code took **144**, because it is the more specific statement and
+> the one given as an anchor pair with the 1-atmosphere figure. If you meant 200, `BiosphereRules
+> .BoilingAtFourAtm` is the single constant to change and the whole curve moves with it.
+
+## 7. Time scale — built
+
+`GameCalendar`: one second of game time is one in-game day, 30-day months, 360-day years, starting
+Year 0001. Construction, travel and research durations all read through it.
+
+---
+
+## Open items
+
+### A. The 3D globe and the 2D map draw the same terrain differently
+
+`PlanetAppearance` textures the globe with `SurfaceTextureRenderer.BuildGrid` — one flat texel per
+cell, no biome grain. The Planet View map uses `BuildGridTextured`, which fills each cell with the
+biome's pattern. Same world, same tiles, two different surfaces, and the difference is visible once
+you zoom the globe in far enough to resolve a cell.
+
+Unifying them is not free, and that is the decision:
+
+| Texels per cell | 400×200 world | Grain visible? |
+|---|---|---|
+| 1 (today) | 320 KB | no |
+| 2 | 1.3 MB | barely — the 16×16 art box-filters to 2×2 |
+| 4 | 5.1 MB | yes |
+| 8 | 20 MB | fully |
+
+That is **per body**, and `PlanetAppearance` runs for every body in the system (roughly twenty), and
+`RefreshTexture` reallocates about once a second while a world is terraforming. Options: leave it,
+raise only the focused body, or accept ~4 texels per cell everywhere. **Needs your call.**
+
+### B. `Hills` and `Highlands` are dead types that must not be removed
+
+Neither is generated any more. Both are still in `TerrainType`, `TileCatalog` (where they share the
+display name "Highland"), `TerrainColorMap` and `TerrainTextureMap` — correctly, because
+`GameStateSerializer:676` writes terrain cells as **enum ordinals**, so removing or reordering
+`TerrainType` breaks every existing save. Leave them.
+
+### C. The three new scripts have no `.meta` files
+
+`GeothermalMap.cs`, `RotationRules.cs` and `GameCalendar.cs` were committed without them — Unity
+hasn't opened the project since they were written. It will generate them on next open; commit them
+then.
+
+### D. Still outstanding from the 2026-07-26 build-mode spec
+
+Not part of Planetary Generation 2.0, but still open: un-owning the starting planet's moons and
+hiding Society/Satisfaction until a settlement exists; the grey-metal orbital station over the
+homeworld; the abstract Research Centre's `researchFacility` capability needing to move onto the new
+surface `ResearchCenter` before the button can retire; and fixed-footprint buildings (spaceport,
+shipyard, capitol, colony base) still bypassing the build queue, which is a `BuildScaling` balance
+decision rather than a small change.
+
+---
+
+## Terrain textures — regenerated as one library
+
+Measured against the old set, the art was inconsistent in a specific, measurable way. Grain strength —
+the relative standard deviation of the luminance ratio, which is the only thing
+`TerrainTextureMap` actually reads — ran from **0.010** (beach, snow, ice: no visible grain at all) to
+**0.409** (CrackedGround: a black net stamped over the terrain colour). A forty-fold spread. Several
+tiles were not material grain at all but repeating motifs — an ornate scroll on `grass`, glyph blocks
+on `ObsidianFlat`, hard diagonal corduroy on `Canyon`, `GasClouds` and `Island` — which read as a
+symbol stamped once per cell and tiled across a continent.
+
+All 42 files were regenerated to two rules:
+
+- **Seamless by construction.** Value noise on an integer lattice whose period divides 16, cellular
+  distance measured the short way round the torus, ripples at whole wavenumbers. Verified: every
+  tile's wrap edge now falls within normal pixel-edge range measured *along its own axis* — which is
+  what licenses the renderer's per-tile random offset, and therefore what stops a continent of one
+  biome reading as wallpaper.
+- **One contrast ladder.** Five permitted grain strengths, 0.060 (bare fractured rock) down to 0.020
+  (snow and ice). Materials differ by how rough the surface genuinely is, not by how loud the tile is.
+
+Families are shared, which is where the consistency comes from: mountain / Highlands / Hills / rocky
+are cellular rock at four roughnesses; Canyon and Badlands are that rock with bedding planes through
+it; forest / jungle / Taiga / swamp are one clumped-canopy field. Energy is spread across all four
+octaves whose periods divide 16 on purpose — `Pattern()` box-filters the art down to 4 texels per cell
+on the biggest worlds, and grain built only from single-texel speckle would average away to nothing
+there, making the largest worlds the flattest-looking ones.
+
+Tiles are authored in their palette colour so the folder is browsable, but the renderer divides the
+mean out, so the tint changes nothing on the map. `TerrainColorMap` remains the single source of truth
+for colour.
+
+The previous art is recoverable from git at `0c71223`.

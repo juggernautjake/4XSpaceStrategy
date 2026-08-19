@@ -10,22 +10,37 @@ using UnityEngine;
 //
 // ---- WHY THE ART SUPPLIES THE PATTERN AND NOT THE COLOUR -------------------------------------
 //
-// The obvious thing is to blit the art tile straight onto the map and let it bring its own colours.
-// Rendered side by side against the palette, that breaks two biomes outright: the mountain tile is
-// BROWN where TerrainColorMap.Mountains is grey, and the crystal-field tile is magenta where
-// CrystalField is pale cyan. A player reading the map would see dirt where the legend, the 3D globe,
-// the moon thumbnails and the loading-screen morph all still said stone.
+// The art is reduced to a LUMINANCE RATIO — each texel's brightness over the tile's own mean — and
+// that ratio multiplies TerrainColorMap.Get(type). The mean of the pattern is 1 by construction, so
+// a patch of terrain still averages to exactly the colour it has always been: TerrainColorMap stays
+// the single source of truth, every view keeps agreeing, and no biome can drift hue because somebody
+// redrew a tile. What the art contributes is the thing it is actually good for — the structure.
 //
-// So the art is reduced to a LUMINANCE RATIO — each texel's brightness over the tile's own mean —
-// and that ratio multiplies TerrainColorMap.Get(type). The mean of the pattern is 1 by construction,
-// so a patch of terrain still averages to exactly the colour it has always been: TerrainColorMap
-// stays the single source of truth, every view keeps agreeing, and no biome can drift hue because
-// somebody redrew a tile. What the art contributes is the thing it is actually good for — the
-// structure. The cracks in CrackedGround and the sparkle in CrystalField come through intact.
+// The tiles are authored IN their palette colour anyway, so the folder is browsable, but that is a
+// courtesy to whoever opens it rather than something the renderer depends on. Tint a tile any hue
+// you like and the map will not change; only its light and dark will.
 //
-// It also means all FORTY-ONE terrain types get texture from twenty-six files. A type with no art of
-// its own borrows a relative's pattern (Hills takes the grass grain, Canyon takes rock) and keeps its
-// own colour, which is what makes Hills and Grassland still readable as different things.
+// ---- ONE MATERIAL LIBRARY, NOT FORTY-ONE DRAWINGS ---------------------------------------------
+//
+// Every type has its own file, and the set is built to two rules that make it read as one library:
+//
+//   SEAMLESS BY CONSTRUCTION. Each tile is periodic across 16 texels on both axes — value noise on an
+//       integer lattice whose period divides 16, cellular distance measured the short way round the
+//       torus, ripples at whole wavenumbers. That is what licenses the per-tile random offset in
+//       SurfaceTextureRenderer: any window into the tile is a valid window, so a continent of one
+//       biome is a continuous material rather than the same stamp repeated in a grid.
+//
+//   ONE CONTRAST LADDER. A tile's grain strength is the relative standard deviation of that luminance
+//       ratio, and it may only take one of five values — from 0.060 for bare fractured rock down to
+//       0.020 for snow and ice. Materials differ by how rough the surface genuinely is, not by how
+//       much a given tile wanted attention. The set this replaced ran from 0.010 (beach: no visible
+//       grain at all) to 0.409 (CrackedGround: a black net stamped over the colour), a forty-fold
+//       spread, which is why no two biomes read as belonging to the same world.
+//
+// Energy is spread across all four octaves whose periods divide 16, deliberately. Pattern() box-filters
+// the art down to `scale` when a big world can only afford 4 texels per cell, and grain built purely
+// from single-texel speckle averages away to nothing there — the biggest worlds in the game would be
+// the flattest-looking ones, which is exactly backwards.
 //
 // ---- OPTIONAL, LIKE EVERY OTHER DROP-IN ART HOOK ---------------------------------------------
 // Loaded through Resources, the same convention as AssetIntegration. If the folder is missing the
@@ -39,12 +54,12 @@ public static class TerrainTextureMap
     /// The art is authored at this size. Everything below downsamples FROM it, never up.
     public const int ArtSize = 16;
 
-    /// Which art file carries the pattern for a type. Types not listed here have art of their own
-    /// under the same name; see PatternFile.
-    ///
-    /// The donors are chosen by SURFACE, not by mood: Canyon and Badlands are broken rock, so they
-    /// take the rock grain; Dunes is wind-blown sand, so it takes the desert grain. GasClouds and
-    /// Storm take the plainest noise there is, because a gas giant has no ground to have a texture.
+    /// Which art file carries the pattern for a type. One file per type — nothing borrows any more —
+    /// but the FAMILY each was generated from is shared, and that is where the consistency comes from:
+    /// mountain, Highlands, Hills and rocky are all cellular rock at different roughnesses; Canyon and
+    /// Badlands are the same rock with bedding planes through it; forest, jungle, Taiga and swamp are
+    /// one clumped-canopy field. Two biomes that are the same material look like it, and two that are
+    /// not, do not.
     static string PatternFile(TerrainType t)
     {
         switch (t)
@@ -76,13 +91,14 @@ public static class TerrainTextureMap
             case TerrainType.CrystalField:  return "CrystalField";
             case TerrainType.MetallicCrust: return "MetallicCrust";
 
-            // ---- the sixteen that were drawn to fill the gaps ----
+            // ---- the sixteen that once borrowed a relative's grain ----
             //
-            // These used to borrow a relative's grain — Canyon took rock, Dunes took sand, Storm took
-            // the plainest noise there was. That worked, and it meant four different kinds of rock all
-            // wore the same rock. They have their own now, authored to the same brief as the supplied
-            // set: fine grain first, structure only as a hint. A bold motif at this scale does not read
-            // as material, it reads as a symbol stamped once per cell and repeated across a continent.
+            // Canyon took rock, Dunes took sand, Storm took the plainest noise there was — so four
+            // different kinds of rock all wore the same rock. They have their own now. The brief for
+            // every tile in the set is the same: fine grain first, structure only as a hint, and any
+            // direction (bedding, dune ripples, cloud bands) kept well under the noise it sits in. A
+            // bold motif at this scale does not read as material — it reads as a symbol stamped once
+            // per cell and repeated across a continent, which is what the map looked like before.
             case TerrainType.Volcano:       return "Volcano";
             case TerrainType.LavaRock:      return "LavaRock";
             case TerrainType.Island:        return "Island";

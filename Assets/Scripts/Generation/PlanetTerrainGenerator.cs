@@ -1052,6 +1052,20 @@ public static class PlanetTerrainGenerator
         if (tileC >= WorldClassifier.MagmaMinC && !IsWater(t))
             return TerrainType.MagmaField;
 
+        // ...AND THE SAME GATE IN REVERSE, which is the half that was missing.
+        //
+        // The per-type Volcanic classifier lays down magma from its own NORMALIZED heat field ("hot >
+        // 0.78"), which is a latitude-and-noise number that knows nothing about °C. So a volcanic world
+        // whose internal heat left it at, say, 540 °C — well short of molten — still grew a band of
+        // liquid rock across its equator, while the readout under the cursor said the ground was three
+        // hundred degrees too cold to melt. The promotion above was gated on MagmaMinC and the
+        // classifier's own path was not, so the two disagreed on exactly the worlds the band is for.
+        //
+        // Cooled magma is LavaRock — the same word the Volcanic classifier already uses for solidified
+        // flows one threshold down, so the demotion lands somewhere that world's vocabulary already has.
+        if (t == TerrainType.MagmaField && tileC < WorldClassifier.MagmaMinC)
+            return TerrainType.LavaRock;
+
         // --- Above boiling: the sea is not here any more, and what it left behind is its own bed ---
         if (tileC > boilC)
         {
