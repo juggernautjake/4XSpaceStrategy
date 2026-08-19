@@ -132,20 +132,34 @@ display name "Highland"), `TerrainColorMap` and `TerrainTextureMap` — correctl
 `GameStateSerializer:676` writes terrain cells as **enum ordinals**, so removing or reordering
 `TerrainType` breaks every existing save. Leave them.
 
-### C. The three new scripts have no `.meta` files
+### C. The three new scripts have no `.meta` files — **done**
 
-`GeothermalMap.cs`, `RotationRules.cs` and `GameCalendar.cs` were committed without them — Unity
-hasn't opened the project since they were written. It will generate them on next open; commit them
-then.
+`GeothermalMap.cs`, `RotationRules.cs` and `GameCalendar.cs` now have them, with GUIDs checked
+against all 479 already in the project.
 
 ### D. Still outstanding from the 2026-07-26 build-mode spec
 
-Not part of Planetary Generation 2.0, but still open: un-owning the starting planet's moons and
-hiding Society/Satisfaction until a settlement exists; the grey-metal orbital station over the
-homeworld; the abstract Research Centre's `researchFacility` capability needing to move onto the new
-surface `ResearchCenter` before the button can retire; and fixed-footprint buildings (spaceport,
-shipyard, capitol, colony base) still bypassing the build queue, which is a `BuildScaling` balance
-decision rather than a small change.
+Not part of Planetary Generation 2.0. Two of the four are now closed:
+
+- **Un-own the cradle's moons; hide Society/Satisfaction until settled — done.** The moons are
+  surveyed and reachable but unclaimed. The birthright was quietly carrying two guarantees
+  (guaranteed terraformable, claimable at tech 1) that had nothing to do with ownership; those moved
+  to a new `CelestialBody.cradleMoon` flag so the moons stop being free without becoming unreachable.
+  Society is gated on `settled` in both the Inspector tab and the Planet View panel.
+- **The abstract Research Centre — done, and the answer was that the migration had already
+  happened.** `BuildingInfo.researchFacility` had no readers at all: ore-sample research reads
+  `CelestialBody.researchCenterLevel`, and `SurfaceBuildManager.SyncFacilityTiers` derives that from
+  the surface `ResearchCenter` standing on the map. Same for `BuildingInfo.shipyard`. Both dead flags
+  are deleted and the descriptions no longer promise capabilities the abstract entry does not supply.
+
+Still open:
+
+- The grey-metal orbital station model over the homeworld — needs art in the editor.
+- Fixed-footprint buildings (spaceport, shipyard, capitol, colony base) still bypass the build queue,
+  so they get no construction ghost and no queue row. Routing them through it means `PlaceDrawn`
+  stores a drawn shape, so a 9-tile spaceport picks up `BuildScaling` cost ×10.8 and output ×12.6.
+  **That is a balance decision, not a refactor.**
+- Master plan C3 — verify framing on a 21:9 ultrawide. Needs a running build; only Jacob can do it.
 
 ---
 

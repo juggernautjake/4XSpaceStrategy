@@ -17,8 +17,20 @@ public class BuildingInfo
     public float metalPerSec, energyPerSec, waterPerSec, researchPerSec;
     public float popGrowthPerSec;    // Farms feed population growth
 
-    public bool researchFacility;    // researches co-located samples / ores / anomalies
-    public bool shipyard;            // lets you build ships at this world
+    // `researchFacility` and `shipyard` USED TO LIVE HERE, and both are gone rather than deprecated,
+    // because both had already stopped being read by anything.
+    //
+    // The capabilities they described did not disappear — they moved onto the STRUCTURES, where a
+    // capability now has to be standing somewhere on the map to count. Ore-sample research is gated on
+    // `CelestialBody.researchCenterLevel` (ColonyManager.TickColony), shipbuilding on
+    // `shipyardLevel`, and SurfaceBuildManager.SyncFacilityTiers derives BOTH from the surface
+    // ResearchCenter and SurfaceShipyard actually built on the world. So the answer to "does this world
+    // research samples" is a thing you can point at on the surface grid, which is the whole direction
+    // the facility rework went in.
+    //
+    // Keeping two unread booleans that name real capabilities is worse than having neither: the next
+    // person to add a capability finds them, assumes this is where capabilities are declared, and adds a
+    // third one nothing reads.
 
     public BuildingInfo(BuildingType t, string n, string d, int cm, int ce, float bt)
     { type = t; name = n; description = d; costMetal = cm; costEnergy = ce; buildTime = bt; }
@@ -56,13 +68,14 @@ public static class BuildingDatabase
         { energyPerSec = 1.6f };
 
         _all[(int)BuildingType.ResearchCenter] = new BuildingInfo(BuildingType.ResearchCenter, "Research Centre",
-            "Generates research and acts as a research facility: it researches ore samples that ships bring here.",
+            "Generates research. Ore-sample analysis is done by the research campus standing on the surface — this " +
+            "entry is the legacy colony-level record of one.",
             80, 70, 22f)
-        { researchPerSec = 0.7f, researchFacility = true };
+        { researchPerSec = 0.7f };
 
         _all[(int)BuildingType.Shipyard] = new BuildingInfo(BuildingType.Shipyard, "Shipyard",
-            "Lets you build ships at this world instead of only your home world.",
-            120, 90, 26f)
-        { shipyard = true };
+            "Lets you build ships at this world. The yard that actually does it is the one on the surface; " +
+            "this entry is the legacy colony-level record of one.",
+            120, 90, 26f);
     }
 }
