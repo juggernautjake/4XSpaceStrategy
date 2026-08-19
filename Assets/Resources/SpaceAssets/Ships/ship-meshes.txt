@@ -1,0 +1,34 @@
+# ============================================================================================
+# SHIP MESH ORIENTATION
+#
+# One line per mesh that needs correcting. Anything NOT listed here is oriented automatically
+# from its own bounding box, and the console says what it decided — so the usual workflow is:
+# drop the mesh in, look at it, and only come here if it is wrong.
+#
+# Edit and reload while the game is running. No recompile.
+#
+#   name        the mesh file's name, without folder or extension
+#   rotation    pitch yaw roll, in degrees, applied BEFORE the ship is pointed along its course
+#   scale       optional multiplier on the class's normal size (omit for 1)
+#   flags       spin   = always tumble freely (radially symmetric things with no real facing)
+#               nospin = hold a fixed attitude (rings, relays, anything that should not rotate)
+#
+# The game's convention is Unity's: +Z is forward (the bow), +Y is up (the dorsal surface).
+#
+#   flying sideways?      try  0 90 0   or  0 -90 0
+#   flying belly-first?   try  -90 0 0
+#   flying backwards?     try  0 180 0
+#
+# ---- examples, safe to delete ----
+# Terran_Dreadnought        0 0 0
+# Aquarii_Carrier         -90 0 0
+# Pyrothian_MiningBarge     0 180 0    1.15
+# Cryithn_Probe             0 0 0      1.0    spin
+# Sylvan_HyperSpeedRelay    0 90 0     1.0    nospin
+# ============================================================================================
+
+# ---- The three meshes that shipped with the project ----------------------------------------
+# Hand-found before the manifest existed. Listed so they are data like everything else rather
+# than constants nobody can change without a programmer.
+LP Colony Ship              -90 0 0
+LP Science Ship               0 90 0

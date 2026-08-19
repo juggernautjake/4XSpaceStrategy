@@ -24,7 +24,21 @@ public static class UnitModelLibrary
         public float spin;         // degrees/sec of idle axial rotation
         // A fixed orientation correction applied AFTER the ship is pointed along its course, in the model's
         // own local frame — so an imported hull that faces the wrong way sits right relative to travel.
+        //
+        // Left at identity here means "work it out": either the artist has written a line in
+        // ship-meshes.txt, or the bounds heuristic will guess. See UnitModelLibrary.Resolve.
         public Quaternion modelRotation = Quaternion.identity;
+
+        /// Has Resolve() already settled this entry's rotation, scale and spin? Guards the lazy pass so
+        /// the bounds heuristic runs once per entry rather than once per unit per frame.
+        [System.NonSerialized] public bool oriented;
+
+        // What Build() authored, before the manifest was applied on top. Kept so a reload starts from
+        // the original values rather than compounding the manifest's scale on every pass.
+        [System.NonSerialized] public bool baseCaptured;
+        [System.NonSerialized] public float baseSize;
+        [System.NonSerialized] public float baseSpin;
+        [System.NonSerialized] public Quaternion baseRotation;
     }
 
     // Sizes are measured against the worlds these things sit next to. SystemVisualizer scales a planet
@@ -122,7 +136,76 @@ public static class UnitModelLibrary
     public static Entry For(UnitType t)
     {
         if (!built) Build();
-        return map.TryGetValue(t, out var e) ? e : null;
+        if (!map.TryGetValue(t, out var e) || e == null) return null;
+        Resolve(e);
+        return e;
+    }
+
+    // ============================================================================================
+    // ORIENTATION IS RESOLVED ONCE, LAZILY, AND FROM DATA
+    //
+    // The `modelRotation` values written into Build() above are hand-found constants for the three
+    // meshes that shipped with the project. They are still honoured — a hand-found value is a correct
+    // value — but they are no longer the only way to get one, and they cannot be the way when there are
+    // a hundred and forty-five meshes to import.
+    //
+    // The order of authority, most trusted first:
+    //
+    //   1. `ship-meshes.txt`. An artist wrote it, while looking at the ship, without a recompile. If it
+    //      says a hull is rotated ninety degrees, it is.
+    //   2. A non-identity `modelRotation` in Build(). The hand-found legacy constants.
+    //   3. The bounds heuristic (ShipMeshManifest.AutoOrient), which is right for most conventional
+    //      hulls and says out loud what it decided so a wrong guess is one pasted line from fixed.
+    //
+    // Resolved once per entry and cached, because AutoOrient walks every renderer on the prefab and the
+    // answer cannot change while the prefab is loaded.
+    static void Resolve(Entry e)
+    {
+        if (e.oriented) return;
+        e.oriented = true;
+
+        // The FIRST resolve records what Build() authored, and every later one starts from that record
+        // rather than from the current values. Without this, ReloadOrientations would re-apply the
+        // manifest's scale multiplier to an already-multiplied size and a ship would grow by 15% every
+        // time the artist reloaded to check their work — which is exactly the kind of bug that looks
+        // like the manifest is broken when the manifest is fine.
+        if (!e.baseCaptured)
+        {
+            e.baseSize = e.size;
+            e.baseSpin = e.spin;
+            e.baseRotation = e.modelRotation;
+            e.baseCaptured = true;
+        }
+        e.size = e.baseSize;
+        e.spin = e.baseSpin;
+        e.modelRotation = e.baseRotation;
+
+        var authored = ShipMeshManifest.Authored(e.path);
+        if (authored != null)
+        {
+            e.modelRotation = authored.rotation;
+            e.size = e.baseSize * authored.scale;
+            if (authored.forceSpin && e.spin <= 0f) e.spin = 12f;
+            if (authored.forceNoSpin) e.spin = 0f;
+            return;
+        }
+
+        // A hand-found constant from Build() counts as authored — do not second-guess it.
+        if (e.modelRotation != Quaternion.identity) return;
+
+        var prefab = Prefab(e.path);
+        if (prefab == null) return;                 // no art; the class falls back to its billboard
+        e.modelRotation = ShipMeshManifest.AutoOrient(prefab, ShipMeshManifest.LeafName(e.path), out _);
+    }
+
+    /// Re-read the orientation manifest and re-resolve every entry. For the Dev reload: fix a sideways
+    /// ship in a text file, hit reload, see it corrected — which is the entire reason the manifest is a
+    /// file rather than a table in this class.
+    public static void ReloadOrientations()
+    {
+        ShipMeshManifest.Reload();
+        if (!built) { Build(); return; }
+        foreach (var e in map.Values) if (e != null) e.oriented = false;
     }
 
     // ---- Prefab cache ----
@@ -167,6 +250,14 @@ public class UnitModelRenderer : MonoBehaviour
     }
 
     readonly Dictionary<Unit, Model> models = new Dictionary<Unit, Model>();
+
+    /// F10 — re-read ship-meshes.txt and rebuild every model in place.
+    ///
+    /// This key is the reason the manifest is a text file at all. The import loop it exists for is:
+    /// generate a mesh, drop it in, look at it flying sideways, type one line, press F10, watch it snap
+    /// upright. Without a way to trigger a reload the file's promise — fix it without a recompile — is
+    /// not true, and an artist would be restarting the game a hundred and forty-five times.
+    const KeyCode ReloadOrientationsKey = KeyCode.F10;
 
     public static void Create()
     {
@@ -369,6 +460,23 @@ public class UnitModelRenderer : MonoBehaviour
         var b = rends[0].bounds;
         for (int i = 1; i < rends.Length; i++) b.Encapsulate(rends[i].bounds);
         return b;
+    }
+
+    void Update()
+    {
+        // F10 — re-read the orientation manifest and rebuild. See ReloadOrientationsKey.
+        if (Input.GetKeyDown(ReloadOrientationsKey))
+        {
+            UnitModelLibrary.ReloadOrientations();
+            // Drop every built model so the next Rebuild picks the new rotations up. Cheap: there are
+            // tens of these, not thousands, and this only happens when a key is pressed.
+            foreach (var kv in models) if (kv.Value?.go != null) Destroy(kv.Value.go);
+            models.Clear();
+            badges.Clear();
+            Rebuild();
+            NotificationManager.Instance?.Push("Ship orientations reloaded",
+                "Re-read ship-meshes.txt and rebuilt every model.", null, NotifKind.Info);
+        }
     }
 
     void LateUpdate()
