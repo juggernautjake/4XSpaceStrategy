@@ -124,6 +124,47 @@ if (fs.existsSync(manifestPath)) {
   console.log(`\norientation manifest: ${named.size} entries, ${withArt.length} meshes with art`);
   if (unoriented.length)
     console.log(`  ${unoriented.length} rely on the bounds heuristic: ${unoriented.join(', ')}`);
+
+  // ---- ORPHANED LINES ------------------------------------------------------------------------
+  //
+  // The check above catches a mesh with NO line, which flies on the bounds heuristic and may come out
+  // backwards. This catches the other direction: a line naming a mesh that is not there.
+  //
+  // That one is worse, because it is silent in both places. The manifest loader skips a name it never
+  // sees, and the fleet renderer never asks for a mesh that does not exist, so an orphan sits in the
+  // file looking like the hull is handled. It is exactly what a rename or a reorganisation produces —
+  // and the art library was just reorganised — so it is worth a line of output rather than a shrug.
+  const legacyNames = new Set(LEGACY.map(l => l.split('/').pop()));
+  const orphans = [...named].filter(n => !legacyNames.has(n) && !withArt.includes(n));
+  if (orphans.length)
+    console.log(`  ${orphans.length} ORPHANED line(s) naming a mesh that is not on disk: ${orphans.join(', ')}`);
+  else
+    console.log('  every line matches a mesh, and every mesh has a line');
+}
+
+// ---- SHIPS UNDER Ships/, STATIONS UNDER Stations/ ----------------------------------------------
+//
+// UnitModelLibrary.CivPath picks the folder from UnitInfo.isStation and looks in exactly one place. A
+// station mesh filed under Ships/ is therefore not "in the wrong folder but findable" — it is INVISIBLE,
+// and that hull silently falls back to a borrowed placeholder while every file-count check in this
+// script still reports it present.
+{
+  const misfiled = [];
+  for (const civ of CIVS) {
+    for (const sub of ['Ships', 'Stations']) {
+      const dir = path.join(RES, 'SpaceAssets', sub, civ);
+      if (!fs.existsSync(dir)) continue;
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.glb')) continue;
+        const type = f.replace(/\.glb$/, '').replace(`${civ}_`, '');
+        const wantStation = STATIONS.has(type);
+        const want = wantStation ? 'Stations' : 'Ships';
+        if (want !== sub) misfiled.push(`${sub}/${civ}/${f} should be under ${want}/`);
+      }
+    }
+  }
+  console.log(`\nfolder placement: ${misfiled.length ? misfiled.length + ' MISFILED' : 'every mesh is in the folder its class is looked up in'}`);
+  for (const m of misfiled) console.log(`  ${m}`);
 }
 
 console.log(anyStarterMissing
