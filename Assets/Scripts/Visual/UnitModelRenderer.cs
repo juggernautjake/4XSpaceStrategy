@@ -310,6 +310,13 @@ public class UnitModelRenderer : MonoBehaviour
     /// where a scout's does.
     const float BadgeLift = 1.15f, BadgeScale = 1.35f;
 
+    /// Whether a modelled ship carries its class icon on a stick above it.
+    ///
+    /// OFF for the shipping game: the badges were a stand-in for silhouettes that did not exist yet,
+    /// and now that each hull has its own art they are clutter between the camera and the model.
+    /// Turn it on to tell apart hulls that are still sharing a borrowed mesh.
+    public static bool ShowClassBadges = false;
+
     /// The badges, kept so LateUpdate can turn them to face the camera without a GetComponentInChildren
     /// per ship per frame.
     readonly List<Transform> badges = new List<Transform>();
@@ -350,6 +357,10 @@ public class UnitModelRenderer : MonoBehaviour
     /// because it is one transform write per ship and a component would be an Update call per ship.
     void TickBadges()
     {
+        // Nothing is built when the flag is off, so the list is empty and this is a wasted Camera.main
+        // every frame. Cheap, but Camera.main is a lookup and this runs in LateUpdate.
+        if (badges.Count == 0) return;
+
         var cam = Camera.main;
         if (cam == null) return;
 
@@ -419,22 +430,21 @@ public class UnitModelRenderer : MonoBehaviour
         go.AddComponent<UnitModelClick>().Init(u);
 
         // ============================================================================================
-        // THE CLASS BADGE
+        // THE CLASS BADGE — OFF, now that hulls have their own art
         //
-        // A ship rendered as a mesh used to carry NO class marking at all: tokens and models were an
-        // either/or, and the token was the thing with the icon on it. That was survivable while only
-        // colony ships and the research line had meshes, and it stopped being survivable the moment
-        // every hull got one — three shared meshes across twenty classes means the silhouette cannot
-        // tell you what you are looking at, and at system zoom a hull is a few pixels of grey.
+        // The badge existed for one reason: there were three meshes and twenty-odd classes, so the
+        // silhouette could not tell you what you were looking at and every modelled ship had to wear
+        // its class icon on a stick to be identifiable at all.
         //
-        // So every modelled ship wears the same icon its billboard would have: the class shape in the
-        // class colour, plus the owner's colour behind it. Held ABOVE the hull rather than on it, so it
-        // never disappears into the mesh from a bad angle, and billboarded to the camera every frame
-        // (see TickBadge) so it is legible from anywhere.
+        // That reason is going away. Each civilization and hull now gets art of its own — a scout is a
+        // shrimp and a dreadnought is a leviathan — and a silhouette that identifies itself makes the
+        // floating symbol pure clutter sitting between the camera and the ship you paid for.
         //
-        // Deliberately the SAME sprite the tokens and the build menus use. A class that reads as a
-        // diamond in the shipyard has to read as a diamond in space, or the icon is decoration.
-        BuildBadge(go, u, entry.size);
+        // Kept behind a flag rather than deleted, because the fallback is still real: any hull with no
+        // art yet is still drawn on a borrowed mesh, and switching this back on is how you tell those
+        // apart while the fleet is being finished. Unmodelled units are unaffected either way — they
+        // are drawn by UnitTokenRenderer, whose whole job is the icon.
+        if (ShowClassBadges) BuildBadge(go, u, entry.size);
 
         // ============================================================================================
         // RUNNING LIGHTS AND ENGINES

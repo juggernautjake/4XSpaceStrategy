@@ -86,8 +86,21 @@ public static class FleetClock
 public class ShipLights : MonoBehaviour
 {
     // ---- tuning ------------------------------------------------------------------------------
+
+    /// Running lights: OFF.
+    ///
+    /// They were built at 8.5% of hull length, which sounds small and is not — a ship is drawn at
+    /// 0.09-0.40 world units, so each lamp came out a substantial fraction of the whole vessel and the
+    /// fleet read as a string of fairy lights with a ship somewhere behind it. The blinking made it
+    /// worse by drawing the eye to the lamp rather than the hull.
+    ///
+    /// Turned off rather than deleted, and the size fixed at the same time, so switching it back on
+    /// gives pinpricks instead of beacons. The rhythm machinery in FleetClock is untouched and still
+    /// drives the drive plumes and the plasma pulse, which are the effects worth having.
+    public static bool ShowNavLights = false;
+
     const int   MaxNavLights   = 7;
-    const float NavSizeFactor  = 0.085f;   // of hull length
+    const float NavSizeFactor  = 0.028f;   // of hull length — a third of what it was
     const float ThrusterFactor = 0.30f;    // of hull width
     const float MuzzleLife     = 0.09f;    // seconds — matched to the shot leaving the barrel
 
@@ -182,6 +195,8 @@ public class ShipLights : MonoBehaviour
     // the ship already carries.
     void BuildNavLights(Bounds b, Color ownerColour)
     {
+        if (!ShowNavLights) return;
+
         float size = hullLength * NavSizeFactor;
         float halfW = hullWidth * 0.5f;
         float halfL = hullLength * 0.5f;
