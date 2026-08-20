@@ -189,7 +189,16 @@ public class GameHUD : MonoBehaviour
     static string SpeedLabel()
     {
         string date = GameCalendar.Short();
-        return TimeControl.IsPaused ? $"{date}  ❚❚" : $"{date}  {Time.timeScale:0.#}x";
+        // "PAUSED" rather than a pause GLYPH, and it has to be. This used to read "❚❚" (U+275A, HEAVY
+        // VERTICAL BAR), which LiberationSans SDF — the TMP default — does not contain. TextMeshPro
+        // does not fail quietly on a missing glyph: it substitutes □ and logs a warning EVERY time the
+        // text is measured or rebuilt, which for a label that repaints as the date ticks meant the
+        // console filled with the same warning forever and drowned out everything else.
+        //
+        // Any decorative glyph outside the font's range would do the same, so the rule here is ASCII
+        // unless a glyph has been confirmed present in the SDF asset. A word also parallels the other
+        // branch, which already spells out a value ("1x", "2x") rather than drawing an icon.
+        return TimeControl.IsPaused ? $"{date}  PAUSED" : $"{date}  {Time.timeScale:0.#}x";
     }
 
     // The date changes on its own, without anything raising an event the HUD subscribes to — so unlike
