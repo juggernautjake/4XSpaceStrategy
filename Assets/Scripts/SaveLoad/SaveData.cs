@@ -86,6 +86,7 @@ public class SaveGame
     public bool organicCityGrowth = true;                   // the player's taste toggle, saved with the game
     public List<TerraformJobDTO> terraformJobs = new List<TerraformJobDTO>();
     public List<ControlGroupDTO> controlGroups = new List<ControlGroupDTO>();
+    public List<SquadronOrdersDTO> squadronOrders = new List<SquadronOrdersDTO>();
     public List<FactionAIDTO> factionAI = new List<FactionAIDTO>();   // each rival civilisation's race + personality
     public List<DerelictDTO> derelicts = new List<DerelictDTO>();     // ancient derelict stations and their contents
 
@@ -125,6 +126,33 @@ public class ControlGroupDTO
 {
     public int group;
     public List<int> unitIds = new List<int>();
+}
+
+// A squadron's STANDING ORDERS — formation, protocol, rally point and patrol route. Saved beside the
+// membership list in ControlGroupDTO rather than inside it, so an older save that has groups but no
+// squadron orders still loads and simply gets the defaults.
+//
+// The route is stored as three parallel float lists because Unity's JsonUtility does not serialize a
+// List<Vector3> field, and will hand back an empty list without telling anyone if you ask it to.
+[System.Serializable]
+public class SquadronOrdersDTO
+{
+    public int group;
+    public string name = "";
+    public int formation;          // FleetFormationKind
+    public int protocol;           // SquadronProtocol
+    public float withdrawAt = 0.35f;
+    public int escorting;
+
+    public bool hasRally;
+    public float rallyX, rallyY, rallyZ;
+
+    public int patrolMode;         // PatrolMode
+    public int patrolLeg;
+    public int patrolDir = 1;
+    public List<float> patrolX = new List<float>();
+    public List<float> patrolY = new List<float>();
+    public List<float> patrolZ = new List<float>();
 }
 
 // One planetary-engineering project under way on a world (see TerraformJob).

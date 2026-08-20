@@ -56,8 +56,11 @@ meshes under `_Extras/` in the Downloads library.
 - [x] Size variance named per hull — a probe is a fist across, a mega-station a small moon
 
 ### A4. Generation progress
-- [~] **Aquarii 25/29** — the last four stations (Terraforming, Deep-Space, Mega, Hyper-Relay) are
-      generating now. All 25 finished hulls are decimated and imported into `Resources/`
+- [x] **Aquarii 29/29 — COMPLETE.** Every hull generated, downloaded in all five formats, decimated
+      and imported. `verify-wiring.mjs` resolves 29/29
+- [~] **Terran 4/29** — running. The two existing hulls (Scout, Fighter) were reviewed and KEPT:
+      correct design language, on-palette steel-blue with orange trim, well textured. Every lineage
+      chains off them
 - [ ] **Terran 2/29** — started, then deprioritised to finish Aquarii first
 - [ ] Pyrothian 0/29 · Cryithn 0/29 · Sylvan 0/29
 - [x] **No longer blocked on hand-feeding tokens.** The open Meshy tab refreshes its own session
@@ -88,7 +91,12 @@ meshes under `_Extras/` in the Downloads library.
 - [x] `tools/verify-textures.mjs` — brightness, detail, and whether both livery accents landed
 - [x] `tools/contact-sheet.mjs` — tile every render into one image for review
 - [x] Thresholds calibrated against accepted art, not against the prompt's stated percentages
-- [ ] Re-roll the one genuine failure (Aquarii Research Ship Mk II, 0.157 brightness)
+- [x] The Research Ship Mk II re-roll landed — it is no longer among the failures
+- [ ] **Two Aquarii stations read dark**: Terraforming Station (0.125) and Mega-Station (0.122),
+      against a ~0.15 floor. NOT re-rolled, and the call is deliberate: the whole station set scores
+      below the ships because the checker was calibrated on hulls, and both look right beside their
+      siblings on the contact sheet. Worth 84 credits only once every civilization has art at all —
+      see the credit note in H
 
 ---
 
@@ -247,5 +255,9 @@ shown on bare models. One flag each to bring back.
 
 - **Nothing here is compiled.** There is no Unity in this environment.
   `tools/Check-Scripts.ps1` is a structural tripwire, not a compiler. Build before playing.
-- **Credits:** ~4,400 at last check. Roughly 42 per hull.
+- **Credits: ~4,105, and that is NOT enough for all five civilizations.** 117 hulls remain at ~42
+  each = ~4,900. The shortfall is roughly 800 credits, or 19 hulls. On the current order — Terran,
+  then Pyrothian, Cryithn, Sylvan — that lands four complete civilizations and about a third of
+  Sylvan. Buying credits, or accepting that the last civilization flies borrowed hulls for now, is a
+  decision for Jacob.
 - **Everything is pushed to `origin/main`** as it lands.

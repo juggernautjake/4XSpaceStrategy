@@ -71,6 +71,12 @@ Aquarii_ResearchStation           0    0    0  1.0  spin   # sea snail observato
 Aquarii_RelayStation              0    0    0  1.0  spin   # sea urchin, spines as antennae
 Aquarii_SupplyStation             0    0    0  1.0  spin   # barnacle cluster
 Aquarii_MultiStation              0    0    0  1.0  spin   # crab fortress-city
+Aquarii_TerraformStation          0    0    0  1.0  spin   # anemone processor ring, 1.90 x 0.35 x 1.90
+Aquarii_DeepSpaceStation          0    0    0  1.0  spin   # glass-sponge lattice tower
+Aquarii_MegaStation               0    0    0  1.0  spin   # reef metropolis, a flat ring city
+# The one station that holds a fixed attitude. A jump gate that slowly rotates reads as adrift rather
+# than as installed, and its aperture faces +Y — ships pass UP through it — which a spin would smear.
+Aquarii_HyperRelay                0    0    0  1.0  nospin # basket-star gate framing the aperture
 
 # ---- Terran --------------------------------------------------------------------------------
 Terran_Scout                      0  -90    0    # aeroplane — LENGTH IS X, wingspan is Z; nose +X

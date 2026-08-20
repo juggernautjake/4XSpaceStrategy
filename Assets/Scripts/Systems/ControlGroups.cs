@@ -29,15 +29,106 @@ public static class ControlGroups
         OnChanged?.Invoke();
     }
 
+    // ---- The roster verbs ------------------------------------------------------------------------
+    //
+    // MEMBERSHIP IS EXCLUSIVE: a ship sits in at most one group, and joining a new one leaves the old.
+    // Classic control groups overlap freely, which is fine while a group is only a selection shortcut.
+    // It stops being fine the moment a group carries a FORMATION and a PROTOCOL (see Squadrons): "the
+    // squadron's formation" has no answer for a ship in two squadrons, and neither does which rally
+    // point it runs to when it is hurt.
+    //
+    // Exclusivity is also what gives the verbs below their meaning. Detach takes ships out of whatever
+    // they are in; Split promotes a sub-selection into a slot of its own — which is exactly "select a
+    // few ships inside a bigger group and make them their own group".
+
+    static bool Eligible(Unit u) => u != null && u.owner == FactionManager.Player;
+
+    /// Take these units out of every group. Returns the groups that changed.
+    static void RemoveFromAll(IReadOnlyList<Unit> units, HashSet<int> touched)
+    {
+        if (units == null) return;
+        foreach (var u in units)
+        {
+            if (u == null) continue;
+            for (int g = 1; g <= Count; g++)
+                if (groups[g].Remove(u.id)) touched.Add(g);
+        }
+    }
+
+    /// Replace group N with these units. The classic Ctrl+N.
     public static void Assign(int group, IReadOnlyList<Unit> units)
     {
         if (group < 1 || group > Count) return;
+        var touched = new HashSet<int> { group };
+        RemoveFromAll(units, touched);
         groups[group].Clear();
         if (units != null)
             foreach (var u in units)
-                if (u != null && u.owner == FactionManager.Player && !groups[group].Contains(u.id))
+                if (Eligible(u) && !groups[group].Contains(u.id))
                     groups[group].Add(u.id);
+        PruneEmptied(touched);
         OnChanged?.Invoke();
+    }
+
+    /// Add these units to group N, leaving its existing members alone.
+    public static void AddTo(int group, IReadOnlyList<Unit> units)
+    {
+        if (group < 1 || group > Count || units == null) return;
+        var touched = new HashSet<int> { group };
+        RemoveFromAll(units, touched);
+        foreach (var u in units)
+            if (Eligible(u) && !groups[group].Contains(u.id))
+                groups[group].Add(u.id);
+        PruneEmptied(touched);
+        OnChanged?.Invoke();
+    }
+
+    /// Take these units out of whatever group they are in, leaving the rest of it intact. This is how
+    /// a single ship is broken off a fleet: select it, detach it.
+    public static void Detach(IReadOnlyList<Unit> units)
+    {
+        if (units == null) return;
+        var touched = new HashSet<int>();
+        RemoveFromAll(units, touched);
+        PruneEmptied(touched);
+        OnChanged?.Invoke();
+    }
+
+    /// Promote these units into the first free slot and return it, or 0 if every slot is taken.
+    public static int Split(IReadOnlyList<Unit> units)
+    {
+        if (units == null || units.Count == 0) return 0;
+        for (int g = 1; g <= Count; g++)
+            if (groups[g].Count == 0) { Assign(g, units); return g; }
+
+        // Every slot is full. A slot whose ships are ALL in this selection is about to be emptied by
+        // the split anyway, so it is free in every sense that matters — take it rather than refusing.
+        var ids = new HashSet<int>();
+        foreach (var u in units) if (u != null) ids.Add(u.id);
+        for (int g = 1; g <= Count; g++)
+        {
+            bool whollyContained = groups[g].Count > 0;
+            foreach (int id in groups[g]) if (!ids.Contains(id)) { whollyContained = false; break; }
+            if (whollyContained) { Assign(g, units); return g; }
+        }
+        return 0;
+    }
+
+    /// Empty a group, leaving its ships unassigned.
+    public static void Disband(int group)
+    {
+        if (group < 1 || group > Count) return;
+        groups[group].Clear();
+        Squadrons.ResetSlot(group);
+        OnChanged?.Invoke();
+    }
+
+    /// A slot that has just lost its last member forgets its standing orders too, so slot 3 does not
+    /// hand the next fleet bound there the patrol route the last one was given.
+    static void PruneEmptied(HashSet<int> touched)
+    {
+        foreach (int g in touched)
+            if (g >= 1 && g <= Count && groups[g].Count == 0) Squadrons.ResetSlot(g);
     }
 
     // The living members of a group.
