@@ -13,6 +13,7 @@
 // ============================================================================================
 
 import sharp from 'sharp';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,17 +22,43 @@ const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const OUT = path.resolve(PROJ, arg('--out', 'Art/AllModels/_flight-model.png'));
 
-// ---- the classes under test, from UnitType.cs -------------------------------------------------
-const SHIPS = [
-  { name: 'Probe',        health: 8,    speed: 7,  size: 0.09, station: false },
-  { name: 'Fighter',      health: 80,   speed: 8,  size: 0.13, station: false },
-  { name: 'Scout Mk III', health: 70,   speed: 15, size: 0.18, station: false },
-  { name: 'Frigate',      health: 180,  speed: 9,  size: 0.20, station: false },
-  { name: 'Cruiser',      health: 340,  speed: 7,  size: 0.26, station: false },
-  { name: 'Colony Ship',  health: 160,  speed: 3,  size: 0.34, station: false },
-  { name: 'Dreadnought',  health: 950,  speed: 5,  size: 0.40, station: false },
-  { name: 'Mega-Station', health: 3000, speed: 1,  size: 0.37, station: true  },
-];
+// ---- the classes under test: ALL of them, read from the game's own tables ---------------------
+//
+// This started as eight rows copied out of UnitType.cs by hand, which tests the eight somebody
+// thought of and silently stops covering a class the day its stats change. It now parses UnitType.cs
+// for the hull stats and UnitModelRenderer.cs for the drawn sizes, so every class in the game is
+// exercised and a stat edit shows up here without anyone having to remember to mirror it.
+function parseShips() {
+  const u = fs.readFileSync(new URL('../Assets/Scripts/Data/UnitType.cs', import.meta.url), 'utf8');
+  const r = fs.readFileSync(new URL('../Assets/Scripts/Visual/UnitModelRenderer.cs', import.meta.url), 'utf8');
+
+  const sizes = {};
+  for (const m of r.matchAll(/Station\(UnitType\.(\w+),\s*([0-9.]+)f\)/g)) sizes[m[1]] = +m[2];
+  for (const m of r.matchAll(/Ship\(UnitType\.(\w+),\s*([0-9.]+)f/g)) sizes[m[1]] = +m[2];
+  for (const m of r.matchAll(/map\[UnitType\.(\w+)\] = new Entry \{ path = sciencePath, size = ([0-9.]+)f/g)) sizes[m[1]] = +m[2];
+  sizes.ColonyShip = 0.33;
+
+  // Stations are the ones registered through Station() in the size table — that is the single place
+  // the distinction is made per class, and it cannot drift from what is actually drawn.
+  const rx = /new UnitInfo\(UnitType\.(\w+),\s*"([^"]+)",\s*\r?\n?\s*"[\s\S]*?",\s*\r?\n?\s*([0-9]+),\s*([0-9]+),\s*([0-9.]+)f,\s*([0-9]+),\s*([0-9]+),\s*([0-9]+)/g;
+  const stationNames = new Set();
+  for (const m of r.matchAll(/Station\(UnitType\.(\w+),/g)) stationNames.add(m[1]);
+
+  const out = [];
+  for (const m of u.matchAll(rx)) {
+    const type = m[1];
+    out.push({
+      name: m[2],
+      health: +m[7],
+      speed: +m[8],
+      size: sizes[type] ?? 0.2,
+      station: stationNames.has(type),
+    });
+  }
+  return out;
+}
+
+const SHIPS = parseShips();
 
 // ---- ShipPhysics ------------------------------------------------------------------------------
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
