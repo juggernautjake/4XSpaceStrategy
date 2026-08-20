@@ -44,7 +44,7 @@
     "verifier measures to tell a real texture from a flat fill."
   ],
   "sharedTail": "Bow distinct from stern; longer than wide, wider than tall; engines aft, sensors forward; flat ventral, detail dorsal. STRONG SATURATED COLOUR, never white or pale. Dense panel lines, rivets, weathering. One ship, plain black background, three-quarter view, no text.",
-  "stationTail": "A built orbital structure, radially symmetric, no bow, no engines. STRONG SATURATED COLOUR, never white or pale. Dense panel lines, rivets, weathering. One structure, plain black background, three-quarter view, no text.",
+  "stationTail": "A built orbital structure, radially symmetric, no bow, no engines. STRONG SATURATED COLOUR, never white or pale. Brightly lit: glowing windows, lamps and panel lights across the whole structure. Dense panel lines, rivets, weathering. One structure, plain black background, three-quarter view, no text.",
   "civilizations": {
     "Terran": {
       "aesthetic": "steel grey-blue gunmetal plating, structural ribs, angular panels, black radiator fins",

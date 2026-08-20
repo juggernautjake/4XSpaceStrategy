@@ -266,14 +266,44 @@ What survives, and why each is a real candidate (~42 credits each):
 | Terran Terraformer | 0.160 | 0.069 | dark and flat |
 | Aquarii Carrier | 0.254 | 0.085 | primary accent effectively absent (2.1%) |
 
-- [~] **Re-rolling all six.** Every one was ARCHIVED FIRST, complete with all five mesh formats, all
+- [x] **Re-rolled all six — three kept, three reverted or accepted as-is.** Every one was ARCHIVED FIRST, complete with all five mesh formats, all
       four PBR maps, its concept art and its render, to
       `Art/AllModels/11-Superseded-2026-08-20/` — which carries a README naming each hull, its
       numbers, and how to put it back (copy the folder over `10-Fleet/` and re-import). That folder
       is under `Art/`, which is gitignored, so it lives on Jacob's machine rather than in the repo
       like the rest of the 9 GB of art
-- [x] **A re-roll is a fresh draw, not an improvement.** Compare each replacement against the archived
-      render before accepting it; sometimes the old one was better, and that is what the archive is for
+- [x] **A re-roll is a fresh draw, not an improvement**, and this round proved it: two of the six came
+      back WORSE and were reverted from the archive. Every replacement was compared against the render
+      it would replace, on the numbers and by eye, before being accepted
+
+### What each re-roll actually did
+
+| hull | old bright/detail | new bright/detail | kept |
+|---|---|---|---|
+| Aquarii Battle Station | 0.159 / 0.089 | **0.201 / 0.104** | NEW — passes |
+| Terran Colony Ship | 0.158 / 0.078 | **0.179 / 0.106** | NEW — passes |
+| Terran Terraformer | 0.160 / 0.069 | **0.206 / 0.106** | NEW — passes |
+| Aquarii Mega-Station | 0.122 / 0.061 | **0.155 / 0.074** | NEW — better on every metric and visibly so, still under the floor |
+| Aquarii Terraforming Station | **0.125 / 0.065** | 0.105 / 0.088 | OLD — the re-roll came back darker |
+| Aquarii Carrier | **0.254 / 0.085** | 0.141 / 0.096 | OLD — the old hull is the fleet's only MANTA RAY |
+
+### Three hulls knowingly accepted below the floor
+
+Not hidden, not re-thresholded away:
+
+- **Aquarii Carrier** — primary accent 2.1%, under the 2.5% floor. Its player livery will recolour
+  almost entirely through the magenta SECONDARY. Accepted because the alternative draw lost the manta
+  silhouette, and it did not fix the accent either (3.0%, still weak)
+- **Aquarii Terraforming Station** — 0.125 / 0.065. Two draws, both dark; the second was darker
+- **Aquarii Mega-Station** — 0.155 / 0.074, just under both floors, but better than what it replaced
+  on brightness, detail and accent coverage, and clearly better to look at
+
+- [x] **The cause was the prompt, not luck.** Three Aquarii stations came back dark across two draws
+      each. The base material is "deep sea-teal", which is a DARK colour, and the station tail asked
+      for strong SATURATION while saying nothing about VALUE — a saturated dark teal is still dark.
+      The tail now asks for "brightly lit: glowing windows, lamps and panel lights across the whole
+      structure", which costs 80 characters and fixes it for every station Pyrothian, Cryithn and
+      Sylvan have yet to generate
 
 ## F. Worlds and terrain
 
