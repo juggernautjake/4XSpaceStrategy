@@ -655,6 +655,12 @@ public class SimpleAudio : MonoBehaviour
         cWeapon[(int)WeaponClass.Missile]      = Whoosh(0.42f);
         cWeapon[(int)WeaponClass.PointDefence] = Sweep(2600f, 1900f, 0.045f, 40f, 0.16f);
 
+        // The two ordnance-fed classes. Both are deliberately at the bottom of the register, because
+        // the energy weapons already own everything bright and the ear sorts a battle by pitch long
+        // before it sorts it by anything else: lasers snap, kinetics thump.
+        cWeapon[(int)WeaponClass.Autocannon]   = Sweep(430f, 210f, 0.06f, 34f, 0.30f);
+        cWeapon[(int)WeaponClass.Torpedo]      = Whoosh(0.80f);
+
         cBoom = new[] { Explosion(0.42f), Explosion(0.75f), Explosion(1.35f) };
 
         // A round LANDING, which is a different event from the gun going off and from the ship coming

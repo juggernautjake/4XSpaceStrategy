@@ -439,6 +439,32 @@ public class UnitModelRenderer : MonoBehaviour
     public ShipLights LightsOf(Unit u)
         => u != null && models.TryGetValue(u, out var m) && m != null ? m.lights : null;
 
+    // ============================================================================================
+    // HOW FAST A SHIP IS ACTUALLY MOVING, AND WHY ANYTHING OUTSIDE THIS FILE CARES
+    //
+    // Gunnery. Every unguided round in the game is aimed at where its target WILL BE, which needs a
+    // velocity, and the only place a truthful one exists is here — `flightVel` is the drawn hull's
+    // real velocity, produced by Steer under the momentum model, and it is not the same thing as the
+    // simulation's marker velocity. A ship halfway through a reversal is still moving the OLD way
+    // while its icon has already turned, and leading the icon would put every shot in the wrong place
+    // at precisely the moment a ship is most worth shooting at.
+    //
+    // Zero is the honest answer for a parked hull, a station, or one drawn as a token rather than a
+    // mesh: none of them are going anywhere the gunner has to lead. The slow parked orbit is
+    // deliberately NOT reported — it is a couple of degrees a second of decoration, and leading it
+    // would make every shot at a docked ship miss by a hull width for no reason anyone could see.
+    // ============================================================================================
+
+    /// This unit's drawn velocity in world units per second, or zero if it is not flying under the
+    /// momentum model.
+    public static Vector3 VelocityOf(Unit u)
+    {
+        if (u == null || Instance == null) return Vector3.zero;
+        if (u.status != UnitStatus.Traveling) return Vector3.zero;
+        if (!Instance.models.TryGetValue(u, out var m) || m == null || !m.flightReady) return Vector3.zero;
+        return m.flightVel;
+    }
+
     public void Rebuild()
     {
         var live = new HashSet<Unit>();

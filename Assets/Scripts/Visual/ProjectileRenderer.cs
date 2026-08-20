@@ -9,32 +9,40 @@ using UnityEngine;
 // battle that fires two hundred rounds a second would otherwise spend its entire frame budget
 // allocating and collecting quads.
 //
-// ---- TWO KINDS OF SHOT, AND THE DIFFERENCE IS `projectileSpeed` -------------------------------
+// This file OWNS the flight and the arrival. It does not own the maths — Ballistics does — and the
+// split is deliberate: everything below is bookkeeping, pooling and drawing, and everything that
+// decides where a round goes is in a file with no Unity in it that a Node script can mirror and draw
+// a picture of. See tools/ballistics-check.mjs.
 //
-//   INSTANT (speed 0)   A beam or a railgun slug. There is no travel: the damage has already landed
-//                       by the time anything is drawn, and what we draw is the AFTERIMAGE — a line
-//                       from muzzle to target that fades over a fraction of a second. Drawing it any
-//                       other way would be a lie about when the hit happened.
+// ---- THREE KINDS OF SHOT ----------------------------------------------------------------------
 //
-//   TRAVELLING          A bolt, a plasma ball, a missile. It has a position, a velocity, and — if the
-//                       weapon has a turn rate — it steers toward its target every frame. Damage lands
-//                       when it arrives, so a target that dies first leaves its inbound rounds flying
-//                       on to nothing, which is correct and is also the reason a missile volley can be
-//                       wasted.
+//   INSTANT     A beam or a railgun slug. There is no travel: hit or miss is decided at the muzzle and
+//               what we draw is the AFTERIMAGE, a line that fades over a fraction of a second.
 //
-// ---- HOMING, AND WHY IT IS RATE-LIMITED RATHER THAN EXACT -------------------------------------
+//   UNGUIDED    A bolt, a plasma ball, an autocannon round. It was aimed at a point — a LEAD point,
+//               computed by Ballistics from where the target was going — and it flies there and no
+//               further. If the target changed its mind after the trigger was pulled, the round goes
+//               through empty space, and that is the mechanic rather than a shortcoming.
 //
-// A missile that simply set its velocity at its target every frame would be unmissable and would look
-// like it was on a string. It turns at `turnRate` degrees per second instead, so it leads, overshoots
-// a hard-manoeuvring target and comes back around — and a fast enough ship genuinely outruns it. That
-// single number is the whole difference between "a homing weapon" and "a hitscan weapon with a delay".
+//   GUIDED      A missile or a torpedo. It has a motor with a boost phase and a finite burn, a seeker
+//               with a finite cone, and a turn radius that grows with the square of its speed. It
+//               steers by proportional navigation while it has fuel and a lock, coasts blind and
+//               straight once either runs out, and then dissipates.
 //
-// ---- WHY THE ART IS PROCEDURAL ----------------------------------------------------------------
+// ---- TWO BUGS THIS REWRITE FIXES, BOTH OF WHICH WERE INVISIBLE --------------------------------
 //
-// Same rule as every other visual in this project: no imported asset is load-bearing. A bolt is a
-// quad with a generated additive texture, a beam is a LineRenderer, and both take their colour and
-// width from the WEAPON (see Weaponry) rather than from a table here — so adding a weapon needs no
-// change to this file at all.
+// 1. INSTANT WEAPONS DEALT NO DAMAGE AT ALL. The single call to ResolveHit lived inside the
+//    travelling-round branch, below an `if (instant) { ...fade...; continue; }`. So every beam and
+//    every railgun in the game drew a beautiful line and did nothing whatsoever. That is 56% of a
+//    Dreadnought's rated attack, 35% of a Cruiser's and 38% of a Fighter Mk II's quietly going
+//    nowhere, in a system where the only symptom is "capital ships feel a bit weak".
+//
+// 2. FAST ROUNDS TUNNELLED THROUGH THEIR TARGETS. Arrival was a point test — is the round within
+//    0.55 units of the target THIS frame. A pulse bolt travels 1.03 units per frame at 60fps, so the
+//    test was being asked to catch a 1.1-unit-wide window with a 1.03-unit stride, and it missed
+//    roughly half of them. At 30fps it missed nearly all of them. Every hit test below is now a
+//    SEGMENT test against the path the round actually swept, which cannot tunnel at any frame rate —
+//    and that matters more now than it did, because frame rate should never be a weapon stat.
 // ============================================================================================
 public class ProjectileRenderer : MonoBehaviour
 {
@@ -47,11 +55,11 @@ public class ProjectileRenderer : MonoBehaviour
         public Unit shooter;                 // for credit on the kill; may die mid-flight
         public Unit target;                  // may die mid-flight, leaving the round to fly on
         public Vector3 pos, vel;
-        public Vector3 endPoint;             // instant shots: where the line stops
+        public Vector3 aimPoint;             // where an unguided round is going; the fallback for a guided one
         public float damage;
-        public float life, maxLife;
+        public float age, maxLife;
         public bool instant;
-        public bool dead;
+        public bool hasLock;                 // a guided round that has lost its target never gets it back
 
         public Transform tr;                 // pooled quad (travelling) — null for instant shots
         public Light light;                  // pooled point light, so the round lights what it passes
@@ -72,15 +80,6 @@ public class ProjectileRenderer : MonoBehaviour
     /// a rope, long enough to survive a frame drop.
     const float InstantLife = 0.13f;
 
-    /// A travelling round gives up after this long even if its target vanished — otherwise a missile
-    /// whose target died flies to the edge of the galaxy and stays in the list forever.
-    const float MaxFlight = 6f;
-
-    /// How close a travelling round has to get to count as a hit. Ships are drawn well under a unit
-    /// across at fighting zoom, so this is generous on purpose: a round that visually clips the hull
-    /// should land, and one that needed sub-pixel accuracy would read as a miss that wasn't.
-    const float HitRadius = 0.55f;
-
     public static void Create()
     {
         if (Instance != null) return;
@@ -99,48 +98,35 @@ public class ProjectileRenderer : MonoBehaviour
     }
 
     /// How many rounds are in the air. The combat manager uses this to stop a pathological fight from
-    /// filling the list; the UI uses it for nothing, which is why it is the only thing exposed.
+    /// filling the list.
     public int LiveCount => shots.Count;
 
     // ============================================================================================
     // FIRING
     // ============================================================================================
 
-    /// Fire one round. `from`/`to` are world positions; the round is drawn from `from` and lands on
-    /// `target`. Returns immediately — nothing here blocks and nothing allocates a GameObject unless
-    /// the pool is empty.
-    public void Fire(Unit shooter, Unit target, WeaponInfo w, Vector3 from, Vector3 to, float damage)
+    /// Fire one round.
+    ///
+    /// `aimPoint` is where the shot is GOING, not where the target is. CombatManager has already run
+    /// the intercept solution and thrown the mount's dispersion cone at it, so by the time a round
+    /// gets here the question of whether it was aimed well has been settled and this only has to fly
+    /// it honestly. A guided round keeps the aim point as the place to coast toward if its seeker
+    /// loses the target.
+    public void Fire(Unit shooter, Unit target, WeaponInfo w, Vector3 from, Vector3 aimPoint, float damage)
     {
         if (w == null) return;
 
         var s = new Shot
         {
             weapon = w, shooter = shooter, target = target,
-            pos = from, endPoint = to, damage = damage,
-            instant = w.projectileSpeed <= 0.01f,
+            pos = from, aimPoint = aimPoint, damage = damage,
+            instant = w.IsInstant,
+            hasLock = target != null && !target.IsDestroyed,
             phaseOffset = Random.Range(0f, Mathf.PI * 2f)
         };
 
-        if (s.instant)
-        {
-            s.maxLife = InstantLife;
-            s.beam = RentBeam();
-            s.beam.startColor = s.beam.endColor = w.colour * w.glow;
-            s.beam.widthMultiplier = w.width;
-            s.beam.SetPosition(0, from);
-            s.beam.SetPosition(1, to);
-        }
-        else
-        {
-            Vector3 dir = (to - from);
-            dir = dir.sqrMagnitude > 1e-6f ? dir.normalized : Vector3.forward;
-            s.vel = dir * w.projectileSpeed;
-            s.maxLife = MaxFlight;
-            s.tr = RentQuad();
-            var mr = s.tr.GetComponent<MeshRenderer>();
-            mr.material.color = w.colour * w.glow;
-            s.tr.localScale = new Vector3(w.width * 2f, w.length, 1f);
-        }
+        if (s.instant) { FireInstant(s, from, aimPoint); }
+        else           { FireTravelling(s, w, from, aimPoint); }
 
         // A real light on the round, so a shot actually illuminates what it passes and what it hits.
         // Range is tied to the weapon's own glow and width, so a heavy plasma bolt throws light and a
@@ -164,6 +150,85 @@ public class ProjectileRenderer : MonoBehaviour
         UnitModelRenderer.Instance?.LightsOf(shooter)?.FlashMuzzle(from, w.colour);
     }
 
+    /// A beam or a slug: hit or miss is decided here and now.
+    ///
+    /// The dispersed aim point already carries whatever error the mount has. If it landed inside the
+    /// weapon's hit radius of the target, the shot connects and the line is drawn to the HULL, because
+    /// that is where it went. If it did not, the line is drawn to the aim point instead — so a missed
+    /// railgun shot visibly sails past, which is the only feedback the player will ever get that
+    /// crossing speed and range are doing something.
+    void FireInstant(Shot s, Vector3 from, Vector3 aimPoint)
+    {
+        var w = s.weapon;
+        s.maxLife = InstantLife;
+
+        Vector3 hullPos = s.target != null && !s.target.IsDestroyed
+            ? CombatManager.PosOf(s.target) : aimPoint;
+
+        bool hit = s.target != null && !s.target.IsDestroyed &&
+                   Vector3.Distance(aimPoint, hullPos) <= w.hitRadius;
+
+        // Overshoot a miss rather than stopping it dead at the aim point. A beam that stops in empty
+        // space exactly level with its target reads as a hit that failed to register; one that carries
+        // past reads as a miss.
+        Vector3 end = hit ? hullPos : from + (aimPoint - from) * 1.12f;
+        s.aimPoint = end;
+
+        s.beam = RentBeam();
+        s.beam.startColor = s.beam.endColor = w.colour * w.glow;
+        s.beam.widthMultiplier = w.width;
+        s.beam.SetPosition(0, from);
+        s.beam.SetPosition(1, end);
+
+        if (hit) CombatManager.Instance?.ResolveHit(s.shooter, s.target, w, s.damage, hullPos);
+        else     CombatManager.Instance?.ReportMiss(s.shooter);
+    }
+
+    /// Anything with a flight time. Sets the launch conditions, which for a guided round are
+    /// deliberately BAD ones.
+    void FireTravelling(Shot s, WeaponInfo w, Vector3 from, Vector3 aimPoint)
+    {
+        Vector3 dir = aimPoint - from;
+        dir = dir.sqrMagnitude > 1e-6f ? dir.normalized : Vector3.forward;
+
+        // ---- the cold launch ------------------------------------------------------------------
+        //
+        // A missile does not leave its tube pointing at the target. It is ejected clear of the hull,
+        // the motor lights, and guidance then hauls it round onto the intercept — which is where the
+        // characteristic opening curve of a missile launch comes from. Modelling it as a bad initial
+        // heading rather than as an animation means proportional navigation fixes it in front of the
+        // player, at whatever rate the round's actual thrust allows, and a torpedo's lazier recovery
+        // versus a missile's sharp one falls out for free.
+        // The ejection is a YAW, about world up, so the round fans out sideways WITHIN the plane the
+        // game is played on. The first version rotated about an axis perpendicular to the bore, which
+        // threw the round up out of the ecliptic — invisible from a top-down camera, and worse than
+        // invisible in the maths: the missile spent its entire boost phase climbing back down, held a
+        // huge bearing off its own nose the whole time, and tripped its seeker the instant it armed.
+        // Two of the four engagements in tools/ballistics-check.mjs failed on that alone.
+        //
+        // Sideways is both visible and cheap to undo, and a salvo whose rounds go opposite ways reads
+        // as a rack emptying rather than as one missile drawn twice. The small pitch scatter is
+        // decoration only — enough that two rounds do not occupy the same pixel, far too little to
+        // cost anything.
+        if (w.launchArcDeg > 0.01f)
+        {
+            float side = Random.value < 0.5f ? -1f : 1f;
+            dir = Quaternion.AngleAxis(w.launchArcDeg * side, Vector3.up) * dir;
+
+            Vector3 pitchAxis = Vector3.Cross(dir, Vector3.up);
+            if (pitchAxis.sqrMagnitude > 1e-6f)
+                dir = Quaternion.AngleAxis(Random.Range(-7f, 7f), pitchAxis.normalized) * dir;
+        }
+
+        s.vel = dir * Ballistics.SpeedAt(w, 0f);
+        s.maxLife = w.Lifetime;
+
+        s.tr = RentQuad();
+        var mr = s.tr.GetComponent<MeshRenderer>();
+        mr.material.color = w.colour * w.glow;
+        s.tr.localScale = new Vector3(w.width * 2f, w.length, 1f);
+    }
+
     // ============================================================================================
     // THE ONE LOOP
     // ============================================================================================
@@ -178,105 +243,154 @@ public class ProjectileRenderer : MonoBehaviour
         for (int i = shots.Count - 1; i >= 0; i--)
         {
             var s = shots[i];
-            s.life += dt;
+            s.age += dt;
 
-            if (s.instant)
-            {
-                // Fade the afterimage out over its life. Nothing moves; only the alpha falls.
-                float k = 1f - Mathf.Clamp01(s.life / s.maxLife);
-                if (s.beam != null)
-                {
-                    Color c = s.weapon.colour * s.weapon.glow;
-                    c.a = k;
-                    s.beam.startColor = s.beam.endColor = c;
-                }
-                // The flash lights the gap it crosses. Sat at the midpoint because a beam is lit along
-                // its whole length and one point light is a great deal cheaper than a line of them.
-                if (s.light != null)
-                {
-                    s.light.transform.position = Vector3.Lerp(s.pos, s.endPoint, 0.5f);
-                    s.light.intensity = Mathf.Clamp(s.weapon.glow * 2.2f, 0.6f, 7f) * k;
-                }
-                if (s.life >= s.maxLife) { Retire(s); shots.RemoveAt(i); }
-                continue;
-            }
-
-            // ---- Steering, for anything with a turn rate ----
-            Vector3 aim = TargetPos(s);
-            if (s.weapon.turnRate > 0f && s.target != null && !s.target.IsDestroyed)
-            {
-                Vector3 want = aim - s.pos;
-                if (want.sqrMagnitude > 1e-6f)
-                {
-                    // RotateTowards, not Slerp-to-target: the cap is what makes the missile miss a
-                    // sharp turn and come back around, which is the entire behaviour being bought.
-                    s.vel = Vector3.RotateTowards(s.vel, want.normalized * s.vel.magnitude,
-                                                  s.weapon.turnRate * Mathf.Deg2Rad * dt, 0f);
-                }
-            }
-
-            s.pos += s.vel * dt;
-
-            if (s.tr != null)
-            {
-                s.tr.position = s.pos;
-                if (s.vel.sqrMagnitude > 1e-6f)
-                    s.tr.rotation = Quaternion.LookRotation(Vector3.forward, s.vel.normalized);
-            }
-
-            // The light rides along with the round, so hulls it passes are lit as it goes by and the
-            // one it is about to hit brightens as it closes.
-            if (s.light != null) s.light.transform.position = s.pos;
-
-            // ---- plasma breathes ------------------------------------------------------------------
-            //
-            // A plasma bolt is a contained ball of energy, and a perfectly steady sprite reads as a
-            // painted slug instead. Pulsing the bolt AND its light together sells it as something
-            // barely held together.
-            //
-            // On the fleet beat, like the running lights and the drive plumes — so everything glowing
-            // in a battle is breathing to one clock rather than each on its own unrelated cycle. The
-            // per-shot offset keeps a volley from pulsing in unison, which would read as a strobe.
-            if (s.weapon.cls == WeaponClass.PlasmaCannon)
-            {
-                float pulse = 0.82f + 0.18f * Mathf.Sin(FleetClock.Beats * Mathf.PI * 4f + s.phaseOffset);
-                if (s.tr != null)
-                    s.tr.localScale = new Vector3(s.weapon.width * 2f * pulse, s.weapon.length * pulse, 1f);
-                if (s.light != null)
-                    s.light.intensity = Mathf.Clamp(s.weapon.glow * 2.2f, 0.6f, 7f) * pulse;
-            }
-
-            // ---- Arrival ----
-            bool arrived = s.target != null && !s.target.IsDestroyed &&
-                           Vector3.Distance(s.pos, aim) <= HitRadius;
-
-            // A dumb-fire round that reached where it was aimed has arrived even if the target moved —
-            // that is precisely what "no tracking" means, and it is why a pulse laser misses.
-            if (!arrived && s.weapon.turnRate <= 0f && Vector3.Distance(s.pos, s.endPoint) <= HitRadius)
-            {
-                bool stillThere = s.target != null && !s.target.IsDestroyed &&
-                                  Vector3.Distance(aim, s.endPoint) <= HitRadius * 2.2f;
-                if (stillThere) arrived = true;
-                else { CombatManager.Instance?.ReportMiss(s.shooter); Retire(s); shots.RemoveAt(i); continue; }
-            }
-
-            if (arrived)
-            {
-                CombatManager.Instance?.ResolveHit(s.shooter, s.target, s.weapon, s.damage, s.pos);
-                Retire(s); shots.RemoveAt(i); continue;
-            }
-
-            if (s.life >= s.maxLife || s.dead) { Retire(s); shots.RemoveAt(i); }
+            if (s.instant) { if (!TickInstant(s)) { Retire(s); shots.RemoveAt(i); } continue; }
+            if (!TickTravelling(s, dt))           { Retire(s); shots.RemoveAt(i); }
         }
     }
 
-    /// Where a shot is currently aiming: its target's live position, or the point it was fired at if
-    /// the target is gone.
-    Vector3 TargetPos(Shot s)
+    /// Fade an afterimage. Returns false when it is done.
+    bool TickInstant(Shot s)
     {
-        if (s.target == null || s.target.IsDestroyed) return s.endPoint;
-        var t = UnitVisuals.TransformOf(s.target);
-        return t != null ? t.position : s.endPoint;
+        float k = 1f - Mathf.Clamp01(s.age / s.maxLife);
+        if (s.beam != null)
+        {
+            Color c = s.weapon.colour * s.weapon.glow;
+            c.a = k;
+            s.beam.startColor = s.beam.endColor = c;
+        }
+        // The flash lights the gap it crosses. Sat at the midpoint because a beam is lit along its
+        // whole length and one point light is a great deal cheaper than a line of them.
+        if (s.light != null)
+        {
+            s.light.transform.position = Vector3.Lerp(s.pos, s.aimPoint, 0.5f);
+            s.light.intensity = Mathf.Clamp(s.weapon.glow * 2.2f, 0.6f, 7f) * k;
+        }
+        return s.age < s.maxLife;
+    }
+
+    /// Fly a round one step and see whether it arrived. Returns false when it should leave the list.
+    bool TickTravelling(Shot s, float dt)
+    {
+        var w = s.weapon;
+        Vector3 was = s.pos;
+
+        // ---- where the target is, and how it is moving ----
+        bool targetAlive = s.target != null && !s.target.IsDestroyed;
+        Vector3 tPos = targetAlive ? CombatManager.PosOf(s.target) : s.aimPoint;
+        Vector3 tVel = targetAlive ? UnitModelRenderer.VelocityOf(s.target) : Vector3.zero;
+
+        if (!targetAlive) s.hasLock = false;
+
+        if (w.IsGuided)
+        {
+            // ---- the seeker ----
+            //
+            // Checked BEFORE the step, against the heading the round currently holds, and caged for
+            // the first fraction of a second so a cold-launched round does not break its own lock on
+            // the bad heading it was deliberately given. A target that slides outside the cone after
+            // that is gone for good: there is no reacquisition.
+            if (s.hasLock && !Ballistics.SeekerHasLock(w, s.age, s.vel, s.pos, tPos))
+                s.hasLock = false;
+
+            s.vel = Ballistics.StepGuided(w, s.pos, s.vel, tPos, tVel, s.aimPoint, s.age, s.hasLock, dt);
+        }
+        else if (w.wanderDeg > 0.01f)
+        {
+            // ---- plasma does not fly straight ----
+            //
+            // A magnetically bottled ball of gas wanders. Perlin rather than white noise so the drift
+            // is a slow curve rather than a jitter, and seeded per shot so a volley does not writhe in
+            // unison. This is the only source of curvature on an unguided round, and it is small
+            // enough to be flavour rather than a hidden accuracy penalty — a plasma bolt still lands
+            // where it was aimed, it just does not get there along a ruler.
+            float t = s.age * 0.9f + s.phaseOffset;
+            float yaw   = (Mathf.PerlinNoise(t, 0.13f) - 0.5f) * 2f;
+            float pitch = (Mathf.PerlinNoise(0.71f, t) - 0.5f) * 2f;
+            Vector3 axis = Vector3.Cross(s.vel, Vector3.up);
+            if (axis.sqrMagnitude < 1e-6f) axis = Vector3.right;
+            s.vel = Quaternion.AngleAxis(yaw * w.wanderDeg * dt, Vector3.up) *
+                    (Quaternion.AngleAxis(pitch * w.wanderDeg * dt, axis.normalized) * s.vel);
+        }
+
+        s.pos += s.vel * dt;
+
+        // ---- did it touch anything on the way? -------------------------------------------------
+        //
+        // Against the SEGMENT it just swept, not against where it happens to have stopped. See the
+        // header: a point test at these speeds misses about half its hits at 60fps and nearly all of
+        // them at 30, which makes frame rate a weapon stat.
+        if (targetAlive && SegmentDistance(was, s.pos, tPos) <= w.hitRadius)
+        {
+            CombatManager.Instance?.ResolveHit(s.shooter, s.target, w, s.damage, tPos);
+            return false;
+        }
+
+        // An unguided round that reached where it was aimed is spent. That is precisely what "no
+        // tracking" means, and it is why a pulse laser misses a ship that changed course.
+        if (!w.IsGuided && SegmentDistance(was, s.pos, s.aimPoint) <= w.hitRadius)
+        {
+            CombatManager.Instance?.ReportMiss(s.shooter);
+            return false;
+        }
+
+        DrawTravelling(s);
+        return s.age < s.maxLife;
+    }
+
+    /// Everything about a round in flight that is purely appearance.
+    void DrawTravelling(Shot s)
+    {
+        var w = s.weapon;
+
+        // How much of its life is left, over the final stretch. A round does not blink out — it
+        // gutters, which reads as the motor dying instead of as a rendering bug.
+        float fade = Mathf.Clamp01((s.maxLife - s.age) / Ballistics.DissipateTime);
+
+        // Boost is BRIGHT. A missile lighting its motor a moment after launch is the single most
+        // readable event in a volley, and it costs one multiplier to say so.
+        float boost = (w.boostTime > 0.01f && s.age < w.boostTime) ? 1.55f : 1f;
+
+        // Plasma breathes, on the fleet beat like the running lights and the drive plumes — so
+        // everything glowing in a battle pulses to one clock rather than each on its own cycle. The
+        // per-shot offset keeps a volley from strobing in unison.
+        float pulse = w.cls == WeaponClass.PlasmaCannon
+            ? 0.82f + 0.18f * Mathf.Sin(FleetClock.Beats * Mathf.PI * 4f + s.phaseOffset)
+            : 1f;
+
+        if (s.tr != null)
+        {
+            s.tr.position = s.pos;
+            if (s.vel.sqrMagnitude > 1e-6f)
+                s.tr.rotation = Quaternion.LookRotation(Vector3.forward, s.vel.normalized);
+
+            float k = pulse * Mathf.Max(0.15f, fade);
+            s.tr.localScale = new Vector3(w.width * 2f * k, w.length * k, 1f);
+
+            var mr = s.tr.GetComponent<MeshRenderer>();
+            Color c = w.colour * (w.glow * boost);
+            c.a = fade;
+            mr.material.color = c;
+        }
+
+        // The light rides along, so hulls the round passes are lit as it goes by and the one it is
+        // about to hit brightens as it closes.
+        if (s.light != null)
+        {
+            s.light.transform.position = s.pos;
+            s.light.intensity = Mathf.Clamp(w.glow * 2.2f, 0.6f, 7f) * pulse * boost * fade;
+        }
+    }
+
+    /// Distance from a point to the segment ab. The whole reason hits are reliable at any frame rate.
+    static float SegmentDistance(Vector3 a, Vector3 b, Vector3 p)
+    {
+        Vector3 ab = b - a;
+        float len2 = ab.sqrMagnitude;
+        if (len2 < 1e-8f) return Vector3.Distance(a, p);
+        float t = Mathf.Clamp01(Vector3.Dot(p - a, ab) / len2);
+        return Vector3.Distance(a + ab * t, p);
     }
 
     /// Delete every round aimed at this unit that a point-defence mount managed to catch. Returns how
@@ -315,15 +429,12 @@ public class ProjectileRenderer : MonoBehaviour
         if (s.light != null) { s.light.enabled = false; lightPool.Push(s.light); s.light = null; }
     }
 
-/// A pooled point light for a round in flight.
+    /// A pooled point light for a round in flight.
     ///
     /// HARD-CAPPED, and it has to be. Real-time lights are the one thing here that is not nearly free:
     /// URP culls per object and a battle putting two hundred rounds in the air would hand the renderer
     /// two hundred lights to sort. Past the cap this returns null and the round simply flies unlit —
     /// which nobody notices in a firefight already lit by the ones that got a light.
-    /// Real point lights on rounds in flight. ON, alongside ShipLights.Enabled, now that the fleet is
-    /// in — a bolt that lights the hull it passes is most of what sells a firefight, and there are
-    /// hulls to light. Capped at MaxLiveLights below, which is what makes this affordable at all.
     public static bool DynamicLights = true;
 
     const int MaxLiveLights = 14;

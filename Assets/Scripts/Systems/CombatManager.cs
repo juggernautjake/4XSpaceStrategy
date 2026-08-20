@@ -21,12 +21,32 @@ using UnityEngine;
 //      hundreds apart.
 //   2. For each armed unit, pick a target — the most dangerous thing it can reach, because a screen
 //      of fighters in front of a dreadnought should not soak the dreadnought's fire.
-//   3. Fire every mount that has come off cooldown, once each.
+//   3. Fire every mount that has come off cooldown, CAN AFFORD TO, and has a firing solution — once
+//      each, and a mount that fires a salvo keeps sending rounds for the next few frames.
 //   4. Let point-defence mounts swat down whatever is inbound.
 //
 // Damage does not land here. A shot is handed to ProjectileRenderer, which flies it and calls back
 // into ResolveHit when it arrives — so a missile crossing a gap really is in the air for that time,
 // and a target that dies first eats none of the volley already aimed at it.
+//
+// ---- AIMING, WHICH USED NOT TO HAPPEN ---------------------------------------------------------
+//
+// Every shot used to be fired at the target's CURRENT position, which for anything with a travel time
+// meant firing at where it had already stopped being. Now each mount solves an intercept (Ballistics
+// .LeadAim), declines the shot outright if the target is outrunning the weapon, and then throws its
+// own dispersion cone at the answer. Three consequences worth knowing about:
+//
+//   * unguided weapons genuinely hit things now, which is a substantial buff to every hull carrying
+//     one and was never intended as a nerf in the first place;
+//   * manoeuvring is a defence, because a solution is computed at the muzzle and a target that
+//     changes velocity afterwards invalidates it;
+//   * a mount will hold its fire rather than waste a round it cannot land — which matters little for
+//     a laser and enormously for a torpedo tube carrying four.
+//
+// ---- AND SHIPS CAN RUN OUT ---------------------------------------------------------------------
+//
+// Magazines owns the two supply resources. Combat asks it before every trigger pull and spends
+// through it afterwards; nothing else here knows what a magazine is.
 //
 // ---- TIME -------------------------------------------------------------------------------------
 //
@@ -60,6 +80,19 @@ public class CombatManager : MonoBehaviour
         public float[] cooldown;      // seconds remaining per mount
         public Unit target;
         public float retargetIn;
+
+        // ---- salvos ----------------------------------------------------------------------------
+        //
+        // A rack that empties two tubes per trigger pull cannot fire both on the same frame, or the
+        // two rounds are one round drawn twice: same position, same heading, same everything, and the
+        // volley reads as a single fat missile. Spacing them by a tenth of a second is what makes a
+        // launch look like a launch.
+        //
+        // The ammunition for the WHOLE salvo is spent when the trigger is pulled, not as each round
+        // leaves — see Magazines.CanFire. So a rack cannot start a two-round salvo with one round
+        // left and quietly fire one and a half.
+        public int[] salvoLeft;       // rounds still to leave this mount from the current pull
+        public float[] salvoTimer;    // seconds until the next one does
     }
 
     readonly Dictionary<Unit, Mounts> mounts = new Dictionary<Unit, Mounts>();
@@ -80,6 +113,7 @@ public class CombatManager : MonoBehaviour
     {
         if (Instance == null) return;
         Instance.mounts.Clear();
+        Magazines.ResetAll();
         ProjectileRenderer.Instance?.ClearAll();
         ExplosionRenderer.Instance?.ClearAll();
     }
@@ -98,6 +132,11 @@ public class CombatManager : MonoBehaviour
         foreach (var u in um.Units)
             if (u != null && !u.IsDestroyed && u.hideReason == HideReason.None) scratch.Add(u);
 
+        // Capacitors recharge and magazines refill here rather than in a manager of their own. Combat
+        // already ticks every frame with the unit list in hand, and a second MonoBehaviour would be a
+        // second thing to create, reset, and eventually forget to reset.
+        Magazines.Tick(dt, scratch);
+
         for (int i = 0; i < scratch.Count; i++)
         {
             var u = scratch[i];
@@ -109,6 +148,15 @@ public class CombatManager : MonoBehaviour
             // ---- cooldowns ----
             for (int k = 0; k < m.cooldown.Length; k++)
                 if (m.cooldown[k] > 0f) m.cooldown[k] -= dt;
+
+            // ---- rounds still owed from a trigger already pulled ----
+            //
+            // Ahead of BOTH retargeting and the hold-fire check, and both placements are load-bearing.
+            // A salvo whose ammunition has already been spent must finish leaving the tubes: if a
+            // squadron is told to hold fire halfway through one, or the mount's target changes under
+            // it, the remaining rounds would otherwise sit in `salvoLeft` forever and that mount would
+            // never fire again for the rest of the game. Paid for is paid for.
+            RunSalvos(u, m, dt);
 
             // ---- targeting ----
             m.retargetIn -= dt;
@@ -134,6 +182,7 @@ public class CombatManager : MonoBehaviour
             if (m.target == null) continue;
 
             Vector3 from = PosOf(u), to = PosOf(m.target);
+            Vector3 targetVel = UnitModelRenderer.VelocityOf(m.target);
 
             // ---- fire everything that is ready ----
             for (int k = 0; k < m.loadout.Length; k++)
@@ -141,19 +190,100 @@ public class CombatManager : MonoBehaviour
                 var w = m.loadout[k];
                 if (w == null || w.attackShare <= 0f) continue;      // point defence fires elsewhere
                 if (m.cooldown[k] > 0f) continue;
+                if (m.salvoLeft[k] > 0) continue;                    // still emptying the last pull
                 if (Vector3.Distance(from, to) > w.range) continue;
                 if (ProjectileRenderer.Instance != null &&
                     ProjectileRenderer.Instance.LiveCount >= ProjectileCeiling) break;
 
+                // ---- can it afford to? --------------------------------------------------------
+                //
+                // Ahead of the cooldown being set, so a dry mount keeps trying every frame and opens
+                // up the instant it is rearmed, rather than sitting out a reload it never paid for.
+                if (!Magazines.CanFire(u, k, w)) continue;
+
+                // ---- is the shot worth taking? ------------------------------------------------
+                //
+                // A round that provably cannot catch its target is not fired at all. For an energy
+                // mount that is a small politeness; for a torpedo tube carrying four rounds it is the
+                // difference between a weapon and a waste. Ballistics.CanReach is deliberately
+                // optimistic — it declines only the genuinely hopeless.
+                if (!Ballistics.CanReach(w, from, to, targetVel)) continue;
+
                 m.cooldown[k] = w.cooldown;
+                Magazines.Consume(u, k, w);
 
-                // Muzzle offset: shots leave the hull rather than its centre, so a ship firing several
-                // mounts at once does not look like one gun stuttering.
-                Vector3 muzzle = from + Random.insideUnitSphere * 0.35f;
-
-                ProjectileRenderer.Instance?.Fire(u, m.target, w, muzzle, to, Weaponry.ShotDamage(u, w));
+                m.salvoLeft[k] = Mathf.Max(1, w.salvo);
+                m.salvoTimer[k] = 0f;                                // the first round goes now
+                FireOne(u, m, k, w);
             }
         }
+    }
+
+    /// Send the rounds still owed from trigger pulls already made.
+    void RunSalvos(Unit u, Mounts m, float dt)
+    {
+        for (int k = 0; k < m.loadout.Length; k++)
+        {
+            if (m.salvoLeft[k] <= 0) continue;
+            m.salvoTimer[k] -= dt;
+            if (m.salvoTimer[k] > 0f) continue;
+            FireOne(u, m, k, m.loadout[k]);
+        }
+    }
+
+    /// One round out of one mount, with its firing solution worked out.
+    ///
+    /// This is where a shot stops being "the ship attacks" and becomes a piece of geometry. Three
+    /// things happen in order, and the order is the whole model:
+    ///
+    ///   1. LEAD. Ballistics solves for where the target will be when the round gets there. An
+    ///      unguided round is aimed at that point and nowhere else. A guided round does not need it
+    ///      to hit — it works out its own intercept the whole way in — but it is handed the same
+    ///      point as the place to coast toward if its seeker loses the target, which is a much better
+    ///      guess than the target's present position.
+    ///
+    ///   2. DECLINE. No solution means the target is simply outrunning this weapon. The mount holds
+    ///      its fire, and the round it did not waste is still in the magazine.
+    ///
+    ///   3. DISPERSE. The mount's own error cone is thrown at the perfect answer — bigger at range,
+    ///      bigger against a target crossing fast. This is the only source of misses for a weapon
+    ///      whose target is flying straight, and it is what stops perfect gunnery from meaning perfect
+    ///      hit rates.
+    void FireOne(Unit u, Mounts m, int k, WeaponInfo w)
+    {
+        m.salvoLeft[k]--;
+        m.salvoTimer[k] = w.salvoSpacing;
+
+        // The target died between one round of the salvo and the next. The rest of the salvo is
+        // dropped rather than re-aimed: a rack that swung onto a fresh target mid-pull would let a
+        // ship spend one reload killing two hulls, which is a free shot nobody authored.
+        var target = m.target;
+        if (target == null || target.IsDestroyed) { m.salvoLeft[k] = 0; return; }
+
+        Vector3 from = PosOf(u);
+
+        // Muzzle offset: shots leave the hull rather than its centre, so a ship firing several mounts
+        // at once does not look like one gun stuttering.
+        Vector3 muzzle = from + Random.insideUnitSphere * 0.35f;
+
+        Vector3 tPos = PosOf(target);
+        Vector3 tVel = UnitModelRenderer.VelocityOf(target);
+
+        // Motor-aware, not cruise-speed: a missile spends most of a short engagement still building
+        // speed, and a solution that pretends otherwise aims well short of where the target will be.
+        Vector3 aim = Ballistics.LeadAimFor(w, muzzle, tPos, tVel, out bool solved, out _);
+        if (!solved) { m.salvoLeft[k] = 0; return; }
+
+        float spread = Ballistics.DispersionDegrees(w, muzzle, tPos, tVel);
+        if (spread > 0.0001f)
+        {
+            Vector3 dir = aim - muzzle;
+            float reach = dir.magnitude;
+            if (reach > 0.001f)
+                aim = muzzle + Ballistics.ApplyDispersion(dir / reach, spread) * reach;
+        }
+
+        ProjectileRenderer.Instance?.Fire(u, target, w, muzzle, aim, Weaponry.ShotDamage(u, w));
     }
 
     // ============================================================================================
@@ -237,10 +367,16 @@ public class CombatManager : MonoBehaviour
             if (w == null || w.cls != WeaponClass.PointDefence) continue;
             if (m.cooldown[k] > 0f) continue;
 
+            // The screen draws on the capacitor like any other energy mount. Small, but not nothing:
+            // a ship swatting missiles all engagement has a little less charge for its own guns, which
+            // is the honest cost of being the hull everything is shooting at.
+            if (!Magazines.CanFire(u, k, w)) continue;
+
             int killed = pr.InterceptIncoming(u, PosOf(u), w.range, 2);
             if (killed > 0)
             {
                 m.cooldown[k] = w.cooldown;
+                Magazines.Consume(u, k, w);
                 // Deliberately no sound. There can be dozens of these a second in a real engagement,
                 // and a battle that clicks like a Geiger counter is a battle nobody can hear.
             }
@@ -326,7 +462,13 @@ public class CombatManager : MonoBehaviour
     {
         if (mounts.TryGetValue(u, out var m) && m.loadout != null) return m;
         var loadout = Weaponry.For(u.type);
-        m = new Mounts { loadout = loadout, cooldown = new float[loadout.Length] };
+        m = new Mounts
+        {
+            loadout = loadout,
+            cooldown = new float[loadout.Length],
+            salvoLeft = new int[loadout.Length],
+            salvoTimer = new float[loadout.Length],
+        };
         mounts[u] = m;
         return m;
     }
