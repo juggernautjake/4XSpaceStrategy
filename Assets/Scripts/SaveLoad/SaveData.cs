@@ -98,6 +98,7 @@ public class SaveGame
     public List<TerraformJobDTO> terraformJobs = new List<TerraformJobDTO>();
     public List<ControlGroupDTO> controlGroups = new List<ControlGroupDTO>();
     public List<SquadronOrdersDTO> squadronOrders = new List<SquadronOrdersDTO>();
+    public List<FleetDTO> fleets = new List<FleetDTO>();
     public List<FactionAIDTO> factionAI = new List<FactionAIDTO>();   // each rival civilisation's race + personality
     public List<DerelictDTO> derelicts = new List<DerelictDTO>();     // ancient derelict stations and their contents
 
@@ -164,6 +165,17 @@ public class SquadronOrdersDTO
     public List<float> patrolX = new List<float>();
     public List<float> patrolY = new List<float>();
     public List<float> patrolZ = new List<float>();
+}
+
+// A named grouping of SQUADRONS (see Fleets). Holds no orders of its own — a fleet-level order would
+// contradict the squadron orders underneath it, and then "what formation is this ship flying in" would
+// have two answers.
+[System.Serializable]
+public class FleetDTO
+{
+    public int fleet;
+    public string name = "";
+    public List<int> squadrons = new List<int>();
 }
 
 // One planetary-engineering project under way on a world (see TerraformJob).

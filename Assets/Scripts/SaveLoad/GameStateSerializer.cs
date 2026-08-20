@@ -73,6 +73,7 @@ public static class GameStateSerializer
         game.terraformJobs = TerraformManager.Instance != null ? TerraformManager.Instance.Export() : new List<TerraformJobDTO>();
         game.controlGroups = ControlGroups.Export();
         game.squadronOrders = Squadrons.Export();
+        game.fleets = Fleets.Export();
         game.factionAI = FactionAI.ToDTOs();   // rival civilisations' races + personalities (their worlds save via body ownerId)
 
         int bodyCount = 0;
@@ -439,6 +440,7 @@ public static class GameStateSerializer
         TerraformManager.Instance?.Import(game.terraformJobs, byId);
         ControlGroups.Import(game.controlGroups);   // after the fleet exists, so members resolve
         Squadrons.Import(game.squadronOrders);      // ...and their standing orders alongside them
+        Fleets.Import(game.fleets);                 // ...and which fleet each squadron belongs to
 
         // The game underneath Dev Mode has just been swapped out. Re-baseline against what was loaded,
         // so leaving Dev Mode restores THIS save rather than whatever was on screen before it. Last,

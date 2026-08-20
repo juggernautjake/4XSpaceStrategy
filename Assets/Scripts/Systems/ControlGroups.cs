@@ -196,19 +196,88 @@ public class ControlGroupInput : MonoBehaviour
 
     void Awake() { Instance = this; }
 
+    /// Order of battle — the fleet / squadron / ship roster with its condition bars.
+    public const KeyCode RosterKey = KeyCode.O;
+
+    /// Promote the current selection into a squadron of its own, in the first free slot.
+    public const KeyCode SplitKey = KeyCode.M;
+
     void Update()
     {
         bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
         bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        bool alt = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+
+        if (Input.GetKeyDown(RosterKey) && !ctrl && !alt)
+        {
+            FleetRosterPanel.Instance?.Toggle();
+            return;
+        }
+
+        // Ctrl+M: take whatever is selected and make it its own squadron. The common case is "these
+        // four out of that twelve are going somewhere else", and it is one keystroke because it is
+        // common, not because it is important.
+        if (ctrl && Input.GetKeyDown(SplitKey)) { SplitSelection(); return; }
 
         for (int g = 1; g <= ControlGroups.Count; g++)
         {
             if (!Input.GetKeyDown(Digits[g])) continue;
 
-            if (ctrl) BindGroup(g);
+            // Ctrl+Alt  detach these ships from whatever squadron they are in
+            // Ctrl      bind the selection to this squadron, replacing it
+            // Ctrl+Shift add the selection to this squadron
+            // Shift     add this squadron to the selection
+            // (plain)   select this squadron and fly the camera to it
+            if (ctrl && alt) DetachFrom(g);
+            else if (ctrl && shift) AddToGroup(g);
+            else if (ctrl) BindGroup(g);
             else RecallGroup(g, shift);
             return;   // one group action per frame
         }
+    }
+
+    void AddToGroup(int g)
+    {
+        var sel = UnitSelection.Selected;
+        if (sel.Count == 0) return;
+        ControlGroups.AddTo(g, sel);
+        SimpleAudio.Instance?.PlayClick();
+        NotificationManager.Instance?.Push($"Squadron {g} reinforced",
+            $"{sel.Count} ship(s) joined {Squadrons.NameOf(g)}.", null, NotifKind.Info);
+    }
+
+    void DetachFrom(int g)
+    {
+        var sel = UnitSelection.Selected;
+        if (sel.Count == 0) return;
+        ControlGroups.Detach(sel);
+        SimpleAudio.Instance?.PlayClick();
+        NotificationManager.Instance?.Push("Detached",
+            $"{sel.Count} ship(s) now belong to no squadron.", null, NotifKind.Info);
+    }
+
+    void SplitSelection()
+    {
+        var sel = UnitSelection.Selected;
+        if (sel.Count == 0)
+        {
+            NotificationManager.Instance?.Push("Nothing to split",
+                "Select the ships you want to break out, then press Ctrl+M.", null, NotifKind.Info);
+            return;
+        }
+
+        var list = new List<Unit>(sel);
+        int g = ControlGroups.Split(list);
+        if (g == 0)
+        {
+            NotificationManager.Instance?.Push("No free squadron",
+                "All nine squadrons are in use. Disband one first.", null, NotifKind.Danger);
+            return;
+        }
+
+        SimpleAudio.Instance?.PlayClick();
+        NotificationManager.Instance?.Push($"Squadron {g} formed",
+            $"{list.Count} ship(s) broken out into {Squadrons.NameOf(g)}.", null, NotifKind.Info);
     }
 
     void BindGroup(int g)

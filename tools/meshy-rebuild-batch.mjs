@@ -159,9 +159,42 @@ function conceptPrompt(civ, lin, tier, isChild) {
   // then handing over two accent hexes gave a Mk II that was entirely amber and magenta with no teal
   // and no creature left in it — the model had no colour anchor, so it painted the whole hull in the
   // only colours the prompt named. Restating the base costs a dozen words and holds the identity.
+  // ---- HOW HARD THE CHAIN PULLS -------------------------------------------------------------
+  //
+  // Two strengths, because a lineage means two different things depending on which lineage it is.
+  //
+  //   refit   (the default) — the SAME HULL upgraded. Keep the silhouette and the proportions. This
+  //           is right for a Mk I -> Mk II -> Mk III, where looking alike IS the progression: the
+  //           Aquarii reef shark, hammerhead and megalodon read as one animal growing up, and the
+  //           Terran spyplane, twin-engine jet and hypersonic blackbird as one airframe maturing.
+  //
+  //   family  — the same NAVY, not the same ship. Keep the materials, the palette, the finish, the
+  //           weathering and the camera; build a DIFFERENT CLASS of vessel.
+  //
+  // The second exists because the first collapsed the Terran battle line. A corvette, a guided-
+  // missile cruiser, a fleet carrier and a battleship are four different kinds of warship, and their
+  // per-hull descriptions say so in detail — but "keep its silhouette and proportions" is a stronger
+  // instruction than any description, and it won: the first pass returned the same long grey slab
+  // four times, with the carrier showing no flight deck at all.
+  //
+  // The Aquarii survived the same setting only because a lobster, a sawfish, a manta ray and a
+  // leviathan cannot collapse into one another however hard a model tries to preserve a silhouette.
+  // That was luck of the metaphor, not a property of the chain.
+  //
+  // Unchaining the line outright was the first fix and it was too blunt: the chain is also what keeps
+  // a civilization's ships looking related, and dropping it buys variance by spending coherence. This
+  // keeps both — same fleet, different ship.
+  const chainMode = lin.chainMode || 'refit';
+  const reference = chainMode === 'family'
+    ? 'Same navy as the reference image: keep its materials, palette, surface finish, weathering and ' +
+      'camera angle. But this is a DIFFERENT CLASS OF VESSEL — give it its own silhouette and its own ' +
+      'proportions, as described above. Do NOT reuse the reference hull\'s shape.'
+    : 'This is the SAME ship as the reference image, refitted — keep its silhouette, proportions, ' +
+      'base colour and camera angle.';
+
   const head = isChild
     ? `${creature ? creature.charAt(0).toUpperCase() + creature.slice(1) + '. ' : ''}` +
-      `This is the SAME ship as the reference image, refitted — keep its silhouette, proportions, base colour and camera angle. ${tech}`
+      `${reference} ${tech}`
     : `${civ} starship concept art: ${creature || lin.family}. ${tech} ${creature ? '' : c.aesthetic + '.'}`;
 
   // Stations get their own tail: telling a space station its bow must be distinct from its stern

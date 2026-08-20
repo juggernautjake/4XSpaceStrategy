@@ -80,14 +80,32 @@ function walk(dir, acc = []) {
   return acc;
 }
 
-const STRING_LITERAL = /"(?:[^"\\]|\\.)*"/g;
+// ---- WHY THE WHOLE LINE, NOT JUST THE LITERALS ----------------------------------------------
+//
+// This used to pull out `"..."` runs and check only those, which is tidy and has a hole big enough
+// to walk a bug through: string INTERPOLATION nests quotes inside quotes.
+//
+//     $"{(open ? "▾" : "▸")} {name}"
+//
+// Scanning left to right, the regex pairs the opening quote with the one before the first arrow, so
+// the arrows themselves land BETWEEN matches and are never looked at. That is exactly the shape of
+// the line this check was written for, and it passed two glyphs that are not in LiberationSans SDF —
+// the small triangles, where only the LARGE ones are safe.
+//
+// So comments are stripped (already) and then the entire remaining line is scanned. The cost is that
+// a risky character in an identifier would be reported too, which cannot happen in C# worth writing
+// and would be worth knowing about if it did.
+const STRING_LITERAL = /"(?:[^"\\]|\\.)*"/g;   // kept for reference; the scan below uses the line
 
 const findings = [];
 for (const file of walk(ROOT)) {
-  const lines = stripComments(fs.readFileSync(file, 'utf8')).split('\n');
+  // The leading BYTE ORDER MARK is stripped first. It is file encoding, not text — it never reaches
+  // TMP and is never drawn — but it is a codepoint above 0x00FF sitting on line 1, so widening the
+  // scan from string literals to whole lines turned fifteen perfectly good files into findings.
+  const lines = stripComments(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')).split('\n');
   lines.forEach((line, idx) => {
-    for (const lit of line.match(STRING_LITERAL) ?? []) {
-      for (const ch of lit) {
+    {
+      for (const ch of line) {
         const cp = ch.codePointAt(0);
         if (cp > 0x00FF && !SAFE.has(cp)) {
           findings.push({

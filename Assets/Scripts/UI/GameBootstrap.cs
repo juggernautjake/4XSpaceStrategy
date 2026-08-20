@@ -74,6 +74,7 @@ public static class GameBootstrap
         // keep the panel with more info and tabs. Not instantiated, so it never appears.
         //   CompactBodyPanel.Create(canvas.transform);
         BodyUnitsPanel.Create(canvas.transform);
+        FleetRosterPanel.Create(canvas.transform);   // fleet > squadron > ship, with condition bars
         // "Around Homeworld" (AssociatedObjectsWindow) retired at Raptok's request: its moon-hopping list
         // is superseded by the Planet View's moon tabs. Not instantiated, so it never subscribes to
         // selection and never appears. The class is left in the tree as dead code for now.

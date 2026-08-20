@@ -207,6 +207,32 @@ shown on bare models. One flag each to bring back.
       mega-station a small moon. Current spread is 0.09 (probe) to 0.40 (dreadnought), stations
       0.23-0.37 against a moon's 0.35 floor
 
+## G-ter. The order of battle, and honing the chain
+
+- [x] **Fleets** — a tier above squadrons: a named bag of squadrons, holding NO orders of its own,
+      because a fleet order would contradict the squadron orders underneath it. Exclusive membership,
+      saved with the game
+- [x] **The Order of Battle panel** (`O`) — fleet, squadron and ship in one collapsing list, every
+      row with a condition bar. Click a row to select everything under it. Bars are WEIGHTED BY HULL,
+      not averaged: one dreadnought at 20% and nine intact probes average to 92%, which is a
+      reassuring number for a wreck escorted by ten pounds of instruments
+- [x] **Roster keys** — `Ctrl+Shift+N` add to a squadron, `Ctrl+Alt+N` detach, `Ctrl+M` split the
+      selection into a free slot, and the body panel groups what is in orbit by squadron
+- [x] **The glyph tripwire had a hole and it caught me.** It scanned `"..."` runs, and string
+      INTERPOLATION nests quotes inside quotes — so in `$"{(open ? "x" : "y")} …"` the characters
+      between the nested quotes were never looked at. Two triangles not in the font passed clean. It
+      now scans whole lines with comments stripped and the BOM ignored
+- [x] **Chain strength, rather than chain on/off.** The Terran battle line came back as the same grey
+      slab four times — corvette, missile cruiser, fleet carrier and battleship, the carrier without a
+      flight deck — because the chained prompt opens with "keep its silhouette and proportions" and
+      that beats any per-hull description. The Aquarii survived the same setting only because a
+      lobster, a sawfish, a manta and a leviathan cannot collapse into each other; that was luck of
+      the metaphor. Unchaining outright was too blunt — the chain is also what makes a navy look like
+      one navy — so there are now two strengths: **refit** (same hull upgraded; the Mk I-II-III
+      ladders keep it, where looking alike IS the progression) and **family** (same materials,
+      palette, finish and camera; a DIFFERENT class of vessel). The capital line is now family
+- [ ] Re-roll Terran 17-20 under family mode, plus the two hulls that failed on an expired concept URL
+
 ## F. Worlds and terrain
 
 ### Done

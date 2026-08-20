@@ -150,7 +150,9 @@
           "unit": "20-Dreadnought",
           "upgrade": "the same family at its heaviest: colossal slab-armoured hull, an immense spinal cannon, layered gun batteries, enormous engine bank"
         }
-      ]
+      ],
+      "_note": "CHAINED IN FAMILY MODE. A corvette, a guided-missile cruiser, a fleet carrier and a battleship are four different KINDS of warship, and the per-hull text says so — but the default refit chain opens with \"keep its silhouette and proportions\", which beats any description and returned the same grey slab four times for the Terrans, carrier flight deck and all. Unchaining outright was the first fix and it was too blunt: the chain is also what keeps a navy looking like one navy. Family mode keeps the materials, palette, finish and camera and explicitly asks for a different silhouette — same fleet, different ship.",
+      "chainMode": "family"
     },
     {
       "key": "explorer",
