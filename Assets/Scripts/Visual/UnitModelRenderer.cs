@@ -497,6 +497,13 @@ public class UnitModelRenderer : MonoBehaviour
         // particular size to look right here.
         FitTo(go, entry.size);
 
+        // The player's chosen livery, painted onto the accent surfaces the art was generated with.
+        // Player ships only: the other empires wear the colours their art shipped in, and a galaxy in
+        // which every fleet had been recoloured to somebody's taste would lose the thing the accents
+        // are for. Silent no-op until the player actually chooses. See CivLivery.
+        if (u.owner == FactionManager.Player)
+            CivLivery.Apply(go, SpeciesManager.CurrentIndex);
+
         // Tint toward the owner's colour so allegiance reads at a glance, matching the token emblem.
         var tint = FactionManager.OwnerColor(u.owner);
         foreach (var mr in go.GetComponentsInChildren<MeshRenderer>())

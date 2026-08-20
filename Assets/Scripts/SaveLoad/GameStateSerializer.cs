@@ -16,6 +16,16 @@ public static class GameStateSerializer
             formatVersion = SaveGame.CurrentVersion,
             savedAtIso = System.DateTime.UtcNow.ToString("o"),
             speciesIndex = SpeciesManager.CurrentIndex,
+
+            liveryChosen = CivLivery.Chosen,
+            symbolIndex = CivEmblem.SymbolIndex,
+            liveryPrimaryR = CivLivery.Primary.r,
+            liveryPrimaryG = CivLivery.Primary.g,
+            liveryPrimaryB = CivLivery.Primary.b,
+            liverySecondaryR = CivLivery.Secondary.r,
+            liverySecondaryG = CivLivery.Secondary.g,
+            liverySecondaryB = CivLivery.Secondary.b,
+
             difficulty = (int)GameConfig.CurrentDifficulty,
             factionName = FactionManager.Player != null ? FactionManager.Player.name : "Your Empire",
             homeIndex = galaxy != null ? galaxy.homeIndex : 0,
@@ -383,6 +393,16 @@ public static class GameStateSerializer
 
         GameManager.Instance.LoadGalaxy(galaxy);
         SpeciesManager.Select(game.speciesIndex);
+
+        // The empire's mark and livery. A save that predates them leaves `liveryChosen` false, and the
+        // fleet correctly comes back in the colours its art was generated with rather than in defaults
+        // nobody picked.
+        CivEmblem.Reset();
+        CivLivery.Reset();
+        CivEmblem.SetSymbol(game.symbolIndex);
+        if (game.liveryChosen)
+            CivLivery.Set(new Color(game.liveryPrimaryR, game.liveryPrimaryG, game.liveryPrimaryB),
+                          new Color(game.liverySecondaryR, game.liverySecondaryG, game.liverySecondaryB));
         // Rival civilisations' races + personalities. Their owned worlds already came back via each body's
         // ownerId (and the renderer draws their owner rings from body.owner), so this just restores who they
         // are and where their expansion clock stands.

@@ -52,6 +52,17 @@ public class SaveGame
     public const int CurrentVersion = 1;
     public int formatVersion;
     public int speciesIndex = 0;
+
+    // ---- The empire's identity: its mark and its two livery colours ------------------------------
+    //
+    // `liveryChosen` is the field that matters for older saves. JsonUtility leaves a missing bool
+    // false, which is exactly right: a save written before any of this existed did not choose a
+    // livery, and its fleet should come back in the colours its art was generated with rather than in
+    // whatever the defaults below happen to be.
+    public bool liveryChosen;
+    public int symbolIndex;
+    public float liveryPrimaryR = 0.18f, liveryPrimaryG = 0.44f, liveryPrimaryB = 0.88f;
+    public float liverySecondaryR = 0.95f, liverySecondaryG = 0.66f, liverySecondaryB = 0.12f;
     public int difficulty = 1;              // 0 easy, 1 medium, 2 hard
     public string factionName = "Your Empire";
     public int homeIndex = 0;

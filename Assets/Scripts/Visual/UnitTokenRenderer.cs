@@ -97,7 +97,23 @@ public class UnitTokenRenderer : MonoBehaviour
         go.transform.localScale = Vector3.one * 0.8f;   // ship symbols 50% smaller relative to the view
 
         var icon = MakeQuad(go.transform, UnitIconRenderer.Get(u.type), Color.white, new Vector3(0, 0, 0), 1f);
-        var em = MakeQuad(go.transform, emblem, FactionManager.OwnerColor(u.owner), new Vector3(0.55f, 0.55f, -0.01f), 0.5f);
+
+        // THE PLAYER'S OWN SHIPS WEAR THE PLAYER'S MARK. Everyone else keeps the plain disc tinted to
+        // their faction colour, which is what every ship wore before there was a mark to choose — the
+        // emblem answers "is this mine", and a galaxy where every empire had a distinct crest would
+        // answer it less clearly, not more.
+        //
+        // The composited symbol already carries the chosen colours (CivEmblem multiplies them through
+        // the mask), so its quad is tinted WHITE — tinting it again would multiply the livery by itself.
+        Texture2D mark = emblem;
+        Color markTint = FactionManager.OwnerColor(u.owner);
+        if (u.owner == FactionManager.Player)
+        {
+            var chosen = CivEmblem.Current;
+            if (chosen != null) { mark = chosen; markTint = Color.white; }
+        }
+
+        var em = MakeQuad(go.transform, mark, markTint, new Vector3(0.55f, 0.55f, -0.01f), 0.5f);
 
         var box = go.AddComponent<BoxCollider>();
         box.size = new Vector3(1.2f, 1.2f, 0.2f);

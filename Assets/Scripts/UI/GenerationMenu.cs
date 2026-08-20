@@ -50,6 +50,10 @@ public class GenerationMenu : MonoBehaviour
             UIFactory.Button(col, $"{s.name} — {s.signature}", () => { selectedSpecies = idx; UpdateSummary(); }, 28);
         }
 
+        // Colours and mark sit directly under the species list, because they are the same decision:
+        // who you are, and what that looks like. See CivIdentityPanel.
+        CivIdentityPanel.Build(col, UpdateSummary);
+
         UIFactory.Label(col, "DIFFICULTY", UITheme.SmallSize, UITheme.Accent, 16);
         UIFactory.Button(col, "Easy  (home 100%, more resources, fast research)", () => { selectedDifficulty = Difficulty.Easy; UpdateSummary(); }, 28);
         UIFactory.Button(col, "Medium  (home 90-99%)", () => { selectedDifficulty = Difficulty.Medium; UpdateSummary(); }, 28);
