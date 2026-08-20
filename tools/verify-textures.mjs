@@ -92,6 +92,10 @@ const LIMITS = {
   // are different problems: a hull that missed its accent hues still has a paint job and might be
   // worth keeping, and a greyscale hull is not textured at all.
   minColourPct: 4.0,
+
+  /// Below this stdev-of-luminance a DARK hull is judged empty rather than moody. Sits between the
+  /// two genuine failures (0.061, 0.065) and the darkest hulls that are fine (0.118, 0.129).
+  darkDetailFloor: 0.09,
 };
 
 function hsv(r, g, b) {
@@ -145,7 +149,33 @@ async function analyse(albedoPath, civ) {
 
 function verdict(m) {
   const fails = [], warns = [];
-  if (m.brightness < LIMITS.minBrightness) fails.push(`too dark (${m.brightness.toFixed(3)})`);
+  // ---- DARK, OR DARK AND EMPTY? --------------------------------------------------------------
+  //
+  // Brightness alone was failing nine hulls, and looking at them, most were not failures: the big
+  // stations are charcoal structures with lit panels, and the Terran hyper-relay is near-black with
+  // blazing blue emitters — that one is striking, not broken. Meanwhile the two genuine failures sit
+  // at the same brightness. Brightness cannot tell them apart, because the thing that separates a
+  // designed dark hull from a generation that returned a near-black blob is not how dark it is. It is
+  // whether there is anything IN it.
+  //
+  //   Terran hyper-relay      0.136 bright, 0.118 detail   dark and full of structure  -> fine
+  //   Terran mega-station     0.149 bright, 0.129 detail   dark and full of structure  -> fine
+  //   Aquarii mega-station    0.122 bright, 0.061 detail   dark AND flat               -> a failure
+  //   Aquarii terraforming    0.125 bright, 0.065 detail   dark AND flat               -> a failure
+  //
+  // So darkness is only a failure when it comes with no detail to go with it. This is a refinement
+  // rather than a loosening, and the test still fails the two hulls that deserve it — which is how I
+  // know it has not just been moved out of the way.
+  {
+    const dark = m.brightness < LIMITS.minBrightness;
+    const empty = m.detail < LIMITS.darkDetailFloor;
+    if (dark && empty)
+      fails.push(`too dark AND flat (${m.brightness.toFixed(3)} bright, ${m.detail.toFixed(3)} detail) ` +
+                 '— this reads as a failed generation, not a dark design');
+    else if (dark)
+      warns.push(`dark (${m.brightness.toFixed(3)}), but detailed (${m.detail.toFixed(3)}) — ` +
+                 'check it is meant to be');
+  }
   if (m.brightness > LIMITS.maxBrightness) fails.push(`blown out (${m.brightness.toFixed(3)})`);
   if (m.detail < LIMITS.minDetail) fails.push(`flat, no detail (sd ${m.detail.toFixed(3)})`);
 

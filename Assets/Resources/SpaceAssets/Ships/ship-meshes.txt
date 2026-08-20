@@ -91,6 +91,8 @@ Terran_ResearchShip               0   90    0    # lab cylinder. The least certa
                                                  # is near enough symmetric that neither test is sure,
                                                  # so it takes the fleet convention
 Terran_ResearchShipII             0   90    0    # twin lab cylinders, dish booms forward
+Terran_ResearchShipIII            0   90    0    # instrument ring amidships, scanning lens on -X
+Terran_ScienceVessel              0   90    0    # deep-survey ship, telescope ring forward
 Terran_ColonyShip                 0   90    0    # ark ship, habitat drums aft of a blunt nose
 Terran_Miner                      0   90    0    # dredger, cutting booms on -X
 Terran_Transport                  0   90    0    # container freighter, bridge tower aft
@@ -113,6 +115,11 @@ Terran_ResearchStation            0    0    0  1.0  spin   # habitat torus on a 
 Terran_SupplyStation              0    0    0  1.0  spin   # fuel spheres round a docking spine
 Terran_MultiStation               0    0    0  1.0  spin   # stacked rings on a truss frame
 Terran_TerraformStation           0    0    0  1.0  spin   # a ring of atmosphere processors
+Terran_DeepSpaceStation           0    0    0  1.0  spin   # solar collector wings round a core
+Terran_MegaStation                0    0    0  1.0  spin   # orbital city, nested habitat rings
+# Same call as the Aquarii gate: a jump relay that slowly rotates reads as adrift rather than as
+# installed, and its aperture faces +Y for ships to pass up through.
+Terran_HyperRelay                 0    0    0  1.0  nospin # a ring of arcing emitter pylons
 # The relay is the exception: it measures 1.36 x 1.86 x 1.36, TALLER than it is wide, because it is a
 # mast carrying a dish rather than a disc. It is already upright, and it must stay that way — the
 # bounds heuristic would lay a tower on its side and call it a long ship.
