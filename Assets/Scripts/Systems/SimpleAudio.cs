@@ -633,6 +633,8 @@ public class SimpleAudio : MonoBehaviour
     // ============================================================================================
     AudioClip[] cWeapon;          // indexed by WeaponClass
     AudioClip[] cBoom;            // 0 small, 1 medium, 2 large
+    AudioClip[] cImpact;          // a round landing on a hull
+    float impactSoundNext;
 
     /// A cheap guard against the one thing that makes procedural combat audio unbearable: forty ships
     /// firing on the same frame, each triggering a PlayOneShot, all summing into a clipped roar. One
@@ -654,6 +656,12 @@ public class SimpleAudio : MonoBehaviour
         cWeapon[(int)WeaponClass.PointDefence] = Sweep(2600f, 1900f, 0.045f, 40f, 0.16f);
 
         cBoom = new[] { Explosion(0.42f), Explosion(0.75f), Explosion(1.35f) };
+
+        // A round LANDING, which is a different event from the gun going off and from the ship coming
+        // apart, and had neither cue until now: shots were fired audibly and hit in silence. Short and
+        // dry — a hit is a tick of feedback, not a set piece, and a hundred of them a second must not
+        // pile into mush. Two variants so a sustained burst does not machine-gun one sample.
+        cImpact = new[] { Explosion(0.13f), Explosion(0.19f) };
     }
 
     /// Fire cue for one shot. `at` is where it happened — unused for now (the mix is 2D), but taken so
@@ -669,6 +677,27 @@ public class SimpleAudio : MonoBehaviour
         // A little pitch scatter so a burst from one mount does not sound like a looped sample.
         sfx.pitch = Random.Range(0.93f, 1.08f);
         sfx.PlayOneShot(cWeapon[i], cls == WeaponClass.PointDefence ? 0.22f : 0.40f);
+        sfx.pitch = 1f;
+    }
+
+    /// A round landing on a hull — the one combat event that had no cue at all until now. Shots were
+    /// fired audibly and hit in silence, which made a firefight read as a light show rather than as
+    /// two ships wearing each other down.
+    ///
+    /// Rate-limited hard and mixed low, because in a real engagement this fires far more often than
+    /// any other cue and at full weight it buries the weapons, the explosions and the music under it.
+    /// `damage` scales weight and pitch together, so a dreadnought shell reads heavier than a
+    /// point-defence tick without needing a clip of its own.
+    public void PlayImpact(Vector3 at, float damage)
+    {
+        if (cImpact == null) return;
+        const float ImpactGap = 0.05f;
+        if (Time.unscaledTime < impactSoundNext) return;
+        impactSoundNext = Time.unscaledTime + ImpactGap;
+
+        float heavy = Mathf.Clamp01(damage / 60f);
+        sfx.pitch = Mathf.Lerp(1.25f, 0.82f, heavy) * Random.Range(0.95f, 1.05f);
+        sfx.PlayOneShot(cImpact[Random.Range(0, cImpact.Length)], Mathf.Lerp(0.14f, 0.34f, heavy));
         sfx.pitch = 1f;
     }
 

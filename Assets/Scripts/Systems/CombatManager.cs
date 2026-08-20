@@ -258,6 +258,9 @@ public class CombatManager : MonoBehaviour
         target.Health -= dealt;
 
         ExplosionRenderer.Instance?.Impact(at, w.colour);
+        // Scaled by what actually got through the armour, not by what was fired — a round that barely
+        // scratches a dreadnought should not land with the same weight as one that hurts it.
+        SimpleAudio.Instance?.PlayImpact(at, dealt);
 
         // Experience for landing it. `battles` is incremented on the KILL rather than per hit, in
         // Destroy below — a ship that fires a thousand rounds into one dreadnought fought one battle.

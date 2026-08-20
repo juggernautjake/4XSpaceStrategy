@@ -54,12 +54,14 @@ public class ProjectileRenderer : MonoBehaviour
         public bool dead;
 
         public Transform tr;                 // pooled quad (travelling) — null for instant shots
+        public Light light;                  // pooled point light, so the round lights what it passes
         public LineRenderer beam;            // pooled line (instant) — null for travelling shots
     }
 
     readonly List<Shot> shots = new List<Shot>();
     readonly Stack<Transform> quadPool = new Stack<Transform>();
     readonly Stack<LineRenderer> beamPool = new Stack<LineRenderer>();
+    readonly Stack<Light> lightPool = new Stack<Light>();
 
     Material boltMat;
     Material beamMat;
@@ -138,8 +140,26 @@ public class ProjectileRenderer : MonoBehaviour
             s.tr.localScale = new Vector3(w.width * 2f, w.length, 1f);
         }
 
+        // A real light on the round, so a shot actually illuminates what it passes and what it hits.
+        // Range is tied to the weapon's own glow and width, so a heavy plasma bolt throws light and a
+        // point-defence needle barely does — one number per weapon, no extra table.
+        s.light = RentLight();
+        if (s.light != null)
+        {
+            s.light.color = w.colour;
+            s.light.range = Mathf.Clamp(w.width * 26f + w.glow * 1.6f, 0.6f, 6f);
+            s.light.intensity = Mathf.Clamp(w.glow * 2.2f, 0.6f, 7f);
+            s.light.transform.position = from;
+            s.light.enabled = true;
+        }
+
         shots.Add(s);
         SimpleAudio.Instance?.PlayWeapon(w.cls, from);
+
+        // The muzzle lights up on the SAME call that creates the round, so the flash and the shot can
+        // never drift apart. Deriving it from the weapon's cooldown instead would re-time it against a
+        // different clock and show a flash with no bullet the moment anything hitched.
+        UnitModelRenderer.Instance?.LightsOf(shooter)?.FlashMuzzle(from, w.colour);
     }
 
     // ============================================================================================
@@ -168,6 +188,13 @@ public class ProjectileRenderer : MonoBehaviour
                     c.a = k;
                     s.beam.startColor = s.beam.endColor = c;
                 }
+                // The flash lights the gap it crosses. Sat at the midpoint because a beam is lit along
+                // its whole length and one point light is a great deal cheaper than a line of them.
+                if (s.light != null)
+                {
+                    s.light.transform.position = Vector3.Lerp(s.pos, s.endPoint, 0.5f);
+                    s.light.intensity = Mathf.Clamp(s.weapon.glow * 2.2f, 0.6f, 7f) * k;
+                }
                 if (s.life >= s.maxLife) { Retire(s); shots.RemoveAt(i); }
                 continue;
             }
@@ -194,6 +221,10 @@ public class ProjectileRenderer : MonoBehaviour
                 if (s.vel.sqrMagnitude > 1e-6f)
                     s.tr.rotation = Quaternion.LookRotation(Vector3.forward, s.vel.normalized);
             }
+
+            // The light rides along with the round, so hulls it passes are lit as it goes by and the
+            // one it is about to hit brightens as it closes.
+            if (s.light != null) s.light.transform.position = s.pos;
 
             // ---- Arrival ----
             bool arrived = s.target != null && !s.target.IsDestroyed &&
@@ -261,6 +292,31 @@ public class ProjectileRenderer : MonoBehaviour
     {
         if (s.tr != null) { s.tr.gameObject.SetActive(false); quadPool.Push(s.tr); s.tr = null; }
         if (s.beam != null) { s.beam.enabled = false; beamPool.Push(s.beam); s.beam = null; }
+        if (s.light != null) { s.light.enabled = false; lightPool.Push(s.light); s.light = null; }
+    }
+
+/// A pooled point light for a round in flight.
+    ///
+    /// HARD-CAPPED, and it has to be. Real-time lights are the one thing here that is not nearly free:
+    /// URP culls per object and a battle putting two hundred rounds in the air would hand the renderer
+    /// two hundred lights to sort. Past the cap this returns null and the round simply flies unlit —
+    /// which nobody notices in a firefight already lit by the ones that got a light.
+    const int MaxLiveLights = 14;
+    int lightsMade;
+
+    Light RentLight()
+    {
+        if (lightPool.Count > 0) return lightPool.Pop();
+        if (lightsMade >= MaxLiveLights) return null;
+        lightsMade++;
+        var go = new GameObject("ShotLight");
+        go.transform.SetParent(transform, false);
+        var l = go.AddComponent<Light>();
+        l.type = LightType.Point;
+        l.shadows = LightShadows.None;      // a shot casting shadows is invisible and expensive
+        l.renderMode = LightRenderMode.ForcePixel;
+        l.enabled = false;
+        return l;
     }
 
     Transform RentQuad()

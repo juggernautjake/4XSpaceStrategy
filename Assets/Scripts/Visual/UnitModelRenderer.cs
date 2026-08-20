@@ -247,6 +247,7 @@ public class UnitModelRenderer : MonoBehaviour
         public float height;    // vertical offset of the orbital ring
         public float bob;       // free-flyer idle bob phase
         public bool animated;   // the FBX brought its own clip, so don't add procedural motion
+        public ShipLights lights;   // running lights, engines and muzzle flash; cached, not searched for
     }
 
     readonly Dictionary<Unit, Model> models = new Dictionary<Unit, Model>();
@@ -281,6 +282,11 @@ public class UnitModelRenderer : MonoBehaviour
     /// rendered by EITHER this or UnitTokenRenderer, so neither can answer the question alone.
     public Transform TransformOf(Unit u)
         => u != null && models.TryGetValue(u, out var m) && m != null && m.go != null ? m.go.transform : null;
+
+    /// This unit's light rig, or null if it is drawn as a token rather than a mesh. Used by the
+    /// projectile renderer to flash a muzzle on the frame a round is created — see ShipLights.
+    public ShipLights LightsOf(Unit u)
+        => u != null && models.TryGetValue(u, out var m) && m != null ? m.lights : null;
 
     public void Rebuild()
     {
@@ -430,6 +436,16 @@ public class UnitModelRenderer : MonoBehaviour
         // diamond in the shipyard has to read as a diamond in space, or the icon is decoration.
         BuildBadge(go, u, entry.size);
 
+        // ============================================================================================
+        // RUNNING LIGHTS AND ENGINES
+        //
+        // Placed from the hull's own bounds rather than authored per model — there are a hundred and
+        // forty of these and no rig could be hand-placed on each. ShipLights needs `modelRotation` to
+        // recover ship space (bow +Z) from the root, which is already carrying that correction; see
+        // its header for why that matters and what goes wrong without it.
+        var lights = go.AddComponent<ShipLights>();
+        lights.Init(u, entry.modelRotation, tint);
+
         // Seeded from the unit id so an orbit is stable across frames and reloads, and two stations at
         // one world never share a ring.
         var rng = new System.Random(u.id * 7919);
@@ -441,7 +457,8 @@ public class UnitModelRenderer : MonoBehaviour
             phase = (float)rng.NextDouble() * 360f,
             height = ((float)rng.NextDouble() - 0.5f) * 0.5f,
             bob = (float)rng.NextDouble() * 10f,
-            animated = animated
+            animated = animated,
+            lights = lights
         };
     }
 
@@ -564,6 +581,34 @@ public class UnitModelRenderer : MonoBehaviour
             pos += Vector3.up * Mathf.Sin(m.bob * 1.4f) * 0.05f;   // gentle idle bob
         }
         m.go.transform.position = pos;
+
+        // ---- how hard the engines are burning -------------------------------------------------
+        //
+        // Two things decide it. WHAT CLASS THIS IS — a Scout Mk III at speed 15 should visibly out-burn
+        // a colony ship at 3, which is what "brighter the faster it goes" means when the sim moves
+        // everything on a straight lerp — and WHERE IT IS IN THE TRIP.
+        //
+        // The trip ramp is what stops the plumes being a boolean. Engines light over the first tenth of
+        // the journey and back off over the last fifth, so a departure looks like a departure and an
+        // arrival looks like braking. Parked hulls keep a dim station-keeping glow rather than going
+        // fully dark, because a completely unlit engine bell reads as a dead ship.
+        if (m.lights != null)
+        {
+            const float Idle = 0.06f;
+            float throttle = Idle;
+
+            if (u.status == UnitStatus.Traveling)
+            {
+                // Info.speed spans roughly 3..15 across the whole roster (UnitDatabase).
+                float classK = Mathf.InverseLerp(3f, 15f, u.Info.speed);
+                float p = u.TravelProgress;
+                float spool = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(p / 0.10f));
+                float brake = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((1f - p) / 0.20f));
+                throttle = Mathf.Lerp(0.35f, 1f, classK) * Mathf.Min(spool, brake);
+            }
+
+            m.lights.SetThrottle(Mathf.Max(Idle, throttle));
+        }
     }
 }
 
