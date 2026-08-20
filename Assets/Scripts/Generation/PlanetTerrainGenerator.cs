@@ -820,7 +820,9 @@ public static class PlanetTerrainGenerator
         // than baking constants into the coherence pass is what makes "higher atmospheres allow for
         // liquid water at higher temperatures" true of the actual map instead of only of a readout.
         BiosphereRules.LiquidRange(body, out float freezeC, out float boilC);
-        t = ClimateCoherence(t, tileC, freezeC, boilC);
+        // baseC is the WORLD average before the equator/pole swing is added — see the frozen-world
+        // gate at the top of ClimateCoherence.
+        t = ClimateCoherence(t, tileC, freezeC, boilC, baseC);
 
         // ============================================================================================
         // WHAT IS UNDERNEATH — water and ice as MODIFIERS rather than as the biome
@@ -1064,8 +1066,37 @@ public static class PlanetTerrainGenerator
     //                     grids over the boiling point", and it is enforced per TILE rather than per
     //                     world, so a world can hold an ocean at its poles and none at its equator.
     //   ABOVE MAGMA     — the ground itself is liquid. See WorldClassifier.MagmaMinC.
-    static TerrainType ClimateCoherence(TerrainType t, float tileC, float freezeC, float boilC)
+    static TerrainType ClimateCoherence(TerrainType t, float tileC, float freezeC, float boilC, float worldC)
     {
+        // ---- A FROZEN WORLD GROWS NO LUSH GROUND, however warm one belt of it gets ----------------
+        //
+        // Every other test here asks about the TILE, which is right for almost everything: a mountain
+        // is colder than the plain below it and should read that way. It is wrong for vegetation on a
+        // world that is frozen overall.
+        //
+        // The equator carries +15°C over the world average and the poles -15°C. On a world averaging a
+        // few degrees under freezing that spread puts the equatorial band above it — so the tile test
+        // passed, and an ice moon grew a solid green belt of grassland from one edge of the map to the
+        // other while everything north and south of it was ice.
+        //
+        // Tundra is the ceiling on such a world. Not bare ice, because the ground there genuinely does
+        // thaw; just nothing that implies a growing season the planet as a whole cannot support.
+        if (worldC < freezeC)
+        {
+            switch (t)
+            {
+                case TerrainType.Jungle:
+                case TerrainType.Forest:
+                case TerrainType.Swamp:
+                case TerrainType.Grassland:
+                case TerrainType.Savanna:
+                case TerrainType.Plains:
+                case TerrainType.Steppe:
+                case TerrainType.Taiga:
+                    return tileC < DeepFreezeC ? TerrainType.Snow : TerrainType.Tundra;
+            }
+        }
+
         // --- Liquid rock. The hottest thing on the scale, and it outranks everything below. ---
         if (tileC >= WorldClassifier.MagmaMinC && !IsWater(t))
             return TerrainType.MagmaField;
@@ -1307,8 +1338,21 @@ public static class PlanetTerrainGenerator
         // Grassland is only nominal here — ClimateCoherence re-judges it against the tile's actual °C
         // immediately after, so it survives only where the world genuinely is above freezing and reverts
         // to frozen ground otherwise. One rule decides what "warm enough for plants" means, not two.
+        // TUNDRA EITHER WAY, and never grassland.
+        //
+        // This used to hand back Grassland once the band was above the normalized freeze, on the
+        // reasoning that ClimateCoherence would re-judge it against real °C and revert anything that
+        // did not deserve it. It does re-judge — but it judges the TILE, and a tile at the equator
+        // carries a +15°C bonus over the world average. On a moon sitting a little under freezing that
+        // arithmetic lands the equator above it, and the result was a solid green belt of grassland
+        // wrapped around a world that is ice from the belt to both poles.
+        //
+        // A thawed band on a frozen world is tundra. Lush growth needs a world that is warm, not a
+        // latitude that is briefly less cold than the rest of one — and the world-average gate in
+        // ClimateCoherence now enforces that generally, so this is belt and braces on the one
+        // classifier that produced the belt.
         if (lat < EquatorMeltEdge(moist))
-            return frozen ? TerrainType.Tundra : TerrainType.Grassland;
+            return TerrainType.Tundra;
 
         // ...and the deep snow belongs at the POLES, on ground high enough to hold it.
         if (lat > PolarSnowEdge(moist) && elev > 0.5f)

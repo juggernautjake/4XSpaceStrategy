@@ -308,9 +308,17 @@ public static class UnitModelLibrary
 
     /// Does this unit render as a mesh? False whenever the art is missing, which is what keeps the
     /// game running on a checkout with no models.
+    /// Is this unit drawn as a mesh, or as a flat billboard token?
+    ///
+    /// ASKS ABOUT THE UNIT'S OWN CIVILIZATION FIRST. Checking only the class entry was correct while
+    /// every class shared one of three meshes, and became a latent bug the moment art went per-civ: a
+    /// class whose shared fallback was missing would report "no model" and draw a token even though
+    /// this particular ship's civilization had art sitting right there. It happens to be harmless
+    /// today only because all three legacy meshes still exist — which is a coincidence, not a design.
     public static bool HasModel(Unit u)
     {
         if (u == null) return false;
+        if (CivPath(u) != null) return true;
         var e = For(u.type);
         return e != null && Prefab(e.path) != null;
     }
