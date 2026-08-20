@@ -200,8 +200,13 @@ function conceptPrompt(civ, lin, tier, isChild) {
 //   game with, then the battle line, then science, then civilian hulls, and stations last because they
 //   sit still at a world and are the least-examined art in the game.
 const CIV_ORDER = ['Aquarii', 'Terran', 'Pyrothian', 'Cryithn', 'Sylvan'];
-const LINEAGE_ORDER = ['fighter', 'scout', 'capital', 'research', 'colony', 'explorer',
-                       'miner', 'transport', 'terraformer', 'probe', 'station'];
+// Stations moved up from last. They were bottom of the list on the reasoning that they sit still at a
+// world and are the least-examined art in the game — which is true of a relay mast and completely
+// untrue of the ones that are set pieces. A jellyfish deep-space outpost, a coral research bloom and a
+// crab fortress-city are among the most distinctive hulls any civilization has, and leaving them until
+// after four other civilizations' freighters meant they were the most likely thing to never get made.
+const LINEAGE_ORDER = ['fighter', 'scout', 'capital', 'station', 'research', 'colony', 'explorer',
+                       'miner', 'transport', 'terraformer', 'probe'];
 
 const civRank = c => { const i = CIV_ORDER.indexOf(c); return i < 0 ? 99 : i; };
 const linRank = k => { const i = LINEAGE_ORDER.indexOf(k); return i < 0 ? 99 : i; };

@@ -133,6 +133,53 @@ public static class UnitModelLibrary
         Ship(UnitType.Terraformer, 0.30f, colonyPath, colRot);
     }
 
+    // ============================================================================================
+    // WHICH CIVILIZATION'S ART A SHIP FLIES IN
+    //
+    // Every hull now has art per civilization — an Aquarii scout is a shrimp, a Terran one is a
+    // spyplane — so the mesh a unit uses depends on WHO OWNS IT, not just what class it is.
+    //
+    // Units carry a Faction, and species is a separate, global thing (SpeciesManager.Current is the
+    // species the PLAYER picked). There is no per-unit species field and this does not invent one:
+    //
+    //   * the player's ships fly the species the player chose, which is the whole point of choosing;
+    //   * every other faction is mapped to a species by its id, so a given empire always looks like
+    //     itself from one session to the next rather than shuffling.
+    //
+    // FALLBACK IS THE POINT. Resources.Load returns null for art that is not there yet, and this then
+    // hands back the shared mesh the class used before. A civilization whose fleet has not been
+    // generated still flies — on borrowed hulls, exactly as it did — so the art can land one
+    // civilization at a time without a broken build in between.
+    // ============================================================================================
+
+    /// Folder names under SpaceAssets, in SpeciesDatabase order.
+    static readonly string[] CivFolders = { "Terran", "Aquarii", "Pyrothian", "Cryithn", "Sylvan" };
+
+    static string CivFolderFor(Unit u)
+    {
+        int idx = (u?.owner == null || u.owner == FactionManager.Player)
+            ? SpeciesManager.CurrentIndex
+            : Mathf.Abs(u.owner.id) % CivFolders.Length;
+        return CivFolders[Mathf.Clamp(idx, 0, CivFolders.Length - 1)];
+    }
+
+    /// The civ-specific Resources path for this unit, or null if that art does not exist.
+    ///
+    /// Stations live under Stations/ and hulls under Ships/, matching where the importer writes them;
+    /// both are tried because `isStation` is the only thing that distinguishes them and it is cheap to
+    /// ask. The result is cached by Prefab(), so the miss on a civ with no art costs one failed
+    /// Resources.Load per class, once.
+    public static string CivPath(Unit u)
+    {
+        if (u == null) return null;
+        string civ = CivFolderFor(u);
+        string file = $"{civ}_{u.type}";
+        var info = UnitDatabase.Get(u.type);
+        string folder = (info != null && info.isStation) ? "Stations" : "Ships";
+        string path = $"SpaceAssets/{folder}/{civ}/{file}";
+        return Prefab(path) != null ? path : null;
+    }
+
     public static Entry For(UnitType t)
     {
         if (!built) Build();
@@ -159,6 +206,38 @@ public static class UnitModelLibrary
     //
     // Resolved once per entry and cached, because AutoOrient walks every renderer on the prefab and the
     // answer cannot change while the prefab is loaded.
+    /// The class's entry, re-pointed at a civilization-specific mesh and re-oriented for it.
+    ///
+    /// Size, motion and spin come from the CLASS — a dreadnought is drawn large and a probe small
+    /// whoever built it, and that scale ladder is how the fleet reads at a glance. Only the mesh and
+    /// its orientation are per-civilization, because a shrimp and the borrowed hull it replaces do not
+    /// point the same way and must not share a rotation.
+    ///
+    /// Cached per path so the manifest lookup and the bounds heuristic run once per civ+class rather
+    /// than once per ship — a fleet of forty scouts resolves one entry between them.
+    static readonly Dictionary<string, Entry> civEntries = new Dictionary<string, Entry>();
+
+    public static Entry EntryForPath(Entry classEntry, string path)
+    {
+        if (string.IsNullOrEmpty(path)) return classEntry;
+        if (civEntries.TryGetValue(path, out var cached)) return cached;
+
+        var e = new Entry
+        {
+            path = path,
+            size = classEntry.size,
+            motion = classEntry.motion,
+            spin = classEntry.spin,
+            // Identity, NOT the class's rotation: the class value was hand-found for the borrowed
+            // mesh, and carrying it over would tell Resolve the new hull is already correct and skip
+            // the manifest and the heuristic entirely.
+            modelRotation = Quaternion.identity,
+        };
+        Resolve(e);
+        civEntries[path] = e;
+        return e;
+    }
+
     static void Resolve(Entry e)
     {
         if (e.oriented) return;
@@ -204,6 +283,11 @@ public static class UnitModelLibrary
     public static void ReloadOrientations()
     {
         ShipMeshManifest.Reload();
+        // The per-civilization entries are cached by path and hold their own resolved rotation, so
+        // clearing them is what actually makes F10 re-read the manifest for the generated fleet.
+        // Leaving them would reload the file and change nothing visible — the failure mode that makes
+        // an artist think the manifest is broken when it is fine.
+        civEntries.Clear();
         if (!built) { Build(); return; }
         foreach (var e in map.Values) if (e != null) e.oriented = false;
     }
@@ -248,6 +332,7 @@ public class UnitModelRenderer : MonoBehaviour
         public float bob;       // free-flyer idle bob phase
         public bool animated;   // the FBX brought its own clip, so don't add procedural motion
         public ShipLights lights;   // running lights, engines and muzzle flash; cached, not searched for
+        public float bank;      // current roll into a turn, eased rather than tracked exactly
     }
 
     readonly Dictionary<Unit, Model> models = new Dictionary<Unit, Model>();
@@ -375,7 +460,15 @@ public class UnitModelRenderer : MonoBehaviour
     Model Build(Unit u)
     {
         var entry = UnitModelLibrary.For(u.type);
-        var prefab = UnitModelLibrary.Prefab(entry.path);
+
+        // This unit's OWN civilization's art, if it has been generated; otherwise the shared mesh the
+        // class has always used. See UnitModelLibrary.CivPath — a civ with no art yet still flies.
+        //
+        // The orientation is resolved against whichever mesh actually loaded, not against the class
+        // entry, because a shrimp and the borrowed hull it falls back to do not point the same way.
+        string civPath = UnitModelLibrary.CivPath(u);
+        var prefab = UnitModelLibrary.Prefab(civPath ?? entry.path);
+        if (civPath != null) entry = UnitModelLibrary.EntryForPath(entry, civPath);
         if (prefab == null) return null;
 
         var go = Instantiate(prefab, transform);
@@ -566,11 +659,50 @@ public class UnitModelRenderer : MonoBehaviour
 
         if (u.status == UnitStatus.Traveling)
         {
-            // Face the way it's actually flying (with the hull's own orientation correction on top).
+            // ============================================================================================
+            // FLYING, RATHER THAN SLIDING
+            //
+            // A ship used to snap toward its heading at a flat rate and hold a dead-level attitude the
+            // whole way. Two things were missing and both are what the eye reads as "piloted":
+            //
+            // BANK INTO THE TURN. Anything that changes heading rolls into it — aircraft because they
+            // have to, spacecraft in fiction because we expect it. The roll is taken from how far the
+            // hull still has to turn, so it leans hardest at the start of a course change and levels
+            // out as it settles. Without it a ship pivots like a compass needle: the nose comes round
+            // and the body never acknowledges it.
+            //
+            // TURN HARDER WHEN THE TURN IS BIGGER. A fixed slerp rate takes the same time to correct a
+            // two-degree drift as to swing through ninety, so departures looked sluggish and tiny
+            // corrections looked twitchy. Rate now scales with the angle left to cover.
+            //
+            // Position easing lives in UnitManager.FlightEase — burn, coast, brake — so the ship is
+            // already accelerating out and braking in. This is the attitude half of the same idea.
             Vector3 dir = u.travelTo - u.travelFrom;
             if (dir.sqrMagnitude > 0.0001f)
-                m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
-                    Quaternion.LookRotation(dir.normalized, Vector3.up) * m.entry.modelRotation, 3f * dt);
+            {
+                Quaternion want = Quaternion.LookRotation(dir.normalized, Vector3.up);
+
+                // How far off course the hull still is, measured BEFORE the correction is applied and
+                // in the game's frame — so the hull's own orientation offset does not pollute it.
+                Quaternion current = m.go.transform.rotation * Quaternion.Inverse(m.entry.modelRotation);
+                float off = Quaternion.Angle(current, want);
+
+                // Roll proportional to the turn still to make, capped so a ship never flies inverted.
+                const float MaxBank = 32f;
+                float bank = Mathf.Clamp(off, 0f, 90f) / 90f * MaxBank;
+
+                // Which way to lean: positive when the target heading lies to starboard.
+                Vector3 local = Quaternion.Inverse(want) * (current * Vector3.forward);
+                if (local.x > 0f) bank = -bank;
+
+                // Ease the roll in and out rather than tracking `off` exactly, so a ship settles level
+                // instead of twitching as the angle noise crosses zero.
+                m.bank = Mathf.MoveTowards(m.bank, bank, 90f * dt);
+
+                Quaternion target = want * Quaternion.AngleAxis(m.bank, Vector3.forward) * m.entry.modelRotation;
+                float rate = Mathf.Lerp(1.6f, 6f, Mathf.Clamp01(off / 90f));
+                m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation, target, rate * dt);
+            }
         }
         else if (u.location != null && u.location.visualObject != null)
         {

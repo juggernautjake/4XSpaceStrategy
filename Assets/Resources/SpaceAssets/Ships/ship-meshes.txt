@@ -1,34 +1,47 @@
 # ============================================================================================
 # SHIP MESH ORIENTATION
 #
-# One line per mesh that needs correcting. Anything NOT listed here is oriented automatically
-# from its own bounding box, and the console says what it decided — so the usual workflow is:
-# drop the mesh in, look at it, and only come here if it is wrong.
-#
-# Edit and reload while the game is running. No recompile.
-#
-#   name        the mesh file's name, without folder or extension
-#   rotation    pitch yaw roll, in degrees, applied BEFORE the ship is pointed along its course
-#   scale       optional multiplier on the class's normal size (omit for 1)
-#   flags       spin   = always tumble freely (radially symmetric things with no real facing)
-#               nospin = hold a fixed attitude (rings, relays, anything that should not rotate)
+# One line per mesh: <name> <pitch> <yaw> <roll> [scale] [spin|nospin]
+# Edited and reloaded while the game runs (F10) — no recompile.
 #
 # The game's convention is Unity's: +Z is forward (the bow), +Y is up (the dorsal surface).
 #
 #   flying sideways?      try  0 90 0   or  0 -90 0
 #   flying belly-first?   try  -90 0 0
-#   flying backwards?     try  0 180 0
+#   flying backwards?     add  180 to the yaw
 #
-# ---- examples, safe to delete ----
-# Terran_Dreadnought        0 0 0
-# Aquarii_Carrier         -90 0 0
-# Pyrothian_MiningBarge     0 180 0    1.15
-# Cryithn_Probe             0 0 0      1.0    spin
-# Sylvan_HyperSpeedRelay    0 90 0     1.0    nospin
+# ---- GENERATED, AND ONLY HALF-TRUSTED ------------------------------------------------------
+#
+# Everything below the legacy block was written by tools/make-orientation-manifest.mjs from the
+# bounds the importer measured. It fixes the AXIS choice so the whole fleet agrees — the runtime
+# heuristic decides per mesh, and these hulls measure things like 1.90 x 0.54 x 1.67 where the two
+# longest axes are within ten percent, so a carrier at 1.83 x 0.46 x 1.90 tips the other way and
+# flies across its own beam while its escorts fly nose-first.
+#
+# It CANNOT know bow from stern: a bounding box is symmetric and says nothing about which end the
+# engines are on. A ship flying backwards is one "+180 yaw" away from fixed. Lines marked AMBIGUOUS
+# are the ones whose two longest axes are close enough that the axis pick is a coin toss — check
+# those first.
 # ============================================================================================
 
 # ---- The three meshes that shipped with the project ----------------------------------------
-# Hand-found before the manifest existed. Listed so they are data like everything else rather
-# than constants nobody can change without a programmer.
 LP Colony Ship              -90 0 0
 LP Science Ship               0 90 0
+
+# ---- Generated fleet -----------------------------------------------------------------------
+Aquarii_Carrier                   0    0    0    # len Z, up Y, dims 1.83 x 0.46 x 1.90  AMBIGUOUS
+Aquarii_ColonyShip                0  -90    0    # len X, up Y, dims 1.90 x 0.69 x 1.78  AMBIGUOUS
+Aquarii_Cruiser                   0  -90    0    # len X, up Y, dims 1.90 x 0.57 x 0.74
+Aquarii_Dreadnought               0  -90    0    # len X, up Y, dims 1.90 x 0.70 x 0.85
+Aquarii_Explorer                  0  -90   90    # len X, up Z, dims 1.90 x 0.92 x 0.63
+Aquarii_Fighter                   0  -90    0    # len X, up Y, dims 1.90 x 0.60 x 1.66  AMBIGUOUS
+Aquarii_FighterII                 0  -90    0    # len X, up Y, dims 1.90 x 0.73 x 1.08
+Aquarii_FighterIII                0  -90    0    # len X, up Y, dims 1.90 x 0.77 x 1.29
+Aquarii_Frigate                   0    0    0    # len Z, up Y, dims 1.13 x 0.58 x 1.90
+Aquarii_Miner                     0  -90    0    # len X, up Y, dims 1.90 x 0.62 x 0.99
+Aquarii_ResearchShip              0  -90    0    # len X, up Y, dims 1.90 x 0.58 x 0.96
+Aquarii_ResearchShipII            0  -90    0    # len X, up Y, dims 1.90 x 0.80 x 1.13
+Aquarii_ResearchShipIII           0  -90   90    # len X, up Z, dims 1.89 x 0.89 x 0.89
+Aquarii_Scout                     0  -90    0    # len X, up Y, dims 1.90 x 0.54 x 1.67  AMBIGUOUS
+Aquarii_ScoutII                   0  -90    0    # len X, up Y, dims 1.90 x 0.61 x 1.16
+Aquarii_ScoutIII                  0  -90    0    # len X, up Y, dims 1.90 x 0.44 x 1.77  AMBIGUOUS

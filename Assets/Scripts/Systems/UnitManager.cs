@@ -398,12 +398,76 @@ public class UnitManager : MonoBehaviour
         return Vector3.zero;
     }
 
+    // ============================================================================================
+    // THE FLIGHT PROFILE — burn, coast, brake
+    //
+    // Travel used to be a straight `Lerp(from, to, progress)`, which is a ship at a dead constant
+    // speed: it leaps to full velocity the instant it undocks, holds it exactly, and stops dead on
+    // arrival. Nothing with mass moves like that, and at system zoom — where you watch a ship cross —
+    // it is the single thing that most makes the fleet read as counters sliding on a board.
+    //
+    // So position is eased along the same journey. A ship LEANS INTO its burn over the first stretch,
+    // coasts most of the way, and brakes into its destination.
+    //
+    //   0.00 - 0.18   accelerating   (quadratic ease-in: slow off the mark, building)
+    //   0.18 - 0.78   coasting       (linear — most of a journey is at speed)
+    //   0.78 - 1.00   braking        (quadratic ease-out, arriving gently)
+    //
+    // WHAT THIS DELIBERATELY DOES NOT TOUCH: arrival TIME. `travelElapsed / travelDuration` still runs
+    // 0 to 1 at a constant rate and Travel() still ends the trip on the same frame it always did — so
+    // no ETA, no interception, no fuel or range calculation moves by a millisecond. Only where the
+    // ship is drawn along the way changes. Easing the simulation instead would have been a gameplay
+    // change wearing a visual change's clothes.
+    //
+    // The brake is longer than the burn (22% against 18%) because arriving is the half you watch: a
+    // ship that slides to a halt at its destination reads as piloted, and one that stops instantly
+    // reads as teleporting the last inch.
+    const float BurnFrac  = 0.18f;
+    const float BrakeFrac = 0.22f;
+
+    /// Maps linear trip progress to eased DISTANCE along the trip. Both ends are pinned — Ease(0)=0,
+    /// Ease(1)=1 — so a ship is never drawn short of its destination on the frame it arrives.
+    public static float FlightEase(float t)
+    {
+        t = Mathf.Clamp01(t);
+
+        const float coastStart = BurnFrac;
+        const float coastEnd   = 1f - BrakeFrac;
+
+        // Distance covered by each phase if the coast runs at unit speed. The burn and brake each
+        // cover HALF what they would at full speed (the average of a linear ramp), which is what makes
+        // the three pieces join without a jolt in velocity.
+        float burnDist  = BurnFrac * 0.5f;
+        float coastDist = coastEnd - coastStart;
+        float brakeDist = BrakeFrac * 0.5f;
+        float total     = burnDist + coastDist + brakeDist;
+
+        float d;
+        if (t < coastStart)
+        {
+            float k = t / BurnFrac;                  // 0..1 through the burn
+            d = burnDist * k * k;
+        }
+        else if (t < coastEnd)
+        {
+            d = burnDist + (t - coastStart);
+        }
+        else
+        {
+            float k = (t - coastEnd) / BrakeFrac;    // 0..1 through the brake
+            d = burnDist + coastDist + brakeDist * (1f - (1f - k) * (1f - k));
+        }
+
+        return d / total;
+    }
+
     // A unit's current world position (at a body, parked in space, or mid-transit).
     public Vector3 UnitPos(Unit u)
     {
         if (u == null) return Vector3.zero;
         if (u.location != null) return WorldPos(u.location);
-        if (u.status == UnitStatus.Traveling) return Vector3.Lerp(u.travelFrom, u.travelTo, u.TravelProgress);
+        if (u.status == UnitStatus.Traveling)
+            return Vector3.Lerp(u.travelFrom, u.travelTo, FlightEase(u.TravelProgress));
         if (u.inSpace) return u.parkPosition;
         return Vector3.zero;
     }
