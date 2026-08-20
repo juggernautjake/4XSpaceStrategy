@@ -99,6 +99,8 @@ public class UnitManager : MonoBehaviour
         units.Clear();
         buildQueue.Clear();
         ControlGroups.Clear();
+        Squadrons.Reset();            // ...and their standing orders, or a new game starts out holding
+        SquadronAI.Instance?.Reset(); // the last one's patrol routes and withdraw thresholds
         nextId = 1;
         nextOrderId = 1;
         HomePlanet = homePlanet;

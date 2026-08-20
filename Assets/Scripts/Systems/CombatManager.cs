@@ -123,6 +123,14 @@ public class CombatManager : MonoBehaviour
             // ---- point defence works whether or not this ship has a target of its own ----
             RunPointDefence(u, m, dt);
 
+            // HOLD FIRE. A squadron under this protocol does not shoot first — it is how a player slips
+            // a fleet past something it cannot beat. It suppresses INITIATING only, and deliberately
+            // sits AFTER point defence: declining to start a fight and declining to swat a missile
+            // already in the air are not the same decision, and nobody choosing "do not provoke them"
+            // is choosing to be hit. Ships outside a squadron are unaffected and fight on the ordinary
+            // proximity rule, which is what everything did before squadrons existed.
+            if (Squadrons.HoldingFire(u)) { m.target = null; continue; }
+
             if (m.target == null) continue;
 
             Vector3 from = PosOf(u), to = PosOf(m.target);

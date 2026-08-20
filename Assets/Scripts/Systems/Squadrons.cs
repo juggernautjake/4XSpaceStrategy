@@ -105,6 +105,18 @@ public static class Squadrons
         return Valid(g) ? orders[g] : null;
     }
 
+    /// Is this ship under orders not to shoot first?
+    ///
+    /// Only ever true for a ship in a squadron set to Hold Fire — a ship with no squadron has no
+    /// standing orders and fights on CombatManager's ordinary proximity rule, which is the behaviour
+    /// everything in the game had before squadrons existed and must remain the default.
+    ///
+    /// It suppresses INITIATING only. A ship holding fire still runs its point defence, because
+    /// declining to start a fight and declining to swat a missile already in the air are not the same
+    /// decision, and no player choosing "slip past without provoking them" is choosing to be hit.
+    public static bool HoldingFire(Unit u)
+        => OrdersFor(u)?.protocol == SquadronProtocol.HoldFire;
+
     /// The squadron's display name — the one the player typed, or "Squadron 3".
     public static string NameOf(int g)
         => !Valid(g) ? "" : (string.IsNullOrWhiteSpace(orders[g].name) ? $"Squadron {g}" : orders[g].name);

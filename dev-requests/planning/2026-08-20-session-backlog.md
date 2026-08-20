@@ -107,7 +107,13 @@ meshes under `_Extras/` in the Downloads library.
 - [x] **B2.** Prompts place the accents on named surfaces (Meshy ignores percentages, follows places)
 - [ ] **B3.** `tools/extract-color-masks.mjs` — key the two accent hues into an RGB mask
 - [ ] **B4.** URP shader — recolour masked regions from the player's chosen primary/secondary
-- [ ] **B5.** UI to choose a civ's two colours, persisted in the save
+- [ ] **B5.** **Colours are chosen WHERE THE RACE IS CHOSEN.** Picking a civilization and picking its
+      two colours is one decision made in one place, at the species screen, and the choice shows on
+      the ships immediately. Persisted in the save
+- [x] **B6.** Saturation is NOT uniform across civilizations and must not be forced to be. Aquarii art
+      runs 64-85% coloured; Terran runs 12-17% and is *correct* — desaturated steel-blue with orange
+      trim is that civilization's design language. Variety between civs is wanted. The texture check
+      now only fails a hull that is genuinely UNPAINTED (under 4% coloured), never a pale one
 
 ---
 
@@ -241,6 +247,24 @@ shown on bare models. One flag each to bring back.
       Maximum 3 moons, not a requirement
 - [ ] **F35. Gas giants and stars ×2 in rendered size**, with orbit placement and spacing adjusted so
       the system still reads correctly at that scale
+
+## G-bis. Fleet command — asked for mid-session, planned in full
+
+Its own document: `2026-08-20-fleet-command.md`. Summary of state:
+
+- [x] **Squadrons** — control groups 1-9 now carry standing orders (formation, protocol, rally point,
+      patrol route), saved with the game. Membership is EXCLUSIVE
+- [x] **Roster verbs** — bind, add, detach, split into a free slot, disband
+- [x] **Six formations** — Wedge, Line Abreast, Line Astern, Echelon, Screen, Globe, plus Free
+- [x] **The screening rule** — slots handed out cheapest-first by what a ship costs to LOSE, so Screen
+      and Globe put the expendable hulls between the enemy and the expensive ones
+- [x] **Protocols** — Aggressive, Defensive, Hold Fire, Evade-and-Report, Escort, Withdraw-If-Hurt
+- [x] **Patrol** — a standing route, loop or ping-pong, that re-issues itself until cancelled
+- [x] **Local avoidance** — ships ease off station to keep clear and settle back; the cheaper hull
+      yields; capped so nothing abandons its formation to avoid a graze
+- [ ] **The UI** — squadron chips, formation menu with live diagrams, protocol menu, patrol tool,
+      rally point, and a tooltip on every one of them
+- [ ] Rally points for newly built ships, regroup, reinforce, the slowest-ship warning
 
 ## G. Fixed along the way
 

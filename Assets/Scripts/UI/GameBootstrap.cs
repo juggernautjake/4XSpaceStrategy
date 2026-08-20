@@ -27,6 +27,7 @@ public static class GameBootstrap
         CometManager.Create();              // comets that sweep through systems; study/catch them for salvage or lore
         EarthquakeManager.Create();         // fault-line quakes damage infrastructure on tectonic worlds
         ControlGroupInput.Create();         // Ctrl+1..9 to bind fleets, 1..9 to recall them
+        SquadronAI.Create();                // standing orders: intercept, evade-and-report, escort, patrol
         FleetMovementController.Create();
         TargetIndicator.Create();           // pulsing lock-on ring for right-click sends
         // Combat. Order matters: the renderers must exist before CombatManager's first tick, because
