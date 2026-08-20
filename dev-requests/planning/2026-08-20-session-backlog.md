@@ -203,9 +203,13 @@ shown on bare models. One flag each to bring back.
 - [x] **E10. The body panel groups by squadron** — a header per squadron naming it, its strength and
       its standing orders, and clicking the header selects the whole squadron. Loose hulls collect
       under "Unassigned"
-- [ ] **E11.** Sizes: verify every class reads right on screen — fighters and scouts small, the
-      mega-station a small moon. Current spread is 0.09 (probe) to 0.40 (dreadnought), stations
-      0.23-0.37 against a moon's 0.35 floor
+- [x] **E11. Sizes retuned, and one was plainly wrong.** Station size came from `stationLevel`, and
+      only the Mega-Station carries level 3 — so every other station drew at the level-1 size and the
+      MEGA-STATION ITSELF CAME OUT AT 0.37, SMALLER THAN THE DREADNOUGHT at 0.40. A thing described as
+      "an orbital city the size of a small moon", costing two and a half times what a battleship
+      costs, was the smaller of the two. Stations are per-class now; the full spread runs 0.07 (probe)
+      through 0.11-0.16 (fighters and scouts) to 0.38 (dreadnought), 0.44 (hyper-relay) and 0.52
+      (mega-station) — genuinely a small moon against OrbitSafety's 0.35 moon floor
 
 ## G-ter. The order of battle, and honing the chain
 
@@ -334,9 +338,13 @@ Its own document: `2026-08-20-fleet-command.md`. Summary of state:
 - [x] **Patrol** — a standing route, loop or ping-pong, that re-issues itself until cancelled
 - [x] **Local avoidance** — ships ease off station to keep clear and settle back; the cheaper hull
       yields; capped so nothing abandons its formation to avoid a graze
-- [ ] **The UI** — squadron chips, formation menu with live diagrams, protocol menu, patrol tool,
-      rally point, and a tooltip on every one of them
+- [x] **The UI** — a Fleet Command bar along the bottom whenever ships are selected: squadron chips
+      1-9, all seven formations, all six protocols, patrol, rally, and the roster verbs. A tooltip on
+      every control, and each one says what the ships will DO rather than what the option is called
+- [x] **Patrol and rally tools** — click out a route (it draws the closing leg as you lay it, so a
+      loop looks like a loop before it is committed) or a single fall-back point
 - [ ] Rally points for newly built ships, regroup, reinforce, the slowest-ship warning
+- [ ] Formation menu entries could carry a live diagram of the current squadron, not just a tooltip
 
 ## G. Fixed along the way
 

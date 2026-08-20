@@ -184,18 +184,29 @@ function conceptPrompt(civ, lin, tier, isChild) {
   // Unchaining the line outright was the first fix and it was too blunt: the chain is also what keeps
   // a civilization's ships looking related, and dropping it buys variance by spending coherence. This
   // keeps both — same fleet, different ship.
+  //
+  // BOTH ARE SHORT, AND THE IMPORTANT HALF COMES FIRST. There is an 800-character cap on the whole
+  // prompt, the livery and tail are reserved out of it first (they carry the orientation rules and the
+  // key hues), and the descriptive head is trimmed into what is left — from the END. The first draft
+  // of the family sentence put "this is a DIFFERENT CLASS OF VESSEL" after four clauses about
+  // materials and palette, so the trim ate precisely the instruction the sentence existed for and the
+  // prompt went out reading "...keep its materials, palette, surface finish, weathering and." Whatever
+  // matters most goes at the front, where nothing can trim it.
   const chainMode = lin.chainMode || 'refit';
   const reference = chainMode === 'family'
-    ? 'Same navy as the reference image: keep its materials, palette, surface finish, weathering and ' +
-      'camera angle. But this is a DIFFERENT CLASS OF VESSEL — give it its own silhouette and its own ' +
-      'proportions, as described above. Do NOT reuse the reference hull\'s shape.'
+    ? 'A DIFFERENT CLASS of vessel from the reference image — its own silhouette and proportions. ' +
+      'Same navy: keep the reference materials, palette, finish and camera.'
     : 'This is the SAME ship as the reference image, refitted — keep its silhouette, proportions, ' +
       'base colour and camera angle.';
 
-  const head = isChild
-    ? `${creature ? creature.charAt(0).toUpperCase() + creature.slice(1) + '. ' : ''}` +
-      `${reference} ${tech}`
-    : `${civ} starship concept art: ${creature || lin.family}. ${tech} ${creature ? '' : c.aesthetic + '.'}`;
+  // The head, in priority order — WHAT THE SHIP IS, then how it relates to its sibling, then how
+  // built-up it should look. `tech` is last because it is the one clause the rest can survive without:
+  // tier escalation is also carried by the per-hull text and by the chain itself, whereas losing the
+  // hull's own description or the chain instruction loses the ship.
+  const opening = creature ? creature.charAt(0).toUpperCase() + creature.slice(1) + '.' : '';
+  const headParts = isChild
+    ? [opening, reference, tech]
+    : [`${civ} starship concept art: ${creature || lin.family}.`, tech, creature ? '' : c.aesthetic + '.'];
 
   // Stations get their own tail: telling a space station its bow must be distinct from its stern
   // produces a station with a nose cone, and the orientation heuristic treats them as spin-in-place
@@ -217,8 +228,36 @@ function conceptPrompt(civ, lin, tier, isChild) {
   const fixed = livery + ' ' + tail;
   const room = CAP - fixed.length - 2;
 
-  let body = isChild ? head : head + ` ${c.techMandate}.`;
-  if (body.length > room) body = body.slice(0, room).replace(/[\s,;:]+\S*$/, '') + '.';
+  // ---- FITTING THE HEAD: DROP WHOLE CLAUSES, NEVER HALF A SENTENCE --------------------------
+  //
+  // This used to cut the head at the character limit and glue a full stop on, silently. That cost a
+  // whole round of Terran capitals: the family-mode chain sentence ran a little long, its tail was
+  // cut, and what went to the model was "...keep its materials, palette, surface finish, weathering
+  // and." — with the instruction the sentence existed to give ("a DIFFERENT CLASS of vessel") removed
+  // outright. Every hull came back looking like the one before it, and the prompt read plausibly
+  // enough that nothing looked wrong until the art did.
+  //
+  // Now the least important clause is dropped ENTIRELY and the rest is left intact, which degrades to
+  // a shorter true instruction rather than a longer false one. Mid-sentence truncation survives only
+  // as the last resort, and it says so out loud.
+  const parts = isChild ? [...headParts] : [...headParts, `${c.techMandate}.`];
+
+  let body = parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  while (body.length > room && parts.length > 1)
+  {
+    // Last is least: `tech`, then the civ's aesthetic restatement. The hull's own description and the
+    // chain instruction are at the front and are never the ones dropped.
+    const dropped = parts.pop();
+    if (dropped) console.log(`  ~ ${tier.unit}: dropped a clause to fit (${dropped.slice(0, 40)}...)`);
+    body = parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  if (body.length > room)
+  {
+    console.log(`  !! ${tier.unit}: STILL over by ${body.length - room} char(s) after dropping clauses — ` +
+                'cutting mid-sentence. The hull description itself is too long; shorten it in ship-design.json.');
+    body = body.slice(0, room).replace(/[\s,;:]+\S*$/, '') + '.';
+  }
 
   return body + fixed;
 }

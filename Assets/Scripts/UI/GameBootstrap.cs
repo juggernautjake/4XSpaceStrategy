@@ -28,6 +28,8 @@ public static class GameBootstrap
         EarthquakeManager.Create();         // fault-line quakes damage infrastructure on tectonic worlds
         ControlGroupInput.Create();         // Ctrl+1..9 to bind fleets, 1..9 to recall them
         SquadronAI.Create();                // standing orders: intercept, evade-and-report, escort, patrol
+        PatrolTool.Create();                // click out a patrol route
+        RallyTool.Create();                 // click a squadron's fall-back point
         FleetMovementController.Create();
         TargetIndicator.Create();           // pulsing lock-on ring for right-click sends
         // Combat. Order matters: the renderers must exist before CombatManager's first tick, because
@@ -75,6 +77,7 @@ public static class GameBootstrap
         //   CompactBodyPanel.Create(canvas.transform);
         BodyUnitsPanel.Create(canvas.transform);
         FleetRosterPanel.Create(canvas.transform);   // fleet > squadron > ship, with condition bars
+        FleetCommandBar.Create(canvas.transform);    // formation, protocol, patrol, rally, roster
         // "Around Homeworld" (AssociatedObjectsWindow) retired at Raptok's request: its moon-hopping list
         // is superseded by the Planet View's moon tabs. Not instantiated, so it never subscribes to
         // selection and never appears. The class is left in the tree as dead code for now.

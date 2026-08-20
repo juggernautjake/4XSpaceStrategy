@@ -51,27 +51,63 @@ public static class UnitModelLibrary
     {
         built = true;
 
-        // Every station class shares the one station model for now.
-        foreach (var info in UnitDatabase.All)
+        // ============================================================================================
+        // HOW BIG EVERYTHING IS DRAWN
+        //
+        // The scale these numbers live on is set by the worlds they sit next to: OrbitSafety draws a
+        // MOON at surfaceSize * 0.05 with a floor of 0.35, and a PLANET at * 0.08 with a floor of 0.6.
+        // So a world is 0.35 to 2.2 units across, and anything here has to be a few tenths or it
+        // dwarfs the thing it is orbiting.
+        //
+        // Ship sizes are COMPRESSED, deliberately and heavily. A fighter really is about a
+        // thousandth of a battleship's length, and a fighter drawn to that scale beside one is a
+        // sub-pixel smudge that no player could see, let alone click. What the sizes preserve instead
+        // is the ORDER and the sense of class: a fighter is unmistakably small, a dreadnought is the
+        // biggest thing under way, and the gap between them is legible at system zoom.
+        //
+        // THE STATIONS USED TO BE COMPUTED FROM stationLevel, and it produced a straightforward lie:
+        // only the Mega-Station carries level 3, so every other station came out at the level-1 size
+        // of 0.23 — and the Mega-Station itself landed at 0.37, SMALLER THAN THE DREADNOUGHT at 0.40.
+        // A thing whose own description is "an orbital city the size of a small moon", and which costs
+        // two and a half times what a battleship costs, was being drawn as the smaller of the two.
+        //
+        // They are per-class now. The Mega-Station is 0.52, which really is a small moon on this scale
+        // (a moon of middling surfaceSize draws at about 0.5), and it is comfortably the largest thing
+        // any civilization fields.
+        void Station(UnitType t, float size)
         {
-            if (info == null || !info.isStation) continue;
-            map[info.type] = new Entry
+            map[t] = new Entry
             {
                 path = "SpaceAssets/Stations/LP Space Station",
-                // Tier matters: a Mega-Station should read as the "little moon" its description promises,
-                // which is right about the size of an actual small moon (0.35).
-                size = 0.16f + Mathf.Clamp(info.stationLevel, 1, 3) * 0.07f,
+                size = size,
                 motion = Motion.OrbitHost,
                 spin = 14f
             };
         }
+
+        Station(UnitType.RelayStation, 0.24f);      // a mast and a dish
+        Station(UnitType.SupplyStation, 0.26f);     // tanks and drums round a spine
+        Station(UnitType.ResearchStation, 0.28f);
+        Station(UnitType.BattleStation, 0.30f);
+        Station(UnitType.DeepSpaceStation, 0.30f);
+        Station(UnitType.TerraformStation, 0.36f);  // a processor ring, and they are not small
+        Station(UnitType.MultiStation, 0.38f);
+        Station(UnitType.HyperRelay, 0.44f);        // a gate a fleet flies through
+        Station(UnitType.MegaStation, 0.52f);       // the little moon its description promises
+
+        // Anything flagged isStation that the list above missed still gets drawn rather than skipped —
+        // a new station class should appear at a sane size on the day it is added, not vanish until
+        // somebody remembers this table.
+        foreach (var info in UnitDatabase.All)
+            if (info != null && info.isStation && !map.ContainsKey(info.type))
+                Station(info.type, 0.30f);
 
         // The colony ship — the one hull big and characterful enough to be worth a mesh. It's also the
         // ship you watch most closely, since it's what founds a world.
         map[UnitType.ColonyShip] = new Entry
         {
             path = "SpaceAssets/Ships/LP Colony Ship",
-            size = 0.34f,
+            size = 0.33f,
             motion = Motion.Freeflying,
             spin = 0f,      // it points where it's going; a spinning colony ship would look broken
             // Pitch the hull up 90° about its lateral axis so it sits the right way up.
@@ -84,12 +120,12 @@ public static class UnitModelLibrary
         const string sciencePath = "SpaceAssets/Ships/LP Science Ship";
         // Yaw the science hull 90° about its up axis so it faces the right way.
         var sciRot = Quaternion.Euler(0f, 90f, 0f);
-        map[UnitType.ResearchShip] = new Entry { path = sciencePath, size = 0.22f, motion = Motion.Freeflying, modelRotation = sciRot };
-        map[UnitType.ResearchShipII] = new Entry { path = sciencePath, size = 0.26f, motion = Motion.Freeflying, modelRotation = sciRot };
-        map[UnitType.ResearchShipIII] = new Entry { path = sciencePath, size = 0.30f, motion = Motion.Freeflying, modelRotation = sciRot };
+        map[UnitType.ResearchShip] = new Entry { path = sciencePath, size = 0.20f, motion = Motion.Freeflying, modelRotation = sciRot };
+        map[UnitType.ResearchShipII] = new Entry { path = sciencePath, size = 0.23f, motion = Motion.Freeflying, modelRotation = sciRot };
+        map[UnitType.ResearchShipIII] = new Entry { path = sciencePath, size = 0.26f, motion = Motion.Freeflying, modelRotation = sciRot };
         // The Science Vessel is the top of that line — a dedicated deep-survey laboratory, and the
         // largest of them.
-        map[UnitType.ScienceVessel] = new Entry { path = sciencePath, size = 0.34f, motion = Motion.Freeflying, modelRotation = sciRot };
+        map[UnitType.ScienceVessel] = new Entry { path = sciencePath, size = 0.30f, motion = Motion.Freeflying, modelRotation = sciRot };
 
         // ============================================================================================
         // EVERY OTHER HULL, ON A BORROWED MESH
@@ -112,25 +148,25 @@ public static class UnitModelLibrary
         var colRot = Quaternion.Euler(-90f, 0f, 0f);
 
         // Fast, light hulls — the science frame is the slimmer of the two.
-        Ship(UnitType.Scout, 0.14f, sciencePath, sciRot);
-        Ship(UnitType.ScoutII, 0.16f, sciencePath, sciRot);
-        Ship(UnitType.ScoutIII, 0.18f, sciencePath, sciRot);
-        Ship(UnitType.Explorer, 0.24f, sciencePath, sciRot);
-        Ship(UnitType.Probe, 0.09f, sciencePath, sciRot);
+        Ship(UnitType.Scout, 0.12f, sciencePath, sciRot);
+        Ship(UnitType.ScoutII, 0.14f, sciencePath, sciRot);
+        Ship(UnitType.ScoutIII, 0.16f, sciencePath, sciRot);
+        Ship(UnitType.Explorer, 0.22f, sciencePath, sciRot);
+        Ship(UnitType.Probe, 0.07f, sciencePath, sciRot);
 
         // Combat, escalating. Nothing here is a fighter-shaped mesh yet; size is doing the work.
-        Ship(UnitType.Fighter, 0.13f, sciencePath, sciRot);
-        Ship(UnitType.FighterII, 0.15f, sciencePath, sciRot);
-        Ship(UnitType.FighterIII, 0.17f, sciencePath, sciRot);
-        Ship(UnitType.Frigate, 0.20f, colonyPath, colRot);
-        Ship(UnitType.Cruiser, 0.26f, colonyPath, colRot);
-        Ship(UnitType.Carrier, 0.32f, colonyPath, colRot);
-        Ship(UnitType.Dreadnought, 0.40f, colonyPath, colRot);
+        Ship(UnitType.Fighter, 0.11f, sciencePath, sciRot);
+        Ship(UnitType.FighterII, 0.13f, sciencePath, sciRot);
+        Ship(UnitType.FighterIII, 0.15f, sciencePath, sciRot);
+        Ship(UnitType.Frigate, 0.19f, colonyPath, colRot);
+        Ship(UnitType.Cruiser, 0.27f, colonyPath, colRot);
+        Ship(UnitType.Carrier, 0.34f, colonyPath, colRot);
+        Ship(UnitType.Dreadnought, 0.38f, colonyPath, colRot);
 
         // Bulk hulls — the colony frame is the heavier one, which suits them.
-        Ship(UnitType.Miner, 0.22f, colonyPath, colRot);
-        Ship(UnitType.Transport, 0.26f, colonyPath, colRot);
-        Ship(UnitType.Terraformer, 0.30f, colonyPath, colRot);
+        Ship(UnitType.Miner, 0.21f, colonyPath, colRot);
+        Ship(UnitType.Transport, 0.25f, colonyPath, colRot);
+        Ship(UnitType.Terraformer, 0.31f, colonyPath, colRot);
     }
 
     // ============================================================================================
