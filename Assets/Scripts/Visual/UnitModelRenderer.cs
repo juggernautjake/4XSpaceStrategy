@@ -686,6 +686,11 @@ public class UnitModelRenderer : MonoBehaviour
             // Position easing lives in UnitManager.FlightEase — burn, coast, brake — so the ship is
             // already accelerating out and braking in. This is the attitude half of the same idea.
             Vector3 dir = u.travelTo - u.travelFrom;
+
+            // Stand off the fleet's shared course line, so a flight of eight reads as eight ships
+            // rather than as one that got heavier. Drawing only — see FleetFormation.
+            pos += FleetFormation.Offset(u, dir, u.TravelProgress);
+
             if (dir.sqrMagnitude > 0.0001f)
             {
                 Quaternion want = Quaternion.LookRotation(dir.normalized, Vector3.up);
@@ -719,8 +724,13 @@ public class UnitModelRenderer : MonoBehaviour
             float standoff = host.lossyScale.x * 0.5f + 0.4f;
             int idx = u.location.units != null ? Mathf.Max(0, u.location.units.IndexOf(u)) : 0;
             int count = u.location.units != null ? Mathf.Max(1, u.location.units.Count) : 1;
-            float ang = idx * Mathf.PI * 2f / count;
-            pos = host.position + new Vector3(Mathf.Cos(ang) * standoff, 0.35f, Mathf.Sin(ang) * standoff);
+
+            // The anchorage GROWS with the number of ships in it — see FleetFormation.AnchorOffset.
+            // A fixed-radius ring divided by the count packs twenty ships a tenth of a unit apart, and
+            // hulls are up to 0.40 across, so a well-defended world drew as one solid ring of
+            // interpenetrating geometry instead of as a fleet standing off it.
+            pos = host.position + Vector3.up * 0.35f
+                + FleetFormation.AnchorOffset(idx, count, standoff, 0.34f);
             m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
                 Quaternion.LookRotation((host.position - pos).normalized, Vector3.up) * m.entry.modelRotation, 2f * dt);
         }

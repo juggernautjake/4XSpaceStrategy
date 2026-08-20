@@ -136,17 +136,26 @@ public class UnitTokenRenderer : MonoBehaviour
             {
                 Vector3 basePos = u.location.visualObject != null ? u.location.visualObject.transform.position
                                 : (u.location.system != null ? u.location.system.galaxyPosition : Vector3.zero);
-                int idx = u.location.units != null ? u.location.units.IndexOf(u) : 0;
+                int idx = u.location.units != null ? Mathf.Max(0, u.location.units.IndexOf(u)) : 0;
                 int count = u.location.units != null ? Mathf.Max(1, u.location.units.Count) : 1;
                 float ring = (u.location.visualObject != null ? u.location.visualObject.transform.lossyScale.x * 0.7f : 1f) + 1.6f;
-                float ang = idx * Mathf.PI * 2f / count;
-                pos = basePos + new Vector3(Mathf.Cos(ang) * ring, u.location.visualObject != null ? u.location.visualObject.transform.lossyScale.x * 0.6f + 1.2f : 1.2f, Mathf.Sin(ang) * ring);
+                float lift = u.location.visualObject != null ? u.location.visualObject.transform.lossyScale.x * 0.6f + 1.2f : 1.2f;
+
+                // Same growing anchorage the hulls use, at token scale — icons crowding into an
+                // unreadable band over a busy world is the same bug seen from further away.
+                pos = basePos + Vector3.up * lift + FleetFormation.AnchorOffset(idx, count, ring, 1.1f);
                 emblemAlpha = (u.location.owner == u.owner) ? 0.95f : 0.4f;   // transparent = presence, not ownership
             }
             else if (u.status == UnitStatus.Traveling)
             {
-                // In transit: fly the straight intercept line computed at launch.
-                pos = Vector3.Lerp(u.travelFrom, u.travelTo, u.TravelProgress) + Vector3.up * 1.2f;
+                // In transit: fly the straight intercept line computed at launch — THROUGH THE SAME
+                // EASING THE HULL USES. This read the raw progress, which moves at a constant rate while
+                // the ship under it burns, coasts and brakes (UnitManager.FlightEase). The token drifted
+                // ahead of its own ship on departure and fell behind it on arrival, so the marker and the
+                // hull it marks separated by the width of the icon in the middle of every crossing.
+                pos = Vector3.Lerp(u.travelFrom, u.travelTo, UnitManager.FlightEase(u.TravelProgress))
+                    + FleetFormation.Offset(u, u.travelTo - u.travelFrom, u.TravelProgress)
+                    + Vector3.up * 1.2f;
                 emblemAlpha = 0.85f;
             }
             else

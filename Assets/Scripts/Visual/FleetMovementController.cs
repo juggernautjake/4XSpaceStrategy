@@ -9,7 +9,12 @@ public class FleetMovementController : MonoBehaviour
 {
     public static FleetMovementController Instance;
 
-    const float SpeedScale = 6f;          // must match UnitManager
+    // Travel time comes from UnitManager.TravelTime — there is no local copy of the speed scale any
+    // more. There used to be, with a "must match UnitManager" comment over it, and it matched right up
+    // until the first relay station went up: the sim multiplies the scale by ShipUpgrades.SpeedMult,
+    // which StationEffects raises with the relay network, and the preview did not. Every ETA quoted here
+    // ran long from that point on, and by more the bigger the network got — the one number this
+    // controller exists to show, wrong precisely for the players who had invested in going faster.
     static readonly KeyCode PredictKey = KeyCode.LeftShift;
 
     Camera cam;
@@ -89,7 +94,7 @@ public class FleetMovementController : MonoBehaviour
 
         Vector3 targetNow = BodyPos(hovered);
         float dist = Vector3.Distance(origin, targetNow);
-        float dur = Mathf.Clamp(dist / (slow * SpeedScale), 3f, 120f);
+        float dur = UnitManager.TravelTime(dist, slow);
 
         bool predict = Input.GetKey(PredictKey);
         Vector3 endPoint = targetNow;
@@ -104,7 +109,7 @@ public class FleetMovementController : MonoBehaviour
                 for (int i = 0; i < 3; i++)
                 {
                     Vector3 p = oc.PredictWorldPosition(t);
-                    t = Mathf.Clamp(Vector3.Distance(origin, p) / (slow * SpeedScale), 3f, 120f);
+                    t = UnitManager.TravelTime(Vector3.Distance(origin, p), slow);
                 }
                 endPoint = oc.PredictWorldPosition(t);
                 dur = t;
@@ -167,7 +172,7 @@ public class FleetMovementController : MonoBehaviour
 
         int slow = int.MaxValue;
         foreach (var u in sel) slow = Mathf.Min(slow, Mathf.Max(1, u.Speed));
-        float dur = Mathf.Clamp(Vector3.Distance(origin, targetNow) / (slow * SpeedScale), 3f, 120f);
+        float dur = UnitManager.TravelTime(Vector3.Distance(origin, targetNow), slow);
 
         bool predict = Input.GetKey(PredictKey);
         Vector3 endPoint = targetNow;
@@ -180,7 +185,7 @@ public class FleetMovementController : MonoBehaviour
                 for (int i = 0; i < 3; i++)
                 {
                     Vector3 p = oc.PredictWorldPosition(t);
-                    t = Mathf.Clamp(Vector3.Distance(origin, p) / (slow * SpeedScale), 3f, 120f);
+                    t = UnitManager.TravelTime(Vector3.Distance(origin, p), slow);
                 }
                 endPoint = oc.PredictWorldPosition(t);
                 dur = t;
@@ -315,8 +320,10 @@ public class FleetMovementController : MonoBehaviour
         var b = lead.location;
         if (b != null && b.visualObject != null) return b.visualObject.transform.position;
         if (b != null && b.system != null) return b.system.galaxyPosition;
-        // mid-transit: use the moving token estimate
-        return Vector3.Lerp(lead.travelFrom, lead.travelTo, lead.TravelProgress);
+        // Mid-transit: where the lead ship actually IS, easing included — otherwise the dashed path
+        // starts off the ship's nose by however far the burn/coast/brake curve has pulled ahead of a
+        // straight lerp, which is most of the way through the crossing.
+        return Vector3.Lerp(lead.travelFrom, lead.travelTo, UnitManager.FlightEase(lead.TravelProgress));
     }
 
     static Vector3 BodyPos(CelestialBody b)

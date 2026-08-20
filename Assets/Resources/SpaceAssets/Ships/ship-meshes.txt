@@ -10,49 +10,70 @@
 #   flying belly-first?   try  -90 0 0
 #   flying backwards?     add  180 to the yaw
 #
-# ---- GENERATED, AND ONLY HALF-TRUSTED ------------------------------------------------------
+# ---- VERIFIED BY SILHOUETTE, NOT GUESSED FROM A BOX ----------------------------------------
 #
-# Everything below the legacy block was written by tools/make-orientation-manifest.mjs from the
-# bounds the importer measured. It fixes the AXIS choice so the whole fleet agrees — the runtime
-# heuristic decides per mesh, and these hulls measure things like 1.90 x 0.54 x 1.67 where the two
-# longest axes are within ten percent, so a carrier at 1.83 x 0.46 x 1.90 tips the other way and
-# flies across its own beam while its escorts fly nose-first.
+# These lines were read off `tools/ship-silhouettes.mjs`, which rasterises each mesh's own geometry
+# in the plane of its two longest axes — the top-down profile in which a bow is obvious — and marks
+# the +axis direction in the corner of every cell. The sheet is `Art/AllModels/_silhouettes.png`.
 #
-# It CANNOT know bow from stern: a bounding box is symmetric and says nothing about which end the
-# engines are on. A ship flying backwards is one "+180 yaw" away from fixed. Lines marked AMBIGUOUS
-# are the ones whose two longest axes are close enough that the axis pick is a coin toss — check
-# those first.
+# That mattered, because the previous generated pass had NEARLY THE WHOLE FLEET FLYING BACKWARDS.
+# The bounding-box heuristic settles which axis a hull is long on and cannot settle which END is the
+# bow — a box is symmetric. Measuring where the mass sits does not settle it either: a swordfish's
+# sharp end is its bill and a shrimp's is its tail, so "the pointed end" is the bow on one hull and
+# the stern on the next (`tools/measure-bow.mjs` reports both numbers and says so). The Aquarii
+# creatures are almost all modelled facing -X, so the -90 yaw the generator wrote pointed every one
+# of them tail-first along its course.
+#
+# THREE HULLS WERE ORIENTED ACROSS THEIR OWN BEAM, which no amount of 180s would have fixed: a manta
+# ray carrier, a sea-turtle colony ship and a Terran scout aeroplane are all WIDER than they are
+# long, so "the longest axis" found the wingspan and flew them sideways. Their length is the second
+# axis, and their lines below say so.
+#
+# STATIONS DO NOT HAVE A BOW. Every one of them measures its shortest axis on Y, which means it is
+# already a disc lying flat with its axis of symmetry up — so they take the identity rotation and
+# are marked `spin`, which is what a radially symmetric structure with no facing should do.
+#
+# Re-running tools/make-orientation-manifest.mjs OVERWRITES THIS FILE and will undo all of it. Run
+# the silhouette sheet again after it and re-read the verdicts.
 # ============================================================================================
 
 # ---- The three meshes that shipped with the project ----------------------------------------
 LP Colony Ship              -90 0 0
 LP Science Ship               0 90 0
 
-# ---- Generated fleet -----------------------------------------------------------------------
-Aquarii_BattleStation             0  -90    0    # len X, up Y, dims 1.90 x 0.87 x 1.53
-Aquarii_Carrier                   0    0    0    # len Z, up Y, dims 1.83 x 0.46 x 1.90  AMBIGUOUS
-Aquarii_ColonyShip                0  -90    0    # len X, up Y, dims 1.90 x 0.69 x 1.78  AMBIGUOUS
-Aquarii_Cruiser                   0  -90    0    # len X, up Y, dims 1.90 x 0.57 x 0.74
-Aquarii_Dreadnought               0  -90    0    # len X, up Y, dims 1.90 x 0.70 x 0.85
-Aquarii_Explorer                  0  -90   90    # len X, up Z, dims 1.90 x 0.92 x 0.63
-Aquarii_Fighter                   0  -90    0    # len X, up Y, dims 1.90 x 0.60 x 1.66  AMBIGUOUS
-Aquarii_FighterII                 0  -90    0    # len X, up Y, dims 1.90 x 0.73 x 1.08
-Aquarii_FighterIII                0  -90    0    # len X, up Y, dims 1.90 x 0.77 x 1.29
-Aquarii_Frigate                   0    0    0    # len Z, up Y, dims 1.13 x 0.58 x 1.90
-Aquarii_Miner                     0  -90    0    # len X, up Y, dims 1.90 x 0.62 x 0.99
-Aquarii_MultiStation              0  -90    0    # len X, up Y, dims 1.90 x 0.83 x 1.81  AMBIGUOUS
-Aquarii_Probe                     0  -90   90    # len X, up Z, dims 1.90 x 1.34 x 1.27
-Aquarii_RelayStation              0    0    0    # len Z, up Y, dims 1.89 x 0.77 x 1.90  AMBIGUOUS
-Aquarii_ResearchShip              0  -90    0    # len X, up Y, dims 1.90 x 0.58 x 0.96
-Aquarii_ResearchShipII            0  -90    0    # len X, up Y, dims 1.90 x 0.80 x 1.13
-Aquarii_ResearchShipIII           0  -90    0    # len X, up Y, dims 1.90 x 0.81 x 0.95
-Aquarii_ResearchStation           0    0    0    # len Z, up Y, dims 1.42 x 1.05 x 1.90
-Aquarii_ScienceVessel             0  -90    0    # len X, up Y, dims 1.90 x 1.01 x 1.39
-Aquarii_Scout                     0  -90    0    # len X, up Y, dims 1.90 x 0.54 x 1.67  AMBIGUOUS
-Aquarii_ScoutII                   0  -90    0    # len X, up Y, dims 1.90 x 0.61 x 1.16
-Aquarii_ScoutIII                  0  -90    0    # len X, up Y, dims 1.90 x 0.44 x 1.77  AMBIGUOUS
-Aquarii_SupplyStation             0  -90    0    # len X, up Y, dims 1.90 x 0.47 x 1.83  AMBIGUOUS
-Aquarii_Terraformer               0  -90    0    # len X, up Y, dims 1.80 x 0.71 x 0.87
-Aquarii_Transport                 0  -90    0    # len X, up Y, dims 1.90 x 0.50 x 1.01
-Terran_Fighter                    0  -90    0    # len X, up Y, dims 1.90 x 0.56 x 1.71  AMBIGUOUS
-Terran_Scout                      0    0    0    # len Z, up Y, dims 1.47 x 0.40 x 1.90
+# ---- Aquarii: hulls ------------------------------------------------------------------------
+# Modelled nose-toward--X, so +90 yaw puts the bow on +Z. Verified one at a time on the sheet.
+Aquarii_Scout                     0   90    0    # shrimp, thruster tail on +X
+Aquarii_ScoutII                   0   90    0    # lionfish, tail fins on +X
+Aquarii_ScoutIII                  0   90    0    # swordfish, bill on -X
+Aquarii_Explorer                  0   90    0    # sailfish, bill on -X; the sail IS the +Y up axis
+Aquarii_Probe                     0   90    0  1.0  spin   # nautilus shell, no meaningful facing
+Aquarii_ResearchShip              0   90    0    # cuttlefish, instrument tentacles on -X
+Aquarii_ResearchShipII            0   90    0    # octopus, arms on -X
+Aquarii_ResearchShipIII           0   90    0    # squid, arms on -X, tail fins on +X
+Aquarii_ScienceVessel             0   90    0    # nautilus, head on -X, spiral shell aft
+Aquarii_ColonyShip                0    0    0    # sea turtle — LENGTH IS Z, flipper span is X
+Aquarii_Miner                     0   90    0    # hermit crab, cutting claws on -X
+Aquarii_Transport                 0   90    0    # blue whale, baleen intake on -X, flukes on +X
+Aquarii_Terraformer               0   90    0    # jellyfish, bell on -X, spore tendrils trailing +X
+Aquarii_Fighter                   0   90    0    # reef shark, nose on -X
+Aquarii_FighterII                 0   90    0    # hammerhead, head on -X
+Aquarii_FighterIII                0   90    0    # megalodon, nose on -X
+Aquarii_Frigate                   0    0    0    # lobster — length IS Z, claws already on +Z
+Aquarii_Cruiser                   0   90    0    # sawfish, the saw ram on -X
+Aquarii_Carrier                   0  -90    0    # manta ray — LENGTH IS X, wingspan is Z; nose +X
+Aquarii_Dreadnought               0   90    0    # leviathan, head on -X, spinal cannon along the back
+
+# ---- Aquarii: stations ---------------------------------------------------------------------
+# Discs already lying flat with Y up. No bow, so they turn instead of pointing.
+Aquarii_BattleStation             0    0    0  1.0  spin   # armoured clam
+Aquarii_ResearchStation           0    0    0  1.0  spin   # sea snail observatory
+Aquarii_RelayStation              0    0    0  1.0  spin   # sea urchin, spines as antennae
+Aquarii_SupplyStation             0    0    0  1.0  spin   # barnacle cluster
+Aquarii_MultiStation              0    0    0  1.0  spin   # crab fortress-city
+
+# ---- Terran --------------------------------------------------------------------------------
+Terran_Scout                      0  -90    0    # aeroplane — LENGTH IS X, wingspan is Z; nose +X
+Terran_Fighter                    0  -90    0    # nose on +X, engine cylinder aft. CHECK BY EYE: the
+                                                 # least certain line here — a jet is narrow at both
+                                                 # ends and the silhouette does not clinch it

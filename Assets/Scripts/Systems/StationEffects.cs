@@ -10,9 +10,19 @@ public static class StationEffects
     static float researchCarry = 0f;   // fractional research points awaiting a whole-point flush
 
     // Anchored, player-owned, and not travelling.
+    //
+    // OPEN SPACE COUNTS ONLY FOR THINGS BUILT TO SIT IN IT. This used to accept `u.inSpace` from any
+    // unit, which quietly made `UnitInfo.deepSpace` decorative: a Battle Station or a Supply Station
+    // towed out to an empty point kept radiating everything it radiates at a world, so the flag that
+    // says "runs on starlight, no world needed" described a privilege every station already had. Both
+    // descriptions in the shipyard promise otherwise, and the Deep-Space Station's whole case for
+    // existing — it is the one you can put ANYWHERE — evaporates if the others can go there too.
+    //
+    // Civilian workers land on the right side of this by the same rule: a mining barge or a transport
+    // parked in the void is not running a supply route, and now stops being paid for one.
     static bool Deployed(Unit u)
         => u != null && u.owner == FactionManager.Player && u.status != UnitStatus.Traveling
-           && (u.location != null || u.inSpace);
+           && (u.location != null || (u.inSpace && u.Info != null && u.Info.deepSpace));
 
     public static void Tick(float dt)
     {

@@ -8,7 +8,12 @@ public static class ShipUpgrades
 {
     public static float EmpireRange = 1f;   // set by EmpireTech milestones (level-based)
     public static float TechRange = 1f;     // set by drive technologies (Ion/Warp/Jump…)
-    public static float SpeedMult = 1f;     // quickened by the relay network (StationEffects) + drive tech
+    // Quickened by the RELAY NETWORK ONLY (StationEffects). Drive technologies deliberately buy REACH
+    // rather than pace — they raise TechRange — so the two investments do different things: research
+    // lets a fleet get further, relays let it get there sooner. Nothing else writes this; if a drive
+    // tech is ever meant to add speed it has to multiply in here rather than assign, because
+    // StationEffects recomputes this value from the network every frame.
+    public static float SpeedMult = 1f;
 
     // Set by StationEffects from the active relay/deep-space/mega stations. 1 = no relays deployed.
     public static float RelayRange = 1f;

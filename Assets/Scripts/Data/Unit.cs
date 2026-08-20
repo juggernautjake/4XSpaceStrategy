@@ -86,6 +86,16 @@ public class Unit
     public CelestialBody travelTarget;      // null when moving to a point in empty space
     public float travelElapsed, travelDuration;
     public Vector3 travelFrom, travelTo;    // world positions for the moving token
+
+    // Which station this ship holds in its fleet's formation, and how many ships are in that fleet.
+    // Assigned when a move order is issued (UnitManager.IssueMove / SendUnitsToPoint) and read by the
+    // renderers to spread a flight out across its course — see FleetFormation.
+    //
+    // NOT SAVED, and it does not need to be. A save reloaded mid-flight falls back to the unit's id,
+    // which spreads the fleet just as well; the only thing lost is that the slots are no longer in the
+    // order the fleet was selected, and nothing anywhere depends on that order.
+    [System.NonSerialized] public int formationSlot = -1;
+    [System.NonSerialized] public int formationCount = 1;
     public Vector3 parkPosition;            // where it sits when idling in deep space
     public bool inSpace;                    // true when parked in space (no body)
 

@@ -51,7 +51,24 @@ public class UnitManager : MonoBehaviour
 
     // Active hyper-relays / relay stations quicken travel fleet-wide: the effective speed scale is
     // multiplied by ShipUpgrades.SpeedMult (1 = no relays).
-    static float EffSpeedScale() => SpeedScale * Mathf.Max(1f, ShipUpgrades.SpeedMult);
+    /// World units per second per point of a ship's `speed`, with the relay network folded in.
+    ///
+    /// PUBLIC BECAUSE THE PREVIEW HAS TO USE THE SAME NUMBER. FleetMovementController quotes a travel
+    /// time before the order is given, and it used to compute that from its own copy of the raw
+    /// `SpeedScale` with a "must match UnitManager" comment over it. The copy was accurate exactly until
+    /// the first relay went up: StationEffects raises ShipUpgrades.SpeedMult by 0.75 per point of relay
+    /// boost and the preview did not know, so from the first relay station onward every quoted ETA ran
+    /// long — and by more the bigger the network got. That is the one number the player uses to decide
+    /// whether a crossing is worth making.
+    public static float EffSpeedScale() => SpeedScale * Mathf.Max(1f, ShipUpgrades.SpeedMult);
+
+    /// How long a fleet at this speed takes to cross this distance — the single definition of that,
+    /// shared by the order itself and by the preview that quotes it.
+    public static float TravelTime(float distance, int slowestSpeed)
+        => Mathf.Clamp(distance / (Mathf.Max(1, slowestSpeed) * EffSpeedScale()), MinTravelSeconds, MaxTravelSeconds);
+
+    /// However short the hop, a crossing takes this long — and however long, never longer than this.
+    public const float MinTravelSeconds = 3f, MaxTravelSeconds = 120f;
 
     // XP is earned by COMPLETING tasks (not by idling). Travel gives a little; missions give more.
     const float XpTravel = 8f, XpSample = 5f, XpSurvey = 30f, XpResearch = 45f, XpColonize = 60f;
@@ -293,11 +310,11 @@ public class UnitManager : MonoBehaviour
         Vector3 to; float duration;
         if (oc != null)
         {
-            float t = Mathf.Clamp(Vector3.Distance(from, WorldPos(target)) / (slow * EffSpeedScale()), 3f, 120f);
+            float t = TravelTime(Vector3.Distance(from, WorldPos(target)), slow);
             for (int i = 0; i < 4; i++)
             {
                 Vector3 p = oc.PredictWorldPosition(t);
-                t = Mathf.Clamp(Vector3.Distance(from, p) / (slow * EffSpeedScale()), 3f, 120f);
+                t = TravelTime(Vector3.Distance(from, p), slow);
             }
             to = oc.PredictWorldPosition(t);
             duration = t;
@@ -305,7 +322,7 @@ public class UnitManager : MonoBehaviour
         else
         {
             to = WorldPos(target);
-            duration = Mathf.Clamp(Vector3.Distance(from, to) / (slow * EffSpeedScale()), 3f, 120f);
+            duration = TravelTime(Vector3.Distance(from, to), slow);
         }
 
         if (!CanReach(group, to, out string reason))
@@ -317,13 +334,27 @@ public class UnitManager : MonoBehaviour
             return;
         }
 
+        // Stations in the formation, so the fleet crosses as a wedge rather than as one overlapping
+        // point. Purely a drawing concern — see FleetFormation.
+        FleetFormation.Assign(group);
+
         foreach (var u in group)
         {
+            // EACH SHIP LEAVES FROM WHERE IT ACTUALLY IS. This used to hand every ship the LEAD ship's
+            // position, so a fleet whose members were selected across two worlds saw the stragglers
+            // vanish and reappear alongside the leader on the frame the order was given. They still
+            // arrive together — the duration is shared, computed from the lead ship — so a ship starting
+            // further out simply flies faster to make the rendezvous, which is what a fleet forming up
+            // looks like anyway.
+            //
+            // Read BEFORE `location` is cleared, or UnitPos has nothing left to answer with.
+            Vector3 origin = UnitPos(u);
+
             if (u.location != null && u.location.units != null) u.location.units.Remove(u);
             u.location = null;
             u.status = UnitStatus.Traveling;
             u.travelTarget = target;
-            u.travelFrom = from;
+            u.travelFrom = origin;
             u.travelTo = to;
             u.travelElapsed = 0f;
             u.travelDuration = duration;
@@ -479,7 +510,7 @@ public class UnitManager : MonoBehaviour
         int slow = int.MaxValue;
         foreach (var u in group) slow = Mathf.Min(slow, Mathf.Max(1, u.Speed));
         Vector3 from = UnitPos(group[0]);
-        float duration = Mathf.Clamp(Vector3.Distance(from, worldPos) / (slow * EffSpeedScale()), 3f, 120f);
+        float duration = TravelTime(Vector3.Distance(from, worldPos), slow);
 
         if (!CanReach(group, worldPos, out string reason))
         {
@@ -489,14 +520,19 @@ public class UnitManager : MonoBehaviour
             return;
         }
 
+        FleetFormation.Assign(group);
+
         foreach (var u in group)
         {
+            // Its own position, not the lead ship's — see the note in IssueMove's departure.
+            Vector3 origin = UnitPos(u);
+
             if (u.location != null && u.location.units != null) u.location.units.Remove(u);
             u.location = null;
             u.inSpace = false;
             u.travelTarget = null;   // no body -> pure space move
             u.status = UnitStatus.Traveling;
-            u.travelFrom = from;
+            u.travelFrom = origin;
             u.travelTo = worldPos;
             u.travelElapsed = 0f;
             u.travelDuration = duration;
