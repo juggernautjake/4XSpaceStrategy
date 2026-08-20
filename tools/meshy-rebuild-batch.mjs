@@ -203,10 +203,30 @@ function conceptPrompt(civ, lin, tier, isChild) {
   // built-up it should look. `tech` is last because it is the one clause the rest can survive without:
   // tier escalation is also carried by the per-hull text and by the chain itself, whereas losing the
   // hull's own description or the chain instruction loses the ship.
+  // THE CIVILIZATION'S SIGNATURE, and it sits third on purpose — ahead of the tier clause, so it is
+  // never the thing dropped to fit.
+  //
+  // Without it a fire civilization and an ice civilization come back as the same grey ship with a
+  // different accent colour, which is exactly what happened: twenty-three Pyrothian hulls that should
+  // have been charred basalt with magma cracks arrived as clean battleship grey. The hull description
+  // says what SHAPE a ship is and the palette says what COLOUR it is; nothing was saying what it is
+  // MADE OF or what state its surface is in. This does.
+  const signature = p.signature || '';
+
+  // SIGNATURE OUTRANKS THE CHAIN SENTENCE, which looks backwards and is not.
+  //
+  // A chained tier is an image-to-image generation: the parent's picture is ATTACHED to the request.
+  // The sentence saying "keep the reference's silhouette" is reinforcement of something the model can
+  // already see. The signature is the only place the civilization's surface identity appears at all.
+  //
+  // When the budget forced one out, it was taking the signature — so the chained Pyrothian stations
+  // were being asked for a forge-city with no instruction anywhere that it should look burnt. Now the
+  // redundant clause goes first and the irreplaceable one stays.
   const opening = creature ? creature.charAt(0).toUpperCase() + creature.slice(1) + '.' : '';
   const headParts = isChild
-    ? [opening, reference, tech]
-    : [`${civ} starship concept art: ${creature || lin.family}.`, tech, creature ? '' : c.aesthetic + '.'];
+    ? [opening, signature, reference, tech]
+    : [`${civ} starship concept art: ${creature || lin.family}.`, signature, tech,
+       creature ? '' : c.aesthetic + '.'];
 
   // Stations get their own tail: telling a space station its bow must be distinct from its stern
   // produces a station with a nose cone, and the orientation heuristic treats them as spin-in-place
@@ -219,7 +239,19 @@ function conceptPrompt(civ, lin, tier, isChild) {
   // MOSTLY is doing real work in this sentence. Unlike the 3D texturer, the image model does respond
   // to a stated share, and without one the accent creeps until it has eaten the hull. The base is
   // also named twice on purpose: once as the thing the ship IS, once as the thing that stays.
-  const livery = ` The hull is MOSTLY ${p.baseShort} — at least two thirds of it. Accents only: ${p.primary.hex} on some armour panels, ${p.secondary.hex} on small trim, seams and lights. Do not paint the whole ship in the accent colours.`;
+  // ---- THE ACCENTS GO WHERE THE PALETTE SAYS THEY GO -----------------------------------------
+  //
+  // civ-colors.json has carried a `role` for every accent since it was written — "the glowing seams
+  // between armour plates, vent throats" for Pyrothian magma, "crystal spine tips, drive glow" for
+  // Cryithn gold — and none of them were ever sent. Every civilization got the same hardcoded
+  // sentence: primary "on some armour panels", secondary "on small trim, seams and lights".
+  //
+  // That is most of why the first Pyrothian fleet came back looking like Terran ships painted orange.
+  // It was given the Terran instruction. "Some armour panels" produces panels; "the glowing seams
+  // between armour plates and the vent throats" produces a furnace.
+  const livery = ` The hull is MOSTLY ${p.baseShort} — at least two thirds of it. Accents only: ` +
+                 `${p.primary.hex} on ${p.primary.role}; ${p.secondary.hex} on ${p.secondary.role}. ` +
+                 'Do not paint the whole ship in the accent colours.';
 
   // The tail and the livery hexes are NON-NEGOTIABLE — they carry the orientation rules the import
   // heuristic depends on and the two key hues the mask extractor looks for. So they are reserved

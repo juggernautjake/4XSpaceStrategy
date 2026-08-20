@@ -58,7 +58,8 @@
       },
       "hueSeparation": 185,
       "baseSaturated": false,
-      "baseShort": "steel grey-blue armoured hull"
+      "baseShort": "steel grey-blue armoured hull",
+      "signature": "Weathered service ship: scuffed paint, panel wear, soot around the thrusters."
     },
     "Aquarii": {
       "baseMaterial": "a CYBORG SEA CREATURE - deep sea-teal scaled skin, fin membranes and ribbed cartilage, with hard metal armour plates bolted over the back and flanks, mechanical gill vents, cybernetic lens eyes, cable bundles and glowing implant seams",
@@ -77,7 +78,8 @@
       },
       "hueSeparation": 95,
       "baseSaturated": true,
-      "baseShort": "deep sea-teal cyborg sea-creature hull with scaled skin and fins"
+      "baseShort": "deep sea-teal cyborg sea-creature hull with scaled skin and fins",
+      "signature": "Living hull: wet scaled skin and fin membranes under bolted armour, glowing implant seams."
     },
     "Pyrothian": {
       "baseMaterial": "dark charcoal basalt and obsidian slabs, thick overlapping ablative plate, brass heat-exchanger fins",
@@ -95,7 +97,8 @@
       },
       "hueSeparation": 168,
       "baseSaturated": false,
-      "baseShort": "dark charcoal basalt armoured hull"
+      "baseShort": "dark charcoal basalt armoured hull",
+      "signature": "CHARRED: soot-blackened plate, heat-discoloured metal, GLOWING ORANGE MAGMA CRACKS through the armour, ash staining."
     },
     "Cryithn": {
       "baseMaterial": "RICHLY COLOURED deep glacier-blue faceted armour over frosted silver alloy, rime-crusted plating",
@@ -114,7 +117,8 @@
       },
       "hueSeparation": 110,
       "baseSaturated": true,
-      "baseShort": "deep glacier-blue faceted ice hull"
+      "baseShort": "deep glacier-blue faceted ice hull",
+      "signature": "FROZEN: rime and frost crusting the plates, ice crystal along every seam, cold vapour off the drives, mirror facets."
     },
     "Sylvan": {
       "baseMaterial": "RICHLY COLOURED deep forest-green living hull, woven vine over a seed-pod shell, dark bark plating",
@@ -133,7 +137,9 @@
       },
       "hueSeparation": 115,
       "baseSaturated": true,
-      "baseShort": "deep forest-green living grown hull"
+      "baseShort": "deep forest-green living grown hull",
+      "signature": "GROWN, NOT BUILT: bark plating, vine over a seed-pod shell, moss in the seams, living wood grain."
     }
-  }
+  },
+  "_signatureNote": "signature: the surface condition every hull of this civ must show, sent in the prompt right after the hull description and before the tier clause. It exists because without it a fire civ and an ice civ came back as the same grey ship with a different accent colour."
 }
