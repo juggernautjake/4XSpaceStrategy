@@ -90,10 +90,10 @@
         "role": "the molten cracks, furnace mouths and the great glowing eye"
       },
       "secondary": {
-        "name": "Brimstone",
-        "hex": "#D8E84F",
-        "keyHue": 66,
-        "role": "sulphur crusts around the vents"
+        "name": "Ember Crimson",
+        "hex": "#C0143C",
+        "keyHue": 346,
+        "role": "iron banding and riveted straps"
       },
       "hueSeparation": 168,
       "baseSaturated": false,
