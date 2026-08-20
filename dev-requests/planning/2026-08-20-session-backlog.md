@@ -433,3 +433,96 @@ Its own document: `2026-08-20-fleet-command.md`. Summary of state:
   Sylvan. Buying credits, or accepting that the last civilization flies borrowed hulls for now, is a
   decision for Jacob.
 - **Everything is pushed to `origin/main`** as it lands.
+
+---
+
+## I. Projectiles, ballistics and ammunition — 2026-08-20
+
+> *"I also want you to work on the math and trajectories for projectiles. I want to get to a place
+> where there are real lasers and missiles and ammunition and stuff... We need to handle projectile
+> pathing and speeds and arcs and stuff, we will likely also have homing projectiles, so we need to do
+> the math for how those projectiles will turn and move and for how long they will track before
+> dissipating."*
+
+### What was already broken, and had no visible symptom
+
+- [x] **Instant weapons dealt no damage at all.** `ResolveHit` was called from inside the
+      travelling-round branch, under an `if (instant) { ...fade...; continue; }`. Beams and railguns
+      drew their line and did nothing: **56% of a Dreadnought's rated attack, 35% of a Cruiser's,
+      38% of a Fighter Mk II's.** The only symptom available was "capital ships feel a bit weak"
+- [x] **Nothing was ever aimed.** Every gun fired at where the target *was*. A pulse bolt crosses 22
+      units in 0.35s while a fighter covers four — thirteen hull widths of miss on a target flying in
+      a straight line. Hits happened only because a round landing within 1.2 units of its aimpoint
+      counted
+- [x] **Fast rounds tunnelled.** Arrival was a point test; a 62 u/s bolt has a 1.03-unit stride
+      against a 1.1-unit window, so about half of all hits were missed at 60fps and nearly all at 30.
+      Frame rate was a weapon stat. Every hit test is a **segment** test now
+
+### The model
+
+- [x] **`Ballistics.cs`** — no Unity past `Vector3`, so `tools/ballistics-check.mjs` mirrors it and
+      draws the trajectories. Intercept quadratic, dispersion, turn radius, three guidance laws,
+      motor model, seeker
+- [x] **Lead solutions on every mount**, motor-aware — a missile spends most of a short engagement
+      still accelerating, so a cruise-speed solution aims twenty units short. Solved against the real
+      distance-vs-time curve by **bisection**; the obvious fixed-point iteration oscillates, worst
+      exactly where the target's speed approaches the round's
+- [x] **A mount declines a shot it cannot land.** Matters little for a laser, enormously for a torpedo
+      tube carrying four
+- [x] **Dispersion** that grows with range and with the target's **crossing** speed, so manoeuvring is
+      a defence and flying straight at a gun is a mistake. The beam laser has none of any kind — it is
+      the one weapon that cannot miss, and that is why its DPS is the worst on the list
+- [x] **Midcourse → terminal guidance.** ProNav is a *terminal* law; run from launch it asked for
+      20 deg/s from a round capable of 150 and never undid the launch transient — engagements came out
+      with **eight degrees of total control effort and eighteen-unit misses.** The round flies the
+      firing solution until its seeker arms, then hands over
+- [x] **Proportional navigation** for missiles and torpedoes, `N = 3.6`. Flies a visibly intelligent
+      curve: near-straight to a lead point, where pure pursuit hooks at the end. On the hardest shot
+      in the sweep pursuit does **4.7× the control effort** for 1.5× the flight time
+- [x] **Real motors** — cold launch, boost, sustain, then a ballistic coast where the round **cannot
+      turn at all**, because in vacuum turning is thrusting. Then it dissipates over half a second
+      rather than blinking off
+- [x] **Turn radius is v²/a**, so a fast missile cannot corner. A torpedo at half a missile's speed
+      and a fifth of its thrust holds the same 12-unit circle — that pairing *is* the hull
+- [x] **Seekers** with a cone, an arming delay and a terminal release. All three were needed and the
+      reasons are in the source; the short version is that ProNav *holds* the target at a constant
+      bearing, so a naive cone fires on the healthiest intercepts
+
+### Ammunition
+
+- [x] **Two resources that behave nothing alike.** Energy mounts draw a capacitor that always refills,
+      so a laser fleet is rationed in the moment and never starved. Ordnance mounts carry rounds and
+      run out
+- [x] **Rearming needs no order** — park near a settled world you own, a friendly station (26u) or a
+      **carrier** (14u), which is what finally gives the carrier a job
+- [x] **No death spiral, by construction.** Point defence is energy-fed and every warship keeps an
+      energy mount, so being out of supply is a weak fleet and never a helpless one
+- [x] **Two new classes** to make the split bite: an **autocannon** that eats magazines and shrugs off
+      nothing, and a **torpedo** that a Dreadnought carries *four* of
+- [x] Supply strip under the health bar in the roster, per-mount rounds in the ship panel, one
+      notification when a hull runs dry
+
+### Moving together
+
+- [x] **Predictive separation.** The old rule was purely reactive, and for two ships closing head-on
+      the push is along the closing line — it tells one to hurry and the other to slow and moves
+      neither out of the way. A look-ahead term now eases converging hulls apart *perpendicular* to
+      their closing velocity, starting about a second out. Head-on clearance **0.47 → 0.84** of the
+      wanted gap, four-way crossing **0.31 → 0.57**, and a squadron already flying clear moves 0.03
+      units, so nothing that worked was disturbed
+
+### Still open
+
+- [ ] Ships do not manoeuvre *in combat* — they fly their orders and shoot. Now that crossing speed is
+      a real defence, an evasive protocol would mean something
+- [ ] Point defence still protects only its own hull. Deliberate (see `CombatManager`), but a torpedo
+      is slow enough that escort PD is worth revisiting
+- [ ] Magazine capacity is not a refit choice. A hull that could trade armour for rounds would be the
+      natural next decision
+
+### How it was checked
+
+`tools/ballistics-check.mjs` — 17 checks and a six-panel trajectory sheet. `tools/separation-check.mjs`
+— 4 checks and a before/after sheet. Both parse the game's own tables so a tuning change shows up
+without anyone remembering to mirror it. **Five of the defects above were found by looking at the
+picture, not by reading the source.**

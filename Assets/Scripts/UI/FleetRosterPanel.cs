@@ -110,7 +110,8 @@ public class FleetRosterPanel : MonoBehaviour
                    $"{Fleets.NameOf(f)} — {squads.Count} squadron(s), {ships.Count} ship(s).\n" +
                    "Click the name to select the whole fleet; click the arrow to open it.",
                    () => UnitSelection.Set(ships),
-                   () => { if (!openFleets.Remove(f)) openFleets.Add(f); Refresh(); });
+                   () => { if (!openFleets.Remove(f)) openFleets.Add(f); Refresh(); },
+                   Magazines.GroupSupply(ships));
 
             foreach (int g in squads)
             {
@@ -150,7 +151,8 @@ public class FleetRosterPanel : MonoBehaviour
                $"Formation: {o.formation}\nProtocol: {o.protocol}\n\n" +
                $"Click the name to select it; press {g} anywhere to recall it.",
                () => UnitSelection.Set(members),
-               () => { if (!openSquadrons.Remove(g)) openSquadrons.Add(g); Refresh(); });
+               () => { if (!openSquadrons.Remove(g)) openSquadrons.Add(g); Refresh(); },
+               Magazines.GroupSupply(members));
 
         if (!open) return;
 
@@ -169,7 +171,7 @@ public class FleetRosterPanel : MonoBehaviour
     /// One row: an indent, a label, an optional count, and a condition bar. `onExpand` is null for a
     /// leaf, which is what makes ships un-openable without a separate row type.
     void AddRow(int indent, string label, int count, float condition, string tip,
-                System.Action onSelect, System.Action onExpand)
+                System.Action onSelect, System.Action onExpand, float supply = -1f)
     {
         var row = UIFactory.NewUI(list, "Row");
         var bg = row.AddComponent<Image>();
@@ -196,7 +198,9 @@ public class FleetRosterPanel : MonoBehaviour
         krt.anchorMin = new Vector2(1, 0.5f); krt.anchorMax = new Vector2(1, 0.5f);
         krt.pivot = new Vector2(1, 0.5f);
         krt.sizeDelta = new Vector2(84, 9);
-        krt.anchoredPosition = new Vector2(-6, 0);
+        // Lifted clear when a supply strip is going under it, so the pair reads as one stacked
+        // readout rather than two bars fighting for the same few pixels.
+        krt.anchoredPosition = new Vector2(-6, supply >= 0f ? 3f : 0f);
 
         var fill = UIFactory.NewUI(track.transform, "Fill");
         var fimg = fill.AddComponent<Image>();
@@ -205,6 +209,37 @@ public class FleetRosterPanel : MonoBehaviour
         var frt = fill.GetComponent<RectTransform>();
         frt.anchorMin = new Vector2(0, 0); frt.anchorMax = new Vector2(Mathf.Clamp01(condition), 1);
         frt.offsetMin = Vector2.zero; frt.offsetMax = Vector2.zero;
+
+        // ---- the supply strip ----
+        //
+        // A second, thinner bar tucked under the condition bar, and drawn ONLY for hulls that carry
+        // ordnance — a colony ship with an empty ammunition bar would be reporting a problem it can
+        // never have. Deliberately a different shape as well as a different colour: a fleet is read at
+        // a glance and two bars of the same weight side by side get confused with each other.
+        if (supply >= 0f)
+        {
+            var stripTrack = UIFactory.NewUI(row.transform, "Supply");
+            var simg = stripTrack.AddComponent<Image>();
+            simg.color = new Color(0, 0, 0, 0.45f);
+            simg.raycastTarget = false;
+            var srt = stripTrack.GetComponent<RectTransform>();
+            srt.anchorMin = new Vector2(1, 0.5f); srt.anchorMax = new Vector2(1, 0.5f);
+            srt.pivot = new Vector2(1, 0.5f);
+            srt.sizeDelta = new Vector2(84, 4);
+            srt.anchoredPosition = new Vector2(-6, -8);
+
+            var sfill = UIFactory.NewUI(stripTrack.transform, "Fill");
+            var sfimg = sfill.AddComponent<Image>();
+            // Amber for ordnance, and it goes red only when a mount is genuinely empty rather than
+            // merely low — a warship at 20% has one more salvo and should not be flagged as beaten.
+            sfimg.color = supply <= 0.001f ? new Color(0.90f, 0.30f, 0.25f)
+                                           : new Color(1.00f, 0.72f, 0.30f);
+            sfimg.raycastTarget = false;
+            var sfrt = sfill.GetComponent<RectTransform>();
+            sfrt.anchorMin = new Vector2(0, 0);
+            sfrt.anchorMax = new Vector2(Mathf.Clamp01(supply), 1);
+            sfrt.offsetMin = Vector2.zero; sfrt.offsetMax = Vector2.zero;
+        }
 
         var pct = UIFactory.Text(row.transform, $"{condition * 100f:F0}%", 9, UITheme.Text,
                                  TextAlignmentOptions.Right);

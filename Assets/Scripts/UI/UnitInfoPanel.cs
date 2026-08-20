@@ -308,11 +308,45 @@ public class UnitInfoPanel : MonoBehaviour
             if (fx != "") structLine += $"\n<color=#8FE9C0>{fx}</color>";
         }
 
+        // ---- what it is carrying ----------------------------------------------------------------
+        //
+        // Only for hulls that have guns, because "Armament: none" on a colony ship is a line that
+        // exists to be scrolled past. Ordnance is named to the round, since four torpedoes and four
+        // hundred autocannon shells are the same bar and completely different situations, and the
+        // one number a player needs before committing to a fight is how many of the scarce thing is
+        // left.
+        string armsLine = "";
+        var loadout = Weaponry.For(u.type);
+        if (loadout != null && loadout.Length > 0)
+        {
+            armsLine = "\n<color=#8FD0FF>Armament:</color>";
+            for (int k = 0; k < loadout.Length; k++)
+            {
+                var w = loadout[k];
+                if (w == null) continue;
+                if (w.ammo == AmmoKind.Ordnance)
+                {
+                    Magazines.MountAmmo(u, k, out float have, out float full);
+                    int left = Mathf.FloorToInt(have);
+                    string col = left <= 0 ? "#FF6A5C" : (have < full * 0.25f ? "#FFBF4D" : "#D9E6F2");
+                    armsLine += $"\n  {w.name}  <color={col}>{left}/{Mathf.FloorToInt(full)}</color>";
+                }
+                else
+                {
+                    armsLine += $"\n  {w.name}  <color=#7FA9D4>reactor</color>";
+                }
+            }
+            armsLine += $"\n  Capacitor <color=#7FA9D4>{Magazines.EnergyFraction(u) * 100f:F0}%</color>";
+            if (Magazines.Resupplying(u)) armsLine += "   <color=#4DFF6E>rearming</color>";
+            else if (Magazines.CarriesOrdnance(u) && Magazines.AmmoFraction(u) <= 0.001f)
+                armsLine += "   <color=#FF6A5C>out of ordnance — return to a colony, station or carrier</color>";
+        }
+
         body.text =
             $"<b>{u.Info.name}</b>  ·  <color=#FFD24D>{u.RankName}</color>\n" +
             $"Owner: <color={ownerHex}>{FactionManager.OwnerName(u.owner)}</color>\n" +
             $"Health {u.EffectiveHealth}  Armor {u.Armor}  Speed {u.Speed}  Range {rangeStr}\n" +
-            $"Research {u.EffectiveResearch}  Attack {u.EffectiveAttack}\n" +
+            $"Research {u.EffectiveResearch}  Attack {u.EffectiveAttack}{armsLine}\n" +
             $"XP {u.experience:F0}  Worlds {u.worldsExplored}{structLine}\n\n" +
             $"<color=#8FD0FF>Task:</color> {task}{queueLine}{sampleLine}";
 

@@ -222,6 +222,50 @@ public static class Magazines
         have = l.rounds[k]; full = l.capacity[k];
     }
 
+    /// The weakest ordnance mount across a group, or -1 if nothing in it carries any.
+    ///
+    /// WEAKEST here, where a single hull reports its FULLEST — and the two are opposites on purpose.
+    /// Asked about one ship, the useful question is "can it still shoot", which is its best mount.
+    /// Asked about a squadron, the useful question is "is anything in here out", which is its worst.
+    /// A formation is only as supplied as the ship in it that has run dry.
+    public static float GroupSupply(System.Collections.Generic.IReadOnlyList<Unit> group)
+    {
+        if (group == null) return -1f;
+        float worst = -1f;
+        for (int i = 0; i < group.Count; i++)
+        {
+            var u = group[i];
+            if (u == null || u.IsDestroyed || !CarriesOrdnance(u)) continue;
+            float f = AmmoFraction(u);
+            if (worst < 0f || f < worst) worst = f;
+        }
+        return worst;
+    }
+
+    /// A few lines describing what this hull is carrying, for a tooltip. Built here rather than in the
+    /// UI so nothing outside this file has to know what a magazine is.
+    public static string SupplyReport(Unit u)
+    {
+        var l = LoadFor(u);
+        if (l == null || l.loadout.Length == 0) return "Unarmed.";
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"Capacitor {EnergyFraction(u) * 100f:F0}%");
+        if (Resupplying(u)) sb.Append("   <color=#7FD46A>rearming</color>");
+
+        for (int k = 0; k < l.loadout.Length; k++)
+        {
+            var w = l.loadout[k];
+            if (w == null) continue;
+            sb.Append('\n');
+            if (w.ammo == AmmoKind.Energy)
+                sb.Append($"  {w.name} — reactor-fed");
+            else
+                sb.Append($"  {w.name} — {Mathf.FloorToInt(l.rounds[k])} / {Mathf.FloorToInt(l.capacity[k])} rounds");
+        }
+        return sb.ToString();
+    }
+
     /// Is this hull being rearmed right now?
     public static bool Resupplying(Unit u)
     {

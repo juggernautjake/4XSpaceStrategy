@@ -752,6 +752,31 @@ public class UnitModelRenderer : MonoBehaviour
     //
     // O(n^2) over DRAWN models, which is tens — the map's hundreds of units are drawn as tokens, not
     // meshes, and never reach this. If that ever stops being true this wants a grid, not a rewrite.
+    //
+    // ---- AND THE HALF THAT WAS MISSING: LOOKING AHEAD --------------------------------------------
+    //
+    // Everything above is REACTIVE. It measures the gap between two hulls right now and shoves them
+    // apart if that gap has already closed, which handles the common case — a squadron settling onto
+    // an anchorage — and handles the interesting case not at all.
+    //
+    // The interesting case is two ships on a collision course. There, the vector between them is very
+    // nearly parallel to the way they are both travelling, so the positional push is almost entirely
+    // ALONG TRACK: it tells the ship in front to hurry up and the one behind to slow down, and does
+    // essentially nothing to move either of them out of the other's path. The two hulls converge,
+    // interpenetrate, and are shoved apart only once they are already occupying the same pixels — at
+    // which point the correction is large, sudden, and looks exactly like what it is, which is a
+    // collision resolved after the fact.
+    //
+    // So there is a second term, and it asks a different question: not "are we touching" but "at the
+    // rate we are both going, when are we closest, and how close is that". If two hulls are going to
+    // be inside each other in the next second or so, they start easing APART NOW — perpendicular to
+    // their closing velocity, which is the direction that actually buys clearance — and they do it
+    // gently, early, and over the whole second rather than violently at the end of it.
+    //
+    // The two terms are complementary and both are wanted. Prediction alone lets a ship that is
+    // already overlapping sit there, because two stationary hulls have no closing velocity to predict
+    // with. Reaction alone produces the shuffle described above. Together they read as ships that
+    // see each other coming.
     // ============================================================================================
 
     /// How much of a hull's drawn size counts as its personal space.
@@ -763,15 +788,41 @@ public class UnitModelRenderer : MonoBehaviour
     /// The furthest a ship will ever stand off its station, as a multiple of its own drawn size.
     const float MaxStandoff = 1.1f;
 
+    /// How far ahead the predictive term looks, in seconds. A second is about how long a ship takes to
+    /// ease a hull's width sideways under YieldSpeed, so looking further would ask for a correction it
+    /// could start but not finish, and looking less far is indistinguishable from not looking.
+    const float LookAheadSeconds = 1.1f;
+
+    /// How hard the predictive term pulls, relative to the reactive one. Swept in
+    /// tools/separation-check.mjs: a head-on pass clears 0.47 -> 0.71 -> 0.84 of the wanted gap at
+    /// weights of 0.75, 1.0 and 1.4 respectively, and
+    /// then flattens out. Past this it buys almost nothing and starts to read as a fleet swerving around
+    /// itself. A squadron already flying clear moves 0.03 units under it, which is nothing at all —
+    /// the term only ever fires on hulls genuinely converging.
+    const float PredictWeight = 1.4f;
+
     // Reused between frames — this runs every LateUpdate and must not allocate.
     static readonly List<Model> separating = new List<Model>();
     static readonly List<Unit> sepUnits = new List<Unit>();
     static readonly List<Vector3> stations = new List<Vector3>();
     static readonly List<Vector3> pushes = new List<Vector3>();
+    static readonly List<Vector3> vels = new List<Vector3>();
+
+    /// A direction for two hulls that have nothing to work with — dead centre on each other, or dead
+    /// head-on. Derived from the pair's identities rather than from Random, so it is the SAME
+    /// direction every frame for as long as the pair exists. A fresh random one each frame would have
+    /// the two of them shoving each other a different way sixty times a second, which is a vibration
+    /// rather than an avoidance.
+    static Vector3 ScatterDirection(Model a, Model b)
+    {
+        int seed = a.go.GetInstanceID() ^ b.go.GetInstanceID();
+        float ang = (seed & 1023) / 1023f * Mathf.PI * 2f;
+        return new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+    }
 
     void Separate(float dt)
     {
-        separating.Clear(); sepUnits.Clear(); stations.Clear(); pushes.Clear();
+        separating.Clear(); sepUnits.Clear(); stations.Clear(); pushes.Clear(); vels.Clear();
 
         foreach (var kv in models)
         {
@@ -783,6 +834,10 @@ public class UnitModelRenderer : MonoBehaviour
             // frame's correction — so the station is the transform MINUS that correction.
             stations.Add(m.go.transform.position - m.sep);
             pushes.Add(Vector3.zero);
+            // A parked hull, a station, or one drawn before its flight model has initialised is not
+            // going anywhere worth predicting. Zero is the honest answer and it makes the predictive
+            // term fall out of the arithmetic on its own rather than needing a special case.
+            vels.Add(m.flightReady ? m.flightVel : Vector3.zero);
         }
 
         int n = separating.Count;
@@ -801,30 +856,71 @@ public class UnitModelRenderer : MonoBehaviour
                 // already eased apart are not overlapping and should not be pushed again.
                 Vector3 d = (stations[j] + mj.sep) - (stations[i] + mi.sep);
                 float sq = d.sqrMagnitude;
-                if (sq >= want * want) continue;
 
-                // Dead centre on each other: pick a repeatable direction from the pair rather than a
-                // random one, or the two of them jitter against each other forever.
-                Vector3 dir;
-                if (sq < 1e-8f)
-                {
-                    int seed = mi.go.GetInstanceID() ^ mj.go.GetInstanceID();
-                    float a = (seed & 1023) / 1023f * Mathf.PI * 2f;
-                    dir = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
-                }
-                else dir = d / Mathf.Sqrt(sq);
-
-                float overlap = want - Mathf.Sqrt(Mathf.Max(0f, sq));
-
-                // The cheaper ship does most of the moving. Both values zero (two identical hulls, or
-                // two with no info) falls back to sharing it evenly.
+                // The cheaper ship does most of the moving. A scout gets out of a dreadnought's way
+                // and not the reverse, which is both what an admiral would order and what makes the
+                // capital ships read as the anchor of the formation. Both values zero (two identical
+                // hulls, or two with no info) falls back to sharing it evenly. Hoisted above the
+                // range test because the predictive term needs it too.
                 float vi = FleetFormation.ProtectionValue(sepUnits[i]);
                 float vj = FleetFormation.ProtectionValue(sepUnits[j]);
                 float total = vi + vj;
                 float shareI = total > 0.001f ? vj / total : 0.5f;
 
-                pushes[i] -= dir * (overlap * shareI);
-                pushes[j] += dir * (overlap * (1f - shareI));
+                // ---- reactive: are we touching RIGHT NOW ----
+                if (sq < want * want)
+                {
+                    // Dead centre on each other: pick a repeatable direction from the pair rather than
+                    // a random one, or the two of them jitter against each other forever.
+                    Vector3 dir;
+                    if (sq < 1e-8f) dir = ScatterDirection(mi, mj);
+                    else            dir = d / Mathf.Sqrt(sq);
+
+                    float overlap = want - Mathf.Sqrt(Mathf.Max(0f, sq));
+                    pushes[i] -= dir * (overlap * shareI);
+                    pushes[j] += dir * (overlap * (1f - shareI));
+                }
+
+                // ---- predictive: are we GOING to be ----
+                //
+                // Time of closest approach for two bodies holding their present velocities:
+                //
+                //     t = -(d . vrel) / (vrel . vrel)
+                //
+                // Negative means the closest approach is behind us and the pair is already opening —
+                // nothing to do. Beyond the look-ahead means it is somebody else's problem for now.
+                Vector3 vrel = vels[j] - vels[i];
+                float vrelSq = vrel.sqrMagnitude;
+                if (vrelSq < 1e-6f) continue;                 // parallel or both stationary
+
+                float tca = -Vector3.Dot(d, vrel) / vrelSq;
+                if (tca <= 0f || tca > LookAheadSeconds) continue;
+
+                Vector3 atClosest = d + vrel * tca;           // the gap we are heading for
+                float missSq = atClosest.sqrMagnitude;
+                if (missSq >= want * want) continue;          // we will pass clear; leave them alone
+
+                // Perpendicular to the closing velocity, because that is the only direction that
+                // actually buys clearance — pushing along the closing line just changes when the two
+                // meet, not whether. `atClosest` IS that perpendicular: it is what is left of the
+                // separation once the closing component has been used up.
+                //
+                // Very nearly head-on leaves nothing to work with, and that is precisely the case the
+                // reactive term cannot solve either. Break the tie deterministically off the pair, so
+                // both hulls agree on which way they are going round each other and neither dithers.
+                Vector3 lateral = missSq > 1e-6f
+                    ? atClosest / Mathf.Sqrt(missSq)
+                    : ScatterDirection(mi, mj);
+
+                // Urgency: full weight at the moment of closest approach, tailing off the further
+                // away in time it is. So a ship eases over well before it needs to and is already
+                // clear by the time it matters, rather than jinking at the last instant.
+                float urgency = 1f - tca / LookAheadSeconds;
+                float depth = want - Mathf.Sqrt(missSq);
+                float strength = depth * urgency * PredictWeight;
+
+                pushes[i] -= lateral * (strength * shareI);
+                pushes[j] += lateral * (strength * (1f - shareI));
             }
         }
 
