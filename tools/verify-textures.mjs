@@ -41,12 +41,27 @@ const RULES = palette.maskRules;
 // Deliberately loose. These are meant to catch textures that FAILED, not to enforce a house style —
 // a ship that squeaks past at 6% primary is a judgement call for a human, and gets flagged WEAK
 // rather than FAIL so it shows up in the list without forcing a re-spend.
+// RECALIBRATED against art that was actually accepted, rather than against the percentages the prompt
+// asks for. Those turned out to be different numbers, and the prompt's are the wrong ones to test.
+//
+// The first pass demanded 14% primary before it stopped saying "weak", on the theory that the prompt
+// asks for a third of the hull. Then a fleet came back that looks right — teal hulls, amber panels,
+// magenta trim, obviously one civilization — and it scored 3 FAIL and 8 WEAK out of 15. A checker
+// that flags good art is worse than no checker: it burns credits re-rolling ships that were fine and
+// it trains you to ignore it.
+//
+// What actually matters is not how MUCH accent there is, it is whether there is enough of a coherent
+// region for extract-color-masks.mjs to key and recolour. A few percent of contiguous panel is plenty;
+// zero is not. So the floors sit where an accent has genuinely failed to appear, and the weak band
+// flags "worth a look" rather than "wrong".
+//
+// Brightness and detail are unchanged — those caught the near-black Pyrothian and they were right to.
 const LIMITS = {
   minBrightness: 0.16,   // below this it is the near-black failure
   maxBrightness: 0.82,   // above this it is blown out and detail is gone
-  minPrimaryPct: 6.0,    // aiming for ~30
-  weakPrimaryPct: 14.0,
-  minSecondaryPct: 0.4,  // aiming for ~5
+  minPrimaryPct: 2.5,    // below this the accent effectively did not land
+  weakPrimaryPct: 8.0,   // present but sparse — worth a glance, not a re-roll
+  minSecondaryPct: 0.4,
   weakSecondaryPct: 1.5,
   maxSecondaryPct: 45.0, // secondary swamping the hull means the roles inverted
   minDetail: 0.035,      // stdev of luminance; a flat fill has almost none
