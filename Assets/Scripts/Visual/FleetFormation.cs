@@ -70,6 +70,45 @@ public static class FleetFormation
     /// happens for a save reloaded mid-flight, and spreads the fleet just as well.
     static int SlotOf(Unit u) => u == null ? 0 : (u.formationSlot >= 0 ? u.formationSlot : Mathf.Abs(u.id));
 
+    // ============================================================================================
+    // WHAT A SHIP COSTS TO LOSE — the number the screening formations sort on
+    //
+    // "Cheaper ships in front of the more expensive ones" needs a definition of expensive, and the
+    // build cost alone is not it. Three things make a hull worth protecting and only one of them is
+    // the price:
+    //
+    //   what it cost      metal + energy, the obvious half
+    //   what it took      a hull needing a level-3 yard and Empire Level 9 cannot simply be rebuilt
+    //                     the same afternoon; the Mega-Station is not 1500 metal, it is a campaign
+    //   whether it can    a colony ship, a terraformer and a science vessel have NO attack. Putting
+    //   fight back        them on the outside of a formation is not a trade, it is a donation
+    //
+    // The result is a rank, not a currency. All that is ever asked of it is the ORDER, so the weights
+    // only have to get the ordering right: scouts and fighters cheap, freighters and labs dear,
+    // capitals dearest.
+    // ============================================================================================
+    public static float ProtectionValue(Unit u)
+    {
+        var i = u?.Info;
+        if (i == null) return 0f;
+
+        float v = i.costMetal + i.costEnergy;
+
+        // Hard to replace: each gate above the first is worth roughly another half of the hull again.
+        v *= 1f + 0.5f * Mathf.Max(0, i.minShipyardLevel - 1);
+        v *= 1f + 0.12f * Mathf.Max(0, i.minEmpireLevel - 1);
+
+        // Cannot defend itself. Doubled rather than nudged, because an unarmed hull on the exposed
+        // face of a formation contributes nothing there and dies for it.
+        if (i.attack <= 0) v *= 2f;
+
+        // A station under tow is the most helpless thing in the fleet: no guns that bear while it is
+        // moving, and the slowest hull present.
+        if (i.isStation) v *= 1.5f;
+
+        return v;
+    }
+
     /// Where to draw this ship, relative to the fleet's shared position on its course.
     ///
     /// `courseDir` is the direction of travel; `progress` is 0..1 through the trip. Returns zero for a
@@ -81,8 +120,8 @@ public static class FleetFormation
         int count = Mathf.Max(1, u.formationCount);
         if (count <= 1) return Vector3.zero;
 
-        int slot = SlotOf(u);
-        if (slot == 0) return Vector3.zero;         // the leader flies the course itself
+        var kind = Squadrons.OrdersFor(u)?.formation ?? FleetFormationKind.Wedge;
+        if (kind == FleetFormationKind.Free) return Vector3.zero;
 
         if (courseDir.sqrMagnitude < 0.000001f) return Vector3.zero;
         Vector3 fwd = courseDir.normalized;
@@ -91,24 +130,132 @@ public static class FleetFormation
         // reachable if a fleet is sent vertically and is better than a zero-length cross product.
         Vector3 right = Vector3.Cross(Vector3.up, fwd);
         right = right.sqrMagnitude < 0.0001f ? Vector3.right : right.normalized;
+        Vector3 up = Vector3.Cross(fwd, right).normalized;
 
-        // Rank and file. Slot 0 leads; 1,2 are the first pair, 3,4 the second, and so on until the rank
-        // is full, at which point the next ships start a second rank one step further back.
-        int rank = slot / RankWidth;
-        int inRank = slot % RankWidth;
+        // Stations are laid out in STEPS and converted to world units here, so one number sets the
+        // scale of every formation and it is the one that matters: the size of the biggest hull present.
+        float step = u.formationSpacing > 0.001f ? u.formationSpacing : LateralStep;
 
-        int pair = (inRank + 1) / 2;                       // 0 for the leader, then 1,1,2,2,3,3...
-        float side = (inRank % 2 == 1) ? -1f : 1f;         // odd to port, even to starboard
-
-        float lateral = side * pair * LateralStep;
-        float back = (pair * SweepBack + rank * RankDepth) * LateralStep;
+        Station(kind, SlotOf(u), count, out float lateral, out float back, out float lift);
 
         // Form up out of the anchorage, hold through the coast, close up into the destination.
         float spread = Mathf.Min(
             Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(progress / FormUpFrac)),
             Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((1f - progress) / CloseUpFrac)));
 
-        return (right * lateral - fwd * back) * spread;
+        return (right * lateral - fwd * back + up * lift) * step * spread;
+    }
+
+    // ============================================================================================
+    // THE FORMATIONS — a slot, in steps, for each shape
+    //
+    // `back` is measured ASTERN, so a negative back puts a ship ahead of the formation's centre —
+    // which is the whole point of a screen. `lift` is above or below the plane of the course, and only
+    // Globe uses it: at the shallow angle the 4X camera looks down from, vertical spread reads as
+    // depth rather than as height, so spending it anywhere else buys nothing and costs legibility.
+    //
+    // Slots arrive sorted CHEAPEST FIRST (see Assign), which is what makes Screen and Globe do what
+    // was asked without either of them having to know a thing about ship classes.
+    // ============================================================================================
+    static void Station(FleetFormationKind kind, int slot, int count,
+                        out float lateral, out float back, out float lift)
+    {
+        lateral = back = lift = 0f;
+        if (slot <= 0 && kind != FleetFormationKind.Screen && kind != FleetFormationKind.Globe) return;
+
+        switch (kind)
+        {
+            case FleetFormationKind.LineAbreast:
+            {
+                // One rank, everything bearing forward. Extra ships form ranks behind rather than
+                // widening past the cap.
+                Pair(slot, out int rank, out int pair, out float side);
+                lateral = side * pair;
+                back = rank * RankDepth;
+                break;
+            }
+
+            case FleetFormationKind.LineAstern:
+            {
+                // Single file. Deliberately uncapped in depth — a column IS long, and the ship at the
+                // front is the one that meets what is down the lane.
+                back = slot * 0.9f;
+                break;
+            }
+
+            case FleetFormationKind.Echelon:
+            {
+                // A diagonal stair to starboard: every ship clear of the one ahead's wake and of its
+                // line of fire.
+                lateral = slot * 0.8f;
+                back = slot * 0.8f;
+                break;
+            }
+
+            case FleetFormationKind.Screen:
+            {
+                // The cheaper HALF forms an arc ahead of the formation; everything dear sits behind it.
+                int screen = Mathf.Clamp(count / 2, 1, 8);
+                if (slot < screen)
+                {
+                    // Spread across the front, curving back at the wingtips so the arc is convex
+                    // toward whatever it is meeting.
+                    float t = screen == 1 ? 0f : (slot / (float)(screen - 1)) * 2f - 1f;   // -1..1
+                    lateral = t * 2.2f;
+                    back = -1.8f + Mathf.Abs(t) * 1.0f;
+                }
+                else
+                {
+                    // The protected body, in a compact block a clear gap behind the screen.
+                    Pair(slot - screen, out int rank, out int pair, out float side);
+                    lateral = side * pair * 0.9f;
+                    back = 1.2f + rank * RankDepth + pair * 0.3f;
+                }
+                break;
+            }
+
+            case FleetFormationKind.Globe:
+            {
+                // Escorts on a shell, the valuable ships inside it. Two thirds to the shell, because a
+                // shell with holes in it is not a shell.
+                int shell = Mathf.Clamp((count * 2) / 3, 1, 12);
+                if (slot < shell)
+                {
+                    float ang = slot * Mathf.PI * 2f / shell;
+                    lateral = Mathf.Sin(ang) * 2.0f;
+                    back = Mathf.Cos(ang) * 2.0f;
+                    // Alternate above and below so the shell has a third dimension without needing
+                    // twice as many ships to close it.
+                    lift = ((slot % 2 == 0) ? 0.7f : -0.7f) * Mathf.Abs(Mathf.Sin(ang * 0.5f));
+                }
+                else
+                {
+                    Pair(slot - shell, out int rank, out int pair, out float side);
+                    lateral = side * pair * 0.7f;
+                    back = rank * 0.8f;
+                }
+                break;
+            }
+
+            default:   // Wedge
+            {
+                Pair(slot, out int rank, out int pair, out float side);
+                lateral = side * pair;
+                back = pair * SweepBack + rank * RankDepth;
+                break;
+            }
+        }
+    }
+
+    /// Rank and file for the pair-based shapes: slot 0 alone at the point, then 1,2 abreast a step
+    /// wider, 3,4 wider still, until the rank is full and the next ships start another behind it.
+    static void Pair(int slot, out int rank, out int pair, out float side)
+    {
+        slot = Mathf.Max(0, slot);
+        rank = slot / RankWidth;
+        int inRank = slot % RankWidth;
+        pair = (inRank + 1) / 2;                       // 0, then 1,1, 2,2, 3,3...
+        side = (inRank % 2 == 1) ? -1f : 1f;           // odd to port, even to starboard
     }
 
     // ============================================================================================
@@ -153,14 +300,42 @@ public static class FleetFormation
 
     /// Hand out stations to a fleet that has just been given a move order. Called once per order, not
     /// per frame — the slot has to stay put for the whole crossing or the formation churns.
+    ///
+    /// SLOTS ARE HANDED OUT CHEAPEST FIRST, which is the whole of "the less expensive ships group up
+    /// in front of the larger and more expensive ones". Doing it here rather than inside each shape
+    /// means Screen and Globe get it for nothing, and Wedge and Line Astern get it too — the ship at
+    /// the point of a wedge and the ship at the head of a column are the exposed ones either way.
+    ///
+    /// A squadron of one CLASS sorts to a stable tie and lays out in geometric order, which is right:
+    /// there is nothing to protect, and a screen of dreadnoughts by dreadnoughts is theatre.
     public static void Assign(System.Collections.Generic.List<Unit> group)
     {
         if (group == null) return;
-        for (int i = 0; i < group.Count; i++)
+
+        var order = new System.Collections.Generic.List<Unit>();
+        foreach (var u in group) if (u != null) order.Add(u);
+
+        // Ties broken on id so the order is stable from one order to the next — a squadron that
+        // reshuffled its stations every time it was told to move would churn for no reason.
+        order.Sort((a, b) =>
         {
-            if (group[i] == null) continue;
-            group[i].formationSlot = i;
-            group[i].formationCount = group.Count;
+            int c = ProtectionValue(a).CompareTo(ProtectionValue(b));
+            return c != 0 ? c : a.id.CompareTo(b.id);
+        });
+
+        // One spacing for the whole fleet, from its LARGEST hull, so nothing in it interpenetrates.
+        float widest = LateralStep;
+        foreach (var u in order)
+        {
+            var e = UnitModelLibrary.For(u.type);
+            if (e != null) widest = Mathf.Max(widest, e.size * 1.15f);
+        }
+
+        for (int i = 0; i < order.Count; i++)
+        {
+            order[i].formationSlot = i;
+            order[i].formationCount = order.Count;
+            order[i].formationSpacing = widest;
         }
     }
 }

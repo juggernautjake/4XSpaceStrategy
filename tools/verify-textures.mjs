@@ -65,6 +65,33 @@ const LIMITS = {
   weakSecondaryPct: 1.5,
   maxSecondaryPct: 45.0, // secondary swamping the hull means the roles inverted
   minDetail: 0.035,      // stdev of luminance; a flat fill has almost none
+
+  // ---- IS IT COLOURED AT ALL --------------------------------------------------------------
+  //
+  // The cheapest and most decisive test, added after auditing the models already sitting in the
+  // Meshy account to see which could be reused instead of regenerated. The answer was almost none,
+  // and this is the number that said so: the archived Terran Dreadnought — a genuinely good mesh —
+  // carries an albedo that is ENTIRELY GREYSCALE. It scores 0.0% here.
+  //
+  // That is the documented failure mode of texturing an uploaded mesh: Meshy largely ignores livery
+  // instructions on geometry it did not author and hands back a grey hull or one flat colour. The
+  // rest of the archive has no albedo at all.
+  //
+  // THE FLOOR IS LOW ON PURPOSE, and the first attempt at it was wrong in a way worth writing down.
+  // It was set at 20% from the Aquarii numbers alone, where hulls score 64-85% — and it immediately
+  // failed both accepted TERRAN hulls, which score 12.6% and 16.9%. They are not greyscale; they are
+  // military aircraft, and desaturated steel-blue with a little orange trim is exactly the design
+  // language that civilization is supposed to have. A saturation floor calibrated on the most vivid
+  // civ would quietly condemn the most restrained one.
+  //
+  // What the number has to separate is PAINTED from NOT PAINTED, and that gap is still enormous:
+  // every real hull, vivid or restrained, clears 12%, and the greyscale failure sits at 0.0% with
+  // 0.0% of both accent hues. Four per cent sits in the middle of an empty gap.
+  //
+  // It gets its own verdict rather than being left to fall out of "primary missing", because the two
+  // are different problems: a hull that missed its accent hues still has a paint job and might be
+  // worth keeping, and a greyscale hull is not textured at all.
+  minColourPct: 4.0,
 };
 
 function hsv(r, g, b) {
@@ -121,6 +148,16 @@ function verdict(m) {
   if (m.brightness < LIMITS.minBrightness) fails.push(`too dark (${m.brightness.toFixed(3)})`);
   if (m.brightness > LIMITS.maxBrightness) fails.push(`blown out (${m.brightness.toFixed(3)})`);
   if (m.detail < LIMITS.minDetail) fails.push(`flat, no detail (sd ${m.detail.toFixed(3)})`);
+
+  // Checked BEFORE the accent tests and reported instead of them: on a greyscale hull "primary
+  // missing" and "secondary missing" are both true, both trivially implied, and neither says the
+  // thing that matters, which is that this model was never painted.
+  if (m.saturatedPct < LIMITS.minColourPct)
+  {
+    fails.push(`GREYSCALE — no livery at all (${m.saturatedPct.toFixed(1)}% coloured). ` +
+               `Regenerate; texturing an existing mesh does not fix this`);
+    return { pass: false, fails, warns };
+  }
   if (m.primaryPct < LIMITS.minPrimaryPct) fails.push(`primary missing (${m.primaryPct.toFixed(1)}%)`);
   else if (m.primaryPct < LIMITS.weakPrimaryPct) warns.push(`primary weak (${m.primaryPct.toFixed(1)}%)`);
   if (m.secondaryPct < LIMITS.minSecondaryPct) fails.push(`secondary missing (${m.secondaryPct.toFixed(2)}%)`);
@@ -154,7 +191,7 @@ for (const civ of fs.readdirSync(DIR).sort()) {
 
 // ---- report ---------------------------------------------------------------------------------
 const c = palette.civilizations;
-console.log(`\n${'unit'.padEnd(34)} ${'bright'.padStart(6)} ${'detail'.padStart(6)} ${'prim%'.padStart(6)} ${'sec%'.padStart(6)}  verdict`);
+console.log(`\n${'unit'.padEnd(34)} ${'bright'.padStart(6)} ${'detail'.padStart(6)} ${'colour%'.padStart(7)} ${'prim%'.padStart(6)} ${'sec%'.padStart(6)}  verdict`);
 console.log('-'.repeat(96));
 
 let pass = 0, warn = 0, fail = 0, other = 0;
@@ -168,6 +205,7 @@ for (const r of rows) {
   const notes = [...v.fails, ...v.warns].join('; ');
   if (VERBOSE || tag !== 'ok')
     console.log(`${label.padEnd(34)} ${m.brightness.toFixed(3).padStart(6)} ${m.detail.toFixed(3).padStart(6)} ` +
+                `${m.saturatedPct.toFixed(1).padStart(7)} ` +
                 `${m.primaryPct.toFixed(1).padStart(6)} ${m.secondaryPct.toFixed(2).padStart(6)}  ${tag}${notes ? '  — ' + notes : ''}`);
 }
 

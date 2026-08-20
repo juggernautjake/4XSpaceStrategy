@@ -96,6 +96,11 @@ public class Unit
     // order the fleet was selected, and nothing anywhere depends on that order.
     [System.NonSerialized] public int formationSlot = -1;
     [System.NonSerialized] public int formationCount = 1;
+
+    /// Gap to keep between stations, set from the LARGEST hull in the fleet when the order was issued.
+    /// A pair of dreadnoughts drawn at fighter spacing interpenetrates; a pair of probes drawn at
+    /// dreadnought spacing looks like two unrelated ships. 0 = use the default.
+    [System.NonSerialized] public float formationSpacing = 0f;
     public Vector3 parkPosition;            // where it sits when idling in deep space
     public bool inSpace;                    // true when parked in space (no body)
 

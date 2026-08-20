@@ -341,6 +341,10 @@ public class UnitModelRenderer : MonoBehaviour
         public bool animated;   // the FBX brought its own clip, so don't add procedural motion
         public ShipLights lights;   // running lights, engines and muzzle flash; cached, not searched for
         public float bank;      // current roll into a turn, eased rather than tracked exactly
+
+        /// How far this hull has stood off its station to keep clear of its neighbours, carried
+        /// between frames so the correction eases in and out rather than snapping. See Separate().
+        public Vector3 sep;
     }
 
     readonly Dictionary<Unit, Model> models = new Dictionary<Unit, Model>();
@@ -625,12 +629,134 @@ public class UnitModelRenderer : MonoBehaviour
             else TickShip(um, u, m, dt);
         }
 
+        // ...and then everybody gets out of everybody else's way. Runs AFTER the tick loop because it
+        // needs every hull's station for this frame before it can tell who is standing on whom.
+        Separate(dt);
+
         // AFTER the hulls have moved and turned, so a badge is never a frame behind the ship it belongs
         // to — at system zoom a badge lagging its hull reads as two separate objects.
         TickBadges();
     }
 
     // A station: orbits whatever it's deployed at, exactly as that world orbits its star.
+    // ============================================================================================
+    // KEEPING CLEAR — the last few tenths of a unit, which no formation can plan for
+    //
+    // Formations and the anchorage ring hand every ship a station and those stations do not overlap.
+    // That settles the plan and not the reality, because a fleet is never only its plan: ships arrive
+    // from different courses, a squadron sits down on top of one already parked, a station orbits
+    // through where a freighter is loading, and a fleet mid-turn is briefly nowhere near its wedge.
+    // Whenever two hulls end a frame in the same place, the thing on screen is one confused shape.
+    //
+    // So this is a LOCAL correction on top of the plan, and it is deliberately soft:
+    //
+    //   * it only acts inside the sum of two hulls' radii — ships are left alone the instant they are
+    //     clear, rather than being held apart by an invisible cushion
+    //   * the correction is CARRIED and eased, not applied outright. A hard push computed per frame
+    //     jitters, because the push that fixes the overlap removes the reason for the push
+    //   * it is CAPPED at roughly a hull's width. A ship that would have to abandon its station to be
+    //     clear stays on station and overlaps a little instead. Brief overlap is a much smaller lie
+    //     than a fleet with no formation at all
+    //   * the CHEAPER hull yields. A scout gets out of a dreadnought's way and not the reverse, which
+    //     is both what an admiral would order and what makes the capital ships read as the anchor of
+    //     the formation
+    //   * when nothing is near, the offset decays back to zero, so ships return to station rather than
+    //     wandering off wherever the last shove left them
+    //
+    // O(n^2) over DRAWN models, which is tens — the map's hundreds of units are drawn as tokens, not
+    // meshes, and never reach this. If that ever stops being true this wants a grid, not a rewrite.
+    // ============================================================================================
+
+    /// How much of a hull's drawn size counts as its personal space.
+    const float ClearanceRadius = 0.55f;
+
+    /// How fast a ship slides off station to keep clear, and how fast it drifts back when clear.
+    const float YieldSpeed = 1.6f, ReturnSpeed = 0.9f;
+
+    /// The furthest a ship will ever stand off its station, as a multiple of its own drawn size.
+    const float MaxStandoff = 1.1f;
+
+    // Reused between frames — this runs every LateUpdate and must not allocate.
+    static readonly List<Model> separating = new List<Model>();
+    static readonly List<Unit> sepUnits = new List<Unit>();
+    static readonly List<Vector3> stations = new List<Vector3>();
+    static readonly List<Vector3> pushes = new List<Vector3>();
+
+    void Separate(float dt)
+    {
+        separating.Clear(); sepUnits.Clear(); stations.Clear(); pushes.Clear();
+
+        foreach (var kv in models)
+        {
+            var m = kv.Value;
+            if (m?.go == null) continue;
+            separating.Add(m);
+            sepUnits.Add(kv.Key);
+            // The tick loop has just written each hull's station into its transform, and `sep` is last
+            // frame's correction — so the station is the transform MINUS that correction.
+            stations.Add(m.go.transform.position - m.sep);
+            pushes.Add(Vector3.zero);
+        }
+
+        int n = separating.Count;
+        for (int i = 0; i < n; i++)
+        {
+            var mi = separating[i];
+            float ri = Mathf.Max(0.02f, mi.entry.size * ClearanceRadius);
+
+            for (int j = i + 1; j < n; j++)
+            {
+                var mj = separating[j];
+                float rj = Mathf.Max(0.02f, mj.entry.size * ClearanceRadius);
+                float want = ri + rj;
+
+                // Compare where they are ACTUALLY drawn, not where their stations are — two ships
+                // already eased apart are not overlapping and should not be pushed again.
+                Vector3 d = (stations[j] + mj.sep) - (stations[i] + mi.sep);
+                float sq = d.sqrMagnitude;
+                if (sq >= want * want) continue;
+
+                // Dead centre on each other: pick a repeatable direction from the pair rather than a
+                // random one, or the two of them jitter against each other forever.
+                Vector3 dir;
+                if (sq < 1e-8f)
+                {
+                    int seed = mi.go.GetInstanceID() ^ mj.go.GetInstanceID();
+                    float a = (seed & 1023) / 1023f * Mathf.PI * 2f;
+                    dir = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+                }
+                else dir = d / Mathf.Sqrt(sq);
+
+                float overlap = want - Mathf.Sqrt(Mathf.Max(0f, sq));
+
+                // The cheaper ship does most of the moving. Both values zero (two identical hulls, or
+                // two with no info) falls back to sharing it evenly.
+                float vi = FleetFormation.ProtectionValue(sepUnits[i]);
+                float vj = FleetFormation.ProtectionValue(sepUnits[j]);
+                float total = vi + vj;
+                float shareI = total > 0.001f ? vj / total : 0.5f;
+
+                pushes[i] -= dir * (overlap * shareI);
+                pushes[j] += dir * (overlap * (1f - shareI));
+            }
+        }
+
+        for (int i = 0; i < n; i++)
+        {
+            var m = separating[i];
+            Vector3 want = pushes[i];
+
+            float cap = Mathf.Max(0.05f, m.entry.size * MaxStandoff);
+            if (want.sqrMagnitude > cap * cap) want = want.normalized * cap;
+
+            // Off station quickly, back to station gently: getting clear is urgent and returning is not.
+            float rate = want.sqrMagnitude > m.sep.sqrMagnitude ? YieldSpeed : ReturnSpeed;
+            m.sep = Vector3.MoveTowards(m.sep, want, rate * dt);
+
+            m.go.transform.position = stations[i] + m.sep;
+        }
+    }
+
     void TickStation(UnitManager um, Unit u, Model m, float dt)
     {
         if (u.status == UnitStatus.Traveling)
