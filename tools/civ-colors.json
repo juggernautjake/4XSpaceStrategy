@@ -101,24 +101,24 @@
       "signature": "JAGGED AND BARBED, lit from WITHIN by molten fire through every crack. Ash, smoke, forge-glare."
     },
     "Cryithn": {
-      "baseMaterial": "RICHLY COLOURED deep glacier-blue faceted armour over frosted silver alloy, rime-crusted plating",
+      "baseMaterial": "mirror-polished glacier-blue crystal over frosted silver alloy, snow-dusted, elegant swept facets",
       "baseHue": 205,
       "primary": {
         "name": "Aurora Violet",
         "hex": "#C64FD8",
         "keyHue": 292,
-        "role": "the faceted panel inlays and dorsal spine"
+        "role": "faceted panel inlays and the dorsal spine"
       },
       "secondary": {
-        "name": "Ember Gold",
-        "hex": "#F0B33C",
-        "keyHue": 42,
-        "role": "crystal spine tips, drive glow, instrument light"
+        "name": "Glacier Light",
+        "hex": "#5FD8F0",
+        "keyHue": 190,
+        "role": "cool blue glowing light along the seams and drive slots"
       },
       "hueSeparation": 110,
       "baseSaturated": true,
-      "baseShort": "deep glacier-blue faceted ice hull",
-      "signature": "FROZEN: rime and frost crusting the plates, ice crystal along every seam, cold vapour off the drives, mirror facets."
+      "baseShort": "glacier-blue crystal hull",
+      "signature": "SLEEK AND REGAL: mirror-polished ice, snow-dusted facets, glimmering frost, blue light within."
     },
     "Sylvan": {
       "baseMaterial": "RICHLY COLOURED deep forest-green living hull, woven vine over a seed-pod shell, dark bark plating",
