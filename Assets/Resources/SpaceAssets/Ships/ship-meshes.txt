@@ -79,7 +79,41 @@ Aquarii_MegaStation               0    0    0  1.0  spin   # reef metropolis, a 
 Aquarii_HyperRelay                0    0    0  1.0  nospin # basket-star gate framing the aperture
 
 # ---- Terran --------------------------------------------------------------------------------
+# Same convention as the Aquarii, and confirmed twice over: tools/measure-bow.mjs reports "bulk +X,
+# point -X" for thirteen Terran hulls with no dissent, and the silhouette sheet agrees on every one.
+# The pipeline exports nose-toward--X, so +90 yaw puts the bow on +Z.
 Terran_Scout                      0  -90    0    # aeroplane — LENGTH IS X, wingspan is Z; nose +X
-Terran_Fighter                    0  -90    0    # nose on +X, engine cylinder aft. CHECK BY EYE: the
-                                                 # least certain line here — a jet is narrow at both
-                                                 # ends and the silhouette does not clinch it
+Terran_ScoutII                    0   90    0    # twin-engine jet, nose on -X, engines aft
+Terran_ScoutIII                   0   90    0    # hypersonic blackbird, the point on -X
+Terran_Explorer                   0  -90    0    # survey aircraft — LENGTH IS X, those huge wings are Z
+Terran_Probe                      0   90    0  1.0  spin   # an instrument bus; no meaningful facing
+Terran_ResearchShip               0   90    0    # lab cylinder. The least certain line here: the hull
+                                                 # is near enough symmetric that neither test is sure,
+                                                 # so it takes the fleet convention
+Terran_ResearchShipII             0   90    0    # twin lab cylinders, dish booms forward
+Terran_ColonyShip                 0   90    0    # ark ship, habitat drums aft of a blunt nose
+Terran_Miner                      0   90    0    # dredger, cutting booms on -X
+Terran_Transport                  0   90    0    # container freighter, bridge tower aft
+Terran_Terraformer                0   90    0    # atmosphere processor, intakes forward
+Terran_Fighter                    0   90    0    # CORRECTED. This was 0 -90 0, guessed from an earlier
+                                                 # sheet and flagged at the time as the least certain
+                                                 # line in the file. Both tests now say nose -X, and a
+                                                 # jet is narrow at BOTH ends, which is what made the
+                                                 # first read a coin toss
+Terran_FighterII                  0   90    0    # up-armoured, four cannon ports on -X
+Terran_FighterIII                 0   90    0    # stealth striker, faceted nose on -X
+Terran_Frigate                    0   90    0    # corvette, missile cells and prow on -X
+Terran_Cruiser                    0   90    0    # missile cruiser, prow on -X, superstructure aft
+Terran_Carrier                    0   90    0    # fleet carrier, flight deck forward of the island
+Terran_Dreadnought                0   90    0    # battleship, spinal cannon forward
+
+# Terran stations. Discs and rings lying flat, so identity rotation and spin — with one exception.
+Terran_BattleStation              0    0    0  1.0  spin   # armoured drum
+Terran_ResearchStation            0    0    0  1.0  spin   # habitat torus on a truss
+Terran_SupplyStation              0    0    0  1.0  spin   # fuel spheres round a docking spine
+Terran_MultiStation               0    0    0  1.0  spin   # stacked rings on a truss frame
+Terran_TerraformStation           0    0    0  1.0  spin   # a ring of atmosphere processors
+# The relay is the exception: it measures 1.36 x 1.86 x 1.36, TALLER than it is wide, because it is a
+# mast carrying a dish rather than a disc. It is already upright, and it must stay that way — the
+# bounds heuristic would lay a tower on its side and call it a long ship.
+Terran_RelayStation               0    0    0  1.0  spin   # comms mast and parabolic dish, upright
