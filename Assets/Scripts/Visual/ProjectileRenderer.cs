@@ -321,11 +321,17 @@ public class ProjectileRenderer : MonoBehaviour
     /// URP culls per object and a battle putting two hundred rounds in the air would hand the renderer
     /// two hundred lights to sort. Past the cap this returns null and the round simply flies unlit —
     /// which nobody notices in a firefight already lit by the ones that got a light.
+    /// Real point lights on rounds in flight. OFF alongside ShipLights.Enabled while ships are shown
+    /// on their bare models — the bolts and beams themselves still draw, since those ARE the weapon
+    /// rather than lighting on top of it.
+    public static bool DynamicLights = false;
+
     const int MaxLiveLights = 14;
     int lightsMade;
 
     Light RentLight()
     {
+        if (!DynamicLights) return null;
         if (lightPool.Count > 0) return lightPool.Pop();
         if (lightsMade >= MaxLiveLights) return null;
         lightsMade++;

@@ -411,20 +411,54 @@ public static class SurfaceIndex
         return Mathf.Clamp01(v);
     }
 
+    /// How much ore a biome is worth before elevation and broken ground are folded in.
+    ///
+    /// EVERY terrain is listed. It used to name twelve of forty-one and let the rest fall to 0.12,
+    /// which is not a default so much as a silence: a salt flat, a lava field and a jungle all
+    /// yielded the same, and nothing in the game could tell you why. A terrain nobody scored is a
+    /// terrain the player cannot reason about.
     static float BiomeMineral(TerrainType t)
     {
         switch (t)
         {
+            // ---- the ore terrains ----
             case TerrainType.MetallicCrust: return 1.0f;
             case TerrainType.CrystalField: return 0.95f;
             case TerrainType.Mountains: return 0.8f;
             case TerrainType.Canyon: case TerrainType.Badlands: return 0.65f;
             case TerrainType.Highlands: case TerrainType.Crater: return 0.6f;
             case TerrainType.LavaRock: case TerrainType.ObsidianFlat: return 0.55f;
+            // Evaporites. A dry lake bed is one of the richest mineral surfaces there is — potash,
+            // borates, lithium — and it read as barren dirt purely because nobody had listed it.
+            case TerrainType.SaltFlat: return 0.5f;
+            case TerrainType.Volcano: return 0.5f;
             case TerrainType.Hills: return 0.45f;
+            case TerrainType.MagmaField: return 0.45f;
+            // Hot springs deposit their load at the surface: sulphur, cinnabar, metal salts.
+            case TerrainType.GeyserField: case TerrainType.CrackedGround: return 0.4f;
             case TerrainType.Barren: case TerrainType.Wasteland: return 0.35f;
-            default: return 0.12f;
+            case TerrainType.AshWaste: return 0.3f;
+            case TerrainType.Island: return 0.25f;              // volcanic in origin
+
+            // ---- living ground: soil over rock, little of it reachable ----
+            // Bog iron is a real ore and the only one you dig out of a wetland, so a swamp beats the
+            // other soils without ever competing with a mountain.
+            case TerrainType.Swamp: return 0.2f;
+            case TerrainType.Reef: return 0.18f;                // carbonate
+            case TerrainType.Beach: return 0.15f;               // placer deposits in the sand
+            case TerrainType.Steppe: case TerrainType.Savanna: return 0.14f;
+            case TerrainType.Tundra: return 0.13f;
+            case TerrainType.Plains: case TerrainType.Grassland: return 0.1f;
+            case TerrainType.Forest: case TerrainType.Jungle: case TerrainType.Taiga: return 0.1f;
+            case TerrainType.Desert: case TerrainType.Dunes: return 0.1f;
+
+            // ---- buried, drowned or not solid at all ----
+            case TerrainType.Snow: case TerrainType.Ice: case TerrainType.Glacier: return 0.06f;
+            case TerrainType.Ocean: case TerrainType.Lake: case TerrainType.River:
+            case TerrainType.FrozenSea: return 0.04f;
+            case TerrainType.GasClouds: case TerrainType.Storm: return 0.02f;
         }
+        return 0.12f;
     }
 
     // ============================================================================================
@@ -458,7 +492,22 @@ public static class SurfaceIndex
         // A deep sea floor bleeds its heat into the water above it long before a plant could take any.
         // Applied last, so it cuts the finished figure rather than one of its inputs — a fault under an
         // ocean is still a fault, it is just not a building site.
+        float dry = geo;
         if (f.water) geo *= 0.55f;
+
+        // ...BUT THE PENALTY MUST NOT RUB THE BOUNDARY OUT.
+        //
+        // A continental margin reads exactly PlateLineBase (0.40), and 0.40 x 0.55 is 0.22 — under
+        // PlateLineFloor, which is the value the overlay starts painting at. So every underwater plate
+        // boundary vanished from the map, and on a wet world that is nearly all of them: the push
+        // arrows (drawn from the plate LAYOUT, not from this index) kept shoving against a line that
+        // was no longer there.
+        //
+        // The two jobs this number does are separable, and here is where they separate. VISIBILITY is
+        // floored back to the plate line, so the fault stays on the map wherever it runs. PRODUCTION is
+        // untouched, because the floor is 0.40 and a geothermal plant needs 0.70 (SurfaceBuildManager)
+        // — a submarine fault is drawn and still unbuildable, which is exactly the truth about it.
+        if (dry >= PlateLineFloor) geo = Mathf.Max(geo, PlateLineFloor);
 
         return Mathf.Clamp01(geo);
     }
@@ -474,9 +523,20 @@ public static class SurfaceIndex
             case TerrainType.AshWaste: return 0.55f;
             case TerrainType.CrackedGround: return 0.5f;    // fissures = accessible heat
             case TerrainType.ObsidianFlat: return 0.48f;
+            // Islands are volcanoes with their feet in the water — hot rock at shallow depth is the
+            // reason Iceland runs on geothermal, and it was worth nothing here.
+            case TerrainType.Island: return 0.4f;
             case TerrainType.Mountains: case TerrainType.Highlands: return 0.2f;   // some tectonism
-            default: return 0.05f;
+            case TerrainType.Canyon: case TerrainType.Badlands: return 0.12f;      // exposed section
+            case TerrainType.Hills: return 0.1f;
+
+            // Ice sits ON crust and insulates it, so what matters is that there is no accessible heat
+            // at the surface — not that the surface is cold.
+            case TerrainType.Ice: case TerrainType.Glacier: case TerrainType.Snow:
+            case TerrainType.FrozenSea: return 0.02f;
+            case TerrainType.GasClouds: case TerrainType.Storm: return 0f;         // no crust at all
         }
+        return 0.05f;
     }
 
     // ---- FERTILE: where farmland pays ----
@@ -509,25 +569,58 @@ public static class SurfaceIndex
         return Mathf.Clamp01(v * 1.35f);
     }
 
+    /// How much food a biome yields.
+    ///
+    /// THE BIG HOLE HERE WAS WATER. Ocean, Lake, River and Reef were all unlisted and took 0.08 —
+    /// less than tundra — so an ocean world was a starvation world and a river was worth no more than
+    /// the desert beside it. Every real civilisation grew up on a floodplain or a coast, and the
+    /// Aquarii are literally the fertility species living on ocean worlds; the number said otherwise.
+    ///
+    /// Fisheries and floodplains now score at the top of the table, which is also what makes ocean
+    /// worlds worth settling and gives the Aquarii somewhere to be good at their own signature.
     static float BiomeFertile(TerrainType t)
     {
         switch (t)
         {
+            // ---- the breadbaskets ----
             case TerrainType.Grassland: return 1.0f;
             case TerrainType.Plains: return 0.92f;
+            case TerrainType.River: return 0.9f;                // floodplain silt, renewed every year
             case TerrainType.Jungle: return 0.85f;
             case TerrainType.Forest: return 0.8f;
+            case TerrainType.Reef: return 0.78f;                // the most productive water there is
+            case TerrainType.Lake: return 0.72f;
             case TerrainType.Swamp: return 0.7f;
+            case TerrainType.Island: return 0.6f;
+            case TerrainType.Ocean: return 0.55f;               // fisheries, not farms
             case TerrainType.Savanna: case TerrainType.Steppe: return 0.5f;
             case TerrainType.Taiga: return 0.45f;
-            case TerrainType.Beach: return 0.35f;
             case TerrainType.Hills: return 0.4f;
-            case TerrainType.Tundra: return 0.15f;
+            case TerrainType.Beach: return 0.35f;
+
+            // ---- thin living ----
             case TerrainType.Highlands: return 0.18f;
+            case TerrainType.Tundra: return 0.15f;
+            // Weathered volcanic ash is famously good ground once it has had time to break down —
+            // the reason people farm the slopes of active volcanoes.
+            case TerrainType.AshWaste: return 0.13f;
+            case TerrainType.FrozenSea: return 0.12f;           // fished through the ice
+            case TerrainType.GeyserField: return 0.1f;          // warm ground, mineral-poisoned
+            case TerrainType.Canyon: return 0.1f;
+            case TerrainType.Mountains: return 0.08f;
+            case TerrainType.Snow: return 0.06f;
+
+            // ---- effectively dead ----
             case TerrainType.Desert: case TerrainType.Dunes: case TerrainType.SaltFlat: return 0.05f;
+            case TerrainType.Crater: case TerrainType.CrackedGround: return 0.05f;
             case TerrainType.Badlands: case TerrainType.Wasteland: case TerrainType.Barren: return 0.04f;
-            default: return 0.08f;
+            case TerrainType.LavaRock: case TerrainType.ObsidianFlat: return 0.02f;
+            case TerrainType.CrystalField: case TerrainType.MetallicCrust: return 0.02f;
+            case TerrainType.Ice: case TerrainType.Glacier: return 0.01f;
+            case TerrainType.Volcano: case TerrainType.MagmaField: return 0.01f;
+            case TerrainType.GasClouds: case TerrainType.Storm: return 0f;
         }
+        return 0.08f;
     }
 
     // ============================================================================================
@@ -648,16 +741,46 @@ public static class SurfaceIndex
         return "violent";
     }
 
+    /// How much a biome BLOCKS the wind. 1 is fully sheltered and useless for turbines; 0 is bare
+    /// exposure and the best ground there is.
+    ///
+    /// Counter-intuitive on purpose, and it is why mountains score zero: this feeds the WIND index,
+    /// so "sheltered" is a penalty. Most of the map used to sit on a flat 0.3, which flattened the
+    /// one decision wind farms offer — a windswept ridge and the forest below it paid the same.
     static float Shelter(TerrainType t)
     {
         switch (t)
         {
+            // ---- blocked ----
             case TerrainType.Jungle: case TerrainType.Forest: case TerrainType.Taiga: return 0.85f;
-            case TerrainType.Swamp: return 0.6f;
             case TerrainType.Canyon: return 0.7f;
+            case TerrainType.Crater: return 0.65f;              // the rim does the sheltering
+            case TerrainType.Swamp: return 0.6f;
+            case TerrainType.Hills: return 0.5f;
+            case TerrainType.River: return 0.45f;               // down in its own valley
+            case TerrainType.CrackedGround: return 0.4f;
+            case TerrainType.CrystalField: return 0.35f;
+            case TerrainType.GeyserField: return 0.3f;         // low mounds, not much cover
+
+            // ---- open ----
+            case TerrainType.Island: return 0.25f;
+            case TerrainType.Beach: return 0.2f;
+            case TerrainType.MetallicCrust: case TerrainType.LavaRock: case TerrainType.Volcano: return 0.2f;
+            case TerrainType.Plains: case TerrainType.Grassland:
+            case TerrainType.Savanna: case TerrainType.Steppe: return 0.15f;
+            case TerrainType.AshWaste: case TerrainType.MagmaField: return 0.15f;
+            case TerrainType.Desert: case TerrainType.Dunes: case TerrainType.SaltFlat:
+            case TerrainType.Badlands: case TerrainType.Wasteland: case TerrainType.Barren: return 0.1f;
+            case TerrainType.Tundra: case TerrainType.Snow: case TerrainType.Glacier:
+            case TerrainType.Ice: case TerrainType.ObsidianFlat: return 0.1f;
+
+            // ---- nothing to hide behind at all ----
+            case TerrainType.Ocean: case TerrainType.Lake: case TerrainType.FrozenSea: return 0.05f;
+            case TerrainType.Reef: return 0.08f;
             case TerrainType.Mountains: case TerrainType.Highlands: return 0f;
-            default: return 0.3f;
+            case TerrainType.GasClouds: case TerrainType.Storm: return 0f;
         }
+        return 0.3f;
     }
 
     // ============================================================================================

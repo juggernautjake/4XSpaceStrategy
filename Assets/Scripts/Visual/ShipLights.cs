@@ -87,7 +87,16 @@ public class ShipLights : MonoBehaviour
 {
     // ---- tuning ------------------------------------------------------------------------------
 
-    /// Running lights: OFF.
+    /// The whole rig: OFF for now.
+    ///
+    /// Ships are being shown on their bare models while the art is still landing, so nothing here is
+    /// wanted on top of them yet — not the running lights, not the drive plumes, not the muzzle
+    /// flashes. One switch turns the lot back on when the fleet is in and the hulls can carry it.
+    ///
+    /// Everything below is built and commented; this is a display decision, not an unfinished feature.
+    public static bool Enabled = false;
+
+    /// Running lights: OFF even when the rig is on.
     ///
     /// They were built at 8.5% of hull length, which sounds small and is not — a ship is drawn at
     /// 0.09-0.40 world units, so each lamp came out a substantial fraction of the whole vessel and the
@@ -145,6 +154,7 @@ public class ShipLights : MonoBehaviour
 
     public void Init(Unit u, Quaternion modelRotation, Color ownerColour)
     {
+        if (!Enabled) return;   // bare hulls for now; see the Enabled flag
         unit = u;
 
         // Ship space, in this transform's local frame. See the header note: the root is already
@@ -388,6 +398,7 @@ public class ShipLights : MonoBehaviour
     // ============================================================================================
     public void FlashMuzzle(Vector3 worldPos, Color colour)
     {
+        if (!Enabled) return;
         Lamp free = null;
         for (int i = 0; i < muzzlePool.Count; i++)
             if (muzzleLife[i] <= 0f) { free = muzzlePool[i]; muzzleLife[i] = MuzzleLife; break; }

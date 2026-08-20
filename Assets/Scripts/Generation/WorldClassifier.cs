@@ -219,10 +219,27 @@ public static class WorldClassifier
                     return water < LandWater ? "desert world" : "barren rocky world";
 
                 if (c < 4f) return "tundra world";                    // cold edge of the band
-                if (water >= 0.65f) return "swamp world";             // wet and warm and living
+
+                // ---- DROWNED FIRST, and this ordering is the whole fix -------------------------
+                //
+                // "swamp world" used to be `water >= 0.65`, tested before anything else, so any warm
+                // living world with two thirds of its surface under water was called a swamp. It was
+                // reported as "mostly just ocean", and it was: at 65% coverage the water has closed
+                // over the land, and a world with no land is not a wetland.
+                //
+                // A SWAMP IS WET LAND. So drowned worlds are named for their water first, and swamp is
+                // left to describe what it actually describes — a coastline you can still walk on,
+                // waterlogged rather than submerged.
+                if (water >= OceanWater) return "ocean world";
+                if (water >= 0.62f) return "archipelago world";
+
+                // Waterlogged land: high moisture, warm enough to rot, and enough water present to
+                // keep the ground saturated — but not so much that there is nothing left to stand on.
+                if (moisture >= 1.05f && c >= 12f && water >= 0.3f) return "swamp world";
+
                 if (water < 0.2f || moisture < 0.85f) return
                     (c > 24f) ? "desert world" : "savanna world";     // dry: harsher hot, milder warm
-                if (water > 0.55f) return "continental world";        // land-heavy but well-watered
+                if (water > 0.5f) return "continental world";         // land-heavy but well-watered
                 return "terran world";                                // the balanced default
         }
     }
@@ -253,6 +270,23 @@ public static class WorldClassifier
                 break;
             case "swamp world":
                 p.moisture = Mathf.Max(p.moisture, 1.2f);
+                // AND HOLD THE SEA DOWN. Amplifying moisture without touching the water level produced
+                // exactly the world that got reported: the moisture made every low tile a wetland, and
+                // then the sea rose straight over the top of it, so the "swamp world" was open ocean
+                // with a fringe. A swamp is the SHORE — it needs the water near the land, not above it.
+                //
+                // 0.42-0.58 keeps the coastline in the band where lowland floods but does not drown,
+                // which is the same neutral-ish range a terran world sits in. The classifier now refuses
+                // to call anything wetter than 0.62 a swamp at all; this stops generation from drifting
+                // a world out of its own class after it has been named.
+                p.seaLevel = Mathf.Clamp(p.SeaLevelOrNeutral, 0.42f, 0.58f);
+                break;
+
+            case "archipelago world":
+                // Broken land in a high sea. Left alone before, which meant nothing guaranteed there
+                // was any land left to break — an archipelago could generate as an unbroken ocean.
+                p.seaLevel = Mathf.Clamp(p.SeaLevelOrNeutral, 0.62f, 0.76f);
+                p.elevation = Mathf.Max(p.elevation, 1.05f);   // relief, so islands clear the water
                 break;
             case "tundra world":
                 p.heat = Mathf.Min(p.heat, 0.75f);
