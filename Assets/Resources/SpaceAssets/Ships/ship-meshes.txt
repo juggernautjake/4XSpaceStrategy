@@ -124,3 +124,43 @@ Terran_HyperRelay                 0    0    0  1.0  nospin # a ring of arcing em
 # mast carrying a dish rather than a disc. It is already upright, and it must stay that way — the
 # bounds heuristic would lay a tower on its side and call it a long ship.
 Terran_RelayStation               0    0    0  1.0  spin   # comms mast and parabolic dish, upright
+
+# ---- Pyrothian -----------------------------------------------------------------------------
+# The third civilization to confirm the same export convention, which settles it: measure-bow
+# reports "bulk +X, point -X" for twenty of the twenty-one Pyrothian ships. The pipeline puts the
+# nose on -X regardless of civ, so +90 yaw carries it to +Z.
+Pyrothian_Scout                   0   90    0    # blast-furnace wedge, sensor spines on -X
+Pyrothian_ScoutII                 0   90    0    # the same wedge up-armoured
+Pyrothian_ScoutIII                0   90    0    # smelter-racer, three exhaust throats aft
+Pyrothian_Explorer                0   90    0    # prospector rig, drilling head forward
+Pyrothian_Probe                   0   90    0  1.0  spin   # a cinder, no meaningful facing
+Pyrothian_ResearchShip            0   90    0    # assay laboratory, sample claws on -X
+Pyrothian_ResearchShipII          0   90    0
+Pyrothian_ResearchShipIII         0   90    0
+Pyrothian_ScienceVessel           0   90    0    # foundry-laboratory, analysis ring forward
+Pyrothian_ColonyShip              0   90    0    # foundry ark, landing sled beneath
+Pyrothian_Miner                   0   90    0    # drilling rig, boring head on -X
+Pyrothian_Transport               0   90    0    # slag hauler, shielded cab forward
+Pyrothian_Terraformer             0   90    0    # mobile caldera, vent nozzles
+Pyrothian_Fighter                 0   90    0    # obsidian wedge. THE ONE DISSENTER: its own mass
+                                                 # reads bulk -X, against twenty hulls that read the
+                                                 # other way. Taking the fleet convention over a
+                                                 # single measurement; check it by eye first if the
+                                                 # Pyrothians ever fly backwards
+Pyrothian_FighterII               0   90    0
+Pyrothian_FighterIII              0   90    0    # forge-knight, cannon pods underslung
+Pyrothian_Frigate                 0   90    0    # furnace hull, glowing vent slots along the flanks
+Pyrothian_Cruiser                 0   90    0    # smelter cruiser, turret batteries down the spine
+Pyrothian_Carrier                 0   90    0    # foundry carrier, casting bays along the flanks
+Pyrothian_Dreadnought             0   90    0    # mobile volcano, spinal cannon and the great eye
+
+# Pyrothian stations. Every one measures its shortest axis on Y, so they are discs already lying flat.
+Pyrothian_BattleStation           0    0    0  1.0  spin   # crucible fortress
+Pyrothian_ResearchStation         0    0    0  1.0  spin   # assay station
+Pyrothian_RelayStation            0    0    0  1.0  spin   # beacon tower
+Pyrothian_SupplyStation           0    0    0  1.0  spin   # clamped fuel crucibles
+Pyrothian_MultiStation            0    0    0  1.0  spin   # foundry complex
+Pyrothian_TerraformStation        0    0    0  1.0  spin   # ring of volcanic vents
+Pyrothian_DeepSpaceStation        0    0    0  1.0  spin   # basalt core, heat-radiator wings
+Pyrothian_MegaStation             0    0    0  1.0  spin   # forge-city, the great eye at its summit
+Pyrothian_HyperRelay              0    0    0  1.0  nospin # a gate holds its attitude, as the others do
