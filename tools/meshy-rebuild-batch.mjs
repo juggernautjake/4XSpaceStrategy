@@ -93,6 +93,15 @@ async function api(p, opts = {}) {
       ...opts,
       headers: { authorization: TOKEN, 'content-type': 'application/json', ...(opts.headers || {}) },
     });
+    // 5xx is Meshy having a moment, not a bad request. One InternalError killed a whole lineage
+    // because a failed tier stops the tiers that chain from it — so a transient blip cost the Mk II
+    // and Mk III as well. Back off and try again; only give up after several.
+    if (r.status >= 500 && attempt < 4) {
+      const wait = 4000 * (attempt + 1);
+      console.log(`  ~ ${r.status} from Meshy, retrying in ${wait / 1000}s`);
+      await sleep(wait);
+      continue;
+    }
     if (r.status !== 401) return { status: r.status, body: await r.json().catch(() => null) };
 
     // 401: the token died mid-run. With no file to watch there is nothing to wait FOR, so fail fast
@@ -136,15 +145,37 @@ function conceptPrompt(civ, lin, tier, isChild) {
   // A chained tier spends its words on WHAT CHANGED, because the reference image is already carrying
   // the hull, palette and camera. Repeating the full description there fights the reference and
   // produces a redesign instead of a refit.
+  // The specific creature this hull is, where one is defined. Naming the animal is what makes the
+  // ships distinct from each other: "an Aquarii fighter" returns a generic wedge every time, "a
+  // hammerhead shark with bolted armour and four cannons" does not. It also carries the lineage on
+  // its own — reef shark, hammerhead, megalodon are recognisably the same animal escalating.
+  const creature = design.creatures?.[civ]?.[tier.unit] || '';
+
+  // How much equipment is bolted to it. See techProgression: tier decides how built-up a hull looks,
+  // so a Mk III reads as an upgrade rather than a sidegrade.
+  const tech = design.techProgression?.[design.techTiers?.[tier.unit] ?? 2] || '';
+
+  // A chained tier MUST still be told what the ship is made of. Saying only "keep it identical" and
+  // then handing over two accent hexes gave a Mk II that was entirely amber and magenta with no teal
+  // and no creature left in it — the model had no colour anchor, so it painted the whole hull in the
+  // only colours the prompt named. Restating the base costs a dozen words and holds the identity.
   const head = isChild
-    ? `Refit of the SAME starship shown in the reference image. Keep the hull shape, proportions, colours, camera angle and lighting identical. Change only this: ${tier.upgrade}.`
-    : `${civ} starship concept art: ${lin.family}. ${tier.upgrade}. ${c.aesthetic}.`;
+    ? `${creature ? creature.charAt(0).toUpperCase() + creature.slice(1) + '. ' : ''}` +
+      `This is the SAME ship as the reference image, refitted — keep its silhouette, proportions, base colour and camera angle. ${tech}`
+    : `${civ} starship concept art: ${creature || lin.family}. ${tech} ${creature ? '' : c.aesthetic + '.'}`;
 
   // Stations get their own tail: telling a space station its bow must be distinct from its stern
   // produces a station with a nose cone, and the orientation heuristic treats them as spin-in-place
   // objects anyway.
   const tail = lin.key === 'station' ? design.stationTail : design.sharedTail;
-  const livery = ` Primary ${p.primary.hex}, secondary ${p.secondary.hex}.`;
+  // "Accents ON a <base> hull", never a bare pair of hex codes. Naming the colours without saying
+  // what they sit on invites the model to make them the entire paint job — a scout came back
+  // entirely amber with no teal left anywhere.
+  //
+  // MOSTLY is doing real work in this sentence. Unlike the 3D texturer, the image model does respond
+  // to a stated share, and without one the accent creeps until it has eaten the hull. The base is
+  // also named twice on purpose: once as the thing the ship IS, once as the thing that stays.
+  const livery = ` The hull is MOSTLY ${p.baseShort} — at least two thirds of it. Accents only: ${p.primary.hex} on some armour panels, ${p.secondary.hex} on small trim, seams and lights. Do not paint the whole ship in the accent colours.`;
 
   // The tail and the livery hexes are NON-NEGOTIABLE — they carry the orientation rules the import
   // heuristic depends on and the two key hues the mask extractor looks for. So they are reserved

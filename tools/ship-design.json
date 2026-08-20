@@ -23,7 +23,7 @@
     "referenceStrength is how strongly the previous tier's art constrains the next: high enough that the",
     "ship is recognisably the same, low enough that the added armour and guns actually appear."
   ],
-  "referenceStrength": 0.62,
+  "referenceStrength": 0.8,
   "conceptModel": "fal-ai/nano-banana-pro",
   "aspectRatio": "16:9",
   "_tailNotes": [
@@ -261,5 +261,76 @@
         }
       ]
     }
-  ]
+  ],
+  "techProgression": {
+    "1": "EARLY AND SIMPLE: bare hull, one small engine, one or two light weapons, a couple of small lights. Uncluttered.",
+    "2": "IMPROVED: light armour plates over the vitals, two engines, several weapon mounts, more lit panels and antennae.",
+    "3": "ADVANCED: layered armour, three engines, multiple weapon mounts and missile rails, dense greebling, many glowing strips.",
+    "4": "HIGH-TECH: heavy segmented armour, a cluster of engines, many weapon systems, glowing energy conduits threaded through the hull.",
+    "5": "THE PINNACLE: colossal layered armour, a whole bank of engines, weapon batteries over every surface, blazing energy cores and light everywhere."
+  },
+  "techTiers": {
+    "01-Scout": 1,
+    "02-Scout-MkII": 2,
+    "03-Scout-MkIII": 3,
+    "04-Explorer": 3,
+    "05-Probe": 1,
+    "06-Research-Ship": 1,
+    "07-Research-Ship-MkII": 2,
+    "08-Research-Ship-MkIII": 3,
+    "09-Science-Vessel": 4,
+    "10-Colony-Ship": 2,
+    "11-Mining-Barge": 1,
+    "12-Transport": 2,
+    "13-Terraformer": 4,
+    "14-Fighter": 1,
+    "15-Fighter-MkII": 2,
+    "16-Fighter-MkIII": 3,
+    "17-Frigate": 2,
+    "18-Cruiser": 3,
+    "19-Carrier": 4,
+    "20-Dreadnought": 5,
+    "21-Battle-Station": 2,
+    "22-Research-Station": 2,
+    "23-Relay-Station": 2,
+    "24-Supply-Station": 2,
+    "25-Multi-Role-Station": 4,
+    "26-Terraforming-Station": 4,
+    "27-Deep-Space-Station": 3,
+    "28-Mega-Station": 5,
+    "29-Hyper-Speed-Relay": 5
+  },
+  "creatures": {
+    "Aquarii": {
+      "01-Scout": "a small armoured SHRIMP with a single thruster tail and two tiny laser antennae",
+      "02-Scout-MkII": "a LIONFISH, the same small scout grown up: armoured spine fins, twin thruster tails, sensor barbels",
+      "03-Scout-MkIII": "a SWORDFISH, sleek and fast: bladed armoured bill, three thruster tails, a faired sensor spine",
+      "04-Explorer": "a SAILFISH with a great solar-sail dorsal fin and long-range sensor bill",
+      "05-Probe": "a tiny drifting NAUTILUS shell with one instrument eye",
+      "06-Research-Ship": "a CUTTLEFISH with instrument tentacles and a wide scanning mantle",
+      "07-Research-Ship-MkII": "an OCTOPUS, the same lab grown up: eight instrument arms, more sensor eyes",
+      "08-Research-Ship-MkIII": "a GIANT SQUID with a rotating instrument ring and a huge forward lens eye",
+      "09-Science-Vessel": "a great NAUTILUS, its spiral shell crowned with dish arrays and sensor rings",
+      "10-Colony-Ship": "a SEA TURTLE carrying a habitat dome fused into its shell, with landing legs",
+      "11-Mining-Barge": "a HERMIT CRAB whose shell is an ore hopper, with cutting claws and a refinery drum",
+      "12-Transport": "a BLUE WHALE, a bulk hauler with cargo pods slung along its flanks",
+      "13-Terraformer": "a colossal SEA ANEMONE trailing seeding tendrils that vent glittering vapour",
+      "14-Fighter": "a REEF SHARK: simple, fast, a cannon in the jaw and one thruster tail",
+      "15-Fighter-MkII": "a HAMMERHEAD SHARK, the same fighter up-armoured: plated head, four cannons, twin thruster tails",
+      "16-Fighter-MkIII": "a MEGALODON, fully armoured and bristling: cannon batteries, missile rails, a bank of thrusters",
+      "17-Frigate": "a BARRACUDA, lean and armoured, turret blisters along the flanks",
+      "18-Cruiser": "a SAWFISH with a heavy armoured saw ram and turret batteries down the spine",
+      "19-Carrier": "a giant MANTA RAY, flat and broad, strike craft launching from bays under the wings",
+      "20-Dreadnought": "a LEVIATHAN sea-serpent, colossal and segmented, a spinal cannon along its back",
+      "21-Battle-Station": "a giant armoured CLAM fortress, its shell ringed with gun turrets",
+      "22-Research-Station": "a CORAL BLOOM studded with dish arrays and lit laboratory windows",
+      "23-Relay-Station": "a SEA URCHIN whose spines are antennae, around a central dish",
+      "24-Supply-Station": "a cluster of BARNACLES and mussel pods around a docking spine",
+      "25-Multi-Role-Station": "a CORAL CITY: stacked reef terraces, dishes, docking arms and turrets",
+      "26-Terraforming-Station": "a vast ring of ANEMONE processor mouths around a glowing reactor core",
+      "27-Deep-Space-Station": "a JELLYFISH, its bell a solar collector and its tendrils sensor booms",
+      "28-Mega-Station": "a KRAKEN-CORAL METROPOLIS: nested reef rings, spires, docking bays, a glowing heart",
+      "29-Hyper-Speed-Relay": "a colossal ring of CEPHALOPOD ARMS around a blazing energy aperture"
+    }
+  }
 }

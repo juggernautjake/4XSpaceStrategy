@@ -99,6 +99,16 @@ public class ShipLights : MonoBehaviour
         public float period, phase;
         public bool constant;      // never blinks; breathes instead
         public float baseScale;
+
+        // ---- drive plume only ----
+        /// 0 is the nozzle itself; 1..n are plume segments trailing aft behind it.
+        public int plumeIndex;
+        /// Where this segment sits at idle. At full throttle it is pushed further aft from here, which
+        /// is what makes the flame LENGTHEN with speed rather than merely brighten.
+        public Vector3 restPos;
+        /// Direction to push it, i.e. astern. Stored per lamp so the plume follows the hull's own
+        /// axis rather than a world direction.
+        public Vector3 aft;
     }
 
     readonly List<Lamp> lamps = new List<Lamp>();
@@ -213,10 +223,23 @@ public class ShipLights : MonoBehaviour
     // Placed on the stern plane, spread across the beam. Brightness and length track speed, which is
     // the thing the request was really about: a ship under way should look like it is under power,
     // and a parked one should not.
+    // ---- how a flame is made out of round sprites ------------------------------------------------
+    //
+    // A drive plume wants to be a long tapered cone, and the obvious way to draw one — a single quad
+    // stretched along the hull's axis — does not survive being looked at. A camera-facing billboard
+    // cannot also be axis-aligned, and a quad that IS axis-aligned vanishes when viewed edge-on, which
+    // at this game's top-down-ish angles is most of the time.
+    //
+    // So the plume is built from a few round billboards in a line astern, each smaller, dimmer and
+    // further out than the last. It reads as a tapered flame from every angle, costs four sprites, and
+    // reuses the billboard and material every other light here already uses.
+    const int PlumeSegments = 4;
+
     void BuildThrusters(Bounds b)
     {
         Vector3 stern = b.center - bow * (hullLength * 0.5f);
         float size = hullWidth * ThrusterFactor;
+        Vector3 aft = -bow;
 
         // Bigger hulls get more nozzles. Purely cosmetic, but a dreadnought with one exhaust looks
         // like a bigger fighter rather than a bigger ship.
@@ -225,10 +248,24 @@ public class ShipLights : MonoBehaviour
         for (int i = 0; i < n; i++)
         {
             float t = n == 1 ? 0f : (i / (float)(n - 1)) * 2f - 1f;   // -1..1 across the beam
-            Vector3 p = stern + right * (t * hullWidth * 0.30f);
-            var lamp = MakeQuad("Thruster", p, size, new Color(0.55f, 0.8f, 1f));
-            lamp.period = 0f;
-            thrusters.Add(lamp);
+            Vector3 nozzle = stern + right * (t * hullWidth * 0.30f);
+
+            for (int s = 0; s <= PlumeSegments; s++)
+            {
+                // The core is white-hot and the tail cools toward the drive colour, because that is
+                // what a real exhaust does and it is most of what sells a plume as hot rather than as
+                // a blue smear.
+                float k = s / (float)PlumeSegments;
+                Color c = Color.Lerp(new Color(0.85f, 0.95f, 1f), new Color(0.25f, 0.55f, 1f), k);
+
+                Vector3 pos = nozzle + aft * (hullLength * 0.06f * s);
+                var lamp = MakeQuad(s == 0 ? "Thruster" : "Plume", pos, size * (1f - 0.16f * s), c);
+                lamp.period = 0f;
+                lamp.plumeIndex = s;
+                lamp.restPos = pos;
+                lamp.aft = aft;
+                thrusters.Add(lamp);
+            }
         }
     }
 
@@ -289,11 +326,23 @@ public class ShipLights : MonoBehaviour
         {
             var t = thrusters[i];
             if (t.tr == null) continue;
+
             // A slight flicker keeps a plume from looking like a decal, and it is locked to the beat
             // like everything else so it never fights the running lights.
             float flicker = 0.9f + 0.1f * Mathf.Sin(FleetClock.Beats * Mathf.PI * 2f * 3f + i);
             float k = throttle * flicker;
-            SetLamp(t, k, 0.35f + k * 1.25f);
+
+            // Segments further down the plume need MORE throttle before they light, so the flame grows
+            // out of the nozzle as the ship accelerates instead of the whole cone fading up together.
+            // At idle only the nozzle glows; at full burn the tail reaches its full length.
+            float seg = t.plumeIndex / (float)PlumeSegments;
+            float reach = Mathf.Clamp01((throttle - seg * 0.55f) / 0.45f);
+            float bright = k * reach;
+
+            if (t.plumeIndex > 0)
+                t.tr.localPosition = t.restPos + t.aft * (hullLength * 0.10f * t.plumeIndex * throttle);
+
+            SetLamp(t, bright, 0.35f + bright * 1.25f);
         }
 
         // ---- muzzle flashes ----

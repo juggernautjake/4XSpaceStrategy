@@ -57,7 +57,8 @@
         "role": "trim lines, hazard chevrons, running lights, engine glow"
       },
       "hueSeparation": 185,
-      "baseSaturated": false
+      "baseSaturated": false,
+      "baseShort": "steel grey-blue armoured hull"
     },
     "Aquarii": {
       "baseMaterial": "a CYBORG SEA CREATURE - deep sea-teal scaled skin, fin membranes and ribbed cartilage, with hard metal armour plates bolted over the back and flanks, mechanical gill vents, cybernetic lens eyes, cable bundles and glowing implant seams",
@@ -75,7 +76,8 @@
         "role": "glowing implant seams, fin edges, lens eyes and gill slits"
       },
       "hueSeparation": 95,
-      "baseSaturated": true
+      "baseSaturated": true,
+      "baseShort": "deep sea-teal cyborg sea-creature hull with scaled skin and fins"
     },
     "Pyrothian": {
       "baseMaterial": "dark charcoal basalt and obsidian slabs, thick overlapping ablative plate, brass heat-exchanger fins",
@@ -92,7 +94,8 @@
         "role": "sulphur-crystal growths, sensor spines, cockpit glow"
       },
       "hueSeparation": 168,
-      "baseSaturated": false
+      "baseSaturated": false,
+      "baseShort": "dark charcoal basalt armoured hull"
     },
     "Cryithn": {
       "baseMaterial": "RICHLY COLOURED deep glacier-blue faceted armour over frosted silver alloy, rime-crusted plating",
@@ -110,7 +113,8 @@
         "role": "crystal spine tips, drive glow, instrument light"
       },
       "hueSeparation": 110,
-      "baseSaturated": true
+      "baseSaturated": true,
+      "baseShort": "deep glacier-blue faceted ice hull"
     },
     "Sylvan": {
       "baseMaterial": "RICHLY COLOURED deep forest-green living hull, woven vine over a seed-pod shell, dark bark plating",
@@ -128,7 +132,8 @@
         "role": "sap-light veins along the grain, blossoms, pod seams"
       },
       "hueSeparation": 115,
-      "baseSaturated": true
+      "baseSaturated": true,
+      "baseShort": "deep forest-green living grown hull"
     }
   }
 }

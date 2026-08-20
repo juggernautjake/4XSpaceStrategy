@@ -55,6 +55,7 @@ public class ProjectileRenderer : MonoBehaviour
 
         public Transform tr;                 // pooled quad (travelling) — null for instant shots
         public Light light;                  // pooled point light, so the round lights what it passes
+        public float phaseOffset;            // per-shot offset so a volley pulses out of step, not as one strobe
         public LineRenderer beam;            // pooled line (instant) — null for travelling shots
     }
 
@@ -116,7 +117,8 @@ public class ProjectileRenderer : MonoBehaviour
         {
             weapon = w, shooter = shooter, target = target,
             pos = from, endPoint = to, damage = damage,
-            instant = w.projectileSpeed <= 0.01f
+            instant = w.projectileSpeed <= 0.01f,
+            phaseOffset = Random.Range(0f, Mathf.PI * 2f)
         };
 
         if (s.instant)
@@ -225,6 +227,24 @@ public class ProjectileRenderer : MonoBehaviour
             // The light rides along with the round, so hulls it passes are lit as it goes by and the
             // one it is about to hit brightens as it closes.
             if (s.light != null) s.light.transform.position = s.pos;
+
+            // ---- plasma breathes ------------------------------------------------------------------
+            //
+            // A plasma bolt is a contained ball of energy, and a perfectly steady sprite reads as a
+            // painted slug instead. Pulsing the bolt AND its light together sells it as something
+            // barely held together.
+            //
+            // On the fleet beat, like the running lights and the drive plumes — so everything glowing
+            // in a battle is breathing to one clock rather than each on its own unrelated cycle. The
+            // per-shot offset keeps a volley from pulsing in unison, which would read as a strobe.
+            if (s.weapon.cls == WeaponClass.PlasmaCannon)
+            {
+                float pulse = 0.82f + 0.18f * Mathf.Sin(FleetClock.Beats * Mathf.PI * 4f + s.phaseOffset);
+                if (s.tr != null)
+                    s.tr.localScale = new Vector3(s.weapon.width * 2f * pulse, s.weapon.length * pulse, 1f);
+                if (s.light != null)
+                    s.light.intensity = Mathf.Clamp(s.weapon.glow * 2.2f, 0.6f, 7f) * pulse;
+            }
 
             // ---- Arrival ----
             bool arrived = s.target != null && !s.target.IsDestroyed &&

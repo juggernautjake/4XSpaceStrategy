@@ -181,6 +181,61 @@ unmistakably present.
 keys on) are reserved FIRST; the descriptive text is trimmed into what is left. Doing it the other way
 round silently dropped the livery clauses on the first attempt.
 
+## 4c. THE ART DIRECTION, settled — cyborg sea creatures and a tech ladder
+
+Arrived at by iteration, and the intermediate results are kept in `Art/AllModels/` rather than
+deleted so the reasoning is checkable.
+
+### Aquarii are cyborg sea creatures
+
+Not "organic-looking ships" — actual animals, cyborg-converted into warships. Naming the ANIMAL is
+what makes hulls distinct from one another: "an Aquarii fighter" returns a generic wedge every time,
+"a hammerhead shark with bolted armour and four cannons" does not. The full bestiary is
+`tools/ship-design.json` → `creatures.Aquarii`, one entry per hull.
+
+Getting here took three swings, all recorded because each failure was informative:
+
+1. **Too much tech.** A hard `techMandate` produced a handsome but boxy angular fighter with no fish
+   left in it. Kept at `Art/AllModels/03-Aquarii-CyborgRebuild/`.
+2. **Too little tech.** Removing it produced a plain teal shark that read as a toy — no plates, no
+   thrusters, no weapons. Kept at `Art/AllModels/02-Aquarii-Textured/`.
+3. **Both at once** — a creature body with machinery grafted ON: metal plates bolted over living
+   scales, cannons through the jaw, thruster pods on the tail, cybernetic lens eyes. That is the
+   direction, and it is the first texture to pass `verify-textures.mjs` cleanly.
+
+Note for later: **texturing alone cannot produce this.** Paint cannot add bolted plates or thruster
+pods, so a cyborg hull has to be GENERATED, not repainted. That is why the Gen-1 meshes — which are
+genuinely lovely sea creatures — still get rebuilt rather than just textured.
+
+### Lineages escalate through the same animal family
+
+    fighter    reef shark  ->  hammerhead  ->  megalodon
+    scout      shrimp      ->  lionfish    ->  swordfish
+    research   cuttlefish  ->  octopus     ->  giant squid  ->  nautilus
+    capital    barracuda   ->  sawfish     ->  manta ray    ->  leviathan
+    transport  blue whale        colony  sea turtle      miner  hermit crab
+
+Stations are sessile creatures — clam fortress, coral bloom, sea urchin relay, jellyfish outpost,
+kraken-coral metropolis — which suits something that anchors and never moves again.
+
+### The tech ladder: later units look later
+
+`techTiers` gives every hull a level 1-5 and `techProgression` says what that means. Tier decides how
+much EQUIPMENT is on a ship, not how big it is — a probe is tiny at tier 1 and a mega-station is vast
+at tier 5, but a tier-1 anything is plain and a tier-5 anything is covered in armour, engines,
+weapons and light. The tiers follow the shipyard and empire gating in `UnitType.cs`, so the art
+ladder and the gameplay ladder agree.
+
+### Two prompt rules learned by losing ships to them
+
+**Restate the base in every chained tier.** A Mk II told only "keep it identical" plus two accent hex
+codes came back a generic yellow-and-pink jet — no teal, no shark. With no colour anchor the model
+paints the whole hull in the only colours named. Kept at `Art/AllModels/04-Rejected-LineageDrift/`.
+
+**Say MOSTLY.** Even with the base named, an accent creeps until it has eaten the ship — a scout came
+back entirely amber. The image model does respond to a stated share ("at least two thirds"), unlike
+the 3D texturer, which ignores proportions completely.
+
 ## 5. Workstream C — "the ships look like they are running"
 
 No credits, no art dependency. **Buildable right now.**
@@ -212,6 +267,28 @@ No credits, no art dependency. **Buildable right now.**
 
 ### C4 — Projectile light — **BUILT**
 - [x] Rounds **emit light that falls on nearby ships**, and notably on the ship they hit.
+- [x] Works for every weapon class already defined in `Weaponry.cs` — pulse laser, beam laser, plasma
+      cannon, railgun, missiles, point defence. Range and intensity come from each weapon's own
+      `colour`, `glow` and `width`, so a plasma bolt throws real light and a point-defence needle
+      barely does, with no extra table to maintain.
+- [x] Beams light the gap they cross from the midpoint (one light, not a line of them) and die with
+      the afterimage.
+- [x] **Plasma glow**: plasma bolts and their light breathe together, on the fleet beat, with a
+      per-shot phase offset so a volley pulses out of step instead of strobing as one.
+- [x] Hard cap of 14 live lights. URP culls per object; a battle with 200 rounds in the air would
+      otherwise hand the renderer 200 lights to sort.
+
+### C6 — Drive plumes — **BUILT**
+- [x] Real tapered flames, not a dot: each nozzle trails `PlumeSegments` billboards astern, each
+      smaller, dimmer and further out, white-hot at the core cooling to drive-blue at the tail.
+- [x] The flame **grows out of the nozzle** as the ship accelerates — later segments need more
+      throttle before they light — so the plume lengthens with speed rather than the whole cone
+      fading up together.
+
+      A single stretched quad was the obvious approach and does not survive being looked at: a
+      camera-facing billboard cannot also be axis-aligned, and an axis-aligned quad vanishes edge-on,
+      which at this game's viewing angles is most of the time. A line of round billboards reads as a
+      tapered flame from everywhere and reuses the material every other light already uses.
 
 ### C5 — Impact
 - [ ] Small explosion on hit — **already built**: `ExplosionRenderer.Impact(at, w.colour)` is called
