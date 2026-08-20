@@ -298,6 +298,65 @@ No credits, no art dependency. **Buildable right now.**
 
 ---
 
+## 5b. Workstream E — worlds, terrain and tectonics
+
+No credits, no art dependency.
+
+### E1 — Swamp worlds were mostly ocean — **FIXED**
+- [x] `water >= 0.65 -> "swamp world"` was tested before anything else, so any warm living world two
+      thirds underwater got the name. At that coverage the water has closed over the land, and a world
+      with no land is not a wetland.
+- [x] Drowned worlds are named for their water FIRST (ocean past `OceanWater`, archipelago past 0.62).
+      Swamp now means high moisture, warm enough to rot, and a coastline you can still walk on.
+- [x] `AmplifyBiome` was the other half: "swamp world" raised moisture and never touched sea level, so
+      generation made every low tile a wetland and then flooded over the top of it — the world drifted
+      out of its own class *after* being named. It now holds the sea in the band a shore can exist in.
+- [x] Archipelago got the same treatment from the other side. Nothing guaranteed an archipelago had
+      any land left to break up, so it could generate as unbroken ocean.
+
+### E2 — Plate boundaries under water — **FIXED**
+- [x] A continental margin reads exactly `PlateLineBase` (0.40). The submarine penalty multiplies by
+      0.55, giving 0.22 — below `PlateLineFloor`, the value the overlay starts painting at. Every
+      underwater boundary was erased, which on a wet world is nearly all of them.
+- [x] Worse, the push arrows kept drawing: they come from the plate LAYOUT rather than from this
+      index, so the map showed arrows shoving against a line that was no longer there.
+- [x] The two jobs that number does are now separated. **Visibility** floors back to the plate line so
+      the fault stays on the map; **production** is untouched, because the floor is 0.40 and a
+      geothermal plant needs 0.70. A submarine fault is drawn and still unbuildable — which is the
+      truth about it.
+
+### E3 — Terrain yields were mostly unscored — **FIXED**
+- [x] 1 of 41 terrain types was named in every yield table; the rest fell to a `default`. That is not
+      a default so much as a silence: a salt flat, a lava field and a jungle all yielded the same and
+      nothing could tell the player why.
+- [x] Now **41/41** for minerals, fertility and wind shelter. `CrustHeat` still defaults for 22 types,
+      and that one is correct — grassland and forest genuinely have no accessible geothermal.
+- [x] The worst hole was **water fertility**. Ocean, Lake, River and Reef were unlisted and took 0.08
+      — *less than tundra*. An ocean world was a starvation world, a river was worth no more than the
+      desert beside it, and the Aquarii (the fertility species, on ocean worlds) had nowhere to be
+      good at their own signature. Fisheries and floodplains now score at the top.
+- [x] Others worth naming: salt flats are among the richest mineral surfaces there is (potash,
+      borates, lithium) and read as barren dirt; weathered volcanic ash is famously good farmland; bog
+      iron gives a swamp the only ore you dig out of a wetland. `Shelter` feeds the WIND index, so
+      "sheltered" is a penalty — most of the map sat on a flat 0.3, flattening the one decision wind
+      farms offer.
+- [x] `tools/audit-terrain-balance.mjs` reads the switch tables out of the source and reports which
+      terrain each names and which it lets fall through. That is how these were found.
+
+### E4 — Water tiles report as water — **ALREADY CORRECT**
+- [x] Verified rather than changed. `Terran()` floods before any land test
+      (`elev < 0.36 + sea -> Ocean/FrozenSea`), and the flood-fill pass separates enclosed pools into
+      Lake and open water into Ocean. A submerged tile is genuinely typed Ocean or Lake, so the readout
+      cannot be showing drowned land. What looked like that was E1: the world was ocean.
+
+### E5 — Still open
+- [ ] Water level variance is fine as it stands (`SetBandWater` rolls 0.10–1.00 across temperate and
+      cold bands, and runs *before* `AmplifyBiome`, so the class clamps layer correctly on top).
+      Revisit only if worlds still cluster.
+- [ ] One orphan biome tile: `rocky_16x16.png` is referenced by no `TerrainType`.
+- [ ] Red plate outline: visible now, but its WIDTH and colour ramp have not been reviewed against a
+      finished world.
+
 ## 6. Workstream D — getting 900 MB of art into a Unity project
 
 Raw art cannot ship as-is. One Terran Dreadnought is **1,996,570 triangles**, 4096² albedo + 4096²
