@@ -105,8 +105,12 @@ meshes under `_Extras/` in the Downloads library.
 - [x] **B1.** Palette per civ — `tools/civ-colors.json`. Base colour plus two accents, kept far apart
       in hue so the accents can be keyed out of a baked texture and recoloured
 - [x] **B2.** Prompts place the accents on named surfaces (Meshy ignores percentages, follows places)
-- [ ] **B3.** `tools/extract-color-masks.mjs` — key the two accent hues into an RGB mask
-- [ ] **B4.** URP shader — recolour masked regions from the player's chosen primary/secondary
+- [~] **B3/B4. SUPERSEDED, not abandoned.** The mask-plus-shader route is the textbook answer and is
+      cheaper at draw time, and it is the wrong answer in THIS environment: there is no Unity here to
+      compile a shader in, and an uncompiled shader is not a feature — it is a file that turns the
+      whole fleet magenta the first time anyone presses play. `CivLivery` does the same job on the
+      CPU, once per colour change, cached. Worth revisiting as an optimisation if repaint cost ever
+      shows up in a profile; it does not need to be revisited to ship
 - [ ] **B5.** **Colours are chosen WHERE THE RACE IS CHOSEN.** Picking a civilization and picking its
       two colours is one decision made in one place, at the species screen, and the choice shows on
       the ships immediately. Persisted in the save
@@ -148,7 +152,12 @@ shown on bare models. One flag each to bring back.
 - [x] **C4.** Projectile point lights (pooled, capped at 14) + plasma pulse on the fleet beat
 - [x] **C5.** Impact sound scaled by damage past armour
 - [x] **C6.** Class badges removed — the silhouettes identify themselves now
-- [ ] **C7.** Re-enable and tune once the fleet is in and hulls can carry it
+- [x] **C7. Re-enabled.** The condition was "once the fleet is in and the hulls can carry it", and
+      the Aquarii are in at 29/29, oriented and flying nose-first. `ShipLights.Enabled` and
+      `ProjectileRenderer.DynamicLights` are both ON. A civ whose art has not landed still flies
+      borrowed hulls and now lights them too, which is right: the lights are placed from each hull's
+      own BOUNDS rather than an authored rig, so they sit correctly on whatever mesh is there
+- [ ] **C8.** Tune the rig by eye in Unity now that it is on — brightness, plume length, beat rate
 
 ---
 

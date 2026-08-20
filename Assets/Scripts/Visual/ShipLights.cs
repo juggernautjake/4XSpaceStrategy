@@ -87,14 +87,17 @@ public class ShipLights : MonoBehaviour
 {
     // ---- tuning ------------------------------------------------------------------------------
 
-    /// The whole rig: OFF for now.
+    /// The whole rig: ON.
     ///
-    /// Ships are being shown on their bare models while the art is still landing, so nothing here is
-    /// wanted on top of them yet — not the running lights, not the drive plumes, not the muzzle
-    /// flashes. One switch turns the lot back on when the fleet is in and the hulls can carry it.
+    /// It was off while the art was landing, because running lights, drive plumes and muzzle flashes
+    /// on top of a fleet of borrowed placeholder hulls is decoration on top of a stand-in — you cannot
+    /// judge either. The condition for turning it back on was "when the fleet is in and the hulls can
+    /// carry it", and the Aquarii are in: twenty-nine of twenty-nine, oriented and flying nose-first.
     ///
-    /// Everything below is built and commented; this is a display decision, not an unfinished feature.
-    public static bool Enabled = false;
+    /// A civilization whose art has not landed yet still flies borrowed hulls and now lights them too.
+    /// That is the right trade: the lights are placed from each hull's own BOUNDS rather than from an
+    /// authored rig, so they sit correctly on whatever mesh is actually there.
+    public static bool Enabled = true;
 
     /// Running lights: OFF even when the rig is on.
     ///

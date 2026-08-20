@@ -321,10 +321,10 @@ public class ProjectileRenderer : MonoBehaviour
     /// URP culls per object and a battle putting two hundred rounds in the air would hand the renderer
     /// two hundred lights to sort. Past the cap this returns null and the round simply flies unlit —
     /// which nobody notices in a firefight already lit by the ones that got a light.
-    /// Real point lights on rounds in flight. OFF alongside ShipLights.Enabled while ships are shown
-    /// on their bare models — the bolts and beams themselves still draw, since those ARE the weapon
-    /// rather than lighting on top of it.
-    public static bool DynamicLights = false;
+    /// Real point lights on rounds in flight. ON, alongside ShipLights.Enabled, now that the fleet is
+    /// in — a bolt that lights the hull it passes is most of what sells a firefight, and there are
+    /// hulls to light. Capped at MaxLiveLights below, which is what makes this affordable at all.
+    public static bool DynamicLights = true;
 
     const int MaxLiveLights = 14;
     int lightsMade;
