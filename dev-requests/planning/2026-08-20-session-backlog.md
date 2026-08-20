@@ -266,8 +266,14 @@ What survives, and why each is a real candidate (~42 credits each):
 | Terran Terraformer | 0.160 | 0.069 | dark and flat |
 | Aquarii Carrier | 0.254 | 0.085 | primary accent effectively absent (2.1%) |
 
-- [ ] Re-roll those six — about 250 credits — OR accept them. **Jacob's call**, because credits are
-      the binding constraint on finishing the remaining three civilizations
+- [~] **Re-rolling all six.** Every one was ARCHIVED FIRST, complete with all five mesh formats, all
+      four PBR maps, its concept art and its render, to
+      `Art/AllModels/11-Superseded-2026-08-20/` — which carries a README naming each hull, its
+      numbers, and how to put it back (copy the folder over `10-Fleet/` and re-import). That folder
+      is under `Art/`, which is gitignored, so it lives on Jacob's machine rather than in the repo
+      like the rest of the 9 GB of art
+- [x] **A re-roll is a fresh draw, not an improvement.** Compare each replacement against the archived
+      render before accepting it; sometimes the old one was better, and that is what the archive is for
 
 ## F. Worlds and terrain
 
