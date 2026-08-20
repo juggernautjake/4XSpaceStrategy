@@ -314,16 +314,27 @@ No credits, no art dependency.
 - [x] Archipelago got the same treatment from the other side. Nothing guaranteed an archipelago had
       any land left to break up, so it could generate as unbroken ocean.
 
-### E2 — Plate boundaries under water — **FIXED**
-- [x] A continental margin reads exactly `PlateLineBase` (0.40). The submarine penalty multiplies by
-      0.55, giving 0.22 — below `PlateLineFloor`, the value the overlay starts painting at. Every
-      underwater boundary was erased, which on a wet world is nearly all of them.
-- [x] Worse, the push arrows kept drawing: they come from the plate LAYOUT rather than from this
-      index, so the map showed arrows shoving against a line that was no longer there.
-- [x] The two jobs that number does are now separated. **Visibility** floors back to the plate line so
-      the fault stays on the map; **production** is untouched, because the floor is 0.40 and a
-      geothermal plant needs 0.70. A submarine fault is drawn and still unbuildable — which is the
-      truth about it.
+### E2 — Plate boundaries under water — **FIXED**, and the diagnosis needed correcting
+
+There are TWO things drawn here, and only one of them was broken. Worth writing down, because the
+first read of this was wrong and the distinction is easy to lose again:
+
+- **The red hairline** (`PaintPlateLines`) is painted straight from `TectonicsMap.Tiles(...).border`
+  and never consults the geothermal index or the water flag. It was *always* drawn under water. It
+  is gated only by survey progress — an unresolved tile gets no line, which is deliberate.
+- **The geothermal field shading around it** comes from the index, and that was being erased. A
+  continental margin reads exactly `PlateLineBase` (0.40); the submarine penalty multiplies by 0.55,
+  giving 0.22 — below `PlateLineFloor`, the value the overlay starts painting at.
+
+- [x] So the symptom underwater was a bare red line with none of its supporting heat field, on a map
+      whose push arrows (drawn from the plate LAYOUT) were still shoving against it. Half the
+      annotation, which reads as a rendering fault rather than as information.
+- [x] Fixed by separating the two jobs that one number does. **Visibility** floors back to the plate
+      line so the field is painted wherever the fault runs; **production** is untouched, because the
+      floor is 0.40 and a geothermal plant needs 0.70. A submarine fault is now fully drawn and still
+      unbuildable — which is the truth about it.
+- [ ] Not yet reviewed: the hairline's WIDTH (currently a full tile, `sub x sub` texels) and whether
+      `Color32(255, 40, 34, 250)` reads well against the ocean blues as opposed to against land.
 
 ### E3 — Terrain yields were mostly unscored — **FIXED**
 - [x] 1 of 41 terrain types was named in every yield table; the rest fell to a `default`. That is not
