@@ -58,9 +58,9 @@ meshes under `_Extras/` in the Downloads library.
 ### A4. Generation progress
 - [x] **Aquarii 29/29 — COMPLETE.** Every hull generated, downloaded in all five formats, decimated
       and imported. `verify-wiring.mjs` resolves 29/29
-- [~] **Terran 4/29** — running. The two existing hulls (Scout, Fighter) were reviewed and KEPT:
-      correct design language, on-palette steel-blue with orange trim, well textured. Every lineage
-      chains off them
+- [x] **Terran 29/29 — COMPLETE.** Imported, oriented, resolving. The two pre-existing hulls (Scout,
+      Fighter) were reviewed and KEPT rather than regenerated — correct design language, on-palette,
+      well textured — and every lineage chains off them
 - [ ] **Terran 2/29** — started, then deprioritised to finish Aquarii first
 - [ ] Pyrothian 0/29 · Cryithn 0/29 · Sylvan 0/29
 - [x] **No longer blocked on hand-feeding tokens.** The open Meshy tab refreshes its own session
@@ -245,6 +245,29 @@ shown on bare models. One flag each to bring back.
       ladders keep it, where looking alike IS the progression) and **family** (same materials,
       palette, finish and camera; a DIFFERENT class of vessel). The capital line is now family
 - [ ] Re-roll Terran 17-20 under family mode, plus the two hulls that failed on an expired concept URL
+
+## A-bis. Six hulls worth re-rolling, with the evidence
+
+The brightness check was failing nine hulls and most were not failures — the big stations are
+charcoal structures with lit panels, and the Terran hyper-relay is near-black with blazing blue
+emitters, which is striking rather than broken. Brightness alone cannot tell a designed dark hull
+from a generation that returned a near-black blob, because the difference is not how dark it is; it
+is whether there is anything IN it. The check now fails only DARK **AND** FLAT — a refinement rather
+than a loosening, and it still fails everything that deserves it.
+
+What survives, and why each is a real candidate (~42 credits each):
+
+| hull | bright | detail | verdict |
+|---|---|---|---|
+| Aquarii Battle Station | 0.159 | 0.089 | dark and flat |
+| Aquarii Terraforming Station | 0.125 | 0.065 | dark and flat |
+| Aquarii Mega-Station | 0.122 | 0.061 | dark and flat |
+| Terran Colony Ship | 0.158 | 0.078 | dark and flat |
+| Terran Terraformer | 0.160 | 0.069 | dark and flat |
+| Aquarii Carrier | 0.254 | 0.085 | primary accent effectively absent (2.1%) |
+
+- [ ] Re-roll those six — about 250 credits — OR accept them. **Jacob's call**, because credits are
+      the binding constraint on finishing the remaining three civilizations
 
 ## F. Worlds and terrain
 
