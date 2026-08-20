@@ -1,8 +1,8 @@
 // ============================================================================================
 // A CONTACT SHEET OF EVERY MODEL
 //
-//   node tools/contact-sheet.mjs --dir Art/AllModels --out Art/AllModels/_contact-sheet.png
-//   node tools/contact-sheet.mjs --dir Art/MeshyRebuilt --match thumbnail --cols 6
+//   node tools/contact-sheet.mjs --dir Art/Active --out Art/_review/contact-sheet.png
+//   node tools/contact-sheet.mjs --dir Art/Incoming --match thumbnail --cols 6
 //
 // Reviewing a hundred and forty ships one render at a time is slow and, worse, unreliable — by the
 // thirtieth you have lost the standard you were judging the first against. Tiled together on one
@@ -23,8 +23,8 @@ const PROJ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 
-const DIR   = path.resolve(PROJ, arg('--dir', 'Art/AllModels'));
-const OUT   = path.resolve(PROJ, arg('--out', 'Art/AllModels/_contact-sheet.png'));
+const DIR   = path.resolve(PROJ, arg('--dir', 'Art/Active'));
+const OUT   = path.resolve(PROJ, arg('--out', 'Art/_review/contact-sheet.png'));
 const MATCH = arg('--match', 'render|thumbnail');
 const COLS  = parseInt(arg('--cols', '6'), 10);
 const CELL  = parseInt(arg('--cell', '260'), 10);

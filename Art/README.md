@@ -1,73 +1,93 @@
-# Art — the ship generations, and which one is which
+# Art
 
-Three generations of ship art exist. **Nothing is ever deleted**: a hull that looks wrong today may be
-the one that looks right once it is 40 pixels across in the game, and regenerating costs credits.
-Everything is kept and labelled instead.
+Four folders. That is the whole system.
 
-None of this folder is committed — see `.gitignore`. It is several gigabytes of binary that would
-bloat the repository forever, and every file in it is reproducible from `tools/` plus credits. The
-folder is the working store; the *recipe* is what is version-controlled.
+```
+Art/
+  Active/         the models we are using
+  Alternatives/   models we generated and kept, but are not using
+  Incoming/       where the generator writes, before anything is chosen
+  _review/        contact sheets and diagnostic renders, not models
+```
 
----
+`Active/` and `Alternatives/` both hold **one folder per civilization**, and inside each, one folder
+per ship class:
 
-## GEN 1 — the original library
-**`C:\Users\lando\Downloads\4X-Ship-Models`** — 4.9 GB, 1,191 files, 145 unit folders.
+```
+Art/Active/Aquarii/14-Fighter/          <- the fighter we use
+Art/Alternatives/Aquarii/14-Fighter/    <- other fighters we generated
+    cyborg-rebuild/
+    account-archive/
+```
 
-The first pass, made before this session. **Left exactly where it is, untouched**, because it is the
-only copy and 40 of its units are genuinely good.
+An `Active/<Civ>/<Unit>/` folder holds one model in every format it was downloaded in — `.glb` for
+the game, `.fbx` and `.obj` for DCC tools, `.stl` and `.3mf` for printing, all four PBR maps, the
+concept art it was generated from, and the render Meshy made of it.
 
-Per unit: `concept/`, `unity/*.glb`, `blender/*.fbx`, `obj/`, `textures/`, `print/`, and a
-`PROMPT.txt` recording the exact prompt, the Meshy task id and the generation settings.
+`Alternatives/<Civ>/<Unit>/` holds the same thing again, one folder per alternative, each named for
+where it came from: `superseded-2026-08-20`, `reroll-2026-08-20-not-used`, `pre-creature`,
+`lineage-drift`, `account-archive`, and so on.
 
-- **40 units are textured and good** — Terran 02–29, Aquarii 01–12.
-- **100 units are geometry only**, no materials at all.
-- 5 Sylvan stations (25–29) were never made; Terran 01-Scout has no `.glb`.
-- Quality is uneven even among the textured ones: `Terran/19-Carrier` is a literal naval aircraft
-  carrier, and several Aquarii hulls are shapeless.
+`Alternatives/Misc/` is for anything whose civilization or ship class could not be determined —
+mostly raw Meshy task folders named `texture`, `generate` or `image-to-3d-texture`, which are
+experiments that were never tied to a hull.
 
-## GEN 2 — `Art/MeshyTextured/`
-The abandoned experiment: uploading Gen 1 meshes back to Meshy and running the texture phase on them.
+## Where the game actually loads from
 
-**16 units, 1 usable.** Meshy largely ignores livery instructions on geometry it did not author and
-returns either a greyscale hull or one flat colour. Kept because `Aquarii/14-Fighter` came out well
-and because the albedos are a useful before/after against Gen 3.
+**Not from here.** The game loads `.glb` files out of
+`Assets/Resources/SpaceAssets/Ships/<Civ>/` and `.../Stations/<Civ>/`.
 
-Do not build on this generation. It is a record of a dead end, not a source.
+Those are **built from `Art/Active/`** by the importer, which is a real transformation rather than a
+copy: source art is 1.8 GB of million-triangle meshes with 4K textures, and everything under
+`Resources/` is loaded into the build whether or not it is used. The importer welds, decimates to
+~12k triangles and downscales textures to 512/256, which is what makes the fleet 12 MB instead of a
+couple of gigabytes.
 
-## GEN 3 — `Art/MeshyRebuilt/`
-The current approach, and the one that matches the quality bar: **concept art → image-to-3D**, which
-is how the best Gen 1 ships were made. Regenerates geometry as well as texture, so it also fixes hulls
-that were bad on their own terms.
+```
+node tools/import-ship-models.mjs          # Art/Active  ->  Assets/Resources/SpaceAssets/
+node tools/import-ship-models.mjs --dry    # say what it would do, write nothing
+```
 
-Generated in lineage order — each Mk II is an image-to-image refit of its Mk I, so an upgrade looks
-like the same ship with more bolted on. Per unit:
+So the rule is: **change what is in `Active/`, then re-run the importer.** Swapping a folder in
+`Active/` and forgetting to import changes nothing the game can see.
 
-    <Civ>_<Hull>_concept.png     the concept art
-    <Civ>_<Hull>_thumbnail.png   Meshy's render — this is the UI thumbnail
-    <Civ>_<Hull>_albedo.png      + _normal / _roughness / _metallic
-    <Civ>_<Hull>.glb             the game asset
-    <Civ>_<Hull>.fbx.zip         DCC tools
-    <Civ>_<Hull>.obj.zip         anything that will not read glTF
-    <Civ>_<Hull>.stl / .3mf      3D printing
+## Promoting an alternative
 
-`Art/MeshyRaw/` is scratch space for the decimation pipeline and holds nothing of record.
+To put an alternative into service, swap the folders and re-import:
 
----
+```
+# keep what is there now
+mv Art/Active/Aquarii/19-Carrier Art/Alternatives/Aquarii/19-Carrier/previous-active
 
-## Which one does the game use?
+# put the alternative in its place
+mv Art/Alternatives/Aquarii/19-Carrier/some-draw Art/Active/Aquarii/19-Carrier
 
-Neither directly. `tools/import-ship-models.mjs` decimates a chosen generation into
-`Assets/Resources/SpaceAssets/`, because raw Meshy output is unusable in-engine — one Terran
-Dreadnought is 1,996,570 triangles and 99 MB, for a ship drawn at 0.09–0.40 world units. The importer
-takes it to ~12,000 triangles and a few hundred KB.
+node tools/import-ship-models.mjs
+node tools/verify-wiring.mjs
+```
 
-So the pipeline is: **Gen 3 → import → `Resources/`**, with Gen 1 as the fallback for any unit Gen 3
-has not reached yet.
+Then check the orientation line for that hull in
+`Assets/Resources/SpaceAssets/Ships/ship-meshes.txt` — a different draw can face a different way, and
+that file is what stops it flying backwards. `node tools/ship-silhouettes.mjs` re-renders the sheet
+to read it off.
 
-## Checking a generation
+## Nothing is deleted
 
-    node tools/verify-textures.mjs --dir Art/MeshyRebuilt --verbose
+Every model that has ever been generated is kept, in every format it was downloaded in. When a hull
+is replaced, the old one moves to `Alternatives/` rather than going away — a re-roll is a fresh draw,
+not an improvement, and on 2026-08-20 two of six came back worse and were put straight back.
 
-Scores every albedo for brightness, detail and whether both livery accents actually landed where the
-mask extractor can find them, and writes a re-do worklist for the failures. Use it before importing —
-it is much more reliable than judging 140 thumbnails by eye.
+The one thing that does get removed is a byte-identical duplicate: once a staged model in `Incoming/`
+has been promoted into `Active/`, the staging copy is the same file twice and is cleared.
+
+## The tools
+
+| what | command |
+|---|---|
+| generate a fleet | `node tools/meshy-rebuild-batch.mjs --token-file tools/meshy-token.txt --only <Civ>` |
+| import into the game | `node tools/import-ship-models.mjs` |
+| check the wiring | `node tools/verify-wiring.mjs` |
+| check the textures | `node tools/verify-textures.mjs` |
+| look at a whole civ | `node tools/contact-sheet.mjs --dir Art/Active/<Civ> --match thumbnail` |
+| find which way a hull faces | `node tools/ship-silhouettes.mjs` |
+| re-pull everything from the Meshy account | `node tools/meshy-archive-tasks.mjs` |

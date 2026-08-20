@@ -31,7 +31,7 @@ const PROJ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 
-const OUT  = path.resolve(PROJ, arg('--out', 'Art/AllModels/_silhouettes.png'));
+const OUT  = path.resolve(PROJ, arg('--out', 'Art/_review/silhouettes.png'));
 const COLS = parseInt(arg('--cols', '5'), 10);
 const CELL = parseInt(arg('--cell', '300'), 10);
 const LABEL = 26;

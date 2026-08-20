@@ -64,7 +64,7 @@ function readTokenFile() {
   return /^bearer\s/i.test(raw) || raw.startsWith('msy_') ? raw : 'Bearer ' + raw;
 }
 if (TOKEN_FILE) TOKEN = readTokenFile() || TOKEN;
-const OUT     = arg('--out', path.join(PROJ, 'Art', 'MeshyRebuilt'));
+const OUT     = arg('--out', path.join(PROJ, 'Art', 'Incoming'));
 const STATE   = path.join(PROJ, 'tools', 'meshy-rebuild-state.json');
 const ONLY    = arg('--only', '');
 const LINEAGE = arg('--lineage', '');

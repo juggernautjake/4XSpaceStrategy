@@ -1,7 +1,7 @@
 // ============================================================================================
 // DID THE LIVERY ACTUALLY COME OUT RIGHT?
 //
-//   node tools/verify-textures.mjs [--dir Art/MeshyTextured] [--verbose]
+//   node tools/verify-textures.mjs [--dir Art/Active] [--verbose]
 //
 // Two questions, asked of every textured ship, measured rather than eyeballed:
 //
@@ -32,7 +32,7 @@ const PROJ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const VERBOSE = argv.includes('--verbose');
-const DIR = path.resolve(PROJ, arg('--dir', path.join('Art', 'MeshyTextured')));
+const DIR = path.resolve(PROJ, arg('--dir', path.join('Art', 'Active')));
 
 const palette = JSON.parse(fs.readFileSync(path.join(PROJ, 'tools', 'civ-colors.json'), 'utf8'));
 const RULES = palette.maskRules;

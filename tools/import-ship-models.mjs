@@ -98,10 +98,13 @@ const EXTRA_DIRS = {
 
 // ---- Args ------------------------------------------------------------------------------------
 const argv = process.argv.slice(2);
+const PROJ_FOR_SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DRY = argv.includes('--dry');
 const srcIdx = argv.indexOf('--src');
-const SRC = srcIdx >= 0 ? argv[srcIdx + 1]
-                        : 'C:/Users/lando/Downloads/4X-Ship-Models';
+// Defaults to Art/Active — the one folder holding the models the game is built from. It used to
+// default to a path under Downloads, which meant the source of the shipped art was a folder outside
+// the project that nobody else could see or check into anything.
+const SRC = srcIdx >= 0 ? argv[srcIdx + 1] : path.join(PROJ_FOR_SRC, 'Art', 'Active');
 // fileURLToPath, not URL.pathname — the project lives under "Jacob Maddux", and pathname hands back
 // the space percent-encoded, which then becomes a literal "%20" directory name.
 const PROJ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 const PROJ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
-const OUT = path.resolve(PROJ, arg('--out', 'Art/AllModels/_flight-model.png'));
+const OUT = path.resolve(PROJ, arg('--out', 'Art/_review/flight-model.png'));
 
 // ---- the classes under test: ALL of them, read from the game's own tables ---------------------
 //

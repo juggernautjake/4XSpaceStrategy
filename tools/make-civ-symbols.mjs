@@ -142,7 +142,7 @@ names.forEach((n, i) => {
 });
 labels += `</svg>`;
 
-const sheet = path.join(PROJ, 'Art', 'AllModels', '_civ-symbols.png');
+const sheet = path.join(PROJ, 'Art', '_review', 'civ-symbols.png');
 fs.mkdirSync(path.dirname(sheet), { recursive: true });
 await sharp({ create: { width: sheetW, height: sheetH, channels: 4, background: { r: 18, g: 22, b: 28, alpha: 1 } } })
   .composite([...tiles, { input: Buffer.from(labels), top: 0, left: 0 }])
