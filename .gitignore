@@ -126,3 +126,6 @@ tools/meshy-batch-state.json
 tools/meshy-rebuild-state.json
 tools/retexture-worklist.json
 tools/ship-import-report.json
+
+# Meshy web session (refresh token) — never commit
+tools/.meshy-session.json

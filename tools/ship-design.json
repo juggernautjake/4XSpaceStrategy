@@ -249,7 +249,7 @@
         },
         {
           "unit": "27-Deep-Space-Station",
-          "upgrade": "a compact self-sufficient core wrapped in enormous solar collector wings. A BUILT STATION, never a creature"
+          "upgrade": "a compact self-sufficient core inside an open lattice tower wrapped in enormous solar collector wings. A BUILT STATION, never a creature. TALL and VERTICAL, not a dome and not a disc"
         },
         {
           "unit": "28-Mega-Station",
@@ -257,7 +257,7 @@
         },
         {
           "unit": "29-Hyper-Speed-Relay",
-          "upgrade": "a colossal open ring of arcing emitters around a blazing energy aperture"
+          "upgrade": "a colossal OPEN five-armed gate — arcing emitter arms curling inward around a blazing aperture. NOT a closed ring, NOT a dome, NOT a reef: open space between the arms"
         }
       ]
     }
@@ -328,9 +328,9 @@
       "24-Supply-Station": "a cluster of BARNACLES and mussel pods around a docking spine",
       "25-Multi-Role-Station": "a giant armoured CRAB fortress-city: shell terraces, claw docking arms, turrets between the legs",
       "26-Terraforming-Station": "a vast ring of SEA ANEMONE processor mouths around a glowing reactor core",
-      "27-Deep-Space-Station": "a JELLYFISH, its bell a solar collector and its tendrils sensor booms",
+      "27-Deep-Space-Station": "a deep-sea GLASS SPONGE outpost: a tall silica lattice tower of woven struts, its open weave glassy and lit from within, ringed with solar collector vanes",
       "28-Mega-Station": "a KRAKEN-CORAL METROPOLIS: nested reef rings, spires, docking bays, a glowing heart",
-      "29-Hyper-Speed-Relay": "a colossal ring of CEPHALOPOD ARMS around a blazing energy aperture"
+      "29-Hyper-Speed-Relay": "five colossal arcing BASKET-STAR arms curling up and inward to frame a blazing jump aperture, the arms branching into finer and finer emitter tips"
     },
     "Terran": {
       "01-Scout": "a small single-seat RECON DRONE, like a high-altitude spyplane: long thin wings, one engine, a chin sensor ball",

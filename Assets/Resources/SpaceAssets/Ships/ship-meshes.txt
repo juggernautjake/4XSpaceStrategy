@@ -29,6 +29,7 @@ LP Colony Ship              -90 0 0
 LP Science Ship               0 90 0
 
 # ---- Generated fleet -----------------------------------------------------------------------
+Aquarii_BattleStation             0  -90    0    # len X, up Y, dims 1.90 x 0.87 x 1.53
 Aquarii_Carrier                   0    0    0    # len Z, up Y, dims 1.83 x 0.46 x 1.90  AMBIGUOUS
 Aquarii_ColonyShip                0  -90    0    # len X, up Y, dims 1.90 x 0.69 x 1.78  AMBIGUOUS
 Aquarii_Cruiser                   0  -90    0    # len X, up Y, dims 1.90 x 0.57 x 0.74
@@ -39,9 +40,19 @@ Aquarii_FighterII                 0  -90    0    # len X, up Y, dims 1.90 x 0.73
 Aquarii_FighterIII                0  -90    0    # len X, up Y, dims 1.90 x 0.77 x 1.29
 Aquarii_Frigate                   0    0    0    # len Z, up Y, dims 1.13 x 0.58 x 1.90
 Aquarii_Miner                     0  -90    0    # len X, up Y, dims 1.90 x 0.62 x 0.99
+Aquarii_MultiStation              0  -90    0    # len X, up Y, dims 1.90 x 0.83 x 1.81  AMBIGUOUS
+Aquarii_Probe                     0  -90   90    # len X, up Z, dims 1.90 x 1.34 x 1.27
+Aquarii_RelayStation              0    0    0    # len Z, up Y, dims 1.89 x 0.77 x 1.90  AMBIGUOUS
 Aquarii_ResearchShip              0  -90    0    # len X, up Y, dims 1.90 x 0.58 x 0.96
 Aquarii_ResearchShipII            0  -90    0    # len X, up Y, dims 1.90 x 0.80 x 1.13
-Aquarii_ResearchShipIII           0  -90   90    # len X, up Z, dims 1.89 x 0.89 x 0.89
+Aquarii_ResearchShipIII           0  -90    0    # len X, up Y, dims 1.90 x 0.81 x 0.95
+Aquarii_ResearchStation           0    0    0    # len Z, up Y, dims 1.42 x 1.05 x 1.90
+Aquarii_ScienceVessel             0  -90    0    # len X, up Y, dims 1.90 x 1.01 x 1.39
 Aquarii_Scout                     0  -90    0    # len X, up Y, dims 1.90 x 0.54 x 1.67  AMBIGUOUS
 Aquarii_ScoutII                   0  -90    0    # len X, up Y, dims 1.90 x 0.61 x 1.16
 Aquarii_ScoutIII                  0  -90    0    # len X, up Y, dims 1.90 x 0.44 x 1.77  AMBIGUOUS
+Aquarii_SupplyStation             0  -90    0    # len X, up Y, dims 1.90 x 0.47 x 1.83  AMBIGUOUS
+Aquarii_Terraformer               0  -90    0    # len X, up Y, dims 1.80 x 0.71 x 0.87
+Aquarii_Transport                 0  -90    0    # len X, up Y, dims 1.90 x 0.50 x 1.01
+Terran_Fighter                    0  -90    0    # len X, up Y, dims 1.90 x 0.56 x 1.71  AMBIGUOUS
+Terran_Scout                      0    0    0    # len Z, up Y, dims 1.47 x 0.40 x 1.90

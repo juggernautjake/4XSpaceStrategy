@@ -56,12 +56,14 @@ meshes under `_Extras/` in the Downloads library.
 - [x] Size variance named per hull — a probe is a fist across, a mega-station a small moon
 
 ### A4. Generation progress
-- [~] **Aquarii 19/29** — running. Missing: Science Vessel + all 9 stations
+- [~] **Aquarii 25/29** — the last four stations (Terraforming, Deep-Space, Mega, Hyper-Relay) are
+      generating now. All 25 finished hulls are decimated and imported into `Resources/`
 - [ ] **Terran 2/29** — started, then deprioritised to finish Aquarii first
 - [ ] Pyrothian 0/29 · Cryithn 0/29 · Sylvan 0/29
-- [!] **Blocked on throughput, not credits.** The web token lives ~15 min so the batch needs feeding
-      by hand every few minutes. A `msy_…` API key would make this unattended and is the single
-      highest-leverage thing outstanding.
+- [x] **No longer blocked on hand-feeding tokens.** The open Meshy tab refreshes its own session
+      cookie (`sb-auth-auth-token.*`); reading that back out of the tab and writing
+      `tools/meshy-token.txt` keeps the batch fed without anyone pasting anything. A `msy_…` API key
+      would still be simpler and never expire.
 
 ### A5. Downloads and formats — **[x]**
 - [x] Every finished unit pulls down `.glb` (game), `.fbx` + `.obj` (DCC), `.stl` + `.3mf` (printing)
@@ -72,6 +74,10 @@ meshes under `_Extras/` in the Downloads library.
 ### A7. Every design unique, suited to its job, true to its civ
 - [x] Enforced by construction: the per-civ metaphor names a different thing for every hull, and the
       tech ladder makes each tier visibly more built-up than the last
+- [x] **Two collisions caught before they were generated.** The Deep-Space Station was another
+      JELLYFISH, which the Terraformer already is — it is now a deep-sea GLASS SPONGE lattice tower.
+      The Hyper-Speed Relay was a ring of CEPHALOPOD ARMS sitting between the anemone ring and the
+      kraken reef — it is now an OPEN five-armed BASKET STAR framing the aperture
 - [~] Checked by eye per civ with `tools/contact-sheet.mjs` — tiling a whole civilization into one
       image is the only reliable way to spot two hulls that came back too similar. Done for the 16
       Aquarii landed so far (shrimp / lionfish / swordfish / sailfish / cuttlefish / octopus / squid /
@@ -123,6 +129,9 @@ shown on bare models. One flag each to bring back.
 - [x] **D4.** Orientation manifest generated from measured bounds, so the whole fleet agrees on its
       axis instead of the heuristic deciding per mesh
 - [x] **D5.** `tools/verify-wiring.mjs` — every path the C# will build, checked against disk
+- [x] **D8.** All 25 finished Aquarii hulls imported: 0.74 GB of source art -> 12 MB in the project,
+      ~12k triangles each. `verify-wiring.mjs` resolves 25/29 for Aquarii, all four starting classes
+      among them
 - [ ] **D6.** Confirm in Unity that `.glb` imports and `Resources.Load<GameObject>` resolves
 - [ ] **D7.** Correct the bow/stern 180° flips by eye (F10 hot-reloads the manifest). Five hulls are
       flagged AMBIGUOUS where the two longest axes are within 15%
