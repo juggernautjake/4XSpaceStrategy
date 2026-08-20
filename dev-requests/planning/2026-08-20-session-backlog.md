@@ -69,6 +69,15 @@ meshes under `_Extras/` in the Downloads library.
 - [x] Nothing is deleted. `Art/AllModels/` keeps every generation in labelled folders, and
       `tools/meshy-archive-tasks.mjs` can re-pull everything from the Meshy account
 
+### A7. Every design unique, suited to its job, true to its civ
+- [x] Enforced by construction: the per-civ metaphor names a different thing for every hull, and the
+      tech ladder makes each tier visibly more built-up than the last
+- [~] Checked by eye per civ with `tools/contact-sheet.mjs` — tiling a whole civilization into one
+      image is the only reliable way to spot two hulls that came back too similar. Done for the 16
+      Aquarii landed so far (shrimp / lionfish / swordfish / sailfish / cuttlefish / octopus / squid /
+      nautilus / turtle / crab / shark / hammerhead / megalodon / lobster / sawfish / manta — all
+      distinct); must be repeated as each civilization completes
+
 ### A6. Quality control
 - [x] `tools/verify-textures.mjs` — brightness, detail, and whether both livery accents landed
 - [x] `tools/contact-sheet.mjs` — tile every render into one image for review
@@ -173,6 +182,48 @@ shown on bare models. One flag each to bring back.
       the clutter sitting in the survey tab meanwhile
 
 ---
+
+## F-bis. Terrain and generation — second screenshot round
+
+### Biomes, elevation and the topographic view
+- [ ] **F20. Biomes must not denote elevation.** On geothermal hotspots, Metallic Crust → Badlands →
+      Canyon are currently reading as a rising elevation ramp (screenshot: concentric rings around a
+      vent). Past a certain elevation it should simply be mountain terrain. A biome says what ground
+      IS; how high it is, is a separate fact
+- [ ] **F21. Volcano biome threshold 97% → 95%** on the geothermal index
+- [ ] **F22. Black contour lines every 500 m.** A thin black border separating each elevation band —
+      0, ±500, ±1000, ±1500, … in both directions — giving the planet map a topographic read. This is
+      what replaces biomes-as-elevation
+- [ ] **F23. Molten / lava worlds must remain possible.** Whatever the temperature rework does, the
+      conditions that produce a molten world have to survive it
+
+### Indexes
+- [ ] **F24. Gas giants get NO indexes at all.** Remove them for now; gas giants need their own
+      system later
+- [ ] **F25. Hydro index — revised from F7.** The current result floors the whole map at 70% with a
+      brighter ring at the shoreline, which reads as the index circling the water rather than showing
+      it. Wanted: the **water source itself** carries a high value, the index **reaches a few tiles
+      inland** as it already does, and the flat 70% everywhere goes away
+
+### Solar system generation — scale, spacing and count
+- [ ] **F26. Temperature range −270 °C to 1000 °C.** Bodies close to their star must be far hotter
+      than they are now
+- [ ] **F27. Habitable zones are too close in.** A G-type star's HZ sits far nearer than it should —
+      Earth is the third planet and is not even at the centre of its own HZ
+- [ ] **F28. Stop generating frozen worlds as the innermost planet**
+- [ ] **F29. Far fewer planets per system.** Currently 8–10 around nearly every star. Raise the mass
+      cost per planet/moon so systems spend out sooner; **1-planet systems should be possible**, and
+      a full house should be rare
+- [ ] **F30. Hard cap of 9 planets** per system, excluding asteroid belts and moons. A cap, not a target
+- [ ] **F31. Lower default orbital inclination.** Most planets on a flat plane; inclined orbits rare
+- [ ] **F32. Asteroid belts no closer than beyond the 3rd planet**, out to the furthest orbit —
+      anything that small nearer in would have been swept up long ago
+- [ ] **F33. Belt count: max 4, and 4 very rare.** 1 far more common, *if* a system gets one at all.
+      A system that rolls fewer gas giants may roll more belts instead
+- [ ] **F34. Moons: total mass ≤ ¼ the host planet's**, whether in one moon or split across them.
+      Maximum 3 moons, not a requirement
+- [ ] **F35. Gas giants and stars ×2 in rendered size**, with orbit placement and spacing adjusted so
+      the system still reads correctly at that scale
 
 ## G. Fixed along the way
 
