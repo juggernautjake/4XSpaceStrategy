@@ -1,0 +1,19 @@
+{
+  "name": "4x-ship-tools",
+  "private": true,
+  "type": "module",
+  "description": "Offline art pipeline for the ship fleet. Not part of the Unity build.",
+  "dependencies": {
+    "@gltf-transform/core": "^4.4.2",
+    "@gltf-transform/functions": "^4.4.2",
+    "meshoptimizer": "^0.25.0",
+    "sharp": "0.35.3"
+  },
+  "overrides": {
+    "sharp": "0.35.3"
+  },
+  "//": "sharp is PINNED and overridden to a single version on purpose. @gltf-transform/functions pulls sharp in via ndarray-pixels; if npm installs a second copy at a different version, both native libvips modules load into the same process and every image op dies with 'colourspace: parameter space not set'. One sharp, or no image resizing.",
+  "allowScripts": {
+    "sharp@0.35.3": true
+  }
+}

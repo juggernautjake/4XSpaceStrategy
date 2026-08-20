@@ -104,3 +104,25 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# Offline art-pipeline tooling (tools/import-ship-models.mjs); not part of the Unity build.
+tools/node_modules/
+
+# Meshy credentials / short-lived session tokens — never commit.
+tools/.env.local
+tools/meshy-token.txt
+
+# Generated ship art — gigabytes of binary, reproducible from tools/. See Art/README.md.
+# The README itself is kept: it is the map of which generation is which.
+Art/*
+!Art/README.md
+
+# Playwright MCP scratch: screenshots, snapshots, console logs, batch logs.
+.playwright-mcp/
+
+# Meshy batch resume ledgers. Useful locally, but they churn on every run and are meaningless
+# on another machine — the tasks they reference live in one Meshy account.
+tools/meshy-batch-state.json
+tools/meshy-rebuild-state.json
+tools/retexture-worklist.json
+tools/ship-import-report.json

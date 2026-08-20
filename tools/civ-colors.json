@@ -1,0 +1,134 @@
+{
+  "_readme": [
+    "CIVILIZATION LIVERY — the base material each fleet is built from, and the two accent colours",
+    "the player may change.",
+    "",
+    "The texture Meshy returns is a single baked image with no layers, so the only way to know which",
+    "pixels are 'the stripe' and which are 'the hull' is to key them by colour. Keying only works if",
+    "an accent hue appears nowhere else — a teal stripe on a teal hull is unrecoverable.",
+    "",
+    "REVISED after the first pass came back looking white. The original rule was 'base desaturated,",
+    "accents saturated', which keys perfectly and produced a fleet of pale ships: pearl-white nacre,",
+    "pale ice, bone wood. When the accents then failed to land there was no colour left at all, and",
+    "the civilizations were indistinguishable. Identity cannot live entirely in trim that might not",
+    "arrive.",
+    "",
+    "So there are now TWO kinds of civ, flagged by `baseSaturated`:",
+    "",
+    "  baseSaturated: false  (Terran, Pyrothian) — the hull is genuinely neutral: steel grey-blue,",
+    "    charcoal basalt. It sits below maskRules.minSaturation, so it cannot be mistaken for an",
+    "    accent no matter what hue it leans toward, and only the two accents need separating.",
+    "",
+    "  baseSaturated: true  (Aquarii, Cryithn, Sylvan) — the hull carries the civ's signature colour",
+    "    outright: deep sea-teal, glacier-blue, forest-green. Those ships read as themselves across",
+    "    the map with no accents at all. The cost is that `baseHue` now competes for hue space, so",
+    "    THREE things must stay apart, not two — which is why these civs' accents were moved off the",
+    "    signature colour entirely (Aquarii teal hull, amber and magenta livery).",
+    "",
+    "hueSeparation is a check, not decoration: below about 60 degrees two masks bleed into each other",
+    "and the secondary stops being independently recolourable. For a saturated base, mind the distance",
+    "from baseHue to BOTH accents as well as between them.",
+    "",
+    "primary/secondary are DEFAULTS. They are what ships in the texture and what a new game starts",
+    "with; the player overrides them per civilization and the shader recolours the masked regions.",
+    "",
+    "keyHue/keySat are what the offline mask extractor matches on (tools/extract-color-masks.mjs).",
+    "Widen keyTolerance only if a civ's mask comes out patchy; narrow it if the mask bleeds onto hull."
+  ],
+  "maskRules": {
+    "minSaturation": 0.35,
+    "minValue": 0.12,
+    "keyTolerance": 28,
+    "_note": "HSV. A pixel joins a mask when its saturation and value clear the floors AND its hue is within keyTolerance degrees of that accent's keyHue. Everything else stays unrecoloured base."
+  },
+  "civilizations": {
+    "Terran": {
+      "baseMaterial": "mid-tone STEEL GREY-BLUE gunmetal plating, black heat radiators, exposed structural ribs - a definite colour, never white",
+      "primary": {
+        "name": "Cobalt",
+        "hex": "#2F6FE0",
+        "keyHue": 217,
+        "role": "hull stripes, wing flashes, the broad livery panels"
+      },
+      "secondary": {
+        "name": "Safety Orange",
+        "hex": "#F2820C",
+        "keyHue": 32,
+        "role": "trim lines, hazard chevrons, running lights, engine glow"
+      },
+      "hueSeparation": 185,
+      "baseSaturated": false
+    },
+    "Aquarii": {
+      "baseMaterial": "a CYBORG SEA CREATURE - deep sea-teal scaled skin, fin membranes and ribbed cartilage, with hard metal armour plates bolted over the back and flanks, mechanical gill vents, cybernetic lens eyes, cable bundles and glowing implant seams",
+      "baseHue": 180,
+      "primary": {
+        "name": "Amber",
+        "hex": "#F2A81E",
+        "keyHue": 40,
+        "role": "the armour plates over the back, flanks and dorsal fin"
+      },
+      "secondary": {
+        "name": "Magenta",
+        "hex": "#D24FC8",
+        "keyHue": 305,
+        "role": "glowing implant seams, fin edges, lens eyes and gill slits"
+      },
+      "hueSeparation": 95,
+      "baseSaturated": true
+    },
+    "Pyrothian": {
+      "baseMaterial": "dark charcoal basalt and obsidian slabs, thick overlapping ablative plate, brass heat-exchanger fins",
+      "primary": {
+        "name": "Magma",
+        "hex": "#FF5A14",
+        "keyHue": 20,
+        "role": "the glowing seams between armour plates, vent throats"
+      },
+      "secondary": {
+        "name": "Cryst Cyan",
+        "hex": "#4FD8E8",
+        "keyHue": 188,
+        "role": "sulphur-crystal growths, sensor spines, cockpit glow"
+      },
+      "hueSeparation": 168,
+      "baseSaturated": false
+    },
+    "Cryithn": {
+      "baseMaterial": "RICHLY COLOURED deep glacier-blue faceted armour over frosted silver alloy, rime-crusted plating",
+      "baseHue": 205,
+      "primary": {
+        "name": "Aurora Violet",
+        "hex": "#C64FD8",
+        "keyHue": 292,
+        "role": "the faceted panel inlays and dorsal spine"
+      },
+      "secondary": {
+        "name": "Ember Gold",
+        "hex": "#F0B33C",
+        "keyHue": 42,
+        "role": "crystal spine tips, drive glow, instrument light"
+      },
+      "hueSeparation": 110,
+      "baseSaturated": true
+    },
+    "Sylvan": {
+      "baseMaterial": "RICHLY COLOURED deep forest-green living hull, woven vine over a seed-pod shell, dark bark plating",
+      "baseHue": 120,
+      "primary": {
+        "name": "Blossom Violet",
+        "hex": "#A24FD8",
+        "keyHue": 285,
+        "role": "the broad leaf-sail and canopy panels"
+      },
+      "secondary": {
+        "name": "Sap Amber",
+        "hex": "#E2A32C",
+        "keyHue": 40,
+        "role": "sap-light veins along the grain, blossoms, pod seams"
+      },
+      "hueSeparation": 115,
+      "baseSaturated": true
+    }
+  }
+}

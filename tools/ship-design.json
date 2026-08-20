@@ -1,0 +1,265 @@
+{
+  "_readme": [
+    "SHIP DESIGN RULES — the two things that make a fleet read as a fleet.",
+    "",
+    "1. CIVILIZATION IDENTITY, BUT ALWAYS A STARSHIP.",
+    "   Each civ has a strong aesthetic drawn from its biology (Species.cs), and each one carries a",
+    "   `techMandate` that exists to stop the aesthetic eating the ship. Left alone, 'Aquarii' returns a",
+    "   fish and 'Sylvan' returns a tree — the first pass produced a literal jellyfish for a deep-space",
+    "   station and a naval aircraft carrier for the Terran carrier. The mandate is the counterweight:",
+    "   sea forms yes, but with obvious engineering — thrusters, sensors, weapon mounts, panel lines.",
+    "",
+    "2. LINEAGE. A Mk II must read as the SAME SHIP as the Mk I, refitted — not a different design that",
+    "   happens to share a name. That is a visual promise the UI already makes by calling them Mk I/II/III,",
+    "   and it is what makes an upgrade feel earned.",
+    "",
+    "   Mechanically this is why generation is ORDERED. Each tier's concept art is generated as an",
+    "   image-to-image edit of the tier below it, so the hull, proportions, camera angle and palette carry",
+    "   forward and only the `upgrade` text changes. Generating all three from text independently gives",
+    "   three unrelated ships every time, no matter how carefully the prompts are worded.",
+    "",
+    "   `chain: true` lineages inherit tier to tier. `chain: false` are one-offs with no ancestor.",
+    "",
+    "referenceStrength is how strongly the previous tier's art constrains the next: high enough that the",
+    "ship is recognisably the same, low enough that the added armour and guns actually appear."
+  ],
+  "referenceStrength": 0.62,
+  "conceptModel": "fal-ai/nano-banana-pro",
+  "aspectRatio": "16:9",
+  "_tailNotes": [
+    "The tail is not decoration — every clause in it is load-bearing downstream.",
+    "",
+    "ORIENTATION: the bow/stern and dorsal/ventral clauses exist so ShipMeshManifest's bounds heuristic",
+    "lands. It infers forward from the longest axis, up from the shortest, and the stern from whichever",
+    "half carries more geometry — so a hull that is longer than it is wide, wider than it is tall, with",
+    "its mass and engines aft and its detail on top, auto-orients correctly on import. A blobby or",
+    "symmetric concept produces a mesh that flies sideways and needs a hand-written manifest line.",
+    "",
+    "LIVERY PLACEMENT: the primary has to land on large contiguous panels and the secondary on small",
+    "separate trim, or extract-color-masks.mjs cannot tell them apart in the baked albedo and the ship",
+    "can never take a player's colours. Naming the SURFACES rather than a percentage is what finally",
+    "worked — Meshy ignores proportions but follows 'along the flanks' and 'on the fin edges'.",
+    "",
+    "DETAIL: panel lines and greebling give the albedo luminance variance, which is also what the",
+    "verifier measures to tell a real texture from a flat fill."
+  ],
+  "sharedTail": "Bow distinct from stern; longer than wide, wider than tall; engines aft, sensors forward; flat ventral, detail dorsal. STRONG SATURATED COLOUR, never white or pale. Bold primary panels on flanks and spine; secondary only on small trim and lights. Dense panel lines, rivets, weathering. One ship, plain black background, three-quarter view, no text.",
+  "stationTail": "A built orbital structure, radially symmetric, no bow, no engines. STRONG SATURATED COLOUR, never white or pale. Bold primary panels on the main hull; secondary only on small trim and docking lights. Dense panel lines, rivets, weathering. One structure, plain black background, three-quarter view, no text.",
+  "civilizations": {
+    "Terran": {
+      "aesthetic": "steel grey-blue gunmetal plating, structural ribs, angular panels, black radiator fins",
+      "techMandate": "riveted modular build, visible thrusters, sensor masts, weapon mounts; never organic"
+    },
+    "Aquarii": {
+      "aesthetic": "a CYBORG SEA CREATURE starship - shark, whale, manta ray, crab, anglerfish or jellyfish body with deep sea-teal scaled skin, fins and cartilage",
+      "techMandate": "half creature half machine: metal armour plates bolted over the living body, mechanical gill vents, cybernetic lens eyes, cable bundles, glowing implant seams, thruster pods grafted to the tail"
+    },
+    "Pyrothian": {
+      "aesthetic": "dark charcoal basalt armour, overlapping ablative plate, brass heat fins, magma seams",
+      "techMandate": "heavy machinery: bolted plate, cooling pipework, huge engine bells, gun barrels; never a bare rock"
+    },
+    "Cryithn": {
+      "aesthetic": "deep glacier-blue faceted armour over frosted silver alloy, rime-crusted plating",
+      "techMandate": "precise machined build: crisp seams, sensor spines, recessed weapon ports, drive nozzles; never natural ice"
+    },
+    "Sylvan": {
+      "aesthetic": "deep forest-green living hull, woven vine over a seed-pod shell, dark bark plating",
+      "techMandate": "GROWN BUT ENGINEERED: metal fittings, sensor pods, engine nozzles and gun mounts grafted in; never a plant"
+    }
+  },
+  "lineages": [
+    {
+      "key": "scout",
+      "chain": true,
+      "family": "a small fast survey craft — slim dart hull, oversized sensor dish, single dominant engine",
+      "tiers": [
+        {
+          "unit": "01-Scout",
+          "upgrade": "the baseline model: minimal armour, one engine, one dish"
+        },
+        {
+          "unit": "02-Scout-MkII",
+          "upgrade": "the SAME ship refitted: hull lengthened, a second engine added alongside the first, a second sensor mast, light armour plate over the nose, more antennae"
+        },
+        {
+          "unit": "03-Scout-MkIII",
+          "upgrade": "the SAME ship at its final refit: three engines, a faired sensor spine along the dorsal line, sleeker swept armour, additional dishes and a small defensive turret"
+        }
+      ]
+    },
+    {
+      "key": "research",
+      "chain": true,
+      "family": "a mobile laboratory — slender hull with sensor booms, dish arrays and observation blisters",
+      "tiers": [
+        {
+          "unit": "06-Research-Ship",
+          "upgrade": "the baseline model: one dish boom, a few blisters"
+        },
+        {
+          "unit": "07-Research-Ship-MkII",
+          "upgrade": "the SAME ship refitted: longer hull, twin dish booms, a dorsal telescope array, more observation blisters"
+        },
+        {
+          "unit": "08-Research-Ship-MkIII",
+          "upgrade": "the SAME ship at its final refit: a rotating instrument ring amidships, a large forward scanning lens, dense antenna clusters"
+        },
+        {
+          "unit": "09-Science-Vessel",
+          "upgrade": "the flagship of this line: everything above, larger, crowned with a great sensor ring and radio dishes"
+        }
+      ]
+    },
+    {
+      "key": "fighter",
+      "chain": true,
+      "family": "a compact agile warship — arrowhead hull, forward gun barrels, stubby swept wings",
+      "tiers": [
+        {
+          "unit": "14-Fighter",
+          "upgrade": "the baseline model: two gun barrels, thin armour, small wings"
+        },
+        {
+          "unit": "15-Fighter-MkII",
+          "upgrade": "the SAME fighter refitted: four gun barrels, armoured shoulder plating over the cockpit, broader wings, missile rails added under them"
+        },
+        {
+          "unit": "16-Fighter-MkIII",
+          "upgrade": "the SAME fighter at its final refit: underslung cannon pods, heavy layered armour, longer swept wings, extra thrusters and a sensor blister"
+        }
+      ]
+    },
+    {
+      "key": "capital",
+      "chain": true,
+      "family": "a warship of the battle line — armoured hull, turret batteries, heavy engines",
+      "tiers": [
+        {
+          "unit": "17-Frigate",
+          "upgrade": "the smallest of the line: lean armoured hull, turret blisters, missile racks"
+        },
+        {
+          "unit": "18-Cruiser",
+          "upgrade": "the same design language scaled up: thicker armour belt, multiple turret batteries along the spine"
+        },
+        {
+          "unit": "19-Carrier",
+          "upgrade": "the same family as a fleet carrier: long flat-topped hull, open flight deck, strike-craft launch bays along the flanks. STILL A SPACESHIP, never an ocean-going aircraft carrier"
+        },
+        {
+          "unit": "20-Dreadnought",
+          "upgrade": "the same family at its heaviest: colossal slab-armoured hull, an immense spinal cannon, layered gun batteries, enormous engine bank"
+        }
+      ]
+    },
+    {
+      "key": "explorer",
+      "chain": false,
+      "family": "a long-range pathfinder — lean endurance hull, enormous fuel tanks, wide sensor prow",
+      "tiers": [
+        {
+          "unit": "04-Explorer",
+          "upgrade": "built for reach above all else"
+        }
+      ]
+    },
+    {
+      "key": "probe",
+      "chain": false,
+      "family": "a tiny expendable deep-space probe — small instrument core, solar collector, whip antenna",
+      "tiers": [
+        {
+          "unit": "05-Probe",
+          "upgrade": "cheap, unmanned, barely more than an instrument package"
+        }
+      ]
+    },
+    {
+      "key": "colony",
+      "chain": false,
+      "family": "a huge slow settler vessel — fat cargo-heavy hull carrying prefabricated habitat modules and a landing pod",
+      "tiers": [
+        {
+          "unit": "10-Colony-Ship",
+          "upgrade": "built to be spent: it lands once and becomes a city"
+        }
+      ]
+    },
+    {
+      "key": "miner",
+      "chain": false,
+      "family": "a civilian mining barge — blunt industrial hull, ore hoppers, cutting arms, refinery drum",
+      "tiers": [
+        {
+          "unit": "11-Mining-Barge",
+          "upgrade": "working machinery, unglamorous and heavy"
+        }
+      ]
+    },
+    {
+      "key": "transport",
+      "chain": false,
+      "family": "a civilian freight hauler — long spine strung with modular cargo containers behind a small bridge",
+      "tiers": [
+        {
+          "unit": "12-Transport",
+          "upgrade": "all capacity, no armament"
+        }
+      ]
+    },
+    {
+      "key": "terraformer",
+      "chain": false,
+      "family": "a vast climate-engineering vessel — industrial hull dominated by atmosphere-processor nozzles and cooling towers",
+      "tiers": [
+        {
+          "unit": "13-Terraformer",
+          "upgrade": "a factory that flies"
+        }
+      ]
+    },
+    {
+      "key": "station",
+      "chain": true,
+      "family": "an orbital structure — not a ship, no bow and no engines; radially symmetric, built to sit still",
+      "tiers": [
+        {
+          "unit": "21-Battle-Station",
+          "upgrade": "a rudimentary armoured drum ringed with heavy gun turrets and missile silos"
+        },
+        {
+          "unit": "22-Research-Station",
+          "upgrade": "the same construction style as a laboratory: habitat torus, dish arrays, telescopes, lit lab windows"
+        },
+        {
+          "unit": "23-Relay-Station",
+          "upgrade": "the same construction style as a comms relay: a slender mast carrying a huge parabolic dish and antenna clusters"
+        },
+        {
+          "unit": "24-Supply-Station",
+          "upgrade": "the same construction style as a depot: fuel spheres and cargo drums around a docking spine"
+        },
+        {
+          "unit": "25-Multi-Role-Station",
+          "upgrade": "a large complex combining all of the above: stacked habitat rings, dishes, docking arms, defensive turrets"
+        },
+        {
+          "unit": "26-Terraforming-Station",
+          "upgrade": "a colossal ring of atmosphere-processor nozzles around a reactor core"
+        },
+        {
+          "unit": "27-Deep-Space-Station",
+          "upgrade": "a compact self-sufficient core wrapped in enormous solar collector wings. A BUILT STATION, never a creature"
+        },
+        {
+          "unit": "28-Mega-Station",
+          "upgrade": "an orbital city the size of a small moon: vast nested habitat rings, spires, docking bays, a glowing reactor heart"
+        },
+        {
+          "unit": "29-Hyper-Speed-Relay",
+          "upgrade": "a colossal open ring of arcing emitters around a blazing energy aperture"
+        }
+      ]
+    }
+  ]
+}

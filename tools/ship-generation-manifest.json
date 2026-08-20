@@ -1,0 +1,1626 @@
+{
+  "generated": "tools/build-ship-manifest.mjs",
+  "format": "fbx",
+  "counts": {
+    "species": 5,
+    "shipClasses": 20,
+    "stationClasses": 9,
+    "perSpecies": 29,
+    "civTotal": 145,
+    "neutral": 34,
+    "total": 179
+  },
+  "jobs": [
+    {
+      "name": "Terran_Scout",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Scout",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A tiny fast single-seat scout: a slim dart with oversized sensor dish and a big engine, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_ResearchShip",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "ResearchShip",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A small mobile laboratory: a slender hull with sensor booms, dish arrays and observation blisters, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_Fighter",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Fighter",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A small agile warship: a compact arrowhead with forward gun barrels and stubby wings, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_ColonyShip",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "ColonyShip",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A huge slow settler vessel: a fat cargo-heavy hull carrying prefabricated habitat modules and a landing pod, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_ScoutII",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "ScoutII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "An upgraded scout: the dart hull lengthened, twin engines and a second sensor mast, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_ResearchShipII",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "ResearchShipII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "An upgraded mobile laboratory: a longer hull with a dorsal telescope array and twin dish booms, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_FighterII",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "FighterII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A heavier strike fighter: a broader arrowhead with four gun barrels and armoured shoulders, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_Terraformer",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Terraformer",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A vast climate-engineering vessel: an industrial hull dominated by huge atmosphere-processor nozzles and cooling towers, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_Probe",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Probe",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A tiny expendable deep-space probe: a small instrument core with a solar collector and a whip antenna, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_Miner",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Miner",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A civilian mining barge: a blunt industrial hull with ore hoppers, cutting arms and a refinery drum, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_Transport",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Transport",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A civilian freight hauler: a long spine strung with modular cargo containers behind a small bridge, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_Frigate",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Frigate",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A nimble patrol warship: a lean armoured hull with turret blisters and missile racks, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_Cruiser",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Cruiser",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A heavy warship: a thick armoured battle-line hull bristling with turret batteries, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_Carrier",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Carrier",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A fleet carrier: a long flat-topped hull with an open flight deck and strike-craft launch bays along the flanks, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_Dreadnought",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Dreadnought",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A colossal capital ship of the line: an enormous slab-armoured hull with immense spinal cannon and layered gun batteries, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_ScienceVessel",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "ScienceVessel",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A large deep-survey laboratory: a broad hull crowned with a great sensor ring and radio dishes, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_Explorer",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "Explorer",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A long-range pathfinder: a lean endurance hull with enormous fuel tanks and a wide sensor prow, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_ScoutIII",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "ScoutIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "The finest scout hull: a swept needle-shaped racer with three engines and a faired sensor spine, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_FighterIII",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "FighterIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A top-line strike fighter: a sleek predatory arrowhead with underslung cannon pods and swept wings, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_ResearchShipIII",
+      "folder": "Ships/Terran",
+      "species": "Terran",
+      "unitType": "ResearchShipIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A state-of-the-art mobile laboratory: an elegant hull with a rotating instrument ring and a forward scanning lens, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_BattleStation",
+      "folder": "Stations/Terran",
+      "species": "Terran",
+      "unitType": "BattleStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A rudimentary orbital fortress: an armoured drum ringed with heavy gun turrets and missile silos, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_ResearchStation",
+      "folder": "Stations/Terran",
+      "species": "Terran",
+      "unitType": "ResearchStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital laboratory: a habitat torus with dish arrays, telescopes and glowing lab windows, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_RelayStation",
+      "folder": "Stations/Terran",
+      "species": "Terran",
+      "unitType": "RelayStation",
+      "kind": "station",
+      "flag": "nospin",
+      "prompt": "A comms-and-navigation relay: a slender mast carrying a huge parabolic dish and antenna clusters, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_SupplyStation",
+      "folder": "Stations/Terran",
+      "species": "Terran",
+      "unitType": "SupplyStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital depot: a cluster of fuel spheres and cargo drums around a docking spine, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_MultiStation",
+      "folder": "Stations/Terran",
+      "species": "Terran",
+      "unitType": "MultiStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A large multi-role orbital complex: stacked habitat rings, dish arrays, docking arms and defensive turrets, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_TerraformStation",
+      "folder": "Stations/Terran",
+      "species": "Terran",
+      "unitType": "TerraformStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A colossal climate-engineering platform: a vast ring of atmosphere-processor nozzles around a reactor core, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_DeepSpaceStation",
+      "folder": "Stations/Terran",
+      "species": "Terran",
+      "unitType": "DeepSpaceStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A self-sufficient deep-space outpost: a compact core wrapped in enormous solar collector wings, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_MegaStation",
+      "folder": "Stations/Terran",
+      "species": "Terran",
+      "unitType": "MegaStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital city the size of a small moon: vast nested habitat rings, spires, docking bays and a glowing reactor heart, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Terran_HyperRelay",
+      "folder": "Stations/Terran",
+      "species": "Terran",
+      "unitType": "HyperRelay",
+      "kind": "station",
+      "flag": "nospin",
+      "prompt": "A massive fast-travel relay: a colossal open ring of arcing emitters around a blazing energy aperture, in the style of the Terrans. Terran human engineering: brushed white and gunmetal-grey plating with exposed structural ribs, angular utilitarian panels, black heat radiators, and cobalt-blue running lights and engine glow. Hard science-fiction, built rather than grown — riveted, modular, practical. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Scout",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Scout",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A tiny fast single-seat scout: a slim dart with oversized sensor dish and a big engine, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_ResearchShip",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "ResearchShip",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A small mobile laboratory: a slender hull with sensor booms, dish arrays and observation blisters, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Fighter",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Fighter",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A small agile warship: a compact arrowhead with forward gun barrels and stubby wings, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_ColonyShip",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "ColonyShip",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A huge slow settler vessel: a fat cargo-heavy hull carrying prefabricated habitat modules and a landing pod, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_ScoutII",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "ScoutII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "An upgraded scout: the dart hull lengthened, twin engines and a second sensor mast, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_ResearchShipII",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "ResearchShipII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "An upgraded mobile laboratory: a longer hull with a dorsal telescope array and twin dish booms, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_FighterII",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "FighterII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A heavier strike fighter: a broader arrowhead with four gun barrels and armoured shoulders, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Terraformer",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Terraformer",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A vast climate-engineering vessel: an industrial hull dominated by huge atmosphere-processor nozzles and cooling towers, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Probe",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Probe",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A tiny expendable deep-space probe: a small instrument core with a solar collector and a whip antenna, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Miner",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Miner",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A civilian mining barge: a blunt industrial hull with ore hoppers, cutting arms and a refinery drum, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Transport",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Transport",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A civilian freight hauler: a long spine strung with modular cargo containers behind a small bridge, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Frigate",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Frigate",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A nimble patrol warship: a lean armoured hull with turret blisters and missile racks, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Cruiser",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Cruiser",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A heavy warship: a thick armoured battle-line hull bristling with turret batteries, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Carrier",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Carrier",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A fleet carrier: a long flat-topped hull with an open flight deck and strike-craft launch bays along the flanks, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Dreadnought",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Dreadnought",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A colossal capital ship of the line: an enormous slab-armoured hull with immense spinal cannon and layered gun batteries, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_ScienceVessel",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "ScienceVessel",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A large deep-survey laboratory: a broad hull crowned with a great sensor ring and radio dishes, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_Explorer",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "Explorer",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A long-range pathfinder: a lean endurance hull with enormous fuel tanks and a wide sensor prow, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_ScoutIII",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "ScoutIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "The finest scout hull: a swept needle-shaped racer with three engines and a faired sensor spine, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_FighterIII",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "FighterIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A top-line strike fighter: a sleek predatory arrowhead with underslung cannon pods and swept wings, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_ResearchShipIII",
+      "folder": "Ships/Aquarii",
+      "species": "Aquarii",
+      "unitType": "ResearchShipIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A state-of-the-art mobile laboratory: an elegant hull with a rotating instrument ring and a forward scanning lens, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_BattleStation",
+      "folder": "Stations/Aquarii",
+      "species": "Aquarii",
+      "unitType": "BattleStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A rudimentary orbital fortress: an armoured drum ringed with heavy gun turrets and missile silos, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_ResearchStation",
+      "folder": "Stations/Aquarii",
+      "species": "Aquarii",
+      "unitType": "ResearchStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital laboratory: a habitat torus with dish arrays, telescopes and glowing lab windows, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_RelayStation",
+      "folder": "Stations/Aquarii",
+      "species": "Aquarii",
+      "unitType": "RelayStation",
+      "kind": "station",
+      "flag": "nospin",
+      "prompt": "A comms-and-navigation relay: a slender mast carrying a huge parabolic dish and antenna clusters, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_SupplyStation",
+      "folder": "Stations/Aquarii",
+      "species": "Aquarii",
+      "unitType": "SupplyStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital depot: a cluster of fuel spheres and cargo drums around a docking spine, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_MultiStation",
+      "folder": "Stations/Aquarii",
+      "species": "Aquarii",
+      "unitType": "MultiStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A large multi-role orbital complex: stacked habitat rings, dish arrays, docking arms and defensive turrets, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_TerraformStation",
+      "folder": "Stations/Aquarii",
+      "species": "Aquarii",
+      "unitType": "TerraformStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A colossal climate-engineering platform: a vast ring of atmosphere-processor nozzles around a reactor core, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_DeepSpaceStation",
+      "folder": "Stations/Aquarii",
+      "species": "Aquarii",
+      "unitType": "DeepSpaceStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A self-sufficient deep-space outpost: a compact core wrapped in enormous solar collector wings, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_MegaStation",
+      "folder": "Stations/Aquarii",
+      "species": "Aquarii",
+      "unitType": "MegaStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital city the size of a small moon: vast nested habitat rings, spires, docking bays and a glowing reactor heart, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Aquarii_HyperRelay",
+      "folder": "Stations/Aquarii",
+      "species": "Aquarii",
+      "unitType": "HyperRelay",
+      "kind": "station",
+      "flag": "nospin",
+      "prompt": "A massive fast-travel relay: a colossal open ring of arcing emitters around a blazing energy aperture, in the style of the Aquarii. Aquarii amphibious engineering: smooth streamlined organic hull like a manta ray or a nautilus shell, seamless pearlescent teal and turquoise surfaces, swept fins and gill-slit vents, softly glowing aquamarine bioluminescent seams. No hard corners anywhere. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Scout",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Scout",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A tiny fast single-seat scout: a slim dart with oversized sensor dish and a big engine, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_ResearchShip",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "ResearchShip",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A small mobile laboratory: a slender hull with sensor booms, dish arrays and observation blisters, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Fighter",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Fighter",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A small agile warship: a compact arrowhead with forward gun barrels and stubby wings, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_ColonyShip",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "ColonyShip",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A huge slow settler vessel: a fat cargo-heavy hull carrying prefabricated habitat modules and a landing pod, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_ScoutII",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "ScoutII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "An upgraded scout: the dart hull lengthened, twin engines and a second sensor mast, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_ResearchShipII",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "ResearchShipII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "An upgraded mobile laboratory: a longer hull with a dorsal telescope array and twin dish booms, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_FighterII",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "FighterII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A heavier strike fighter: a broader arrowhead with four gun barrels and armoured shoulders, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Terraformer",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Terraformer",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A vast climate-engineering vessel: an industrial hull dominated by huge atmosphere-processor nozzles and cooling towers, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Probe",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Probe",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A tiny expendable deep-space probe: a small instrument core with a solar collector and a whip antenna, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Miner",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Miner",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A civilian mining barge: a blunt industrial hull with ore hoppers, cutting arms and a refinery drum, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Transport",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Transport",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A civilian freight hauler: a long spine strung with modular cargo containers behind a small bridge, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Frigate",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Frigate",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A nimble patrol warship: a lean armoured hull with turret blisters and missile racks, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Cruiser",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Cruiser",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A heavy warship: a thick armoured battle-line hull bristling with turret batteries, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Carrier",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Carrier",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A fleet carrier: a long flat-topped hull with an open flight deck and strike-craft launch bays along the flanks, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Dreadnought",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Dreadnought",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A colossal capital ship of the line: an enormous slab-armoured hull with immense spinal cannon and layered gun batteries, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_ScienceVessel",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "ScienceVessel",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A large deep-survey laboratory: a broad hull crowned with a great sensor ring and radio dishes, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_Explorer",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "Explorer",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A long-range pathfinder: a lean endurance hull with enormous fuel tanks and a wide sensor prow, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_ScoutIII",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "ScoutIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "The finest scout hull: a swept needle-shaped racer with three engines and a faired sensor spine, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_FighterIII",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "FighterIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A top-line strike fighter: a sleek predatory arrowhead with underslung cannon pods and swept wings, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_ResearchShipIII",
+      "folder": "Ships/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "ResearchShipIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A state-of-the-art mobile laboratory: an elegant hull with a rotating instrument ring and a forward scanning lens, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_BattleStation",
+      "folder": "Stations/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "BattleStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A rudimentary orbital fortress: an armoured drum ringed with heavy gun turrets and missile silos, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_ResearchStation",
+      "folder": "Stations/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "ResearchStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital laboratory: a habitat torus with dish arrays, telescopes and glowing lab windows, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_RelayStation",
+      "folder": "Stations/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "RelayStation",
+      "kind": "station",
+      "flag": "nospin",
+      "prompt": "A comms-and-navigation relay: a slender mast carrying a huge parabolic dish and antenna clusters, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_SupplyStation",
+      "folder": "Stations/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "SupplyStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital depot: a cluster of fuel spheres and cargo drums around a docking spine, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_MultiStation",
+      "folder": "Stations/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "MultiStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A large multi-role orbital complex: stacked habitat rings, dish arrays, docking arms and defensive turrets, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_TerraformStation",
+      "folder": "Stations/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "TerraformStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A colossal climate-engineering platform: a vast ring of atmosphere-processor nozzles around a reactor core, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_DeepSpaceStation",
+      "folder": "Stations/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "DeepSpaceStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A self-sufficient deep-space outpost: a compact core wrapped in enormous solar collector wings, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_MegaStation",
+      "folder": "Stations/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "MegaStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital city the size of a small moon: vast nested habitat rings, spires, docking bays and a glowing reactor heart, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Pyrothian_HyperRelay",
+      "folder": "Stations/Pyrothian",
+      "species": "Pyrothian",
+      "unitType": "HyperRelay",
+      "kind": "station",
+      "flag": "nospin",
+      "prompt": "A massive fast-travel relay: a colossal open ring of arcing emitters around a blazing energy aperture, in the style of the Pyrothians. Pyrothian silicate engineering: massive blocky armoured hull of black obsidian and rough basalt slabs, thick overlapping ablative plates, cracks glowing molten orange and red like cooling lava, brass heat-exchanger fins. Brutally heavy, crystalline, furnace-forged. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Scout",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Scout",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A tiny fast single-seat scout: a slim dart with oversized sensor dish and a big engine, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_ResearchShip",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "ResearchShip",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A small mobile laboratory: a slender hull with sensor booms, dish arrays and observation blisters, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Fighter",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Fighter",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A small agile warship: a compact arrowhead with forward gun barrels and stubby wings, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_ColonyShip",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "ColonyShip",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A huge slow settler vessel: a fat cargo-heavy hull carrying prefabricated habitat modules and a landing pod, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_ScoutII",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "ScoutII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "An upgraded scout: the dart hull lengthened, twin engines and a second sensor mast, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_ResearchShipII",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "ResearchShipII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "An upgraded mobile laboratory: a longer hull with a dorsal telescope array and twin dish booms, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_FighterII",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "FighterII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A heavier strike fighter: a broader arrowhead with four gun barrels and armoured shoulders, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Terraformer",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Terraformer",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A vast climate-engineering vessel: an industrial hull dominated by huge atmosphere-processor nozzles and cooling towers, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Probe",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Probe",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A tiny expendable deep-space probe: a small instrument core with a solar collector and a whip antenna, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Miner",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Miner",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A civilian mining barge: a blunt industrial hull with ore hoppers, cutting arms and a refinery drum, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Transport",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Transport",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A civilian freight hauler: a long spine strung with modular cargo containers behind a small bridge, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Frigate",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Frigate",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A nimble patrol warship: a lean armoured hull with turret blisters and missile racks, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Cruiser",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Cruiser",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A heavy warship: a thick armoured battle-line hull bristling with turret batteries, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Carrier",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Carrier",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A fleet carrier: a long flat-topped hull with an open flight deck and strike-craft launch bays along the flanks, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Dreadnought",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Dreadnought",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A colossal capital ship of the line: an enormous slab-armoured hull with immense spinal cannon and layered gun batteries, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_ScienceVessel",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "ScienceVessel",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A large deep-survey laboratory: a broad hull crowned with a great sensor ring and radio dishes, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_Explorer",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "Explorer",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A long-range pathfinder: a lean endurance hull with enormous fuel tanks and a wide sensor prow, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_ScoutIII",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "ScoutIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "The finest scout hull: a swept needle-shaped racer with three engines and a faired sensor spine, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_FighterIII",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "FighterIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A top-line strike fighter: a sleek predatory arrowhead with underslung cannon pods and swept wings, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_ResearchShipIII",
+      "folder": "Ships/Cryithn",
+      "species": "Cryithn",
+      "unitType": "ResearchShipIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A state-of-the-art mobile laboratory: an elegant hull with a rotating instrument ring and a forward scanning lens, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_BattleStation",
+      "folder": "Stations/Cryithn",
+      "species": "Cryithn",
+      "unitType": "BattleStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A rudimentary orbital fortress: an armoured drum ringed with heavy gun turrets and missile silos, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_ResearchStation",
+      "folder": "Stations/Cryithn",
+      "species": "Cryithn",
+      "unitType": "ResearchStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital laboratory: a habitat torus with dish arrays, telescopes and glowing lab windows, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_RelayStation",
+      "folder": "Stations/Cryithn",
+      "species": "Cryithn",
+      "unitType": "RelayStation",
+      "kind": "station",
+      "flag": "nospin",
+      "prompt": "A comms-and-navigation relay: a slender mast carrying a huge parabolic dish and antenna clusters, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_SupplyStation",
+      "folder": "Stations/Cryithn",
+      "species": "Cryithn",
+      "unitType": "SupplyStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital depot: a cluster of fuel spheres and cargo drums around a docking spine, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_MultiStation",
+      "folder": "Stations/Cryithn",
+      "species": "Cryithn",
+      "unitType": "MultiStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A large multi-role orbital complex: stacked habitat rings, dish arrays, docking arms and defensive turrets, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_TerraformStation",
+      "folder": "Stations/Cryithn",
+      "species": "Cryithn",
+      "unitType": "TerraformStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A colossal climate-engineering platform: a vast ring of atmosphere-processor nozzles around a reactor core, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_DeepSpaceStation",
+      "folder": "Stations/Cryithn",
+      "species": "Cryithn",
+      "unitType": "DeepSpaceStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A self-sufficient deep-space outpost: a compact core wrapped in enormous solar collector wings, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_MegaStation",
+      "folder": "Stations/Cryithn",
+      "species": "Cryithn",
+      "unitType": "MegaStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital city the size of a small moon: vast nested habitat rings, spires, docking bays and a glowing reactor heart, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Cryithn_HyperRelay",
+      "folder": "Stations/Cryithn",
+      "species": "Cryithn",
+      "unitType": "HyperRelay",
+      "kind": "station",
+      "flag": "nospin",
+      "prompt": "A massive fast-travel relay: a colossal open ring of arcing emitters around a blazing energy aperture, in the style of the Cryithn. Cryithn cryogenic engineering: slender faceted hull of pale blue-white ice and frosted silver alloy, sharp crystalline shards and long spines, rime and frost crusting the plating, dim cold cyan light bleeding from deep narrow slots. Ancient, austere, patient. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Scout",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Scout",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A tiny fast single-seat scout: a slim dart with oversized sensor dish and a big engine, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_ResearchShip",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "ResearchShip",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A small mobile laboratory: a slender hull with sensor booms, dish arrays and observation blisters, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Fighter",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Fighter",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A small agile warship: a compact arrowhead with forward gun barrels and stubby wings, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_ColonyShip",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "ColonyShip",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A huge slow settler vessel: a fat cargo-heavy hull carrying prefabricated habitat modules and a landing pod, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_ScoutII",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "ScoutII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "An upgraded scout: the dart hull lengthened, twin engines and a second sensor mast, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_ResearchShipII",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "ResearchShipII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "An upgraded mobile laboratory: a longer hull with a dorsal telescope array and twin dish booms, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_FighterII",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "FighterII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A heavier strike fighter: a broader arrowhead with four gun barrels and armoured shoulders, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Terraformer",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Terraformer",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A vast climate-engineering vessel: an industrial hull dominated by huge atmosphere-processor nozzles and cooling towers, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Probe",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Probe",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A tiny expendable deep-space probe: a small instrument core with a solar collector and a whip antenna, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Miner",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Miner",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A civilian mining barge: a blunt industrial hull with ore hoppers, cutting arms and a refinery drum, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Transport",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Transport",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A civilian freight hauler: a long spine strung with modular cargo containers behind a small bridge, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Frigate",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Frigate",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A nimble patrol warship: a lean armoured hull with turret blisters and missile racks, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Cruiser",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Cruiser",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A heavy warship: a thick armoured battle-line hull bristling with turret batteries, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Carrier",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Carrier",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A fleet carrier: a long flat-topped hull with an open flight deck and strike-craft launch bays along the flanks, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Dreadnought",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Dreadnought",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A colossal capital ship of the line: an enormous slab-armoured hull with immense spinal cannon and layered gun batteries, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_ScienceVessel",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "ScienceVessel",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A large deep-survey laboratory: a broad hull crowned with a great sensor ring and radio dishes, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_Explorer",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "Explorer",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A long-range pathfinder: a lean endurance hull with enormous fuel tanks and a wide sensor prow, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_ScoutIII",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "ScoutIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "The finest scout hull: a swept needle-shaped racer with three engines and a faired sensor spine, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_FighterIII",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "FighterIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A top-line strike fighter: a sleek predatory arrowhead with underslung cannon pods and swept wings, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_ResearchShipIII",
+      "folder": "Ships/Sylvan",
+      "species": "Sylvan",
+      "unitType": "ResearchShipIII",
+      "kind": "ship",
+      "flag": null,
+      "prompt": "A state-of-the-art mobile laboratory: an elegant hull with a rotating instrument ring and a forward scanning lens, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_BattleStation",
+      "folder": "Stations/Sylvan",
+      "species": "Sylvan",
+      "unitType": "BattleStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A rudimentary orbital fortress: an armoured drum ringed with heavy gun turrets and missile silos, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_ResearchStation",
+      "folder": "Stations/Sylvan",
+      "species": "Sylvan",
+      "unitType": "ResearchStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital laboratory: a habitat torus with dish arrays, telescopes and glowing lab windows, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_RelayStation",
+      "folder": "Stations/Sylvan",
+      "species": "Sylvan",
+      "unitType": "RelayStation",
+      "kind": "station",
+      "flag": "nospin",
+      "prompt": "A comms-and-navigation relay: a slender mast carrying a huge parabolic dish and antenna clusters, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_SupplyStation",
+      "folder": "Stations/Sylvan",
+      "species": "Sylvan",
+      "unitType": "SupplyStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital depot: a cluster of fuel spheres and cargo drums around a docking spine, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_MultiStation",
+      "folder": "Stations/Sylvan",
+      "species": "Sylvan",
+      "unitType": "MultiStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A large multi-role orbital complex: stacked habitat rings, dish arrays, docking arms and defensive turrets, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_TerraformStation",
+      "folder": "Stations/Sylvan",
+      "species": "Sylvan",
+      "unitType": "TerraformStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A colossal climate-engineering platform: a vast ring of atmosphere-processor nozzles around a reactor core, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_DeepSpaceStation",
+      "folder": "Stations/Sylvan",
+      "species": "Sylvan",
+      "unitType": "DeepSpaceStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "A self-sufficient deep-space outpost: a compact core wrapped in enormous solar collector wings, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_MegaStation",
+      "folder": "Stations/Sylvan",
+      "species": "Sylvan",
+      "unitType": "MegaStation",
+      "kind": "station",
+      "flag": "spin",
+      "prompt": "An orbital city the size of a small moon: vast nested habitat rings, spires, docking bays and a glowing reactor heart, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Sylvan_HyperRelay",
+      "folder": "Stations/Sylvan",
+      "species": "Sylvan",
+      "unitType": "HyperRelay",
+      "kind": "station",
+      "flag": "nospin",
+      "prompt": "A massive fast-travel relay: a colossal open ring of arcing emitters around a blazing energy aperture, in the style of the Sylvans. Sylvan photosynthetic engineering: a vessel GROWN rather than built — living pale wood and woven vine over a seed-pod hull, broad translucent green leaf-like solar sails, curling tendrils, amber sap-light glowing along the grain, moss and small blossoms on the plating. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Marauder_Raider",
+      "folder": "Enemies",
+      "species": null,
+      "unitType": "Marauder_Raider",
+      "kind": "enemies",
+      "flag": null,
+      "prompt": "A pirate raider starship cobbled together from scavenged wreckage: mismatched scavenged hull plates in rust red and dirty yellow, welded-on armour, exposed pipework, a crude ram prow and oversized bolted-on engines. Battered, asymmetric, menacing. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Marauder_Corsair",
+      "folder": "Enemies",
+      "species": null,
+      "unitType": "Marauder_Corsair",
+      "kind": "enemies",
+      "flag": null,
+      "prompt": "A pirate corsair warship: a lean scavenged hull with harpoon launchers and boarding clamps, rust-red and bone-white war paint, jagged blade-like fins and a slashed skull marking. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Marauder_Brute",
+      "folder": "Enemies",
+      "species": null,
+      "unitType": "Marauder_Brute",
+      "kind": "enemies",
+      "flag": null,
+      "prompt": "A heavy pirate brute-ship: a huge ugly slab of welded scrap armour around enormous engines, chained-on cargo pods, spiked ram prow, rust and soot streaked. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Marauder_Carrier",
+      "folder": "Enemies",
+      "species": null,
+      "unitType": "Marauder_Carrier",
+      "kind": "enemies",
+      "flag": null,
+      "prompt": "A pirate carrier hulk: a gutted freighter converted to a strike-craft mothership, open ragged launch bays cut into the flanks, scavenged plating, rust red and dirty yellow. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Marauder_Outpost",
+      "folder": "Enemies",
+      "species": null,
+      "unitType": "Marauder_Outpost",
+      "kind": "enemies",
+      "flag": "spin",
+      "prompt": "A pirate deep-space outpost: an asteroid hollowed out and studded with welded scrap docking arms, crude gun turrets and flickering red beacons. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Swarm_Drone",
+      "folder": "Enemies",
+      "species": null,
+      "unitType": "Swarm_Drone",
+      "kind": "enemies",
+      "flag": null,
+      "prompt": "A small biomechanical swarm drone: a chitinous insectile body of glossy black carapace with violet veins, folded blade limbs and a single glowing magenta eye. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Swarm_Ravager",
+      "folder": "Enemies",
+      "species": null,
+      "unitType": "Swarm_Ravager",
+      "kind": "enemies",
+      "flag": null,
+      "prompt": "A biomechanical swarm warbeast: a large chitinous predator hull of black and violet carapace, ribbed segments, spined talons and a gaping toothed maw at the prow. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Swarm_Hive",
+      "folder": "Enemies",
+      "species": null,
+      "unitType": "Swarm_Hive",
+      "kind": "enemies",
+      "flag": null,
+      "prompt": "A biomechanical swarm hive-ship: a colossal bulbous chitinous mass of black and violet carapace riddled with glowing magenta birthing orifices and clustered spines. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Ancient_Sentinel",
+      "folder": "Ancients",
+      "species": null,
+      "unitType": "Ancient_Sentinel",
+      "kind": "ancients",
+      "flag": "spin",
+      "prompt": "A dormant precursor sentinel drone: a smooth seamless obelisk of dark polished stone-metal with glowing gold glyph channels, floating geometric rings, no visible engines or seams. Utterly alien and machine-perfect. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Ancient_Warden",
+      "folder": "Ancients",
+      "species": null,
+      "unitType": "Ancient_Warden",
+      "kind": "ancients",
+      "flag": null,
+      "prompt": "A precursor warden warship: an enormous smooth blade-shaped monolith of dark polished stone-metal etched with glowing gold glyphs, weapon apertures that are simply openings in an unbroken surface. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Ancient_Monolith",
+      "folder": "Ancients",
+      "species": null,
+      "unitType": "Ancient_Monolith",
+      "kind": "ancients",
+      "flag": "spin",
+      "prompt": "A dormant precursor monolith drifting in space: a vast featureless black slab inscribed with faintly glowing gold geometric glyphs, chipped and pitted by aeons of micrometeorites. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Ancient_Gate",
+      "folder": "Ancients",
+      "species": null,
+      "unitType": "Ancient_Gate",
+      "kind": "ancients",
+      "flag": "spin",
+      "prompt": "A dormant precursor jump gate: a colossal broken ring of dark polished stone-metal with glowing gold glyph channels, one segment missing, drifting inert. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Ancient_Vault",
+      "folder": "Ancients",
+      "species": null,
+      "unitType": "Ancient_Vault",
+      "kind": "ancients",
+      "flag": "spin",
+      "prompt": "A sealed precursor vault station: a smooth dark dodecahedral shell of stone-metal with recessed gold glyph seams and a single sealed circular door. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Ancient_Observatory",
+      "folder": "Ancients",
+      "species": null,
+      "unitType": "Ancient_Observatory",
+      "kind": "ancients",
+      "flag": "spin",
+      "prompt": "A precursor observatory: a great dark ring holding a floating faceted crystal lens at its centre, gold glyphs tracking around the rim, silent and inert. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Artifact_Obelisk",
+      "folder": "Artifacts",
+      "species": null,
+      "unitType": "Artifact_Obelisk",
+      "kind": "artifacts",
+      "flag": "spin",
+      "prompt": "A small alien artifact floating in space: a tapered black obelisk covered in glowing violet alien script, edges worn smooth by time. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Artifact_Orb",
+      "folder": "Artifacts",
+      "species": null,
+      "unitType": "Artifact_Orb",
+      "kind": "artifacts",
+      "flag": "spin",
+      "prompt": "A small alien artifact: a levitating polished sphere of dark iridescent metal split by glowing turquoise energy seams, with a slowly orbiting outer ring. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Artifact_Shard",
+      "folder": "Artifacts",
+      "species": null,
+      "unitType": "Artifact_Shard",
+      "kind": "artifacts",
+      "flag": "spin",
+      "prompt": "A small alien artifact: a jagged shard of luminous crystal in amethyst and gold, fractured, radiating faint light from within. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Artifact_Codex",
+      "folder": "Artifacts",
+      "species": null,
+      "unitType": "Artifact_Codex",
+      "kind": "artifacts",
+      "flag": "spin",
+      "prompt": "A small alien artifact: a folded metallic tablet of interlocking plates covered in engraved glowing glyphs, half-unfolded like a puzzle box. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Artifact_Beacon",
+      "folder": "Artifacts",
+      "species": null,
+      "unitType": "Artifact_Beacon",
+      "kind": "artifacts",
+      "flag": "spin",
+      "prompt": "A small derelict alien beacon: a slender spire of corroded alloy with a cracked glowing green lamp at its crown and three splayed anchor legs. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Artifact_Engine",
+      "folder": "Artifacts",
+      "species": null,
+      "unitType": "Artifact_Engine",
+      "kind": "artifacts",
+      "flag": "spin",
+      "prompt": "A small alien artifact: an exposed alien drive core, a cage of curved struts around a suspended humming ball of blue-white light. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Derelict_Freighter",
+      "folder": "Derelicts",
+      "species": null,
+      "unitType": "Derelict_Freighter",
+      "kind": "derelicts",
+      "flag": null,
+      "prompt": "A derelict starship wreck: a broken freighter hull snapped in half, hull plates torn open exposing ribs and decks, burnt scorched grey metal, dark and powerless. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Derelict_Warship",
+      "folder": "Derelicts",
+      "species": null,
+      "unitType": "Derelict_Warship",
+      "kind": "derelicts",
+      "flag": null,
+      "prompt": "A derelict warship wreck: a gutted battle-scarred hull with shattered turrets, a gaping hole blown through the midsection, blackened and cold. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Derelict_Station",
+      "folder": "Derelicts",
+      "species": null,
+      "unitType": "Derelict_Station",
+      "kind": "derelicts",
+      "flag": "spin",
+      "prompt": "A derelict space station: a broken habitat ring with collapsed spokes, torn hull panels, drifting debris and dead dark windows. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Derelict_Colony",
+      "folder": "Derelicts",
+      "species": null,
+      "unitType": "Derelict_Colony",
+      "kind": "derelicts",
+      "flag": null,
+      "prompt": "A derelict colony ship wreck: a huge settler vessel long dead, habitat modules ruptured and frozen, hull grey with dust and micrometeorite pitting. The hull is clearly longer than it is wide and wider than it is tall, with a flat featureless underside and all the greebling, towers and antennae on the top surface. Engines and reactor bulk are massed at the rear; the bow is slim and sensor-tipped. Single centred model, symmetrical, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Asteroid_Rocky_Small",
+      "folder": "Asteroids",
+      "species": null,
+      "unitType": "Asteroid_Rocky_Small",
+      "kind": "asteroids",
+      "flag": "spin",
+      "prompt": "A small rocky asteroid: an irregular lumpy grey stone with deep craters and sharp fractured edges, dusty and pitted. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Asteroid_Rocky_Large",
+      "folder": "Asteroids",
+      "species": null,
+      "unitType": "Asteroid_Rocky_Large",
+      "kind": "asteroids",
+      "flag": "spin",
+      "prompt": "A large rocky asteroid: a massive irregular grey-brown boulder with a huge impact crater, ridges and scattered surface rubble. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Asteroid_Metallic",
+      "folder": "Asteroids",
+      "species": null,
+      "unitType": "Asteroid_Metallic",
+      "kind": "asteroids",
+      "flag": "spin",
+      "prompt": "A metallic asteroid: a dense irregular chunk of raw nickel-iron with a dull silver sheen, sharp angular fracture faces and rusty ore veins. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Asteroid_Icy",
+      "folder": "Asteroids",
+      "species": null,
+      "unitType": "Asteroid_Icy",
+      "kind": "asteroids",
+      "flag": "spin",
+      "prompt": "An icy asteroid: an irregular mass of dirty blue-white ice and frozen rock, translucent facets, frost and sublimating vents. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Asteroid_Crystalline",
+      "folder": "Asteroids",
+      "species": null,
+      "unitType": "Asteroid_Crystalline",
+      "kind": "asteroids",
+      "flag": "spin",
+      "prompt": "A crystalline asteroid: a dark rocky core bristling with clusters of large glowing violet and cyan crystal spars. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Asteroid_Volcanic",
+      "folder": "Asteroids",
+      "species": null,
+      "unitType": "Asteroid_Volcanic",
+      "kind": "asteroids",
+      "flag": "spin",
+      "prompt": "A volcanic asteroid: a blackened irregular rock split by glowing molten orange fissures, cooling crust and scorched vents. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Asteroid_Ore_Rich",
+      "folder": "Asteroids",
+      "species": null,
+      "unitType": "Asteroid_Ore_Rich",
+      "kind": "asteroids",
+      "flag": "spin",
+      "prompt": "An ore-rich asteroid: a grey stone body veined with bright seams of gold, copper and green mineral crystal breaking through the surface. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Asteroid_Shattered",
+      "folder": "Asteroids",
+      "species": null,
+      "unitType": "Asteroid_Shattered",
+      "kind": "asteroids",
+      "flag": "spin",
+      "prompt": "A shattered asteroid fragment: a wedge-shaped splinter of grey rock with one flat sheared fracture face and a jagged broken back. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Asteroid_Cometary",
+      "folder": "Asteroids",
+      "species": null,
+      "unitType": "Asteroid_Cometary",
+      "kind": "asteroids",
+      "flag": "spin",
+      "prompt": "A comet nucleus: a dark irregular body of tar-black dust and dirty ice, riddled with vents and pits, faintly outgassing. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    },
+    {
+      "name": "Asteroid_Cluster",
+      "folder": "Asteroids",
+      "species": null,
+      "unitType": "Asteroid_Cluster",
+      "kind": "asteroids",
+      "flag": "spin",
+      "prompt": "A tight cluster of small asteroids: five or six irregular grey rocks of varying size drifting close together as one group. Radially symmetric, roughly as wide as it is tall, readable from every angle. Single centred model, game-ready low-poly asset on a plain background."
+    }
+  ]
+}
