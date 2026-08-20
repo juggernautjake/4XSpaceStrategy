@@ -43,6 +43,7 @@ public class BodyUnitsPanel : MonoBehaviour
         if (UnitManager.Instance != null) UnitManager.Instance.OnUnitsChanged += RefreshIfShowing;
         UnitSelection.OnChanged += RefreshIfShowing;
         ControlGroups.OnChanged += RefreshIfShowing;   // re-stamp the badges when a group is rebound
+        Squadrons.OnChanged += RefreshIfShowing;       // ...and re-title the sections when orders change
 
         root.SetActive(false);
     }
@@ -64,12 +65,94 @@ public class BodyUnitsPanel : MonoBehaviour
         Refresh();
     }
 
+    // ============================================================================================
+    // GROUPED BY SQUADRON, NOT ONE FLAT SHELF OF ICONS
+    //
+    // Twenty ships over a contested world used to arrive here as twenty identical tiles in reading
+    // order, with a small group number stamped in the corner of each. That answers "what is here" and
+    // not the question actually being asked, which is "what is here AS WHAT" — a defence squadron, a
+    // survey wing and three unassigned freighters are three different facts, and the flat shelf made
+    // the player reconstruct them by squinting at corner badges.
+    //
+    // So each squadron present gets a header naming it, its strength, and the standing orders it is
+    // under, and the header SELECTS THE WHOLE SQUADRON — which is the thing a player wants to do
+    // roughly every time they look at this panel. Ships in no squadron collect under "Unassigned" at
+    // the bottom, where they read as what they are: loose hulls nobody has organised yet.
+    // ============================================================================================
     void Refresh()
     {
         for (int i = grid.childCount - 1; i >= 0; i--) Destroy(grid.GetChild(i).gameObject);
 
+        // Bucket by squadron, keeping the panel's existing order inside each bucket.
+        var bySquadron = new System.Collections.Generic.SortedDictionary<int, System.Collections.Generic.List<Unit>>();
         foreach (var u in body.units)
-            CreateIcon(u);
+        {
+            int g = ControlGroups.GroupOf(u);
+            // Unassigned sorts last: a squadron is a decision the player made, and the loose hulls are
+            // the leftovers. int.MaxValue rather than 0, which would sort them first.
+            int key = g >= 1 ? g : int.MaxValue;
+            if (!bySquadron.TryGetValue(key, out var list))
+                bySquadron[key] = list = new System.Collections.Generic.List<Unit>();
+            list.Add(u);
+        }
+
+        foreach (var kv in bySquadron)
+        {
+            bool assigned = kv.Key != int.MaxValue;
+            CreateSectionHeader(assigned ? kv.Key : 0, kv.Value);
+            foreach (var u in kv.Value) CreateIcon(u);
+        }
+    }
+
+    /// One squadron's heading, spanning the grid. Clicking it selects the squadron.
+    void CreateSectionHeader(int group, System.Collections.Generic.List<Unit> members)
+    {
+        var row = UIFactory.NewUI(grid, group >= 1 ? $"Squadron{group}" : "Unassigned");
+        var bg = row.AddComponent<Image>();
+        bg.color = new Color(0.10f, 0.16f, 0.22f, 0.85f);
+
+        // A header is a band, not a tile — opt it out of the grid's cell size.
+        var le = row.AddComponent<LayoutElement>();
+        le.ignoreLayout = false;
+        var g = grid.GetComponent<GridLayoutGroup>();
+        if (g != null) le.preferredWidth = g.cellSize.x;
+
+        string title, tip;
+        if (group >= 1)
+        {
+            var o = Squadrons.Of(group);
+            title = $"<b>{group}</b> {Squadrons.NameOf(group)}  <size=8>({members.Count})</size>";
+            tip = $"{Squadrons.NameOf(group)} — {members.Count} ship(s) here.\n" +
+                  $"Formation: {o.formation}\nProtocol: {o.protocol}\n\n" +
+                  $"Click to select the whole squadron. Press {group} anywhere to recall it.";
+        }
+        else
+        {
+            title = $"<b>Unassigned</b>  <size=8>({members.Count})</size>";
+            tip = $"{members.Count} ship(s) here that belong to no squadron.\n\n" +
+                  "Click to select them all, then Ctrl+1..9 to bind them into one.";
+        }
+
+        var label = UIFactory.Text(row.transform, title, 10, UITheme.Accent, TextAlignmentOptions.Left);
+        var lrt = label.rectTransform;
+        lrt.anchorMin = Vector2.zero; lrt.anchorMax = Vector2.one;
+        lrt.offsetMin = new Vector2(4, 0); lrt.offsetMax = new Vector2(-4, 0);
+        label.raycastTarget = false;
+
+        var captured = new System.Collections.Generic.List<Unit>(members);
+        var btn = row.AddComponent<Button>();
+        btn.targetGraphic = bg;
+        btn.onClick.AddListener(() =>
+        {
+            UnitSelection.Set(captured);
+            if (captured.Count > 0)
+            {
+                SimpleAudio.Instance?.PlayUnitSelect(captured[0].type);
+                UnitInfoPanel.Instance?.Show(captured[0]);
+            }
+        });
+
+        UIFactory.Tooltip(row, tip);
     }
 
     void CreateIcon(Unit u)

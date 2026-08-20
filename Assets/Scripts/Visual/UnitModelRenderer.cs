@@ -345,7 +345,25 @@ public class UnitModelRenderer : MonoBehaviour
         /// How far this hull has stood off its station to keep clear of its neighbours, carried
         /// between frames so the correction eases in and out rather than snapping. See Separate().
         public Vector3 sep;
+
+        // ---- Momentum. See ShipPhysics. -----------------------------------------------------------
+        /// Where the hull actually IS, as opposed to where the simulation says its marker is. The two
+        /// differ through a turn and converge out of it.
+        public Vector3 flightPos;
+        /// Which way it is going and how fast, in world units per second.
+        public Vector3 flightVel;
+        /// False until the first frame has somewhere to start from.
+        public bool flightReady;
+
+        /// How far round its anchorage a parked ship has walked, in degrees. Separate from `phase`,
+        /// which stations use and which is seeded randomly per unit — the anchorage ring must advance
+        /// UNIFORMLY or the spacing it was given decays into a pile-up.
+        public float parkPhase;
     }
+
+    /// How fast a parked fleet walks its anchorage. Six degrees a second is a full circuit a minute —
+    /// clearly alive, and slow enough that clicking a ship is never a moving-target problem.
+    const float ParkedOrbitDegPerSec = 6f;
 
     readonly Dictionary<Unit, Model> models = new Dictionary<Unit, Model>();
 
@@ -792,6 +810,103 @@ public class UnitModelRenderer : MonoBehaviour
             m.go.transform.Rotate(Vector3.up, m.entry.spin * dt, Space.World);
     }
 
+    // ============================================================================================
+    // CHASING THE MARKER — the momentum integrator
+    //
+    // `marker` is where UnitManager says this ship is: authoritative, on schedule, and the thing every
+    // other system reads. This returns where a hull WITH MASS would be while trying to get there.
+    //
+    // Three rules, and between them they produce a turn nobody had to script:
+    //
+    //   1. the hull may only rotate its velocity at ShipPhysics.TurnRateAt, which FALLS as it goes
+    //      faster — so the quicker it is moving the wider the arc it can hold;
+    //   2. it only holds thrust while it is roughly pointing where it wants to go, and brakes when it
+    //      is more than a right angle out;
+    //   3. it eases off as it closes, so it settles onto the marker instead of oscillating past it.
+    //
+    // THE LAG IS CAPPED. A ship may trail its own marker through a turn — that IS the turn — but never
+    // by more than a few hull lengths, because a ship separated from the icon the player is tracking
+    // has stopped being that ship. When the cap bites, the hull is pulled in and keeps its velocity, so
+    // the correction never shows as a jump in heading.
+    // ============================================================================================
+
+    // ---- The leash ----------------------------------------------------------------------------
+    //
+    // The first version scaled this off the HULL'S SIZE, which sounded reasonable and was useless: a
+    // dreadnought is 0.40 units across, so seven hull lengths is 2.8 units — and the simulated reversal
+    // it is meant to allow swings 24.7 units wide. The leash would have dominated the flight model
+    // completely and the momentum nobody could see would have been momentum that was not there.
+    //
+    // A ship's arc is set by its SPEED, not by how big it is, so the leash is now a couple of seconds
+    // of travel. That is a deliberate compromise rather than a physical quantity: the pure model would
+    // let a mega-station wander fifty units from its own icon, and a ship that far from the marker the
+    // player is tracking has stopped being that ship. Sixteen units is about as far as a hull can stray
+    // and still read as the thing the icon belongs to.
+    const float LagSeconds = 1.5f, MinLagUnits = 3f, MaxLagUnits = 16f;
+
+    Vector3 Steer(Unit u, Model m, Vector3 marker, float dt)
+    {
+        if (dt <= 0f) return marker;
+
+        if (!m.flightReady)
+        {
+            m.flightPos = marker;
+            m.flightVel = Vector3.zero;
+            m.flightReady = true;
+            return marker;
+        }
+
+        Vector3 toMarker = marker - m.flightPos;
+        float distance = toMarker.magnitude;
+
+        // The pace the simulation is actually moving the marker at. Taking the top speed from this
+        // rather than from the class's raw `speed` stat keeps the hull honest about the ETA: a fleet
+        // limited by its slowest ship has every hull in it flying at the fleet's pace, not its own.
+        float sim = u.travelDuration > 0.01f
+            ? Vector3.Distance(u.travelFrom, u.travelTo) / u.travelDuration
+            : Mathf.Max(1, u.Info.speed);
+        float topSpeed = Mathf.Max(0.5f, sim * 1.6f);   // headroom to catch up after a turn
+
+        float accel = ShipPhysics.Acceleration(u, topSpeed);
+        float speed = m.flightVel.magnitude;
+
+        Vector3 want = distance > 0.0001f ? toMarker / distance : Vector3.zero;
+        Vector3 heading = speed > 0.0001f ? m.flightVel / speed : want;
+        if (want == Vector3.zero) want = heading;
+
+        // ---- rule 1: turn, at a rate this hull and this speed allow ----
+        float turn = ShipPhysics.TurnRateAt(u, speed) * Mathf.Deg2Rad * dt;
+        heading = Vector3.RotateTowards(heading, want, turn, 0f);
+        if (heading.sqrMagnitude < 0.0001f) heading = want;
+        heading.Normalize();
+
+        // ---- rule 2: thrust only while roughly aimed, brake when badly aimed ----
+        float off = Vector3.Angle(heading, want);
+        float throttle = ShipPhysics.ThrottleFor(off);
+
+        // ---- rule 3: never go faster than it can still stop from ----
+        float target = Mathf.Min(topSpeed * throttle, ShipPhysics.ApproachSpeed(accel, distance));
+
+        speed = target > speed
+            ? Mathf.MoveTowards(speed, target, accel * dt)
+            : Mathf.MoveTowards(speed, target, accel * ShipPhysics.BrakeFactor * dt);
+
+        m.flightVel = heading * speed;
+        m.flightPos += m.flightVel * dt;
+
+        // ---- the leash ----
+        float cap = Mathf.Clamp(topSpeed * LagSeconds, MinLagUnits, MaxLagUnits);
+        Vector3 lag = m.flightPos - marker;
+        if (lag.sqrMagnitude > cap * cap)
+        {
+            // Position only. Keeping the velocity means the pull-in never shows up as the nose
+            // snapping round — the ship is still flying the way it was, just not as far out.
+            m.flightPos = marker + lag.normalized * cap;
+        }
+
+        return m.flightPos;
+    }
+
     // A ship: sits where the unit is, points along its course, and idles with a slow bob so it reads
     // as alive rather than as a prop.
     void TickShip(UnitManager um, Unit u, Model m, float dt)
@@ -824,6 +939,17 @@ public class UnitModelRenderer : MonoBehaviour
             // rather than as one that got heavier. Drawing only — see FleetFormation.
             pos += FleetFormation.Offset(u, dir, u.TravelProgress);
 
+            // MOMENTUM. The marker is where the simulation says the ship is; this is where a thing with
+            // mass would actually be, chasing that marker under a turn rate and an acceleration it
+            // cannot exceed. Order a reversal and the hull carries on the old way while it hauls its
+            // nose round, swings wide, and only builds speed again once it is pointing somewhere useful.
+            // See ShipPhysics. Returns the marker itself for anything with no meaningful momentum.
+            pos = Steer(u, m, pos, dt);
+
+            // The hull points where it is GOING, not down the straight line between its endpoints —
+            // through a turn those are different directions, and the difference is the turn.
+            if (m.flightVel.sqrMagnitude > 0.0004f) dir = m.flightVel;
+
             if (dir.sqrMagnitude > 0.0001f)
             {
                 Quaternion want = Quaternion.LookRotation(dir.normalized, Vector3.up);
@@ -852,6 +978,11 @@ public class UnitModelRenderer : MonoBehaviour
         }
         else if (u.location != null && u.location.visualObject != null)
         {
+            // Docked, so the momentum state is stale: the next departure starts from rest at the
+            // anchorage rather than carrying whatever velocity this ship had when it arrived.
+            m.flightReady = false;
+            m.flightVel = Vector3.zero;
+
             // Parked at a world: stand off it a little so it isn't buried in the planet, and look at it.
             var host = u.location.visualObject.transform;
             float standoff = host.lossyScale.x * 0.5f + 0.4f;
@@ -862,9 +993,39 @@ public class UnitModelRenderer : MonoBehaviour
             // A fixed-radius ring divided by the count packs twenty ships a tenth of a unit apart, and
             // hulls are up to 0.40 across, so a well-defended world drew as one solid ring of
             // interpenetrating geometry instead of as a fleet standing off it.
-            pos = host.position + Vector3.up * 0.35f
-                + FleetFormation.AnchorOffset(idx, count, standoff, 0.34f);
-            m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
+            Vector3 anchor = FleetFormation.AnchorOffset(idx, count, standoff, 0.34f);
+
+            // ============================================================================================
+            // PARKED SHIPS ORBIT — slowly, and on purpose
+            //
+            // A ship at a world used to sit on a fixed point of a ring, which reads as parked in the
+            // car-park sense rather than as being in orbit. It now walks the ring.
+            //
+            // THE WHOLE RING TURNS AT ONE RATE rather than each ship carrying its own phase, and that
+            // matters: the spacing FleetFormation worked out stays exactly as worked out, so ships never
+            // drift into one another however long they sit there. Per-ship rates would have them slowly
+            // bunch and pass through each other, which is the very thing the anchorage exists to prevent.
+            //
+            // The rate is deliberately tiny. At a typical standoff a full circuit takes about a minute —
+            // under a tenth of a world unit per second, which is visible as motion and far too slow to
+            // make a hull hard to click. A ship you cannot reliably click is worse than a ship that does
+            // not move.
+            m.parkPhase += ParkedOrbitDegPerSec * dt;
+            if (m.parkPhase > 360f) m.parkPhase -= 360f;
+            anchor = Quaternion.Euler(0f, m.parkPhase, 0f) * anchor;
+
+            pos = host.position + Vector3.up * 0.35f + anchor;
+
+            // Nose ALONG the orbit rather than at the world. Anything flying a circle points around it;
+            // aimed at the planet it is circling, a ship reads as one about to fly into it.
+            Vector3 along = Vector3.Cross(Vector3.up,
+                anchor.sqrMagnitude > 0.0001f ? anchor.normalized : Vector3.right);
+            if (along.sqrMagnitude > 0.0001f)
+            {
+                m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
+                    Quaternion.LookRotation(along.normalized, Vector3.up) * m.entry.modelRotation, 2f * dt);
+            }
+            else m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
                 Quaternion.LookRotation((host.position - pos).normalized, Vector3.up) * m.entry.modelRotation, 2f * dt);
         }
 

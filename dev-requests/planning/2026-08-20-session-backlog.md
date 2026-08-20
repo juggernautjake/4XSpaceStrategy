@@ -179,6 +179,34 @@ shown on bare models. One flag each to bring back.
 
 ---
 
+## E-bis. Momentum, orbits and picking ships out
+
+- [x] **E5. Mass and momentum.** A hull can no longer pivot on the spot. Turn rate falls with the
+      SQUARE ROOT of mass (moment of inertia does not grow as fast as tonnage) and rises with the
+      class's speed rating; thrust is expressed as a time-to-full-speed on the same law. Mass is read
+      from hull integrity, which is already authored per class across a 375:1 range and already means
+      "how much ship is there"
+- [x] **E6. The wide turn is not scripted.** Two couplings produce it: turn rate falls as speed rises,
+      and a ship will not hold thrust while pointing far off its course. Order a reversal and it brakes
+      because it is aimed wrong, turns slowly because it is still fast, tightens as it slows, and comes
+      out pointing the right way with speed to rebuild
+- [x] **E7. Verified by simulation**, `tools/flight-model-check.mjs` — there is no Unity here to fly
+      it in. A probe reverses in 0.8s inside 1.2 units; a dreadnought takes 7.7s and 7.8 units; the
+      mega-station takes 13.1s and 15.9. Two defects were caught and fixed by looking at the plot:
+      ships ORBITED their own destination (fixed by limiting speed to what braking distance allows,
+      v = sqrt(2ad), rather than easing it down), and the lag leash was scaled off HULL SIZE, which
+      gave a dreadnought 2.8 units of slack for an arc 25 units wide
+- [x] **E8. Parked ships orbit** their world instead of sitting still, the whole ring turning at ONE
+      rate so the spacing never decays into a pile-up. Six degrees a second — a circuit a minute, far
+      too slow to make a ship hard to click
+- [x] **E9. Ships hold their nose along the orbit**, not aimed at the planet they are circling
+- [x] **E10. The body panel groups by squadron** — a header per squadron naming it, its strength and
+      its standing orders, and clicking the header selects the whole squadron. Loose hulls collect
+      under "Unassigned"
+- [ ] **E11.** Sizes: verify every class reads right on screen — fighters and scouts small, the
+      mega-station a small moon. Current spread is 0.09 (probe) to 0.40 (dreadnought), stations
+      0.23-0.37 against a moon's 0.35 floor
+
 ## F. Worlds and terrain
 
 ### Done
