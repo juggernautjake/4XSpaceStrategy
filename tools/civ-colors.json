@@ -82,23 +82,23 @@
       "signature": "Living hull: wet scaled skin and fin membranes under bolted armour, glowing implant seams."
     },
     "Pyrothian": {
-      "baseMaterial": "dark charcoal basalt and obsidian slabs, thick overlapping ablative plate, brass heat-exchanger fins",
+      "baseMaterial": "jagged BLACK IRON and obsidian plate, riveted and barbed, scorched and ash-stained, lit from within by furnace fire",
       "primary": {
-        "name": "Magma",
+        "name": "Forge Fire",
         "hex": "#FF5A14",
         "keyHue": 20,
-        "role": "the glowing seams between armour plates, vent throats"
+        "role": "the molten cracks, furnace mouths and the great glowing eye"
       },
       "secondary": {
-        "name": "Cryst Cyan",
-        "hex": "#4FD8E8",
-        "keyHue": 188,
-        "role": "sulphur-crystal growths, sensor spines, cockpit glow"
+        "name": "Brimstone",
+        "hex": "#D8E84F",
+        "keyHue": 66,
+        "role": "sulphur crusts around the vents"
       },
       "hueSeparation": 168,
       "baseSaturated": false,
-      "baseShort": "dark charcoal basalt armoured hull",
-      "signature": "CHARRED: soot-blackened plate, heat-discoloured metal, GLOWING ORANGE MAGMA CRACKS through the armour, ash staining."
+      "baseShort": "jagged black-iron hull",
+      "signature": "JAGGED AND BARBED, lit from WITHIN by molten fire through every crack. Ash, smoke, forge-glare."
     },
     "Cryithn": {
       "baseMaterial": "RICHLY COLOURED deep glacier-blue faceted armour over frosted silver alloy, rime-crusted plating",

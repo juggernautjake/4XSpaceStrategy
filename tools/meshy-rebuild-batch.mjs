@@ -272,7 +272,14 @@ function conceptPrompt(civ, lin, tier, isChild) {
   // Now the least important clause is dropped ENTIRELY and the rest is left intact, which degrades to
   // a shorter true instruction rather than a longer false one. Mid-sentence truncation survives only
   // as the last resort, and it says so out loud.
-  const parts = isChild ? [...headParts] : [...headParts, `${c.techMandate}.`];
+  // FILTERED BEFORE THE DROP LOOP, and that is a bug fix rather than tidiness. The unchained head
+  // carries an empty string where the civ aesthetic would go for a hull that already has its own
+  // description — which is every hull that has one. `parts.pop()` then spends a whole drop iteration
+  // removing "" and shortening the prompt by nothing, so one clause more than necessary came off the
+  // end. It cost the SIGNATURE on all nine unchained Pyrothian roots: the scout, the explorer, the
+  // colony ship, the dreadnought, the mega-station and four others were being generated with no
+  // instruction anywhere that the hull should look burnt.
+  const parts = (isChild ? [...headParts] : [...headParts, `${c.techMandate}.`]).filter(Boolean);
 
   let body = parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   while (body.length > room && parts.length > 1)
