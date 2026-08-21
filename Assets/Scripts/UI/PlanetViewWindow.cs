@@ -5123,11 +5123,15 @@ public class PlanetViewWindow : MonoBehaviour
         // block rework exists to remove.
         int nb = Survey.ActiveBlocks(b, fogBlocks);
 
+        // And every row's block size, once. Asking per pixel walks the unit list two hundred thousand
+        // times to produce as many answers as there are rows — see Survey's fast-path header.
+        fogRowBlocks = Survey.RowBlocks(b, fogRowBlocks);
+
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
                 float cover;
-                if (Survey.ReachedGround(b, x, y)) cover = 0f;
+                if (Survey.ReachedGround(b, x, y, fogRowBlocks)) cover = 0f;
                 else
                 {
                     cover = 1f;
@@ -5153,6 +5157,10 @@ public class PlanetViewWindow : MonoBehaviour
 
     // Reused between rebuilds; matches Survey's own scratch size.
     static readonly Survey.Block[] fogBlocks = new Survey.Block[8];
+
+    // Per-row block sizes for the world currently being painted. Grown by Survey.RowBlocks when the
+    // world changes size, which for a moon pane means every time a different moon is opened.
+    int[] fogRowBlocks;
 
     /// Blocks wrap in rank space, so one near the right edge is two runs of columns rather than one.
     static bool InFogBlock(Survey.Block blk, int x, int y, int w)

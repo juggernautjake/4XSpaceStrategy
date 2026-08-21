@@ -573,9 +573,20 @@ public static class Survey
     }
 
     /// Every band of this world, in the order a survey works them.
+    ///
+    /// Takes a buffer. It USED to allocate one when handed null, and that was a genuine disaster
+    /// rather than an untidiness: the call chain from the fog renderer ran
+    /// ReachedGround -> RowBlockCells -> BandForShip -> BandOrder, and ReachedGround is asked once per
+    /// PIXEL. On a 640x320 gas giant, at eight repaints a second, that is three and a half MILLION
+    /// array allocations per second to answer a question whose answer is the same for every pixel on
+    /// the row. The block rework existed to stop the survey lagging; this would have made it lag
+    /// considerably worse, and only on the largest worlds — which is to say, exactly where it was
+    /// already worst and hardest to notice a regression.
+    ///
+    /// The buffer is now required. See BandOrderBuffer for the one every caller uses.
     static int[] BandOrder(CelestialBody b, int bands, int[] into)
     {
-        var order = (into != null && into.Length == bands) ? into : new int[bands];
+        var order = (into != null && into.Length >= bands) ? into : new int[bands];
         int n = 0;
         int cy = bands / 2;
         bool up = UpFirst(b);
@@ -611,7 +622,7 @@ public static class Survey
         }
 
         var rows = Rows(b);
-        var order = BandOrder(b, bands, null);
+        var order = BandOrder(b, bands, BandOrderBuffer(bands));
         int seen = 0, last = -1;
         for (int i = 0; i < order.Length; i++)
         {
@@ -623,6 +634,18 @@ public static class Survey
 
         // More ships than unfinished bands: everyone piles onto the last one rather than idling.
         return last;
+    }
+
+    /// A scratch buffer for band orders, grown on demand.
+    ///
+    /// Safe because every use is a single synchronous read-and-discard inside one method — nothing
+    /// holds a band order across a call to anything that could ask for another one.
+    static int[] bandOrderBuf = new int[64];
+
+    static int[] BandOrderBuffer(int bands)
+    {
+        if (bandOrderBuf.Length < bands) bandOrderBuf = new int[Mathf.NextPowerOfTwo(bands)];
+        return bandOrderBuf;
     }
 
     /// How far through a band the survey has got — the LEAST-done row in it, so a band only counts as
@@ -672,6 +695,61 @@ public static class Survey
     /// working block the instant the ship arrived on it and leave the fading cloud with nothing under
     /// it to hide.
     public static bool ReachedGround(CelestialBody b, int x, int y)
+        => ReachedAt(b, x, y, RowBlockCells(b, y));
+
+    // ============================================================================================
+    // THE PER-PIXEL FAST PATH
+    //
+    // BuildFogTexture asks "is this cell uncovered" once for every cell on the world, and the honest
+    // answer needs to know how wide a block is on that ROW — which depends on which ship is working
+    // that band, which means walking the unit list. Asked per pixel, that is the unit list walked two
+    // hundred thousand times to produce three hundred and twenty distinct answers.
+    //
+    // Worse, it used to ALLOCATE on the way: BandForShip asked BandOrder for a fresh array every
+    // time. On a 640x320 gas giant at eight repaints a second that is three and a half million array
+    // allocations per second — and the whole point of the block rework was to stop the survey
+    // lagging. It would have lagged considerably worse, and only on the biggest worlds, which is
+    // exactly where it was already worst and where a regression is hardest to spot.
+    //
+    // So the renderer resolves every row's block size ONCE into a buffer it owns, and then answers
+    // per pixel out of the array. The buffer belongs to the caller rather than being a cache here, on
+    // purpose: the fog is built for the host planet AND for every open moon pane, and a single static
+    // cache would thrash between them and be wrong in precisely the case nobody tests — a moon pane
+    // open beside its planet.
+    // ============================================================================================
+
+    /// Resolve every row's block size in one pass. Reuses `into` when it is already the right size.
+    public static int[] RowBlocks(CelestialBody b, int[] into)
+    {
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        if (into == null || into.Length != h) into = new int[h];
+
+        int fallback = DefaultBlockCells(b);
+        for (int y = 0; y < h; y++) into[y] = fallback;
+
+        if (b?.units != null)
+        {
+            foreach (var u in b.units)
+            {
+                if (u == null || u.status != UnitStatus.Exploring) continue;
+                int bc = BlockCells(b, u);
+                int band = BandForShip(b, u, bc);
+                if (band < 0) continue;
+                int y0 = band * bc;
+                for (int y = y0; y < y0 + bc && y < h; y++) if (y >= 0) into[y] = bc;
+            }
+        }
+        return into;
+    }
+
+    /// ReachedGround answered from a pre-resolved row table. Same result, no unit walk, no allocation.
+    public static bool ReachedGround(CelestialBody b, int x, int y, int[] rowBlocks)
+        => ReachedAt(b, x, y, (rowBlocks != null && y >= 0 && y < rowBlocks.Length)
+                              ? rowBlocks[y] : DefaultBlockCells(b));
+
+    /// The one implementation both forms use, so a block boundary cannot fall in one place for the
+    /// renderer and somewhere else for a tooltip.
+    static bool ReachedAt(CelestialBody b, int x, int y, int blockCells)
     {
         if (b == null) return false;
         if (GameMode.DevMode || b.Surveyed) return true;
@@ -680,10 +758,11 @@ public static class Survey
         if (y < 0 || y >= rows.Length) return false;
         if (rows[y] >= 1f) return true;
 
-        int across = BlocksAcross(b, RowBlockCells(b, y));
+        int bc = Mathf.Max(1, blockCells);
+        int across = BlocksAcross(b, bc);
         int done = Mathf.FloorToInt(rows[y] * across + 1e-4f);
         int w = Mathf.Max(1, MapMetrics.SurfW(b));
-        return ColRank(w, x) / Mathf.Max(1, RowBlockCells(b, y)) < done;
+        return ColRank(w, x) / bc < done;
     }
 
     /// The block size in force on a given row — that of whichever ship is working it, or the default
