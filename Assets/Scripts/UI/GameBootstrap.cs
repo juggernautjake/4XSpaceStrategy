@@ -32,6 +32,7 @@ public static class GameBootstrap
         Safe("RallyTool", () => RallyTool.Create());                 // click a squadron's fall-back point
         Safe("FleetMovementController", () => FleetMovementController.Create());
         Safe("TargetIndicator", () => TargetIndicator.Create());           // pulsing lock-on ring for right-click sends
+        Safe("FocusTargetMarker", () => FocusTargetMarker.Create());       // a red ring on whatever the selection is concentrating on
         // Combat. Order matters: the renderers must exist before CombatManager's first tick, because
         // it hands them shots rather than drawing anything itself.
         Safe("ProjectileRenderer", () => ProjectileRenderer.Create());        // pooled bolts and beams, with rate-limited homing

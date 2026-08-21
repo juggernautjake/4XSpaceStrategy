@@ -229,6 +229,14 @@ public class SquadronAI : MonoBehaviour
             if (u.HealthFraction > Mathf.Clamp01(orders.withdrawAt)) continue;
             if (u.status == UnitStatus.Traveling) continue;    // already going somewhere
 
+            // A HELD SHIP STAYS HELD, even when it is dying.
+            //
+            // The protocol is a standing instruction and hold-position is a direct one, and a direct
+            // order outranks a standing one — a player who pinned a ship to a chokepoint and watched it
+            // burn made that choice deliberately. Quietly overriding it here would also be the one case
+            // where the ship the player was watching most closely is the one that ignored them.
+            if (CombatOrders.Holding(u)) continue;
+
             // Out of the squadron before it is sent, so the formation stops holding a station for a
             // ship that is no longer flying in it.
             var one = new List<Unit> { u };
@@ -299,11 +307,22 @@ public class SquadronAI : MonoBehaviour
 
     // ---- Helpers ---------------------------------------------------------------------------------
 
+    /// The members this AI is allowed to move.
+    ///
+    /// The single chokepoint every standing order goes through — intercept, evade, escort, patrol —
+    /// which is what makes HOLD POSITION cheap to honour. A held ship is filtered out here and the
+    /// rest of the squadron carries on without it, so a picket left to guard a chokepoint stays on the
+    /// chokepoint while its squadron-mates chase whatever turned up.
+    ///
+    /// Holding is deliberately NOT the same as being unable to fight. A held ship still shoots, still
+    /// screens with its point defence, and still has whatever protocol the squadron is under; it
+    /// simply does not move. "Stay there" and "do not shoot" are different orders — HoldFire is the
+    /// second one — and a player will want each without the other.
     static List<Unit> Movable(List<Unit> members)
     {
         var l = new List<Unit>();
         foreach (var u in members)
-            if (u != null && !u.IsDestroyed && !u.Info.isStation) l.Add(u);
+            if (u != null && !u.IsDestroyed && !u.Info.isStation && !CombatOrders.Holding(u)) l.Add(u);
         return l;
     }
 

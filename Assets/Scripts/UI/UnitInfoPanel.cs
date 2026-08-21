@@ -340,6 +340,17 @@ public class UnitInfoPanel : MonoBehaviour
             if (Magazines.Resupplying(u)) armsLine += "   <color=#4DFF6E>rearming</color>";
             else if (Magazines.CarriesOrdnance(u) && Magazines.AmmoFraction(u) <= 0.001f)
                 armsLine += "   <color=#FF6A5C>out of ordnance — return to a colony, station or carrier</color>";
+
+            // ---- what it has been told to do about it ------------------------------------------
+            //
+            // Only when there IS a standing order. A line reading "Orders: none" on every warship in
+            // the game is a line that trains the eye to skip the whole block, including the times it
+            // says something.
+            var focus = CombatOrders.FocusFor(u);
+            if (focus != null)
+                armsLine += $"\n  <color=#FF8A7A>Concentrating fire on {focus.name}</color>";
+            if (CombatOrders.Holding(u))
+                armsLine += "\n  <color=#FFBF4D>Holding position</color> — its squadron will not move it";
         }
 
         body.text =

@@ -86,6 +86,48 @@ public static class ClickPriority
         return false;
     }
 
+    // ============================================================================================
+    // WHICH SHIP IS UNDER THE CURSOR, WITHOUT CLICKING IT
+    //
+    // The method above SELECTS what it finds, which is right for a left-click and wrong for every
+    // other question. Right-clicking a hostile has to know which hostile it is in order to offer
+    // "concentrate fire on this one" — and must emphatically not select the enemy ship on the way,
+    // because selecting it would drop the fleet the order was meant for.
+    //
+    // Same raycast, same nearest-wins rule among ships, no side effects.
+    // ============================================================================================
+
+    /// The ship under the cursor, or null. Does not select anything.
+    public static Unit UnitUnderCursor()
+    {
+        var cam = Camera.main;
+        if (cam == null) return null;
+
+        var ray = cam.ScreenPointToRay(Input.mousePosition);
+        var hits = Physics.RaycastAll(ray);
+        if (hits == null || hits.Length == 0) return null;
+
+        Unit best = null;
+        float bestDistance = float.MaxValue;
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            var col = hits[i].collider;
+            if (col == null) continue;
+            if (hits[i].distance >= bestDistance) continue;
+
+            var token = col.GetComponentInParent<UnitToken>();
+            var model = token == null ? col.GetComponentInParent<UnitModelClick>() : null;
+
+            Unit u = token != null ? token.Unit : model != null ? model.Unit : null;
+            if (u == null || u.IsDestroyed) continue;
+
+            bestDistance = hits[i].distance;
+            best = u;
+        }
+        return best;
+    }
+
     /// Does the ray pass through the body as it is actually DRAWN?
     ///
     /// Measured from the renderer's own bounds rather than from its collider, and that distinction is

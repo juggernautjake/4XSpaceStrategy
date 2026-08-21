@@ -203,6 +203,100 @@ public class FleetMovementController : MonoBehaviour
         // No cursor-following tooltip: just the dashed trajectory. Right-click brings up the confirm menu.
     }
 
+    // ============================================================================================
+    // THE ATTACK MENU
+    //
+    // Offered when the cursor is over something that is not yours and at least one selected ship could
+    // hostilely engage it. Returns false — and falls through to the ordinary move menu — when neither
+    // is true, so right-clicking a neutral trader or an allied freighter still means "go there".
+    //
+    // Three levels, because the useful order is rarely "these exact ships". A player who has box-
+    // selected part of a squadron almost always means the squadron; a player commanding a fleet in a
+    // running battle means the fleet. Offering all three costs two menu lines and saves re-selecting.
+    // ============================================================================================
+    bool ShowAttackMenu(Vector2 mp, List<Unit> group, Unit target)
+    {
+        if (target == null || group == null || group.Count == 0) return false;
+
+        // Anything in the selection that would actually shoot it. Hostility is the same test combat
+        // uses, so the menu can never offer an attack that the guns would then decline.
+        var shooters = new List<Unit>();
+        foreach (var u in group)
+            if (u != null && !u.IsDestroyed && u.Info != null && u.Info.attack > 0 &&
+                CombatManager.AreHostile(u, target)) shooters.Add(u);
+
+        if (shooters.Count == 0) return false;
+
+        TargetIndicator.Instance?.Hide();
+
+        string what = target.Info != null ? target.Info.name : "vessel";
+        string owner = FactionManager.OwnerName(target.owner);
+        var options = new List<ContextMenu.Option>();
+
+        options.Add(new ContextMenu.Option(
+            $"Concentrate fire: {shooters.Count} ship(s) on {target.name}",
+            () => CombatOrders.FocusSelection(shooters, target)));
+
+        // The squadron, when the selection is all of one and there is more of it than is selected.
+        int g = SquadronOf(shooters);
+        if (g >= 1)
+        {
+            int n = ControlGroups.Members(g).Count;
+            if (n > shooters.Count)
+                options.Add(new ContextMenu.Option(
+                    $"Concentrate fire: all of {Squadrons.NameOf(g)} ({n} ships)",
+                    () => CombatOrders.FocusSquadron(g, target)));
+
+            int f = Fleets.FleetOf(g);
+            if (f >= 1)
+            {
+                int fn = Fleets.Ships(f).Count;
+                if (fn > n)
+                    options.Add(new ContextMenu.Option(
+                        $"Concentrate fire: all of {Fleets.NameOf(f)} ({fn} ships)",
+                        () => CombatOrders.FocusFleet(f, target)));
+            }
+        }
+
+        // Closing on it is a MOVE, not an attack — combat starts on its own once they are in range.
+        // Stopping short by a squadron's engagement standoff rather than flying into the hull.
+        options.Add(new ContextMenu.Option($"Move to engage {target.name}", () =>
+        {
+            var mgr = UnitManager.Instance;
+            if (mgr == null) return;
+            Vector3 tp = CombatManager.PosOf(target);
+            Vector3 from = mgr.UnitPos(shooters[0]);
+            Vector3 d = tp - from;
+            Vector3 stop = d.magnitude <= 16f ? from : tp - d.normalized * 16f;
+            mgr.IssueMovePoint(shooters, stop, false);
+            CombatOrders.FocusSelection(shooters, target);
+        }));
+
+        options.Add(new ContextMenu.Option("Cancel", () => { }));
+
+        ContextMenu.Instance?.Show(mp, options);
+
+        // Free information, and it is the information the decision needs: what it is, whose it is, and
+        // how badly hurt. A player deciding where to concentrate is choosing between targets, and the
+        // one already at 20% hull is usually the answer.
+        NotificationManager.Instance?.Push($"{target.name}",
+            $"{owner} {what} — hull {target.HealthFraction * 100f:F0}%, " +
+            $"attack {target.EffectiveAttack}, armour {target.Armor}.",
+            null, NotifKind.Info);
+        return true;
+    }
+
+    /// The squadron every one of these ships belongs to, or 0 when they disagree.
+    static int SquadronOf(List<Unit> ships)
+    {
+        if (ships.Count == 0) return 0;
+        int first = ControlGroups.GroupOf(ships[0]);
+        if (first == 0) return 0;
+        for (int i = 1; i < ships.Count; i++)
+            if (ControlGroups.GroupOf(ships[i]) != first) return 0;
+        return first;
+    }
+
     List<Unit> SelectableFleet()
     {
         var g = new List<Unit>();
@@ -232,8 +326,25 @@ public class FleetMovementController : MonoBehaviour
         bool queue = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
         string verb = queue ? "Queue" : "Send";
         Vector2 mp = Input.mousePosition;
-        var body = RaycastBody();
         var mgr = UnitManager.Instance;
+
+        // ============================================================================================
+        // A HOSTILE UNDER THE CURSOR IS A TARGET, NOT A DESTINATION
+        //
+        // Checked FIRST, above the body raycast, and it has to be: an enemy ship in orbit sits inside
+        // its world's deliberately oversized pick sphere (see ClickPriority), so asking for the body
+        // first would find the planet every time and the enemy would never be offered.
+        //
+        // This is the only way to designate a target. There is no way to name a specific enemy from a
+        // bar of buttons, so picking one is necessarily a thing you do on the map — which is why the
+        // Focus control in the command bar reports and clears rather than sets, and teaches this verb
+        // in its tooltip.
+        // ============================================================================================
+        var hostile = ClickPriority.UnitUnderCursor();
+        if (hostile != null && hostile.owner != FactionManager.Player && ShowAttackMenu(mp, group, hostile))
+            return;
+
+        var body = RaycastBody();
 
         if (body != null)
         {

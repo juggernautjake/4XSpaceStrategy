@@ -627,6 +627,13 @@ public class UnitManager : MonoBehaviour
     void Issue(List<Unit> group, System.Func<ShipOrder> make, bool queue)
     {
         if (group == null) return;
+
+        // Any explicit order releases a hold-position. Here rather than at every button that could
+        // issue one: a player who has just told a ship where to go has unambiguously changed their
+        // mind about it staying put, and making them clear the hold first would be a modal state
+        // nobody asked for. See CombatOrders.ReleaseHold.
+        CombatOrders.ReleaseHold(group);
+
         foreach (var u in group)
         {
             if (u == null) continue;

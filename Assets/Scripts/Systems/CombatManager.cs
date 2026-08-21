@@ -114,6 +114,7 @@ public class CombatManager : MonoBehaviour
         if (Instance == null) return;
         Instance.mounts.Clear();
         Magazines.ResetAll();
+        CombatOrders.ResetAll();
         ProjectileRenderer.Instance?.ClearAll();
         ExplosionRenderer.Instance?.ClearAll();
     }
@@ -300,6 +301,17 @@ public class CombatManager : MonoBehaviour
     /// of a slightly scarier thing across the system.
     Unit PickTarget(Unit self, List<Unit> pool, float reach)
     {
+        // ---- A DESIGNATED TARGET BEATS THE HEURISTIC -------------------------------------------
+        //
+        // But only while it is a target this ship can actually do something about. A focus order that
+        // outlives its range is worse than no order: it would have the ship hold its fire at something
+        // it cannot reach while a hostile shoots it in the back. So the override is checked, validated
+        // against the same reach every other candidate is, and otherwise falls straight through to the
+        // automatic behaviour below. See CombatOrders.
+        var designated = CombatOrders.FocusFor(self);
+        if (designated != null && Vector3.Distance(PosOf(self), PosOf(designated)) <= reach)
+            return designated;
+
         Unit best = null;
         float bestScore = float.NegativeInfinity;
         Vector3 p = PosOf(self);
@@ -440,6 +452,11 @@ public class CombatManager : MonoBehaviour
         string what = victim.Info != null ? victim.Info.name : "vessel";
 
         // RemoveUnit, not DestroyUnit: the latter is the SCRAP path and announces a self-destruct.
+        // Any standing order aimed at it, or given to it, goes with it. Swept here rather than
+        // periodically, because a dictionary keyed on a dead Unit is exactly the leak CombatOrders'
+        // header warns about.
+        CombatOrders.Forget(victim);
+
         UnitManager.Instance?.RemoveUnit(victim);
 
         if (mine)

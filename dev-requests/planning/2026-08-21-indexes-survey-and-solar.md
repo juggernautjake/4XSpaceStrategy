@@ -154,3 +154,67 @@ against 5x5-at-4s ratio surviving the scaling.
 - **Two ships with different block sizes on one world** work separate bands and may briefly overlap at
   a boundary. Harmless by construction: fills only ever increase, so the slower ship finds ground
   already uncovered and moves past it. Nothing can un-reveal.
+
+---
+
+# Battle orders, command symbols and a performance fix — 2026-08-21 (later)
+
+> *"Make sure we have action interfaces for ships and squadrons and fleets for battles and stuff.
+> Create all of the symbols and buttons and stuff to make it all look cool. Use tool tips were needed."*
+
+## J. Two defects found first
+
+- [x] **J1. The fog renderer was allocating about 3.5 million arrays a second.** `ReachedGround` is
+      asked once per PIXEL, and the block rework left it walking the unit list to find the row's block
+      width — which called `BandForShip`, which called `BandOrder`, which **allocated**. On a 640x320
+      gas giant at eight repaints a second that is millions of allocations to produce as many distinct
+      answers as there are rows. The whole point of block surveying was to stop the map lagging; this
+      would have made it lag considerably worse, and only on the largest worlds — where it was already
+      worst and a regression hardest to see. `Survey.RowBlocks` resolves every row once into a buffer
+      the renderer owns; both forms share one implementation so a block boundary cannot fall in one
+      place for the renderer and somewhere else for a tooltip
+- [x] **J2. The per-ship supply strip never landed.** A scripted edit reported success and silently
+      matched nothing for the ship row, so fleet and squadron rows got an ammunition bar and ship rows
+      did not — and the per-mount tooltip was missing entirely. It was reported as done last session.
+      It is done now
+
+## K. Battle orders
+
+- [x] **K1. Focus fire**, at three levels — the selected ships, their whole squadron, or their whole
+      fleet. Most specific wins
+- [x] **K2.** It is an **override, not a replacement**. Validated against the same reach every other
+      candidate is, and falls through to automatic when the target dies, leaves range or stops being
+      hostile
+- [x] **K3. Right-click a hostile** to designate. Checked ABOVE the body raycast, because an enemy in
+      orbit sits inside its world's oversized pick sphere and would otherwise never be offered
+- [x] **K4. Hold position** — filtered at `SquadronAI.Movable`, the single chokepoint every standing
+      order goes through. A held ship still shoots. Any explicit move order releases it
+- [x] **K5. Withdraw** — rally point, else the nearest world you hold. Reports when there is nowhere
+- [x] **K6.** A **red pulsing ring** on the designated target. Without it the order is invisible
+- [x] **K7.** Focus and hold appear in the ship panel and the roster tooltips
+
+## L. Symbols
+
+- [x] **L1. 25 command icons.** The formation icons ARE the formation — hulls arranged abreast,
+      astern, in a stair, in a wedge — so there is nothing to learn
+- [x] **L2.** White masks tinted at runtime; the set follows the theme
+- [x] **L3.** The contact sheet renders every icon **at 24 pixels as well as 72**. Three rounds of
+      that: nine icons too thin to survive, `Screen` and `Escort` sharing a silhouette, `Withdraw`
+      drawn as an unreadable house
+- [x] **L4.** The command bar is **two rows** — 25 controls at 46px is 1,400px of bar
+- [x] **L5.** Fleet / squadron / ship marks on every Order of Battle row
+- [x] **L6.** Every control has a tooltip, and every tooltip says what the ships will DO
+
+## M. The tripwire
+
+`tools/verify-command-ui.mjs` — icons load by NAME, and a name wrong by one character does not throw,
+warn or draw. It checks both directions and that every control carries a tooltip. **It caught two
+flaws in itself**: reading the formation enum from the wrong file and reporting zero formations as a
+pass, and counting thirteen used icons as unused.
+
+## N. Still open
+
+- [ ] Focus fire has no **hotkey** — right-click is the only way to designate
+- [ ] No **formation preview** on the map before committing
+- [ ] **Point defence still covers only its own hull**
+- [ ] Ships still do not **manoeuvre in combat**

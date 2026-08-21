@@ -111,7 +111,7 @@ public class FleetRosterPanel : MonoBehaviour
                    "Click the name to select the whole fleet; click the arrow to open it.",
                    () => UnitSelection.Set(ships),
                    () => { if (!openFleets.Remove(f)) openFleets.Add(f); Refresh(); },
-                   Magazines.GroupSupply(ships));
+                   Magazines.GroupSupply(ships), "Unit_Fleet");
 
             foreach (int g in squads)
             {
@@ -152,26 +152,36 @@ public class FleetRosterPanel : MonoBehaviour
                $"Click the name to select it; press {g} anywhere to recall it.",
                () => UnitSelection.Set(members),
                () => { if (!openSquadrons.Remove(g)) openSquadrons.Add(g); Refresh(); },
-               Magazines.GroupSupply(members));
+               Magazines.GroupSupply(members), "Unit_Squadron");
 
         if (!open) return;
 
         foreach (var u in members)
         {
             var ship = u;
+            var focus = CombatOrders.FocusFor(ship);
+            string orders =
+                (focus != null ? $"\n<color=#FF8A7A>Concentrating fire on {focus.name}</color>" : "") +
+                (CombatOrders.Holding(ship) ? "\n<color=#FFBF4D>Holding position</color>" : "");
+
             AddRow(indent + 1, ship.name, 0, ship.HealthFraction,
                    $"{ship.name} — {ship.Info.name}\n" +
                    $"Hull {ship.Health:F0} / {ship.EffectiveHealth}\n" +
-                   $"Rank {ship.RankName}\n\nClick to select and open its panel.",
+                   $"Rank {ship.RankName}{orders}\n\n" +
+                   Magazines.SupplyReport(ship) +
+                   "\n\nClick to select and open its panel.",
                    () => { UnitSelection.SelectOnly(ship); UnitInfoPanel.Instance?.Show(ship); },
-                   null);
+                   null,
+                   Magazines.CarriesOrdnance(ship) ? Magazines.AmmoFraction(ship) : -1f,
+                   "Unit_Ship");
         }
     }
 
     /// One row: an indent, a label, an optional count, and a condition bar. `onExpand` is null for a
     /// leaf, which is what makes ships un-openable without a separate row type.
     void AddRow(int indent, string label, int count, float condition, string tip,
-                System.Action onSelect, System.Action onExpand, float supply = -1f)
+                System.Action onSelect, System.Action onExpand, float supply = -1f,
+                string icon = null)
     {
         var row = UIFactory.NewUI(list, "Row");
         var bg = row.AddComponent<Image>();
@@ -181,6 +191,27 @@ public class FleetRosterPanel : MonoBehaviour
         UIFactory.AddLayout(row, 26f);
 
         float left = 6 + indent * 14;
+
+        // ---- FLEET, SQUADRON, SHIP — the mark says which ----
+        //
+        // Indentation already says the depth, but only RELATIVE to the row above: a squadron row
+        // scrolled to the top of the panel looks exactly like a fleet row. The mark says what the row
+        // is on its own, without the reader having to go and find its parent. One hull, three or six,
+        // so the scale carries the meaning and no legend is needed.
+        if (!string.IsNullOrEmpty(icon))
+        {
+            var kg = UIFactory.NewUI(row.transform, "Kind");
+            var kind = kg.AddComponent<RawImage>();
+            kind.raycastTarget = false;
+            kind.texture = Resources.Load<Texture2D>($"SpaceAssets/CommandIcons/Cmd_{icon}");
+            kind.color = new Color(0.62f, 0.76f, 0.90f, 0.95f);
+            var mrt = kind.rectTransform;
+            mrt.anchorMin = mrt.anchorMax = new Vector2(0, 0.5f);
+            mrt.pivot = new Vector2(0, 0.5f);
+            mrt.sizeDelta = new Vector2(14, 14);
+            mrt.anchoredPosition = new Vector2(left, 0);
+            left += 18f;
+        }
 
         var text = UIFactory.Text(row.transform, count > 0 ? $"{label}  <size=9>({count})</size>" : label,
                                   indent == 0 ? 12 : 11, UITheme.Text, TextAlignmentOptions.Left);
