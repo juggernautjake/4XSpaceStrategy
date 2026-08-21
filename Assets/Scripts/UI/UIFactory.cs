@@ -116,10 +116,30 @@ public static class UIFactory
         return content;
     }
 
-    // Adds a VerticalLayoutGroup to a container for stacked controls.
+    // ============================================================================================
+    // Adds a VerticalLayoutGroup to a container for stacked controls — or RECONFIGURES the one that is
+    // already there.
+    //
+    // That second half is not politeness, it is a crash fix. Unity permits exactly one LayoutGroup per
+    // GameObject, and AddComponent on an object that already has one does not throw: it logs a warning
+    // and returns NULL. The next line then dereferences that null, and the exception escapes into
+    // whatever was building the UI.
+    //
+    // Which is how a duplicate layout group on ONE panel cost the entire game its interface.
+    // ScrollView already puts a VerticalLayoutGroup on the content it hands back; FleetRosterPanel
+    // asked for a second one to change the spacing to 3; the NullReferenceException unwound out of
+    // FleetRosterPanel.Create and aborted GameBootstrap.Init halfway down — taking StartMenu,
+    // EscapeMenu, GenerationMenu and the whole GameHUD with it, none of which had been created yet.
+    // The symptom was a game that booted to a black hole and nothing else.
+    //
+    // Reusing the existing group makes the call mean what everybody calling it plainly thought it
+    // meant: "this container stacks its children, with these settings."
+    // ============================================================================================
     public static VerticalLayoutGroup VerticalLayout(RectTransform container, float spacing = 6f, RectOffset padding = null)
     {
-        var v = container.gameObject.AddComponent<VerticalLayoutGroup>();
+        if (container == null) return null;
+        var v = container.gameObject.GetComponent<VerticalLayoutGroup>()
+             ?? container.gameObject.AddComponent<VerticalLayoutGroup>();
         v.spacing = spacing;
         v.padding = padding ?? new RectOffset(14, 14, 10, 10);
         v.childControlWidth = true; v.childControlHeight = true;
