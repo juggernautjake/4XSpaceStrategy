@@ -56,8 +56,14 @@ public static class SurfaceTextureRenderer
                 var tile = body.surface.tiles[x, y];
                 if (tile == null) { pixels[y * w + x] = Color.black; continue; }
 
-                // Per-type colour, so every terrain type stays clearly distinguishable.
+                // Per-type colour, so every terrain type stays clearly distinguishable...
                 Color c = TerrainColorMap.Get(tile.type);
+
+                // ...and then, on a gas giant only, moved round the wheel by that world's own tint. The
+                // table is keyed on terrain type and so cannot tell one giant from another; this is the
+                // only place the BODY gets a say. Banding, storms and the per-tile jitter are all
+                // structure and survive untouched — see GasGiantPalette.
+                c = GasGiantPalette.Apply(body, c);
 
                 // The same per-tile shade jitter the detailed map uses, so the two views still look
                 // like the same world — just at different fidelity.

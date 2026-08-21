@@ -71,10 +71,34 @@ public static class SurfaceIndex
     public static bool Present(CelestialBody b, SurfaceIndexKind k)
     {
         if (b == null) return false;
+
+        // ---- A GAS GIANT HAS NO GROUND, SO IT HAS NO INDEXES --------------------------------------
+        //
+        // Above the Dev Mode override, and that is deliberate: this is not "the player has not found
+        // out yet", it is that the question does not apply. There is no crust to mine, no soil to farm,
+        // no seabed and no plate boundary a thousand kilometres above a metallic-hydrogen ocean. The
+        // generator will happily produce numbers for all six, because it works off elevation and
+        // moisture fields that a giant does have — and every one of those numbers would be a fiction
+        // the sandbox would then display with total confidence.
+        //
+        // A giant is still level-1 surveyable. Its cloud bands are a real map of a real thing.
+        if (b.type == CelestialBodyType.GasGiant) return false;
+
         if (GameMode.DevMode) return true;   // the sandbox shows everything; that is what a sandbox is
 
         switch (k)
         {
+            // ---- SOLAR DIES IN THICK AIR -----------------------------------------------------------
+            //
+            // Not "is poor" — is ABSENT. Past the dead line there is no point offering a solar map at
+            // all: the ground under it is uniformly hopeless, and an index whose every answer is "no"
+            // is a survey pass spent to learn nothing, an icon on the bar that does nothing, and a slot
+            // in the running order that makes every other index finish later. SolarViable and
+            // SolarPressureFactor are solved against the same constant, so the map, the build menu's
+            // gate and the readout cannot disagree about where the line falls.
+            case SurfaceIndexKind.Solar:
+                return b.atmospheres < SolarDeadAtmospheres;
+
             // No plates and no plumes: there is no heat in this crust and no boundary to draw.
             case SurfaceIndexKind.Geothermal:
                 return GeothermalMap.Active(b);
@@ -805,8 +829,22 @@ public static class SurfaceIndex
     static float Solar(CelestialBody b, PlanetTerrainGenerator.Sample f, float u, float v)
     {
         float air = AirNorm(b);
-        // Thin air: the poles win outright. Thick air: they are the worst ground on the world.
-        float polar = Mathf.Lerp(0.35f + f.latitude * 0.65f, 1f - f.latitude * 0.80f, air);
+
+        // ---- WHERE THE SUN LANDS, AND WHY IT SWAPS ENDS ------------------------------------------
+        //
+        // Thin air: the equator wins, straightforwardly. More light falls per square metre where the
+        // star is overhead, and with nothing in the way that is the whole story.
+        //
+        // Thick air: THE POLES win, and the air itself is the reason. A thick atmosphere is a weather
+        // engine, and a weather engine is driven by the equator — that is where the heat goes in, where
+        // the convection is, and where the permanent cloud sits. The high latitudes are the quiet part
+        // of a stormy world. So on a two-atmosphere world the sunny ground is the polar ground, which
+        // is also what makes such a world worth siting on rather than uniformly bad.
+        //
+        // This ran the other way round on both counts. `latitude` is 0 at the equator, 1 at the poles.
+        float thin = 1f - f.latitude * 0.80f;          // equator best
+        float thick = 0.30f + f.latitude * 0.70f;      // poles best
+        float polar = Mathf.Lerp(thin, thick, air);
         float clear = Mathf.Clamp01(1f - f.moisture * 1.15f);      // moisture = cloud
         float altitude = f.elevation * 0.2f;
 
@@ -831,22 +869,61 @@ public static class SurfaceIndex
     /// panel and the star — and thick air costs a little off the top, but never enough to put the ceiling
     /// under the floor: a thick-aired world's few hotspots are still worth building on, which is the whole
     /// change. What thick air really costs is COVERAGE.
-    static float SolarAirCeiling(CelestialBody b) => Mathf.Lerp(1f, 0.88f, AirNorm(b));
+    static float SolarAirCeiling(CelestialBody b)
+    {
+        // Air costs a little off the top. Distance costs a great deal — see SolarStarFactor.
+        return Mathf.Clamp01(Mathf.Lerp(1f, 0.86f, AirNorm(b)) * SolarStarFactor(b));
+    }
+
+    /// How much of its star's light this world gets at all, 0..1, as a factor on the solar CEILING.
+    ///
+    /// "Solar Index should also go down in quality the further the celestial body is from its host
+    /// star" — and the honest place for that is the ceiling rather than the per-tile score. Applied per
+    /// tile it would dim a far world's whole map uniformly, which is the exact failure thick air used
+    /// to have: everything faintly bad, nothing to choose between, and no reason to survey. Applied to
+    /// the ceiling, a far world still has a best place and the survey is still worth running — that
+    /// best place is simply worth 55% rather than 100%, and the player reads the difference straight
+    /// off the band.
+    ///
+    /// `terrainParams.heat` is already set from the body's orbital distance, so this needs no new data
+    /// and cannot drift from the temperature the rest of the world is generated at.
+    public static float SolarStarFactor(CelestialBody b)
+    {
+        if (b == null) return 1f;
+        float insolation = Mathf.Clamp01(b.terrainParams.heat / 1.4f);
+        return Mathf.Lerp(0.55f, 1f, insolation);
+    }
 
     /// How much of a world is sunny enough to matter. Nearly half of an airless rock; a sixth of an
     /// Earth-like world; a scattered few percent of a thick one.
     static float SolarCoverage(CelestialBody b)
     {
-        if (b == null) return 0.16f;
+        if (b == null) return 0.30f;
         float a = b.atmospheres;
-        if (a < 1f) return Mathf.Lerp(0.45f, 0.16f, Mathf.Clamp01(a));
-        return Mathf.Lerp(0.16f, 0.04f, Mathf.Clamp01(Mathf.InverseLerp(1f, 4f, a)));
+
+        // ---- BELOW ONE ATMOSPHERE, SOLAR IS EVERYWHERE ------------------------------------------
+        //
+        // "Planets with very low atmosphere can be nearly completely covered in solar index." Which is
+        // right, and is what makes an airless rock beside its star a genuine prize rather than a
+        // consolation one: with nothing between the panel and the light there is no reason for one
+        // patch of ground to beat another, so the whole world qualifies.
+        //
+        // 92% rather than 100%, so the map still has SHAPE. A completely uniform overlay is a coloured
+        // rectangle, and the few percent that misses out is what keeps it reading as terrain.
+        if (a < 1f) return Mathf.Lerp(0.92f, 0.30f, Mathf.Clamp01(a));
+
+        // ---- AND ABOVE IT, SOLAR IS A FIND -------------------------------------------------------
+        //
+        // "Atmospheres of around 2 should have clustered/focused spots of good solar index, but should
+        // not be common." Around an eighth of the world at two atmospheres, falling to almost nothing
+        // by the dead line — at which point Present() has stopped offering the index at all.
+        return Mathf.Lerp(0.30f, 0.05f, Mathf.Clamp01(Mathf.InverseLerp(1f, SolarDeadAtmospheres, a)));
     }
 
     /// ...and how big each patch is. RISES with pressure — more blobs around the equator means smaller
     /// blobs — so a thin-aired world's sun comes in a few huge regions and a thick one's in small spots.
     static float SolarBlobs(CelestialBody b)
-        => b == null ? 9f : Mathf.Lerp(4f, 17f, AirNorm(b));
+        => b == null ? 9f : Mathf.Lerp(2.5f, 20f, AirNorm(b));
 
     /// What a world's air pressure does to solar output, as a multiplier on a 1.0 baseline — the number
     /// the Survey readout quotes so a player can see WHY a thick world's map is nearly empty.
@@ -855,9 +932,9 @@ public static class SurfaceIndex
     /// and multiplying here as well would charge a thick world for its air twice. Kept because it is
     /// still the honest headline figure, and because the build menu's dead-line gate is solved against it.
     ///
-    /// Above Earth-normal, output falls linearly and reaches EXACTLY ZERO at the dead line: 2 atm -> 75%,
-    /// 3 -> 50%, 4 -> 25%, 5 -> 0. Below Earth pressure it runs the other way, gaining 10 points per 0.1
-    /// atmosphere under, so a 0.5-atm world runs at 150% and an airless one at 200%.
+    /// Above Earth-normal, output falls linearly and reaches EXACTLY ZERO at the dead line: 1.5 atm ->
+    /// 75%, 2 -> 50%, 2.5 -> 25%, 3 -> 0. Below Earth pressure it runs the other way, gaining 10 points
+    /// per 0.1 atmosphere under, so a 0.5-atm world runs at 150% and an airless one at 200%.
     ///
     /// Returned UNCLAMPED above 1 on purpose. The bonus is real and the caller decides what to do with it.
     public static float SolarPressureFactor(float atmospheres)
@@ -869,7 +946,17 @@ public static class SurfaceIndex
 
     /// Atmospheres at which solar output reaches zero, and so the point past which panels are not
     /// offered at all. SolarPressureFactor is solved against this, so the two can never drift apart.
-    public const float SolarDeadAtmospheres = 5f;
+    /// ---- THREE, NOT FIVE ----
+    ///
+    /// "Make Solar Index nonexistent on terrestrial celestial bodies with an atmosphere of 3 and up."
+    /// Moving the line down does three things at once, because everything solar is solved against this
+    /// one constant: panels stop being offered at 3 (SolarViable), the index stops being surveyed at
+    /// all at 3 (Present), and the pressure curve reaches zero at 3 rather than limping on through two
+    /// more atmospheres of near-uselessness.
+    ///
+    /// It also makes thinning an atmosphere a sharper decision. A 3.2-atmosphere world has no solar map
+    /// whatsoever; terraform it to 2.8 and the whole index appears, spots and all.
+    public const float SolarDeadAtmospheres = 3f;
 
     /// Is solar worth building on this world? False above the dead line — and true again the moment
     /// terraforming brings the air back down to 4, which is what makes thinning an atmosphere a
@@ -1364,12 +1451,36 @@ public static class SurfaceIndex
     // then for confirming a choice rather than for making one.
     // ============================================================================================
 
+    // ============================================================================================
+    // HOW OPAQUE A HIGHLIGHT MAY GET, AND WHY IT IS NOW MUCH LESS
+    //
+    // The fills used to reach 94% — nearly solid — which was right when exactly one index could be up
+    // at a time. It stopped being right the moment several could (see IndexIconBar): at 94% the last
+    // overlay composited simply painted over everything under it, so a second index was not additional
+    // information, it was a replacement for the first.
+    //
+    // 40% is the number that makes overlap MEAN something. Two washes at 40% resolve to a colour that
+    // is visibly neither of them — mineral orange under fertile green reads as a distinct third thing
+    // in the region where both are strong — and the terrain stays legible under all of it, which is
+    // what a highlight is for. Three at once is still readable; four is a decision the player is
+    // allowed to make badly.
+    //
+    // The OUTLINES are deliberately not reduced with the fills. They are hairlines one texel wide, they
+    // carry the band boundaries, and at 40% they stop separating from the ground entirely — the thing
+    // that makes a patch read as a place with an edge rather than as a smudge. So the fills got quiet
+    // and the edges stayed loud, which is also what makes several overlapping indexes tellable apart:
+    // the washes blend, the borders do not.
+    // ============================================================================================
+    public const float HighlightAlphaMax = 0.40f;
+
     /// The fill for a tile the overlay has decided to draw (see Shown), in the band `t`.
     public static Color Highlight(SurfaceIndexKind k, float t)
     {
         t = Mathf.Clamp01(t);
         var c = Ramp(k, Mathf.Lerp(0.5f, 1f, t));
-        c.a = Mathf.Lerp(0.52f, 0.94f, t);
+        // The band spread is kept — a 90s patch is still more opaque than a 70s one, which is half of
+        // how the bands read — just compressed into the ceiling above.
+        c.a = Mathf.Lerp(HighlightAlphaMax * 0.55f, HighlightAlphaMax, t);
         return c;
     }
 

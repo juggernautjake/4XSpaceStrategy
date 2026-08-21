@@ -304,7 +304,10 @@ public class PlanetViewWindow : MonoBehaviour
                       && hoverCell.x < body.surface.width && hoverCell.y < body.surface.height;
 
     // Survey-mode state.
+    // Kept only so the Survey tab's cards still have something to reflect; the OVERLAY is driven by
+    // IndexToggles now. Clicking a card sets both, so the tab and the icon bar agree.
     SurfaceIndexKind activeIndex = SurfaceIndexKind.None;
+    readonly List<SurfaceIndexKind> scratchKinds = new List<SurfaceIndexKind>();
     // The Power grid is now a Survey overlay rather than its own tab: this flag is the "showing the power
     // grid" option. NOT exclusive with the index ramps any more — the grid has its own layer above the
     // buildings while an index ramp sits below them, so both can be read at once.
@@ -335,7 +338,14 @@ public class PlanetViewWindow : MonoBehaviour
     bool[] powerLit;        // ...and which tiles any grid reaches, for the edge pass
     Color[] powerOut;       // ...and the supersampled texels the rim is drawn into
 
-    RawImage surveyFogImage;    // the blacked-out grid of an unsurveyed world
+    RawImage surveyFogImage;    // the veil over an unsurveyed world
+    RectTransform surveyMarkerLayer;
+    readonly List<RectTransform> surveyMarkers = new List<RectTransform>();
+    readonly List<Image> surveyMarkerFills = new List<Image>();
+    readonly List<Image> surveyMarkerEdges = new List<Image>();
+    IndexIconBar hostIndexBar;
+    float nextFogRepaint;
+    readonly Dictionary<CelestialBody, IndexIconBar> moonIndexBar = new Dictionary<CelestialBody, IndexIconBar>();
     Texture2D surveyFogTex;
     Color32[] surveyFogPx;
 
@@ -502,10 +512,32 @@ public class PlanetViewWindow : MonoBehaviour
         surveyFogImage.raycastTarget = false;
         fogGO.SetActive(false);
 
+        // ============================================================================================
+        // THE BLOCK A SHIP IS WORKING, FRAMED AND PULSING
+        //
+        // A child of the MAP, not of the viewport, so it pans and zooms with the ground it is framing —
+        // a marker that stayed put while the map moved under it would be pointing at the wrong place
+        // the moment anybody scrolled.
+        //
+        // And a set of RectTransforms rather than pixels baked into the fog texture, which is the whole
+        // reason this is affordable: the marker pulses every frame, and a pulsing texture would mean
+        // rebuilding and re-uploading a two-hundred-thousand-texel image sixty times a second. Moving a
+        // rectangle and changing two colours costs nothing.
+        // ============================================================================================
+        surveyMarkerLayer = UIFactory.NewUI(mapRT, "SurveyMarkers").GetComponent<RectTransform>();
+        UIFactory.Stretch(surveyMarkerLayer);
+        surveyMarkerLayer.gameObject.SetActive(false);
+
         // Points of interest sit ABOVE the terrain but BELOW the pieces: a site is GROUND, so a building
         // put on top of it should cover it. Built before the piece layer so hierarchy order says so.
         siteLayer = UIFactory.NewUI(mapRT, "Sites").GetComponent<RectTransform>();
         UIFactory.Stretch(siteLayer);
+
+        // The index buttons, pinned to the top right of the VIEWPORT rather than of the map — furniture
+        // belongs to the window, and a bar that panned off with the terrain would be a bar you have to
+        // go and find. Parented to gridHolder rather than hostViewport so the viewport's RectMask2D
+        // cannot clip it at the edges.
+        hostIndexBar = IndexIconBar.Attach(gridHolder, body);
 
         // ============================================================================================
         // THE POWER GRID GETS ITS OWN LAYER, BETWEEN THE GROUND AND THE BUILDINGS
@@ -1244,7 +1276,10 @@ public class PlanetViewWindow : MonoBehaviour
         // the heading — so entering or leaving it has to rebuild the side panel. Without this the tray
         // would still be telling you to click a structure to pick it up while the map was in demolition.
         sb.Append(BuildDemolition.IsFor(body) ? 1 : 0).Append('|');
-        sb.Append((int)activeIndex).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
+        scratchKinds.Clear();
+        IndexToggles.Active(body, scratchKinds);
+        for (int i = 0; i < scratchKinds.Count; i++) sb.Append((int)scratchKinds[i]).Append(',');
+        sb.Append('|').Append((int)activeIndex).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
 
         // A SURVEY IN PROGRESS IS A CHANGING PICTURE, and the whole point of it is that you can watch.
         // Quantised rather than raw so this is not a rebuild every frame: 200 steps across a level is
@@ -1328,6 +1363,26 @@ public class PlanetViewWindow : MonoBehaviour
 
         string sig = Signature();
         if (sig != lastSig) { lastSig = sig; Rebuild(); }
+
+        // Every frame, deliberately, and outside the signature check. The marker PULSES and the block
+        // under a working ship advances continuously — both are animations, and an animation gated on
+        // "has anything changed enough to rebuild the map" would step at whatever rate the signature
+        // happens to change at. Costs a rectangle move and two colour writes per surveying ship.
+        RefreshSurveyMarkers();
+        if (hostIndexBar != null) hostIndexBar.SetBody(body);
+
+        // ---- the veil thins continuously, so it has to be repainted continuously ----------------
+        //
+        // But NOT every frame. The block under a ship clears over three and a half seconds, and eight
+        // repaints a second is far smoother than the eye needs for a fade that slow — while sixty would
+        // be re-uploading the whole fog texture sixty times a second, which is precisely the cost the
+        // block rework was done to remove. The signature check cannot cover this because the fade is a
+        // continuous quantity and a signature is a discrete one.
+        if (Survey.InProgress(body) && Time.unscaledTime >= nextFogRepaint)
+        {
+            nextFogRepaint = Time.unscaledTime + 0.125f;
+            RefreshSurveyFog();
+        }
 
         // The pane sizes are derived from the map area's size, which isn't known until Unity has laid the
         // window out — so the first layout (from ShowFor) can run against a zero rect. Re-tile once it's
@@ -4176,10 +4231,18 @@ public class PlanetViewWindow : MonoBehaviour
         // Picking an index no longer switches the grid off — they draw on separate layers now, and the
         // exclusivity was asymmetric anyway: index-then-power worked, power-then-index killed the grid
         // with nothing on screen to explain why.
-        var btn = UIFactory.Button(card, "", () => { activeIndex = k; lastSig = null; }, 24);
+        var btn = UIFactory.Button(card, "", () =>
+        {
+            // The card and the icon on the map are two views of one switch. Toggling through
+            // IndexToggles means pressing either one moves both, rather than the tab quietly holding a
+            // different opinion from the map it is describing.
+            IndexToggles.Toggle(body, k);
+            activeIndex = IndexToggles.IsOn(body, k) ? k : SurfaceIndexKind.None;
+            lastSig = null;
+        }, 24);
         live.Button(btn, () =>
         {
-            bool on = activeIndex == k;   // an index and the power grid can both be up
+            bool on = IndexToggles.IsOn(body, k);   // an index and the power grid can both be up
             string nm = labelOverride ?? SurfaceIndex.Name(k);
             if (k == SurfaceIndexKind.None) return (true, on ? $"• {nm}" : nm);
             if (!SurfaceIndex.Unlocked(body, k)) return (false, $"{nm} — {SurfaceIndex.LockReason(body, k)}");
@@ -4517,24 +4580,34 @@ public class PlanetViewWindow : MonoBehaviour
             return;
         }
 
-        var kind = SurfaceIndexKind.None;
+        // ---- WHICH INDEXES ARE UP ----------------------------------------------------------------
+        //
+        // The icon bar owns this now, on every tab rather than only on Survey. That is the point of
+        // moving the buttons onto the map: "where is the good ground" is a question you ask while
+        // siting a building, while reading the terrain, and while watching a survey run — not only
+        // while sitting in the tab that used to hold the switches.
+        //
+        // Build mode still forces its own index up on top of whatever the player chose. A footprint
+        // being dragged around needs the index it will be scored against visible whether or not anyone
+        // remembered to switch it on, and now that overlays composite rather than replace, showing it
+        // costs the player's own selection nothing.
+        overlayKinds.Clear();
+        IndexToggles.Active(body, overlayKinds);
 
         if (tab == Tab.Build && selected.HasValue)
         {
             var info = SurfaceBuildingDatabase.Get(selected.Value);
-            if (info.index != SurfaceIndexKind.None && SurfaceIndex.Unlocked(body, info.index))
-                kind = info.index;
-        }
-        else if (tab == Tab.Survey && SurfaceIndex.Unlocked(body, activeIndex))   // power no longer excludes it — separate layer
-        {
-            kind = activeIndex;
+            if (info.index != SurfaceIndexKind.None && SurfaceIndex.Unlocked(body, info.index)
+                && !overlayKinds.Contains(info.index))
+                overlayKinds.Add(info.index);
         }
 
-        bool show = kind != SurfaceIndexKind.None && body.surface != null;
+        bool show = overlayKinds.Count > 0 && body.surface != null;
         overlayImage.gameObject.SetActive(show);
         if (!show) return;
 
-        RefreshIndexOverlay(kind);
+        var kind = overlayKinds[overlayKinds.Count - 1];   // the plate arrows below follow the topmost
+        RefreshIndexOverlay(overlayKinds);
 
         // The plate PUSH ARROWS come up with the Geothermal index too, not only with the dedicated
         // tectonics view. Which way each plate is driving is the fact that explains the map: it is why
@@ -4597,12 +4670,53 @@ public class PlanetViewWindow : MonoBehaviour
     /// cell it covers is whatever one texel happens to be at that world's supersampling.
     static int OutlineTexels(int sub) => 1;
 
+    // ============================================================================================
+    // SEVERAL INDEXES AT ONCE
+    //
+    // The overlay used to be built for exactly one index, which is why it could write straight into the
+    // texture. Now that the icon bar lets any number of them be up together (see IndexIconBar), the
+    // texture is cleared once and each index is COMPOSITED into it in the canonical order — so two
+    // overlapping patches produce a blend of the two rather than whichever happened to be painted last.
+    //
+    // Order matters and is deliberately SurfaceIndex.All's, not the order the player clicked them in.
+    // Compositing is not commutative, and an overlay that changed appearance depending on which button
+    // was pressed first would be the sort of thing nobody could ever describe a bug in.
+    // ============================================================================================
+    readonly List<SurfaceIndexKind> overlayKinds = new List<SurfaceIndexKind>();
+
     void RefreshIndexOverlay(SurfaceIndexKind kind)
     {
+        overlayKinds.Clear();
+        if (kind != SurfaceIndexKind.None) overlayKinds.Add(kind);
+        RefreshIndexOverlay(overlayKinds);
+    }
+
+    void RefreshIndexOverlay(List<SurfaceIndexKind> kinds)
+    {
+        if (kinds == null || kinds.Count == 0 || body?.surface == null) return;
+
+        int w0 = body.surface.width, h0 = body.surface.height;
+        int sub0 = OverlaySub(w0, h0);
+        int tw0 = w0 * sub0, th0 = h0 * sub0;
+        EnsureOverlayTex(tw0, th0);
+
+        if (overlayPx == null || overlayPx.Length != tw0 * th0) overlayPx = new Color32[tw0 * th0];
+        // Zeroed is fully transparent, which is what "no index reaches this ground" means.
+        System.Array.Clear(overlayPx, 0, overlayPx.Length);
+
+        for (int i = 0; i < kinds.Count; i++) PaintIndexInto(kinds[i], overlayPx, tw0, th0, sub0);
+
+        overlayTex.SetPixels32(overlayPx);
+        overlayTex.Apply();
+        overlayImage.texture = overlayTex;
+    }
+
+    Color32[] overlayPx;
+
+    /// Composite one index into an overlay buffer that may already hold others.
+    void PaintIndexInto(SurfaceIndexKind kind, Color32[] px, int tw, int th, int sub)
+    {
         int w = body.surface.width, h = body.surface.height;
-        int sub = OverlaySub(w, h);
-        int tw = w * sub, th = h * sub;
-        EnsureOverlayTex(tw, th);
 
         // Resolved for every tile FIRST, because the outline pass has to ask about neighbours — and
         // asking Shown again per neighbour would re-sample the terrain noise four more times per tile.
@@ -4681,8 +4795,6 @@ public class PlanetViewWindow : MonoBehaviour
                 }
             }
 
-        var px = new Color32[tw * th];   // zeroed = fully transparent, which is what "not shown" means
-
         // ============================================================================================
         // EVERY BAND GETS ITS OWN EDGE, so the contours NEST
         //
@@ -4720,7 +4832,8 @@ public class PlanetViewWindow : MonoBehaviour
                         bool onEdge = sub > 1 &&
                             ((openL && sx < et) || (openR && sx >= sub - et) ||
                              (openD && sy < et) || (openU && sy >= sub - et));
-                        px[(y * sub + sy) * tw + (x * sub + sx)] = onEdge ? edge : c;
+                        int t = (y * sub + sy) * tw + (x * sub + sx);
+                        px[t] = Blend(px[t], onEdge ? edge : c);
                     }
             }
 
@@ -4741,10 +4854,25 @@ public class PlanetViewWindow : MonoBehaviour
         // giving away the very thing the survey is for.
         if (kind == SurfaceIndexKind.Geothermal && TectonicsMap.Active(body))
             PaintPlateLines(px, tw, th, sub, step);
+    }
 
-        overlayTex.SetPixels32(px);
-        overlayTex.Apply();
-        overlayImage.texture = overlayTex;
+    /// Source-over. The straightforward compositing rule, written out because the alternative — letting
+    /// the later index simply overwrite — is what made a second overlay useless before highlights
+    /// dropped to 40%.
+    static Color32 Blend(Color32 under, Color32 over)
+    {
+        float sa = over.a / 255f;
+        if (sa <= 0.001f) return under;
+        if (sa >= 0.999f && under.a == 0) return over;
+        float ua = under.a / 255f;
+        float outA = sa + ua * (1f - sa);
+        if (outA <= 0.0001f) return new Color32(0, 0, 0, 0);
+        float inv = 1f / outA;
+        return new Color32(
+            (byte)Mathf.Clamp((over.r * sa + under.r * ua * (1f - sa)) * inv, 0f, 255f),
+            (byte)Mathf.Clamp((over.g * sa + under.g * ua * (1f - sa)) * inv, 0f, 255f),
+            (byte)Mathf.Clamp((over.b * sa + under.b * ua * (1f - sa)) * inv, 0f, 255f),
+            (byte)Mathf.Clamp(outA * 255f, 0f, 255f));
     }
 
     /// The fault lines, painted over a finished Geothermal overlay.
@@ -4952,18 +5080,21 @@ public class PlanetViewWindow : MonoBehaviour
     //
     // ============================================================================================
 
-    /// A cell is either COVERED or it is not. No middle.
-    ///
-    /// This was translucent, on the reasoning that a hint of ground under the fog keeps the planet
-    /// reading as a planet rather than as a rectangle where the map failed to load. In practice it did
-    /// the opposite of what a mask is for: it broke the "no information below is visible" rule the
-    /// blackout exists to enforce, AND — because the project renders in Linear space, where an alpha
-    /// looks markedly lighter than its number — it left every unsurveyed world looking like a DIMMED
-    /// map rather than a covered one. A map that is merely dim reads as a rendering fault.
-    ///
-    /// Binary, the two states are unmistakable: a covered cell is black and tells you nothing, an
-    /// uncovered cell is the terrain at full vibrance with no tint over it at all.
-    const byte FogAlpha = 255;
+    // ---- THE VEIL IS TRANSLUCENT AGAIN, AND IT IS THE COLOUR OF THE SKY -------------------------
+    //
+    // It was alpha 255 — solid black — on the reasoning that a partly transparent blackout reads as a
+    // DIMMED map rather than a covered one, and a map that is merely dim reads as a rendering fault.
+    //
+    // That was right about the failure and wrong about the fix. What made the old translucent version
+    // look broken was that it was a flat grey wash at a low alpha, and a flat grey wash IS what a
+    // rendering fault looks like. The answer is not opacity, it is making the veil look like something:
+    // cloud, over a world that has air, in the colour that world's air actually is, and denser where
+    // the air is denser. See SurveyVeil, which owns all of that.
+    //
+    // The per-cell alpha now comes from Survey.VeilAt, which is 1 over untouched ground, 0 over ground
+    // already mapped, and somewhere between over the block a ship is standing on right now — so the
+    // working block visibly thins across its three and a half seconds and is clear at the moment the
+    // survey moves on.
 
     /// Does this world's map need blacking out at all?
     static bool WantsFog(CelestialBody b) =>
@@ -4978,21 +5109,35 @@ public class PlanetViewWindow : MonoBehaviour
         int w = b.surface.width, h = b.surface.height;
         if (surveyFogPx == null || surveyFogPx.Length != w * h) surveyFogPx = new Color32[w * h];
 
-        var covered = new Color32(3, 4, 7, FogAlpha);
-        var clear = new Color32(0, 0, 0, 0);
+        // One colour for the whole world, sampled once rather than per cell — it depends only on the
+        // body, and asking sixty thousand times for the same answer is the sort of thing that makes a
+        // texture rebuild expensive.
+        Color veil = SurveyVeil.ColorFor(b);
+        byte vr = (byte)Mathf.Clamp(veil.r * 255f, 0f, 255f);
+        byte vg = (byte)Mathf.Clamp(veil.g * 255f, 0f, 255f);
+        byte vb = (byte)Mathf.Clamp(veil.b * 255f, 0f, 255f);
+        float peak = veil.a;
 
-        // The tiles the ship is on RIGHT NOW, so the player can see where the work is rather than only
-        // that it is happening. White and translucent over the black: it reads as a light passing across
-        // the covered ground, which is what a survey sweep should look like.
-        var active = new Color32(235, 242, 255, 96);
+        // The blocks under a ship right now, fetched ONCE. Asking Survey per pixel would re-derive
+        // every ship's band assignment sixty thousand times a rebuild, which is the cost this whole
+        // block rework exists to remove.
+        int nb = Survey.ActiveBlocks(b, fogBlocks);
 
-        // Per ROW, so several ships show as several fronts on several latitudes — see Survey.Rows.
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
-                surveyFogPx[y * w + x] =
-                    Survey.ReachedGround(b, x, y) ? clear
-                    : Survey.BeingSurveyedGround(b, x, y) ? active
-                    : covered;
+            {
+                float cover;
+                if (Survey.ReachedGround(b, x, y)) cover = 0f;
+                else
+                {
+                    cover = 1f;
+                    for (int i = 0; i < nb; i++)
+                        if (InFogBlock(fogBlocks[i], x, y, w)) { cover = 1f - fogBlocks[i].frac; break; }
+                }
+
+                byte a = (byte)Mathf.Clamp(cover * peak * 255f, 0f, 255f);
+                surveyFogPx[y * w + x] = new Color32(vr, vg, vb, a);
+            }
 
         if (tex == null || tex.width != w || tex.height != h)
         {
@@ -5004,6 +5149,108 @@ public class PlanetViewWindow : MonoBehaviour
         tex.SetPixels32(surveyFogPx);
         tex.Apply();
         return tex;
+    }
+
+    // Reused between rebuilds; matches Survey's own scratch size.
+    static readonly Survey.Block[] fogBlocks = new Survey.Block[8];
+
+    /// Blocks wrap in rank space, so one near the right edge is two runs of columns rather than one.
+    static bool InFogBlock(Survey.Block blk, int x, int y, int w)
+    {
+        if (y < blk.y0 || y >= blk.y0 + blk.h) return false;
+        int dx = ((x - blk.x0) % w + w) % w;
+        return dx < blk.w;
+    }
+
+    // ============================================================================================
+    // THE MARKERS
+    //
+    // One rectangle per ship on station, framing the block it is working, pulsing on the fleet beat.
+    // Pooled: a world is worked by at most a handful of ships and the rectangles are reused rather
+    // than rebuilt, so this runs every frame without allocating.
+    // ============================================================================================
+    void RefreshSurveyMarkers()
+    {
+        if (surveyMarkerLayer == null) return;
+
+        int n = (body?.surface != null && !GameMode.DevMode && !body.Surveyed)
+            ? Survey.ActiveBlocks(body, fogBlocks) : 0;
+
+        if (n == 0)
+        {
+            if (surveyMarkerLayer.gameObject.activeSelf) surveyMarkerLayer.gameObject.SetActive(false);
+            return;
+        }
+        if (!surveyMarkerLayer.gameObject.activeSelf) surveyMarkerLayer.gameObject.SetActive(true);
+
+        while (surveyMarkers.Count < n) MakeSurveyMarker();
+
+        int w = body.surface.width, h = body.surface.height;
+        Color fill = SurveyVeil.MarkerColor();
+        Color edge = SurveyVeil.MarkerEdgeColor();
+
+        for (int i = 0; i < surveyMarkers.Count; i++)
+        {
+            var rt = surveyMarkers[i];
+            bool live = i < n;
+            if (rt.gameObject.activeSelf != live) rt.gameObject.SetActive(live);
+            if (!live) continue;
+
+            var blk = fogBlocks[i];
+
+            // Blocks wrap in rank space. A block straddling the seam is drawn at its left run only —
+            // the map's own mirror layers redraw the wrapped remainder, so a second rectangle here
+            // would double up on exactly the worlds where the mirrors are already doing the job.
+            float x0 = blk.x0 / (float)w;
+            float x1 = Mathf.Min(1f, (blk.x0 + blk.w) / (float)w);
+            float y0 = blk.y0 / (float)h;
+            float y1 = Mathf.Min(1f, (blk.y0 + blk.h) / (float)h);
+
+            rt.anchorMin = new Vector2(x0, y0);
+            rt.anchorMax = new Vector2(x1, y1);
+            rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+
+            surveyMarkerFills[i].color = fill;
+            surveyMarkerEdges[i].color = edge;
+        }
+    }
+
+    void MakeSurveyMarker()
+    {
+        var rt = UIFactory.NewUI(surveyMarkerLayer, "Block").GetComponent<RectTransform>();
+        rt.pivot = new Vector2(0.5f, 0.5f);
+
+        var f = rt.gameObject.AddComponent<Image>();
+        f.raycastTarget = false;
+
+        // The border is four child edges at a fixed pixel thickness, so the frame stays a hairline at
+        // every zoom instead of growing into the block it is supposed to be outlining.
+        var holder = UIFactory.NewUI(rt, "Edges").GetComponent<RectTransform>();
+        holder.anchorMin = Vector2.zero; holder.anchorMax = Vector2.one;
+        holder.offsetMin = Vector2.zero; holder.offsetMax = Vector2.zero;
+        var tint = holder.gameObject.AddComponent<Image>();
+        tint.color = new Color(0, 0, 0, 0);
+        tint.raycastTarget = false;
+
+        const float T = 2f;
+        MarkerEdge(holder, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -T), Vector2.zero);
+        MarkerEdge(holder, new Vector2(0, 0), new Vector2(1, 0), Vector2.zero, new Vector2(0, T));
+        MarkerEdge(holder, new Vector2(0, 0), new Vector2(0, 1), Vector2.zero, new Vector2(T, 0));
+        MarkerEdge(holder, new Vector2(1, 0), new Vector2(1, 1), new Vector2(-T, 0), Vector2.zero);
+
+        surveyMarkers.Add(rt);
+        surveyMarkerFills.Add(f);
+        surveyMarkerEdges.Add(tint);
+    }
+
+    static void MarkerEdge(RectTransform parent, Vector2 aMin, Vector2 aMax, Vector2 oMin, Vector2 oMax)
+    {
+        var e = UIFactory.NewUI(parent, "Edge").GetComponent<RectTransform>();
+        e.anchorMin = aMin; e.anchorMax = aMax;
+        e.offsetMin = oMin; e.offsetMax = oMax;
+        var img = e.gameObject.AddComponent<Image>();
+        img.raycastTarget = false;
+        e.gameObject.AddComponent<FrameEdgeTint>();
     }
 
     void RefreshSurveyFog()
@@ -5957,8 +6204,12 @@ public class PlanetViewWindow : MonoBehaviour
                      : selected.HasValue ? SurfaceBuildingDatabase.Get(selected.Value) : null;
             return info?.index ?? SurfaceIndexKind.None;
         }
-        if (tab == Tab.Survey) return activeIndex;
-        return SurfaceIndexKind.None;
+        // The numbers under the cursor follow the LAST index switched on, on any tab. With several up
+        // at once something has to be chosen, and the most recently added is the one the player was
+        // most recently thinking about.
+        scratchKinds.Clear();
+        IndexToggles.Active(body, scratchKinds);
+        return scratchKinds.Count > 0 ? scratchKinds[scratchKinds.Count - 1] : SurfaceIndexKind.None;
     }
 
     void RefreshYieldIcons()
@@ -7551,6 +7802,7 @@ public class PlanetViewWindow : MonoBehaviour
                 if (moonFogTex.TryGetValue(m, out var ft) && ft != null) Destroy(ft);
                 moonFrame.Remove(m); moonImg.Remove(m); moonTex.Remove(m);
                 moonFog.Remove(m); moonFogTex.Remove(m);
+                moonIndexBar.Remove(m);
             }
 
         foreach (var m in openMaps)
@@ -7595,6 +7847,14 @@ public class PlanetViewWindow : MonoBehaviour
             UIFactory.Stretch(mfog.rectTransform);
             mfog.raycastTarget = false;
             fogGO.SetActive(false);
+
+            // ---- ITS OWN INDEX BUTTONS, ON ITS OWN SURVEY ----
+            //
+            // A moon is surveyed exactly as a planet is and has its own indexes on its own ground, so
+            // the bar is attached to the moon's FRAME and given the moon. Sharing the host planet's bar
+            // would offer the planet's indexes over the moon's terrain, which is worse than offering
+            // none — it would be confidently wrong about what is under the cursor.
+            moonIndexBar[m] = IndexIconBar.Attach(frame, m);
 
             moonFrame[m] = frame; moonImg[m] = img; moonTex[m] = tex; moonFog[m] = mfog;
         }

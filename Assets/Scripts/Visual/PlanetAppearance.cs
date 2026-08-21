@@ -160,6 +160,12 @@ public static class PlanetAppearance
         return (a + b + c) / 1.75f;
     }
 
+    /// The colour of this kind of world's air, for anything that needs to match it — the survey veil,
+    /// principally. Public so there is ONE table of atmosphere colours rather than a second one kept in
+    /// step by hand, which is how a world ends up with a blue sky and an orange fog over its map.
+    public static bool AtmosphereColorOf(CelestialBodyType t, out Color color)
+        => HasAtmosphere(t, out color, out _);
+
     static bool HasAtmosphere(CelestialBodyType t, out Color color, out float thickness)
     {
         switch (t)
@@ -182,6 +188,11 @@ public static class PlanetAppearance
         if (existing != null) Object.Destroy(existing.gameObject);
 
         if (!HasAtmosphere(body.type, out Color color, out float thickness)) return;
+
+        // A gas giant's shell takes that particular giant's colour rather than the one tan-orange every
+        // giant used to share. Everything else keeps its per-type colour, because a rocky world's sky is
+        // a property of the kind of world it is.
+        if (body.type == CelestialBodyType.GasGiant) color = GasGiantPalette.Atmosphere(body);
 
         // Honor the body's actual atmosphereThickness attribute, not just its type. A small moon can now
         // roll an ice/volcanic/rocky SURFACE (see RollMoonType) while its mass holds essentially no air

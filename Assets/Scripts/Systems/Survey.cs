@@ -405,18 +405,127 @@ public static class Survey
     }
 
     // ============================================================================================
-    // LEVEL 1, ROW BY ROW — WHICH IS WHAT LETS SHIPS SHARE A WORLD
+    // LEVEL 1, A BLOCK AT A TIME
     //
-    // Each ship takes the next unfinished row in the running order and sweeps it. Two ships are two
-    // fronts on two latitudes, three are three, and the map shows it.
+    // A survey used to advance one CELL at a time along one row. That is the finest possible grain and
+    // it was the wrong one for two separate reasons:
     //
-    // WHY THIS NEEDED STATE AND THE REST DID NOT. Every other reveal here is a pure function of one
-    // number, which costs nothing and cannot desynchronise. This one cannot be: if the row assignment
-    // were derived from the CURRENT ship count, a ship arriving or leaving would re-partition the rows
-    // and cells already uncovered would go black again. A survey that un-reveals ground is worse than
-    // one that does not show its ships. So the fills are stored, and the ship count only decides who
-    // works on what NEXT.
+    //   IT LAGGED. Every cell that changed state forced the whole fog texture to be rebuilt and
+    //   re-uploaded, and on a 640x320 world the front crosses a cell several times a second. The map
+    //   spent its frame budget re-uploading a two-hundred-thousand-pixel texture to change one pixel.
+    //
+    //   IT DID NOT LOOK LIKE ANYTHING. A single cell winking out is beneath notice at map zoom. What a
+    //   survey should look like is a machine working a patch of ground and then moving to the next one.
+    //
+    // So a ship now clears a whole BLOCK at a time, sits on it for a few seconds while the cloud over
+    // it thins, and moves on. Four seconds for a scout, three and a half for a science ship, and the
+    // block a science ship clears is half again as wide — which is what "science ships always have the
+    // advantage" comes out as when you put both numbers together: about 2.2 times the ground per second.
+    //
+    // ---- HOW BIG A BLOCK IS, AND THE ARITHMETIC THAT FORCED IT --------------------------------
+    //
+    // A block is quoted in SURVEY UNITS — 5 for a scout, 7 for a science hull, more with technology —
+    // and a unit is worth some number of cells ON THIS WORLD. It is not always one.
+    //
+    // It cannot always be one. Grids here run from 10x5 to 640x320, a factor of four thousand in area.
+    // At a literal 5x5 cells and four seconds a block, a 200x100 world is eight hundred blocks, which
+    // is FIFTY-THREE MINUTES of watching a survey — against the ten to ninety seconds every other part
+    // of the game is balanced around. Meanwhile a small moon would be nine blocks and over in half a
+    // minute, which is about right. One constant cannot serve both ends of that range, and the same
+    // problem is already documented above for seconds-per-cell.
+    //
+    // So the block time is exactly what was asked for — 4.0s and 3.5s, and technology buys it down —
+    // and the block GROWS with the world instead, so the number of blocks stays in a range a player
+    // will sit through. A small moon really does get a 5x5 patch; a 400x200 world gets the same five
+    // units drawn as a much larger square. The ratio between the two hulls is preserved everywhere, so
+    // a science ship's block is always visibly bigger than a scout's, which is the thing the player
+    // actually reads off the screen.
+    //
+    // ---- WHY THE STATE DID NOT CHANGE ------------------------------------------------------------
+    //
+    // Still one float per pixel row, still `surveyRows`, still the same save format and the same
+    // migration path. A block reveal is a contiguous run along each of the rows it covers, which is
+    // exactly what a row fill already describes — so `rows[y] * blocksPerRow` reads as "blocks finished
+    // on this row", and the FRACTIONAL part is how far into the current block the ship has got. That
+    // fraction is what the cloud over the working block thins by, so the veil needs no state of its own
+    // either.
+    //
+    // The consequence worth knowing: two ships with different block sizes on the same world cannot
+    // desynchronise, because fills only ever increase and a block boundary is only ever a place where
+    // one stops. The ship count still only decides who works on what NEXT.
     // ============================================================================================
+
+    /// How many cells across a ship's block is, before the world's scale is applied. The technology
+    /// hook: every tier of Empire Tech widens the patch a survey can take in one bite.
+    public static int SurveyUnits(Unit u)
+    {
+        // A science hull is the only thing that can run a level-2 survey at all, and it leads at level
+        // 1 too — see the Rate() block in UnitType. Seven against five is a 96% bigger patch.
+        int baseUnits = (u?.Info != null && u.Info.canResearch) ? 7 : 5;
+        return baseUnits + Mathf.Clamp(EmpireTech.Level - 1, 0, 6);
+    }
+
+    /// Seconds a ship spends on one block. Lower is better, so technology divides it.
+    public static float BlockSeconds(Unit u)
+    {
+        float baseSeconds = (u?.Info != null && u.Info.canResearch) ? 3.5f : 4.0f;
+
+        // The hull's own survey rate, on a deliberately shallow curve. Applying `surveyRate` directly
+        // would make a Science Vessel more than three times as fast as a scout ON TOP of its bigger
+        // block, and the block is already where the class difference is meant to show. This keeps the
+        // ladder — a Mk III beats a Mk I — without letting it swamp the headline numbers.
+        float rate = Mathf.Max(0.05f, u?.Info.surveyRate ?? 1f);
+        return Mathf.Max(0.25f, baseSeconds / ((0.6f + 0.4f * rate) * TechSpeedMultiplier));
+    }
+
+    /// How many blocks a scout should need to cover this whole world.
+    ///
+    /// Grows with area but slowly — the same sub-linear shape `ChargedCells` uses and for the same
+    /// reason. Four blocks is the floor so the smallest moon is still a few visible steps rather than
+    /// one flash, forty the ceiling so the largest gas giant is minutes rather than an afternoon.
+    static float TargetBlocks(CelestialBody b)
+    {
+        float cells = Mathf.Max(1, MapMetrics.SurfW(b) * MapMetrics.SurfH(b));
+        return Mathf.Clamp(7f * Mathf.Pow(cells / 800f, 0.32f), 8f, 40f);
+    }
+
+    /// How many cells one survey unit is worth on this world. 1 on a small moon, and larger the bigger
+    /// the world gets — see the header for why this cannot simply be 1 everywhere.
+    public static float CellsPerUnit(CelestialBody b)
+    {
+        float cells = Mathf.Max(1, MapMetrics.SurfW(b) * MapMetrics.SurfH(b));
+        float scoutBlock = Mathf.Sqrt(cells / TargetBlocks(b));      // cells across, for a 5-unit hull
+        return Mathf.Max(0.2f, scoutBlock / 5f);
+    }
+
+    /// The side of this ship's block on this world, in cells. Never smaller than two — a one-cell
+    /// "block" is the per-cell crawl this replaced.
+    public static int BlockCells(CelestialBody b, Unit u)
+    {
+        int w = Mathf.Max(1, MapMetrics.SurfW(b));
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        int s = Mathf.RoundToInt(SurveyUnits(u) * CellsPerUnit(b));
+        return Mathf.Clamp(s, 2, Mathf.Max(2, Mathf.Min(w, h)));
+    }
+
+    /// Blocks across one row of this world, for a ship with this block size.
+    public static int BlocksAcross(CelestialBody b, int blockCells)
+        => Mathf.Max(1, Mathf.CeilToInt(Mathf.Max(1, MapMetrics.SurfW(b)) / (float)Mathf.Max(1, blockCells)));
+
+    // ============================================================================================
+    // WHICH WAY IT WORKS OUTWARD, AND WHY IT IS A COIN FLIP
+    //
+    // A survey starts on the middle band, works right, wraps, and then takes the band above or below —
+    // "50/50 as to which", and alternating from there. The coin is the WORLD's, not the moment's: it
+    // comes out of the terrain seed, so a given planet always surveys the same way round however many
+    // times it is reloaded, and two planets in the same system do not move in lockstep.
+    //
+    // Deriving it from the seed rather than storing it also means it costs nothing to save and cannot
+    // come back different, which for anything that decides what is already revealed is the difference
+    // between a quirk and a bug.
+    // ============================================================================================
+    public static bool UpFirst(CelestialBody b)
+        => b != null && ((Mathf.RoundToInt(b.terrainSeed * 131f) ^ b.id) & 1) == 0;
 
     /// This world's per-row fills, sized to its grid and seeded from `explorationProgress` if it has
     /// none — which is what carries an older save, and what survives a sandbox resize.
@@ -452,14 +561,46 @@ public static class Survey
         b.explorationProgress = Mathf.Clamp01(sum / Mathf.Max(1, rows.Length));
     }
 
-    /// The row this ship is working: the Nth unfinished row in running order, where N is the ship's
+    /// Where in this world's band order a given band sits: 0 is the middle, then alternately one to
+    /// the side the world's coin picked and one to the other.
+    public static int BandRank(CelestialBody b, int bands, int band)
+    {
+        int d = band - bands / 2;
+        if (d == 0) return 0;
+        bool up = UpFirst(b);
+        // The favoured side takes the odd ranks, the other the even ones.
+        return (d > 0) == up ? 2 * d - 1 : 2 * Mathf.Abs(d);
+    }
+
+    /// Every band of this world, in the order a survey works them.
+    static int[] BandOrder(CelestialBody b, int bands, int[] into)
+    {
+        var order = (into != null && into.Length == bands) ? into : new int[bands];
+        int n = 0;
+        int cy = bands / 2;
+        bool up = UpFirst(b);
+        if (n < bands) order[n++] = cy;
+        for (int d = 1; n < bands && d <= bands; d++)
+        {
+            int first = up ? cy + d : cy - d;
+            int second = up ? cy - d : cy + d;
+            if (first >= 0 && first < bands && n < bands) order[n++] = first;
+            if (second >= 0 && second < bands && n < bands) order[n++] = second;
+        }
+        return order;
+    }
+
+    /// The band this ship is working: the Nth unfinished band in running order, where N is the ship's
     /// place among the ships surveying this world. Sorted by id so the assignment is stable frame to
-    /// frame — two ships must not swap rows every tick and leave two half-swept latitudes.
+    /// frame — two ships must not swap bands every tick and leave two half-swept latitudes.
     ///
-    /// Returns -1 when every row is done, or when this ship is not surveying here.
-    public static int RowForShip(CelestialBody b, Unit u)
+    /// Returns -1 when every band is done, or when this ship is not surveying here.
+    public static int BandForShip(CelestialBody b, Unit u, int blockCells)
     {
         if (b?.units == null || u == null) return -1;
+
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        int bands = Mathf.Max(1, Mathf.CeilToInt(h / (float)Mathf.Max(1, blockCells)));
 
         int slot = 0;
         foreach (var other in b.units)
@@ -470,33 +611,66 @@ public static class Survey
         }
 
         var rows = Rows(b);
-        var order = RowOrder(rows.Length);
-        int seen = 0;
+        var order = BandOrder(b, bands, null);
+        int seen = 0, last = -1;
         for (int i = 0; i < order.Length; i++)
         {
-            if (rows[order[i]] >= 1f) continue;
+            if (BandFill(rows, order[i], blockCells, h) >= 1f) continue;
+            last = order[i];
             if (seen == slot) return order[i];
             seen++;
         }
 
-        // More ships than unfinished rows: everyone piles onto the last one rather than idling.
-        for (int i = order.Length - 1; i >= 0; i--) if (rows[order[i]] < 1f) return order[i];
-        return -1;
+        // More ships than unfinished bands: everyone piles onto the last one rather than idling.
+        return last;
     }
 
-    /// Advance this ship's row by the share of the world it covers in `dt`. One row is 1/h of the map,
-    /// so a fraction of the whole map becomes h times as much of one row.
+    /// How far through a band the survey has got — the LEAST-done row in it, so a band only counts as
+    /// finished once every row of it is.
+    static float BandFill(float[] rows, int band, int blockCells, int h)
+    {
+        int y0 = band * blockCells;
+        float f = 1f;
+        for (int y = y0; y < y0 + blockCells && y < h; y++)
+            if (y >= 0 && y < rows.Length) f = Mathf.Min(f, rows[y]);
+        return f;
+    }
+
+    /// Advance this ship's block. One block is 1/blocksAcross of a row, so a ship sitting on a block
+    /// for `BlockSeconds` moves exactly that much.
+    ///
+    /// The rows of the band move TOGETHER and are only ever raised, never lowered. That is what keeps
+    /// two ships with different block sizes from fighting: the slower one simply finds ground already
+    /// uncovered and moves past it.
     public static void AdvanceGround(CelestialBody b, Unit u, float dt)
     {
-        int y = RowForShip(b, u);
-        if (y < 0) return;
+        if (b == null || u == null || dt <= 0f) return;
 
+        int blockCells = BlockCells(b, u);
+        int band = BandForShip(b, u, blockCells);
+        if (band < 0) return;
+
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        int across = BlocksAcross(b, blockCells);
         var rows = Rows(b);
-        rows[y] = Mathf.Clamp01(rows[y] + Fraction(b, u, dt, false) * rows.Length);
+
+        float step = dt / (BlockSeconds(u) * across);
+        float f = Mathf.Clamp01(BandFill(rows, band, blockCells, h) + step);
+
+        int y0 = band * blockCells;
+        for (int y = y0; y < y0 + blockCells && y < h; y++)
+            if (y >= 0 && y < rows.Length) rows[y] = Mathf.Max(rows[y], f);
+
         SyncAggregate(b);
     }
 
     /// Has the ground survey uncovered this cell?
+    ///
+    /// WHOLE BLOCKS ONLY. The fractional part of a row fill is the ship's progress through the block it
+    /// is standing on, and that block is still under cloud — it is the thing being uncovered, not
+    /// something already uncovered. Reading the fill directly, as this used to, would reveal the
+    /// working block the instant the ship arrived on it and leave the fading cloud with nothing under
+    /// it to hide.
     public static bool ReachedGround(CelestialBody b, int x, int y)
     {
         if (b == null) return false;
@@ -506,30 +680,142 @@ public static class Survey
         if (y < 0 || y >= rows.Length) return false;
         if (rows[y] >= 1f) return true;
 
+        int across = BlocksAcross(b, RowBlockCells(b, y));
+        int done = Mathf.FloorToInt(rows[y] * across + 1e-4f);
         int w = Mathf.Max(1, MapMetrics.SurfW(b));
-        return ColRank(w, x) / (float)w < rows[y];
+        return ColRank(w, x) / Mathf.Max(1, RowBlockCells(b, y)) < done;
     }
 
-    /// Is this cell under a ship's sweep head right now? One head per row being worked.
+    /// The block size in force on a given row — that of whichever ship is working it, or the default
+    /// for this world when nobody is.
+    ///
+    /// Rows have to agree with themselves about how wide a block is or `ReachedGround` and the veil
+    /// would disagree about where the boundary falls, and the seam would show as a stripe of cloud on
+    /// ground that is already mapped.
+    public static int RowBlockCells(CelestialBody b, int y)
+    {
+        if (b?.units != null)
+        {
+            foreach (var u in b.units)
+            {
+                if (u == null || u.status != UnitStatus.Exploring) continue;
+                int bc = BlockCells(b, u);
+                int band = BandForShip(b, u, bc);
+                if (band < 0) continue;
+                if (y >= band * bc && y < (band + 1) * bc) return bc;
+            }
+        }
+        return DefaultBlockCells(b);
+    }
+
+    /// The block size for a world nobody is currently surveying — a plain scout's, which is what
+    /// already-mapped ground was most likely uncovered at and is the least surprising fallback.
+    public static int DefaultBlockCells(CelestialBody b)
+    {
+        int w = Mathf.Max(1, MapMetrics.SurfW(b));
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        int s = Mathf.RoundToInt(5f * CellsPerUnit(b));
+        return Mathf.Clamp(s, 2, Mathf.Max(2, Mathf.Min(w, h)));
+    }
+
+    // ============================================================================================
+    // THE BLOCK A SHIP IS STANDING ON
+    //
+    // What the white marker frames, what the thinning cloud covers, and the only thing on the map that
+    // changes between one block and the next. Handed out as a small struct rather than answered per
+    // pixel, because the marker is drawn as one rectangle over the map — a pulsating border baked into
+    // the fog texture would mean rebuilding and re-uploading that texture every frame, which is the
+    // cost this whole rework exists to remove.
+    // ============================================================================================
+
+    public struct Block
+    {
+        public int x0, y0, w, h;   // cell rectangle
+        public float frac;         // 0 just arrived, 1 about to move on
+    }
+
+    /// Every block being worked on this world right now, one per surveying ship. Returns how many were
+    /// written into `into`.
+    public static int ActiveBlocks(CelestialBody b, Block[] into)
+    {
+        if (b == null || into == null || b.units == null || b.Surveyed || GameMode.DevMode) return 0;
+
+        int w = Mathf.Max(1, MapMetrics.SurfW(b));
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        var rows = Rows(b);
+        int n = 0;
+
+        foreach (var u in b.units)
+        {
+            if (n >= into.Length) break;
+            if (u == null || u.status != UnitStatus.Exploring) continue;
+
+            int bc = BlockCells(b, u);
+            int band = BandForShip(b, u, bc);
+            if (band < 0) continue;
+
+            int across = BlocksAcross(b, bc);
+            float fill = BandFill(rows, band, bc, h);
+            if (fill >= 1f) continue;
+
+            float pos = fill * across;
+            int done = Mathf.FloorToInt(pos + 1e-4f);
+            if (done >= across) continue;
+
+            // ColRank runs right from the middle column and wraps, so the block's left edge has to be
+            // mapped back out of rank space — otherwise the marker walks the map from the left while
+            // the ground uncovers from the middle.
+            int rank0 = done * bc;
+            int x0 = ((rank0 + w / 2) % w + w) % w;
+
+            into[n++] = new Block
+            {
+                x0 = x0,
+                y0 = band * bc,
+                w = Mathf.Min(bc, w),
+                h = Mathf.Min(bc, h - band * bc),
+                frac = Mathf.Clamp01(pos - done),
+            };
+        }
+        return n;
+    }
+
+    /// Is this cell under a ship's sweep head right now?
     public static bool BeingSurveyedGround(CelestialBody b, int x, int y)
     {
-        if (b == null || b.Surveyed || b.units == null) return false;
-
-        var rows = Rows(b);
-        if (y < 0 || y >= rows.Length || rows[y] >= 1f) return false;
-
-        // Only rows an actual ship is on — a part-done row nobody is working is not being surveyed, it
-        // is abandoned, and marking it would say a ship is there when the player has moved it away.
-        bool worked = false;
-        foreach (var u in b.units)
-            if (u != null && u.status == UnitStatus.Exploring && RowForShip(b, u) == y) { worked = true; break; }
-        if (!worked) return false;
-
-        int w = Mathf.Max(1, MapMetrics.SurfW(b));
-        int front = Mathf.Clamp(Mathf.FloorToInt(rows[y] * w), 0, w - 1);
-        int rank = ColRank(w, x);
-        return rank >= front && rank < front + ActiveBandCells;
+        var blocks = blockScratch;
+        int n = ActiveBlocks(b, blocks);
+        for (int i = 0; i < n; i++)
+            if (InBlock(blocks[i], x, y, Mathf.Max(1, MapMetrics.SurfW(b)))) return true;
+        return false;
     }
+
+    /// How much cloud is still over this cell: 0 clear, 1 untouched. The working block thins across
+    /// its survey time, which is what makes a block visibly resolve rather than pop.
+    public static float VeilAt(CelestialBody b, int x, int y)
+    {
+        if (b == null) return 0f;
+        if (ReachedGround(b, x, y)) return 0f;
+
+        var blocks = blockScratch;
+        int n = ActiveBlocks(b, blocks);
+        int w = Mathf.Max(1, MapMetrics.SurfW(b));
+        for (int i = 0; i < n; i++)
+            if (InBlock(blocks[i], x, y, w)) return 1f - blocks[i].frac;
+        return 1f;
+    }
+
+    /// Blocks wrap in rank space, so a block near the right edge is two runs of columns rather than one.
+    static bool InBlock(Block blk, int x, int y, int w)
+    {
+        if (y < blk.y0 || y >= blk.y0 + blk.h) return false;
+        int dx = ((x - blk.x0) % w + w) % w;
+        return dx < blk.w;
+    }
+
+    // One per world; a world with more than eight ships surveying it at once is not a case worth
+    // allocating for, and the ninth simply does not draw a marker.
+    static readonly Block[] blockScratch = new Block[8];
 
     // ---- Packing, for the save ------------------------------------------------------------------
 
