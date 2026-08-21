@@ -98,6 +98,25 @@ public class CombatManager : MonoBehaviour
     readonly Dictionary<Unit, Mounts> mounts = new Dictionary<Unit, Mounts>();
     readonly List<Unit> scratch = new List<Unit>();
 
+    // ============================================================================================
+    // WHO IS IN A FIGHT
+    //
+    // Asked by the renderer, every frame, for every drawn hull — because a ship under fire flies
+    // evasively and a ship at peace does not, and the difference has to be cheap to ask about.
+    //
+    // Both ENDS of every engagement go in. A colony ship has no guns and picks no target, and it is
+    // precisely the hull that should be jinking; marking only shooters would leave the things most
+    // worth evading with the least reason to. So a unit is engaged if it has a target OR is one.
+    //
+    // Two sets swapped rather than one cleared, so a reader mid-frame never sees a half-built set —
+    // the renderer runs in LateUpdate and this is filled in Update, which is exactly the ordering
+    // where a single set would be observed empty for one frame every frame.
+    static HashSet<Unit> engaged = new HashSet<Unit>();
+    static HashSet<Unit> engagedNext = new HashSet<Unit>();
+
+    /// Is this ship shooting at something, or being shot at?
+    public static bool InCombat(Unit u) => u != null && engaged.Contains(u);
+
     public static void Create()
     {
         if (Instance != null) return;
@@ -113,6 +132,8 @@ public class CombatManager : MonoBehaviour
     {
         if (Instance == null) return;
         Instance.mounts.Clear();
+        engaged.Clear();
+        engagedNext.Clear();
         Magazines.ResetAll();
         CombatOrders.ResetAll();
         ProjectileRenderer.Instance?.ClearAll();
@@ -137,6 +158,8 @@ public class CombatManager : MonoBehaviour
         // already ticks every frame with the unit list in hand, and a second MonoBehaviour would be a
         // second thing to create, reset, and eventually forget to reset.
         Magazines.Tick(dt, scratch);
+
+        engagedNext.Clear();
 
         for (int i = 0; i < scratch.Count; i++)
         {
@@ -168,6 +191,11 @@ public class CombatManager : MonoBehaviour
                 m.target = PickTarget(u, scratch, Weaponry.MaxRange(m.loadout));
                 m.retargetIn = RetargetInterval;
             }
+
+            // Both ends of the engagement, and BEFORE hold-fire can null the target: a squadron
+            // slipping past something it cannot beat is still very much in a fight and should still be
+            // flying like it.
+            if (m.target != null) { engagedNext.Add(u); engagedNext.Add(m.target); }
 
             // ---- point defence works whether or not this ship has a target of its own ----
             RunPointDefence(u, m, dt);
@@ -218,6 +246,9 @@ public class CombatManager : MonoBehaviour
                 FireOne(u, m, k, w);
             }
         }
+
+        // Swap rather than clear-and-refill, so a LateUpdate reader never catches a half-built set.
+        var swap = engaged; engaged = engagedNext; engagedNext = swap;
     }
 
     /// Send the rounds still owed from trigger pulls already made.
@@ -362,12 +393,20 @@ public class CombatManager : MonoBehaviour
     // POINT DEFENCE
     // ============================================================================================
 
-    /// Sweep inbound rounds out of the air around this ship.
+    /// Sweep inbound rounds out of the air around this ship, and around anything friendly standing
+    /// close enough to it.
     ///
-    /// It protects the SHIP CARRYING IT and nothing else. Area point defence — a destroyer screening
-    /// the whole formation — sounds generous and plays badly: it makes one ship in the fleet mandatory
-    /// and the rest interchangeable. Per-hull means a screen is something you build INTO a formation
-    /// by choosing hulls, which is the decision worth having.
+    /// It used to protect the ship carrying it and nothing else, on the reasoning that area point
+    /// defence makes one screening destroyer mandatory and every other hull interchangeable. That
+    /// reasoning still holds and the screen is still PER HULL — but the flat version left a hole
+    /// exactly where the game wanted a mechanic. A colony ship has no guns and no screen, and neither
+    /// does a terraformer, a science vessel or a transport, because arming them would make them
+    /// warships. So an escort could not actually protect the thing it was escorting: the torpedoes
+    /// went straight past it into the hull beside it, and escorting was a formation and a protocol
+    /// with no teeth.
+    ///
+    /// The limits that keep it from becoming a fleet-wide umbrella are in ProjectileRenderer
+    /// .InterceptIncoming, which is where the geometry lives.
     void RunPointDefence(Unit u, Mounts m, float dt)
     {
         var pr = ProjectileRenderer.Instance;

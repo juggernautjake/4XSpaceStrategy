@@ -393,23 +393,85 @@ public class ProjectileRenderer : MonoBehaviour
         return Vector3.Distance(a + ab * t, p);
     }
 
-    /// Delete every round aimed at this unit that a point-defence mount managed to catch. Returns how
-    /// many were destroyed, so the caller can decide whether it was worth a sound.
-    public int InterceptIncoming(Unit protectedUnit, Vector3 screenCentre, float radius, int maxKills)
+    // ============================================================================================
+    // THE SCREEN
+    //
+    // Point defence used to protect the hull carrying it and nothing else. The reasoning was sound and
+    // the conclusion was half right: AREA point defence, where one destroyer screens a whole fleet,
+    // makes that one ship mandatory and every other hull interchangeable, which is a worse game.
+    //
+    // But it left a hole exactly where the game most wanted a mechanic. A colony ship has no guns and
+    // no screen. A terraformer, a science vessel, a transport — none of them carry point defence,
+    // because arming them would make them warships. So an escort could not actually protect the thing
+    // it was escorting: it could kill the shooter eventually, and in the meantime the torpedoes went
+    // past it and into the hull it was standing next to. Escorting was a formation and a protocol with
+    // no mechanical teeth.
+    //
+    // So a mount now reaches for its neighbours as well as itself, with three limits that keep it from
+    // becoming the fleet-wide umbrella the original note was right to refuse:
+    //
+    //   IT REACHES LESS FAR FOR SOMEBODY ELSE. A round crossing your engagement envelope on its way
+    //   somewhere else is a harder shot than one coming down your throat, and the geometry says so.
+    //
+    //   IT LOOKS AFTER ITSELF FIRST. Rounds aimed at the mount's own hull are swept before any aimed
+    //   at a neighbour, so a screening ship under fire stops screening — which is the pressure that
+    //   makes killing the escort worth doing.
+    //
+    //   IT IS STILL PER HULL. Every warship has point defence; a fleet's screen is the sum of what its
+    //   ships brought, not one specialist everybody has to bring. That was the real point of the
+    //   original rule and it survives intact.
+    // ============================================================================================
+
+    /// How much of its own range a mount can cover a NEIGHBOUR at, as a fraction. Deliberately well
+    /// under one: covering a friend is a favour, not a duty, and a fleet in tight formation should get
+    /// a meaningful overlap rather than a blanket.
+    const float EscortRangeFraction = 0.62f;
+
+    /// Delete rounds a point-defence mount managed to catch. Returns how many were destroyed.
+    ///
+    /// `owner` carries the mount. Rounds aimed at it are always eligible; rounds aimed at anything
+    /// friendly within the reduced radius are eligible once its own are clear.
+    public int InterceptIncoming(Unit owner, Vector3 screenCentre, float radius, int maxKills)
     {
-        int killed = 0;
+        int killed = Sweep(owner, owner, screenCentre, radius, maxKills);
+        if (killed >= maxKills) return killed;
+
+        // ---- and then whatever is going past, on its way to somebody the mount is standing near ----
+        float escortRadius = radius * EscortRangeFraction;
         for (int i = shots.Count - 1; i >= 0 && killed < maxKills; i--)
         {
             var s = shots[i];
-            if (s.instant || !s.weapon.interceptable) continue;   // beams and slugs cannot be caught
-            if (s.target != protectedUnit) continue;
-            if (Vector3.Distance(s.pos, screenCentre) > radius) continue;
+            if (!Catchable(s)) continue;
+            if (s.target == null || s.target == owner || s.target.IsDestroyed) continue;
+            // Only for hulls on the same side. "Friendly" is the same test combat uses for hostility,
+            // inverted, so a mount can never shoot down a round aimed at somebody it is at war with.
+            if (owner == null || s.target.owner != owner.owner) continue;
+            if (Vector3.Distance(s.pos, screenCentre) > escortRadius) continue;
 
             ExplosionRenderer.Instance?.Burst(s.pos, 0.35f, s.weapon.colour);
             Retire(s); shots.RemoveAt(i); killed++;
         }
         return killed;
     }
+
+    int Sweep(Unit owner, Unit protectedUnit, Vector3 centre, float radius, int maxKills)
+    {
+        int killed = 0;
+        for (int i = shots.Count - 1; i >= 0 && killed < maxKills; i--)
+        {
+            var s = shots[i];
+            if (!Catchable(s)) continue;
+            if (s.target != protectedUnit) continue;
+            if (Vector3.Distance(s.pos, centre) > radius) continue;
+
+            ExplosionRenderer.Instance?.Burst(s.pos, 0.35f, s.weapon.colour);
+            Retire(s); shots.RemoveAt(i); killed++;
+        }
+        return killed;
+    }
+
+    /// Beams and railgun slugs arrive the frame they are fired and cannot be caught by anything.
+    static bool Catchable(Shot s) => !s.instant && s.weapon != null && s.weapon.interceptable;
 
     /// Forget everything in the air. Called when a galaxy is replaced — the shots reference Units that
     /// are about to stop existing.

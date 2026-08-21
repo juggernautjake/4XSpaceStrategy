@@ -395,6 +395,15 @@ public class UnitModelRenderer : MonoBehaviour
         /// which stations use and which is seeded randomly per unit — the anchorage ring must advance
         /// UNIFORMLY or the spacing it was given decays into a pile-up.
         public float parkPhase;
+
+        // ---- evasive flying, for a ship in a fight — see CombatWeave ----
+        //
+        // `weaveBlend` eases the whole thing in and out so entering and leaving an engagement is not a
+        // teleport. `evadeVel` is the weave's own velocity, reported by VelocityOf so the gunnery model
+        // charges a jinking ship the crossing speed it is actually making.
+        public float weavePhase;
+        public float weaveBlend;
+        public Vector3 evadeVel;
     }
 
     /// How fast a parked fleet walks its anchorage. Six degrees a second is a full circuit a minute —
@@ -460,9 +469,23 @@ public class UnitModelRenderer : MonoBehaviour
     public static Vector3 VelocityOf(Unit u)
     {
         if (u == null || Instance == null) return Vector3.zero;
-        if (u.status != UnitStatus.Traveling) return Vector3.zero;
-        if (!Instance.models.TryGetValue(u, out var m) || m == null || !m.flightReady) return Vector3.zero;
-        return m.flightVel;
+        if (!Instance.models.TryGetValue(u, out var m) || m == null) return Vector3.zero;
+
+        // Under way: the momentum model's own velocity.
+        if (u.status == UnitStatus.Traveling)
+            return m.flightReady ? m.flightVel : Vector3.zero;
+
+        // ---- STOPPED, BUT NOT NECESSARILY STILL ----
+        //
+        // A ship in a fight jinks around its station (see CombatWeave), and that weave has a real
+        // velocity that a gunner has to lead. Reporting zero here — which is what this did — is what
+        // made two fleets meeting at a world stop moving and then shoot each other with perfect
+        // accuracy: the dodge was drawn and then not charged for, so it was decoration.
+        //
+        // The slow parked ORBIT is still deliberately not reported. It is a couple of degrees a second
+        // of decoration on a ship nobody is shooting at, and leading it would put every shot at a
+        // docked hull a hull-width wide for no reason the player could ever see.
+        return m.evadeVel;
     }
 
     public void Rebuild()
@@ -1065,6 +1088,96 @@ public class UnitModelRenderer : MonoBehaviour
         return m.flightPos;
     }
 
+    // ============================================================================================
+    // JINKING — a ship under fire does not hold still
+    //
+    // Every gun in the game now solves a firing solution and throws a dispersion cone at it, and the
+    // largest term in that cone is the target's CROSSING speed (see Ballistics.DispersionDegrees). A
+    // ship moving sideways relative to a shooter is genuinely harder to hit; a stationary one is a
+    // gift.
+    //
+    // Which meant the ballistics rework had quietly created a hole. A ship in transit weaves all over
+    // the shooter's solution and is hard to hit; the moment it arrives and parks, its crossing speed
+    // drops to ZERO and it takes the full accuracy of everything in range. Two fleets meeting at a
+    // world both stopped moving and then shot each other with perfect precision, which is neither what
+    // the model was for nor what anybody would call a battle.
+    //
+    // So a ship that is being shot at, or shooting, flies a small evasive weave around wherever it
+    // would otherwise be sitting.
+    //
+    // ---- AGILITY DECIDES HOW MUCH, AND THAT IS THE WHOLE POINT ---------------------------------
+    //
+    // Off ShipPhysics.BaseTurnRate, so it is the same number that decides how wide a hull turns under
+    // way — a fighter jinks hard, a dreadnought leans, a mega-station does not move at all. Nobody has
+    // to author a per-class evasion stat, and a hull that is buffed to be nimbler becomes harder to hit
+    // as well as quicker to turn, which is the right coupling.
+    //
+    // ---- WHY IT IS SMALL --------------------------------------------------------------------------
+    //
+    // A fighter peaks at a couple of world units of travel and under three units per second, which is
+    // well below the ten to sixteen it makes in transit. That ordering is deliberate: manoeuvring on
+    // the spot should help and RUNNING should help more. It also keeps the hull clickable, which the
+    // parked-orbit note is right about — a ship you cannot reliably click is worse than a ship that
+    // does not move.
+    //
+    // ---- DRAWING, NOT SIMULATION ------------------------------------------------------------------
+    //
+    // Like everything else in this file. It moves the drawn hull, and combat reads drawn positions
+    // (CombatManager.PosOf), so the dodge is real — but no arrival time, no order and nothing in the
+    // save is touched by it.
+    // ============================================================================================
+
+    /// The widest a hull will stray from its station while evading, at maximum agility, in world units.
+    ///
+    /// Started at 1.35 and came down, because tools/flight-model-check.mjs prints what it costs at both
+    /// ends. At 1.35 a scout peaked at 7.7 u/s and wandered nearly three units from its station — most
+    /// of a planet's width at system zoom, which is a ship you cannot reliably click, and the parked-
+    /// orbit note is right that this is worse than one that does not move. At 0.75 it still roughly
+    /// DOUBLES the dispersion a shooter has to overcome and stays inside two or three hull lengths.
+    const float MaxWeaveRadius = 0.75f;
+
+    /// How fast the weave cycles, in radians per second, at minimum and maximum agility.
+    const float WeaveSlow = 0.55f, WeaveFast = 1.9f;
+
+    /// How quickly the weave eases in when a fight starts and out when it ends. A hull that snapped
+    /// into evasive flight the instant a hostile came into range would read as teleporting.
+    const float WeaveBlendRate = 1.4f;
+
+    Vector3 CombatWeave(Unit u, Model m, float dt)
+    {
+        // A ship under way is already crossing; adding a weave on top would double-count the one thing
+        // this exists to provide, and fight the momentum model for control of the same position.
+        bool want = u.status != UnitStatus.Traveling && CombatManager.InCombat(u) &&
+                    u.Info != null && !u.Info.isStation;
+
+        m.weaveBlend = Mathf.MoveTowards(m.weaveBlend, want ? 1f : 0f, WeaveBlendRate * dt);
+        if (m.weaveBlend <= 0.001f) { m.evadeVel = Vector3.zero; return Vector3.zero; }
+
+        // BaseTurnRate is clamped 7..190 across the roster: a mega-station sits at the floor and a
+        // scout near the ceiling. Mapping 7..60 spreads the hulls anyone actually fights with across
+        // the whole range instead of bunching them all near zero.
+        float agility = Mathf.InverseLerp(7f, 60f, ShipPhysics.BaseTurnRate(u));
+        float radius = Mathf.Lerp(0f, MaxWeaveRadius, agility) * m.weaveBlend;
+        if (radius <= 0.001f) { m.evadeVel = Vector3.zero; return Vector3.zero; }
+
+        float omega = Mathf.Lerp(WeaveSlow, WeaveFast, agility);
+        m.weavePhase += omega * dt;
+
+        // A LISSAJOUS rather than a circle. A circle is periodic in a way a gunner — and a player —
+        // reads immediately, and a target on a predictable circle is a target you simply lead. The
+        // 2:3 ratio never closes on itself over any span the eye follows, so the path stays a genuine
+        // wander while remaining perfectly bounded.
+        float t = m.weavePhase + m.phase;      // per-ship offset, so a squadron does not weave in unison
+        Vector3 offset = new Vector3(Mathf.Sin(t * 2f), 0f, Mathf.Sin(t * 3f + 1.3f)) * radius;
+
+        // The VELOCITY is the part that matters — it is what the dispersion cone is computed against.
+        // Differentiated analytically rather than from the frame-to-frame delta, which would be noisy
+        // at low frame rates and would make evasion quietly better on a slower machine.
+        m.evadeVel = new Vector3(Mathf.Cos(t * 2f) * 2f, 0f, Mathf.Cos(t * 3f + 1.3f) * 3f) * (radius * omega);
+
+        return offset;
+    }
+
     // A ship: sits where the unit is, points along its course, and idles with a slow bob so it reads
     // as alive rather than as a prop.
     void TickShip(UnitManager um, Unit u, Model m, float dt)
@@ -1186,6 +1299,9 @@ public class UnitModelRenderer : MonoBehaviour
             else m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
                 Quaternion.LookRotation((host.position - pos).normalized, Vector3.up) * m.entry.modelRotation, 2f * dt);
         }
+
+        // ---- and if somebody is shooting at it, it does not sit still ----
+        pos += CombatWeave(u, m, dt);
 
         if (!m.animated)
         {

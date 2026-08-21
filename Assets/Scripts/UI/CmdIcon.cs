@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using UnityEngine.EventSystems;
 
 // ============================================================================================
 // AN ICON BUTTON, AND THE THREE THINGS IT HAS TO SAY AT A GLANCE
@@ -56,6 +57,7 @@ public class CmdIcon : MonoBehaviour
     Image edge;
     RawImage icon;
     Button button;
+    CmdIconHover hover;
 
     bool on, enabledState = true;
 
@@ -116,6 +118,12 @@ public class CmdIcon : MonoBehaviour
         c.button.targetGraphic = c.fill;
         if (onClick != null) c.button.onClick.AddListener(() => onClick());
 
+        // Hover, for controls that want to SHOW what they would do before they are pressed. Its own
+        // component rather than the Button's own handlers, for the same reason UIFactory.Tooltip is:
+        // a Button with interactable=false stops running its pointer callbacks, and a disabled control
+        // is exactly the one a player most wants to preview.
+        c.hover = go.AddComponent<CmdIconHover>();
+
         var le = go.AddComponent<LayoutElement>();
         le.preferredWidth = width; le.flexibleWidth = 0;
 
@@ -141,6 +149,17 @@ public class CmdIcon : MonoBehaviour
     /// Available / not. A disabled control keeps its tooltip, which is where the reason lives.
     public CmdIcon SetEnabled(bool value) { enabledState = value; Apply(); return this; }
 
+    /// Run something while the cursor is over this control, and something else when it leaves.
+    ///
+    /// Used by the formation buttons to draw the actual stations on the map before the player commits
+    /// to them — a tooltip can describe a wedge and an icon can diagram one, but neither answers the
+    /// question being asked, which is what YOUR eleven ships will look like in it.
+    public CmdIcon OnHover(System.Action enter, System.Action exit)
+    {
+        if (hover != null) { hover.onEnter = enter; hover.onExit = exit; }
+        return this;
+    }
+
     /// Replace the tooltip — for controls whose explanation depends on the current state, like a
     /// button that reads "Hold position" one moment and "Release" the next.
     public CmdIcon SetTip(string tip)
@@ -165,4 +184,22 @@ public class CmdIcon : MonoBehaviour
         if (icon != null) icon.color = on ? OnIcon : IdleIcon;
         if (edge != null) edge.color = on ? OnEdge : new Color(0, 0, 0, 0);
     }
+}
+
+
+/// Pointer enter and exit, as callbacks.
+///
+/// Separate from Button on purpose: a Button with interactable=false stops running its own pointer
+/// callbacks, and the control a player most wants to preview is frequently the one they cannot press.
+/// It also fires OnDisable, because a bar that is rebuilt while the cursor is over one of its buttons
+/// would otherwise leave the preview on screen with nothing left to turn it off.
+public class CmdIconHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+{
+    public System.Action onEnter, onExit;
+    bool inside;
+
+    public void OnPointerEnter(PointerEventData e) { inside = true; onEnter?.Invoke(); }
+    public void OnPointerExit(PointerEventData e) { inside = false; onExit?.Invoke(); }
+
+    void OnDisable() { if (inside) { inside = false; onExit?.Invoke(); } }
 }

@@ -147,6 +147,40 @@ public static class FleetFormation
     }
 
     // ============================================================================================
+    // THE SAME STATIONS, WITHOUT A FLEET TO PUT IN THEM
+    //
+    // Every tooltip in the command bar describes a formation in words and the icons diagram it, and
+    // neither answers the question a player is actually asking, which is "what will MY squadron look
+    // like in it". A wedge of four and a wedge of eleven are different shapes; a screen depends on
+    // which of your hulls are the cheap ones; a globe only makes sense once you can see how wide it is
+    // against the world you are parked at.
+    //
+    // So the preview draws the real stations, from the real function, for the real ship count — rather
+    // than an illustration that could drift from what the formation actually does. Offset() cannot be
+    // used directly because it needs a Unit with a slot already assigned; this is the same arithmetic
+    // with the slot handed in.
+    //
+    // No allocation: the caller owns the buffer, because this is called every frame while a button is
+    // hovered.
+    // ============================================================================================
+
+    /// The station for one slot, in world units relative to the formation's centre.
+    public static Vector3 PreviewStation(FleetFormationKind kind, int slot, int count,
+                                         Vector3 courseDir, float spacing)
+    {
+        if (count <= 1 || kind == FleetFormationKind.Free) return Vector3.zero;
+
+        Vector3 fwd = courseDir.sqrMagnitude > 0.000001f ? courseDir.normalized : Vector3.forward;
+        Vector3 right = Vector3.Cross(Vector3.up, fwd);
+        right = right.sqrMagnitude < 0.0001f ? Vector3.right : right.normalized;
+        Vector3 up = Vector3.Cross(fwd, right).normalized;
+
+        float step = spacing > 0.001f ? spacing : LateralStep;
+        Station(kind, slot, count, out float lateral, out float back, out float lift);
+        return (right * lateral - fwd * back + up * lift) * step;
+    }
+
+    // ============================================================================================
     // THE FORMATIONS — a slot, in steps, for each shape
     //
     // `back` is measured ASTERN, so a negative back puts a ship ahead of the formation's centre —
@@ -230,9 +264,32 @@ public static class FleetFormation
                 }
                 else
                 {
-                    Pair(slot - shell, out int rank, out int pair, out float side);
-                    lateral = side * pair * 0.7f;
-                    back = rank * 0.8f;
+                    // ---- THE PROTECTED BODY: A COMPACT GRID, NOT A WIDENING RANK ----
+                    //
+                    // Two separate faults here, both found by tools/formation-check.mjs and both
+                    // invisible in source, because they are facts about distances between points.
+                    //
+                    // It used 0.7 and 0.8 steps, which on a squadron carrying a dreadnought put the
+                    // first two inner ships 0.49 world units apart — INSIDE the 0.57 the separation
+                    // rule treats as an overlap. The two ships at the heart of a defensive formation
+                    // would have spent the whole flight shoving each other aside: a formation fighting
+                    // the collision avoidance, which is worse than having no formation.
+                    //
+                    // Widening the spacing alone then broke it the other way. Pair() keeps widening —
+                    // pair 2 sits two steps out, which is exactly the shell's radius — so at eleven
+                    // ships the interior grew until it collided with the shell that was supposed to be
+                    // protecting it.
+                    //
+                    // So the interior wraps at THREE abreast and stacks backwards instead. It never
+                    // reaches past one step laterally, which leaves a clear step of daylight inside
+                    // the shell however many ships are packed in there, and every neighbour is a full
+                    // step away.
+                    const int InnerRank = 3;
+                    int inner = slot - shell;
+                    int row = inner / InnerRank;
+                    int col = inner % InnerRank;
+                    lateral = col == 0 ? 0f : (col == 1 ? 1f : -1f);
+                    back = row * 1.0f;
                 }
                 break;
             }

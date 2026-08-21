@@ -202,6 +202,31 @@ public class ControlGroupInput : MonoBehaviour
     /// Promote the current selection into a squadron of its own, in the first free slot.
     public const KeyCode SplitKey = KeyCode.M;
 
+    // ============================================================================================
+    // THE BATTLE KEYS
+    //
+    // Designating a target was right-click only, which is fine for choosing WHICH enemy and useless
+    // for the commonest case by far: the fighting has started, something is shooting at you, and you
+    // want everything you have on it NOW. Hunting for the right hull with the mouse while the fleet
+    // dies is not a decision, it is a dexterity test.
+    //
+    // So T takes the hostile under the cursor if there is one, and otherwise the nearest one anything
+    // in the selection can reach. That second half is the important one — it makes T a single key
+    // meaning "concentrate on the obvious threat", which is what a commander wants nine times in ten.
+    //
+    // T, Y and H were free. WASD is the camera, QR and F are already spoken for, O opens the roster
+    // and M splits a squadron.
+    // ============================================================================================
+
+    /// Concentrate the selection's fire — on the hostile under the cursor, or the nearest one.
+    public const KeyCode FocusKey = KeyCode.T;
+
+    /// Release it: every ship picks its own target again.
+    public const KeyCode AtWillKey = KeyCode.Y;
+
+    /// Hold position, and release it.
+    public const KeyCode HoldKey = KeyCode.H;
+
     void Update()
     {
         bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
@@ -212,6 +237,13 @@ public class ControlGroupInput : MonoBehaviour
         {
             FleetRosterPanel.Instance?.Toggle();
             return;
+        }
+
+        if (!ctrl && !alt)
+        {
+            if (Input.GetKeyDown(FocusKey)) { FocusNearest(); return; }
+            if (Input.GetKeyDown(AtWillKey)) { EngageAtWill(); return; }
+            if (Input.GetKeyDown(HoldKey)) { ToggleHold(); return; }
         }
 
         // Ctrl+M: take whatever is selected and make it its own squadron. The common case is "these
@@ -234,6 +266,95 @@ public class ControlGroupInput : MonoBehaviour
             else RecallGroup(g, shift);
             return;   // one group action per frame
         }
+    }
+
+    // ---- battle ------------------------------------------------------------------------------
+
+    void FocusNearest()
+    {
+        var sel = UnitSelection.Selected;
+        if (sel.Count == 0) return;
+
+        // Only the ships that could actually shoot it. Ordering a colony ship to concentrate fire is
+        // a message the game should not send.
+        var shooters = new List<Unit>();
+        foreach (var u in sel)
+            if (u != null && !u.IsDestroyed && u.Info != null && u.Info.attack > 0) shooters.Add(u);
+        if (shooters.Count == 0) return;
+
+        // Under the cursor first — an explicit choice beats a guess, every time.
+        var target = ClickPriority.UnitUnderCursor();
+        if (target != null && (target.IsDestroyed || !CombatManager.AreHostile(shooters[0], target)))
+            target = null;
+
+        target ??= NearestHostileTo(shooters);
+
+        if (target == null)
+        {
+            NotificationManager.Instance?.Push("Nothing to concentrate on",
+                "No hostile in reach of the selected ships. Point at one to designate it explicitly.",
+                null, NotifKind.Info);
+            return;
+        }
+
+        CombatOrders.FocusSelection(shooters, target);
+        SimpleAudio.Instance?.PlayClick();
+        NotificationManager.Instance?.Push("Concentrating fire",
+            $"{shooters.Count} ship(s) on {target.name}.", null, NotifKind.Info);
+    }
+
+    /// The closest thing any of these ships hates, within the reach of its own guns.
+    ///
+    /// Bounded by the SHOOTER's range rather than by a fixed radius, so pressing the key never
+    /// designates something across the system that nothing can hit — which would produce a fleet
+    /// standing there with a standing order it cannot act on.
+    static Unit NearestHostileTo(List<Unit> shooters)
+    {
+        var um = UnitManager.Instance;
+        if (um == null) return null;
+
+        Unit best = null;
+        float bestSq = float.MaxValue;
+
+        foreach (var s in shooters)
+        {
+            float reach = Weaponry.MaxRange(Weaponry.For(s.type));
+            if (reach <= 0f) continue;
+            Vector3 p = CombatManager.PosOf(s);
+
+            foreach (var o in um.Units)
+            {
+                if (o == null || o.IsDestroyed || o == s) continue;
+                if (!CombatManager.AreHostile(s, o)) continue;
+                float d = Vector3.SqrMagnitude(CombatManager.PosOf(o) - p);
+                if (d > reach * reach || d >= bestSq) continue;
+                bestSq = d; best = o;
+            }
+        }
+        return best;
+    }
+
+    void EngageAtWill()
+    {
+        var sel = UnitSelection.Selected;
+        if (sel.Count == 0 || !CombatOrders.AnyFocused(sel)) return;
+        CombatOrders.ReleaseSelection(sel);
+        SimpleAudio.Instance?.PlayClick();
+        NotificationManager.Instance?.Push("Engaging at will",
+            "Every selected ship picks its own target again.", null, NotifKind.Info);
+    }
+
+    void ToggleHold()
+    {
+        var sel = UnitSelection.Selected;
+        if (sel.Count == 0) return;
+        bool holding = CombatOrders.AnyHolding(sel);
+        CombatOrders.SetHold(sel, !holding);
+        SimpleAudio.Instance?.PlayClick();
+        NotificationManager.Instance?.Push(holding ? "Released" : "Holding position",
+            holding ? $"{sel.Count} ship(s) will take squadron orders again."
+                    : $"{sel.Count} ship(s) will stay put. They keep firing.",
+            null, NotifKind.Info);
     }
 
     void AddToGroup(int g)

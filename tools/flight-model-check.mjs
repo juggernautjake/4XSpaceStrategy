@@ -174,3 +174,107 @@ svg += `</svg>`;
 await sharp(Buffer.from(svg)).png().toFile(OUT);
 console.log(`\n-> ${path.relative(PROJ, OUT)}`);
 console.log('Gold = where it was when the order came. Red = where it was told to go.');
+
+// ============================================================================================
+// JINKING — does evading actually make a ship harder to hit?
+//
+// UnitModelRenderer.CombatWeave moves a ship that is in a fight, and Ballistics.DispersionDegrees
+// charges a shooter for its target's CROSSING speed. Whether those two numbers meet in the middle is
+// not obvious from either file, and it is the whole question: a weave that buys a tenth of a degree
+// is decoration, and one that buys twenty is a hull nothing can hit.
+//
+// Both sets of constants are read from the source rather than typed here, so a tuning change on
+// either side shows up in this table.
+// ============================================================================================
+{
+  const rend = fs.readFileSync(new URL('../Assets/Scripts/Visual/UnitModelRenderer.cs', import.meta.url), 'utf8');
+  const wep = fs.readFileSync(new URL('../Assets/Scripts/Data/Weaponry.cs', import.meta.url), 'utf8');
+
+  // String.raw, because a template literal turns \b into a backspace and \s into a bare "s" — which
+  // is exactly what happened on the first pass. Every lookup silently returned its default, the
+  // defaults happened to equal the real values for the two renderer constants, and the two weapon
+  // constants defaulted to zero and made the whole table read "0.0 -> 0.0 deg". A parser that fails
+  // by returning plausible defaults is worse than one that throws.
+  const c = (src, name, d) => {
+    const m = new RegExp(String.raw`\b${name}\s*=\s*(-?[0-9.]+)f`).exec(src);
+    if (!m) throw new Error(`could not read ${name} from the source — the parser is out of date`);
+    return parseFloat(m[1]);
+  };
+  const MAX_R = c(rend, 'MaxWeaveRadius');
+  const SLOW = c(rend, 'WeaveSlow');
+  const FAST = c(rend, 'WeaveFast');
+
+  // The two unguided mounts a jinking ship most wants to spoil, with their own spread terms.
+  const mount = (name) => {
+    const blk = new RegExp(String.raw`WeaponClass\.${name}[\s\S]*?\n    \};`).exec(wep);
+    if (!blk) throw new Error(`could not find the ${name} mount in Weaponry.cs`);
+    const body = blk[0];
+    return {
+      name,
+      base: c(body, 'spreadDeg'),
+      cross: c(body, 'spreadCrossFactor'),
+    };
+  };
+  const PULSE = mount('PulseLaser'), PLASMA = mount('PlasmaCannon');
+
+  console.log('\n\nJINKING — evasive flight for a ship in a fight');
+  console.log('class            agility   weave u   peak u/s   pulse spread      plasma spread');
+  console.log(''.padEnd(88, '-'));
+
+  const rows = [];
+  for (const s of SHIPS) {
+    const turn = baseTurn(s);
+    const agility = clamp((turn - 7) / (60 - 7), 0, 1);
+    const radius = agility * MAX_R;
+    const omega = SLOW + (FAST - SLOW) * agility;
+    // The Lissajous runs at 2x and 3x the base rate; the faster axis sets the peak speed.
+    const peak = radius * omega * 3;
+
+    const p0 = PULSE.base, p1 = PULSE.base + peak * PULSE.cross;
+    const q0 = PLASMA.base, q1 = PLASMA.base + peak * PLASMA.cross;
+    rows.push({ s, agility, radius, peak, p0, p1, q0, q1 });
+  }
+
+  // Only the hulls worth reading — the extremes and a couple in between, or this is 29 lines nobody
+  // scans. Sorted by agility so the spread across the roster is the shape of the table.
+  rows.sort((a, b) => b.agility - a.agility);
+  const show = [rows[0], rows[1], rows[Math.floor(rows.length / 2)], rows[rows.length - 2], rows[rows.length - 1]];
+  for (const r of show)
+    console.log(
+      r.s.name.padEnd(16) + r.agility.toFixed(2).padStart(7) + r.radius.toFixed(2).padStart(10) +
+      r.peak.toFixed(2).padStart(11) + `   ${r.p0.toFixed(1)} -> ${r.p1.toFixed(1)} deg`.padEnd(20) +
+      `   ${r.q0.toFixed(1)} -> ${r.q1.toFixed(1)} deg`);
+
+  const checks = [];
+  const ok = (n, p, d) => checks.push({ n, p, d });
+
+  const nimble = rows[0], heavy = rows[rows.length - 1];
+
+  ok('the nimblest hull meaningfully spoils an unguided shot',
+     nimble.p1 > nimble.p0 * 1.8,
+     `${nimble.s.name}: pulse spread ${nimble.p0.toFixed(1)} -> ${nimble.p1.toFixed(1)} deg ` +
+     `(${(nimble.p1 / nimble.p0).toFixed(2)}x)`);
+
+  ok('and does not become untouchable doing it',
+     nimble.p1 < 8 && nimble.q1 < 12,
+     `worst case ${Math.max(nimble.p1, nimble.q1).toFixed(1)} deg of spread`);
+
+  ok('the heaviest hulls barely move, so tonnage is still a liability',
+     heavy.peak < 0.35,
+     `${heavy.s.name} peaks at ${heavy.peak.toFixed(2)} u/s against ${nimble.s.name}'s ${nimble.peak.toFixed(2)}`);
+
+  ok('evading is worth less than running',
+     nimble.peak < 8,
+     `weave peaks at ${nimble.peak.toFixed(2)} u/s; a hull in transit makes 10-16`);
+
+  ok('nobody strays far enough from their station to be hard to click',
+     rows.every(r => r.radius <= 0.9),
+     `widest weave is ${Math.max(...rows.map(r => r.radius)).toFixed(2)} world units`);
+
+  console.log('');
+  let failed = 0;
+  for (const k of checks) { if (!k.p) failed++; console.log(`${k.p ? 'ok  ' : 'FAIL'} ${k.n}\n     ${k.d}`); }
+  console.log(failed ? `\n${failed} of ${checks.length} jinking checks FAILED.`
+                     : `\nAll ${checks.length} jinking checks pass.`);
+  if (failed) process.exitCode = 1;
+}

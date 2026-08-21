@@ -198,10 +198,13 @@ public class FleetCommandBar : MonoBehaviour
                        "picking its own. Concentration is usually the whole fight: six ships on one " +
                        "target remove a sixth of the enemy's guns each time one dies, where six ships " +
                        "on six targets kill nothing for most of the engagement.\n\n" +
-                       "<color=#8FA3B5>Right-click another hostile to switch. The order lapses on its " +
-                       "own if the target dies or leaves range.</color>"
+                       "<color=#8FA3B5>Right-click another hostile to switch, or press T to put the " +
+                       "selection on whatever is nearest. The order lapses on its own if the target " +
+                       "dies or leaves range.</color>"
                      : "No target designated — every ship is picking its own.\n\n" +
-                       "<b>Right-click an enemy ship</b> to concentrate the selection's fire on it.\n\n" +
+                       "<b>Right-click an enemy ship</b> to concentrate the selection's fire on it, or " +
+                       "press <b>T</b> to take whatever is under the cursor — and failing that, the " +
+                       "nearest hostile anything selected can actually reach.\n\n" +
                        "<color=#8FA3B5>The automatic targeter is threat-weighted and per ship, so a " +
                        "squadron facing two identical cruisers naturally splits between them. That is " +
                        "the situation this order exists for.</color>")
@@ -212,7 +215,10 @@ public class FleetCommandBar : MonoBehaviour
              () => CombatOrders.ReleaseSelection(sel), !anyFocused ? "on" : null,
              "ENGAGE AT WILL — cancel the focus order and let every ship pick its own target again.\n\n" +
              "The automatic choice is the most dangerous thing in reach, weighted so a screen of cheap " +
-             "hulls in front of a capital ship does not soak the fire meant for it.")
+             "hulls in front of a capital ship does not soak the fire meant for it.
+
+" +
+             "<color=#8FA3B5>Key: Y</color>")
             .SetEnabled(anyFocused);
 
         bool holding = CombatOrders.AnyHolding(sel);
@@ -222,11 +228,17 @@ public class FleetCommandBar : MonoBehaviour
                  ? "HOLDING POSITION. Click to release.\n\n" +
                    "These ships will not be moved by their squadron's standing orders — no intercept, " +
                    "no closing on an escort, no walking a patrol route.\n\n" +
-                   "<color=#8FA3B5>They are still fighting. Holding is not the same as holding fire.</color>"
+                   "<color=#8FA3B5>They are still fighting, and still flying evasively. Holding is not " +
+                   "the same as holding fire.
+
+Key: H</color>"
                  : "HOLD POSITION — stop here and stay here.\n\n" +
                    "Cancels whatever these ships were doing and stops their squadron's AI from moving " +
                    "them. For a picket, a chokepoint, or anything you have parked deliberately.\n\n" +
-                   "<color=#8FA3B5>They keep shooting, and any move order you give releases the hold.</color>");
+                   "<color=#8FA3B5>They keep shooting, they keep jinking, and any move order you give " +
+                   "releases the hold.
+
+Key: H</color>");
 
         Icon("Order_Withdraw", "Withdraw", 52f, () =>
         {
@@ -250,8 +262,13 @@ public class FleetCommandBar : MonoBehaviour
         foreach (FleetFormationKind f in System.Enum.GetValues(typeof(FleetFormationKind)))
         {
             var kind = f;
+            // Hovering DRAWS it on the map before it is committed to — see FormationPreview. A tooltip
+            // can describe a wedge and the icon diagrams one, but neither says what YOUR eleven ships
+            // will look like standing in it.
             Icon(FormIcon(kind), ShortLabel(kind), 46f, () => Squadrons.SetFormation(g, kind),
-                 Squadrons.Of(g).formation == kind ? "on" : null, FormationTip(kind));
+                 Squadrons.Of(g).formation == kind ? "on" : null, FormationTip(kind))
+                .OnHover(() => FormationPreview.Instance?.Show(g, kind),
+                         () => FormationPreview.Instance?.Hide());
         }
 
         // ---- protocol ----

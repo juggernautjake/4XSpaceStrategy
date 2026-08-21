@@ -218,3 +218,89 @@ pass, and counting thirteen used icons as unused.
 - [ ] No **formation preview** on the map before committing
 - [ ] **Point defence still covers only its own hull**
 - [ ] Ships still do not **manoeuvre in combat**
+
+---
+
+# The four open items, closed — 2026-08-21 (later still)
+
+> *"Please fix those issues"* — the four things listed as still open at the end of the last pass.
+
+## O. Focus fire has a hotkey now
+
+- [x] **O1.** **T** concentrates the selection's fire: on the hostile under the cursor if there is one,
+      otherwise **the nearest hostile anything selected can actually reach**. That second half is the
+      point — right-click is fine for choosing WHICH enemy and useless for the commonest case, which
+      is "something is shooting at us, everything on it, now". Hunting for the right hull with the
+      mouse while the fleet dies is a dexterity test, not a decision
+- [x] **O2.** **Y** releases it (engage at will). **H** toggles hold position
+- [x] **O3.** Bounded by the shooter's own weapon range, so the key can never designate something
+      across the system that nothing can hit — which would leave a fleet standing there holding an
+      order it cannot act on
+- [x] **O4.** All three taught in the tooltips that describe the matching buttons
+
+## P. Formations preview before you commit
+
+- [x] **P1.** Hover a formation button and its stations appear on the map, one ring per ship
+- [x] **P2.** Drawn from `FleetFormation.PreviewStation`, which is the SAME arithmetic the live
+      formation uses with the slot handed in — an illustration would be a second implementation
+      nobody would keep in step, and wrong in exactly the way that matters, since the whole point is
+      to be believed
+- [x] **P3.** Sized off the biggest hull present and oriented on the squadron's own heading, or the
+      camera's when it is stationary
+- [x] **P4.** **Slot 0 is marked gold.** Assign fills it with the CHEAPEST hull, so the point of your
+      wedge is your least valuable ship — a real consequence of how slots are assigned, and not at all
+      obvious
+
+## Q. Point defence covers its neighbours
+
+- [x] **Q1.** The old rule was right that a fleet-wide umbrella makes one destroyer mandatory. It was
+      wrong about the hole that left: **a colony ship has no guns and no screen**, and neither does a
+      terraformer, a science vessel or a transport, because arming them would make them warships. So
+      an escort could not protect the thing it was escorting — the torpedoes went straight past it
+      into the hull beside it, and escorting was a formation and a protocol with no teeth
+- [x] **Q2.** Three limits keep it from becoming the umbrella: it reaches **62%** as far for a
+      neighbour as for itself, it **sweeps its own hull first** so a screening ship under fire stops
+      screening, and it is still **per hull** — a fleet's screen is the sum of what its ships brought
+
+## R. Ships manoeuvre in combat
+
+- [x] **R1.** The ballistics rework had quietly opened a hole: a ship in transit weaves all over a
+      shooter's solution, and the moment it parks its crossing speed drops to **zero** and it takes
+      full accuracy from everything in range. Two fleets meeting at a world both stopped moving and
+      then shot each other with perfect precision
+- [x] **R2.** A ship that is shooting or being shot at now flies a **Lissajous weave** around its
+      station — not a circle, which is periodic in a way a gunner reads immediately
+- [x] **R3.** Amplitude and rate come off `ShipPhysics.BaseTurnRate`, the same number that decides how
+      wide a hull turns under way. Nobody authors an evasion stat, and a hull buffed to be nimbler
+      becomes harder to hit as well
+- [x] **R4.** `VelocityOf` reports the weave, so the dodge is **charged for** rather than drawn. It
+      returned zero for any stationary ship, which would have made the whole thing decoration
+- [x] **R5.** Measured, not guessed. `tools/flight-model-check.mjs` prints it: a Scout takes pulse-laser
+      spread from **1.1 to 2.4 degrees** and plasma from **2.2 to 4.3**; a Mega-Station gets nothing at
+      all. The first attempt peaked at 7.7 u/s and wandered three units from station — most of a
+      planet's width, and a ship you cannot reliably click
+
+## S. What the formation checker found
+
+`tools/formation-check.mjs` is new: it ports `FleetFormation.Station` and draws all seven formations at
+three squadron sizes, because **nobody had ever looked at them**. A formation is geometry, which is the
+one kind of thing source review is worst at.
+
+It found a real bug immediately. **The Globe packed two ships 0.49 units apart** — inside the 0.57 the
+separation rule treats as an overlap — so the two ships at the heart of a defensive formation would
+have spent the entire flight shoving each other aside. A formation fighting the collision avoidance is
+worse than no formation.
+
+Widening the spacing then broke it the other way: `Pair()` keeps widening, and at eleven ships the
+interior grew until it **collided with the shell that was protecting it**. The interior now wraps three
+abreast and stacks backwards, so it never reaches past one step laterally whatever is packed in there.
+
+Every formation now holds its shape at 3, 6 and 11 ships.
+
+## T. Still open
+
+- [ ] The **Screen** puts slot 0 — the cheapest hull — at a WINGTIP of the arc rather than the centre.
+      Correct by the rules and possibly not what anyone would choose
+- [ ] Formation preview is hover-only; there is no way to pin it while reading the map
+- [ ] Combat weave does not apply to ships **in transit**, which already cross, but a ship arriving
+      under fire has one abrupt handover between the two
