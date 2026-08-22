@@ -51,6 +51,21 @@ const camNum = (name, d) => {
 const MIN_H = camNum('minHeight', 0.04);
 const FREE_MIN_H = camNum('freeLookMinHeight', 0.35);
 
+// ---- what the last import actually decided -----------------------------------------------------
+//
+// The importer writes a record of every hull it wrote and every level it deliberately skipped. That
+// record is the only place the reason for a missing level exists — it depends on the triangle count
+// the simplifier reached, which cannot be recovered from the shipped files.
+const importReport = new Map();
+{
+  const p = path.join(PROJ, 'tools/ship-import-report.json');
+  if (fs.existsSync(p)) {
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const rows = Array.isArray(raw) ? raw : (raw.models ?? raw.report ?? []);
+    for (const r of rows) importReport.set(r.name, r);
+  }
+}
+
 // A 60-degree vertical field of view at 1080p is the reference view. What matters is the ratio, and
 // this is the one every other resolution scales from.
 const FOV_DEG = 60, SCREEN_H = 1080;
@@ -155,12 +170,25 @@ function checkChain(civ, type, base, hi, lo, problems) {
 }
 
 // ============================================================================================
-const shipDir = path.join(PROJ, 'Assets/Resources/SpaceAssets/Ships', CIV);
-if (!fs.existsSync(shipDir)) { console.log(`no shipped art for ${CIV}`); process.exit(0); }
+// ---- BOTH folders, and that took a bug to notice ----
+//
+// This scanned Ships/ only, so the entire Stations/ tree went unchecked. Which is exactly the tree
+// that needed checking: a station is built from separate structural pieces — masts, dishes, rings —
+// so its mesh is the most fragmented and the least simplifiable in the game. Seventeen of the twenty
+// levels the importer decided were redundant were stations, and this report had nothing to say about
+// any of them because it had never looked.
+const DIRS = ['Ships', 'Stations']
+  .map(sub => path.join(PROJ, 'Assets/Resources/SpaceAssets', sub, CIV))
+  .filter(d => fs.existsSync(d));
+
+if (DIRS.length === 0) { console.log(`no shipped art for ${CIV}`); process.exit(0); }
 
 // Only the BASE files are hulls; _hi and _lo are levels of one of them.
-const files = fs.readdirSync(shipDir)
-  .filter(f => f.endsWith('.glb') && !/_(hi|lo)\.glb$/.test(f)).sort();
+const files = DIRS.flatMap(dir =>
+  fs.readdirSync(dir)
+    .filter(f => f.endsWith('.glb') && !/_(hi|lo)\.glb$/.test(f))
+    .map(f => ({ dir, f })))
+  .sort((a, b) => a.f.localeCompare(b.f));
 
 console.log(`SHIPPED — ${CIV}, ${files.length} hulls\n`);
 console.log('hull                    _lo     mid     _hi     base  normal   m/r   chain KB   drawn u');
@@ -170,17 +198,39 @@ const problems = [];
 const rows = [];
 let chainBytes = 0;
 
-for (const f of files) {
+for (const { dir, f } of files) {
   const type = f.replace(/\.glb$/, '').replace(`${CIV}_`, '');
-  const stem = path.join(shipDir, f.replace(/\.glb$/, ''));
+  const stem = path.join(dir, f.replace(/\.glb$/, ''));
 
   const base = await inspect(stem + '.glb');
   const hi = fs.existsSync(stem + '_hi.glb') ? await inspect(stem + '_hi.glb') : null;
   const lo = fs.existsSync(stem + '_lo.glb') ? await inspect(stem + '_lo.glb') : null;
 
   checkChain(CIV, type, base, hi, lo, problems);
-  if (!hi) problems.push(`${CIV} ${type}: no _hi level — it will draw the mid mesh up close`);
-  if (!lo) problems.push(`${CIV} ${type}: no _lo level`);
+
+  // ---- A MISSING LEVEL IS NOT AUTOMATICALLY A FAULT ----
+  //
+  // The importer skips a level that came out within LOD_MIN_SEPARATION of the base one, because a
+  // hull the simplifier cannot reduce produces three near-identical meshes and writing all three
+  // costs megabytes for three ways to draw the same thing.
+  //
+  // Whether that applies to a given hull is NOT derivable from the shipped files: it depends on the
+  // triangle count the simplifier actually reached, which is a fact about the source mesh that only
+  // the import run knows. The first version of this check guessed from the budgets and cried wolf on
+  // exactly the two hulls the importer had handled correctly.
+  //
+  // So it reads the importer's own record. A level absent from disk AND marked skipped in the report
+  // is a decision; a level absent from disk with no such record is a fault.
+  const rec = importReport.get(`${CIV}_${type}`);
+  const skipped = (suffix) => rec?.levels?.some(l => l.suffix === suffix && l.skipped) ?? false;
+
+  if (!hi && !skipped('_hi'))
+    problems.push(`${CIV} ${type}: no _hi level and the importer did not skip one — it is missing`);
+  if (!lo && !skipped('_lo'))
+    problems.push(`${CIV} ${type}: no _lo level and the importer did not skip one — it is missing`);
+  if ((!hi && skipped('_hi')) || (!lo && skipped('_lo')))
+    notes.push(`${CIV} ${type}: ships with fewer levels — its mesh is too fragmented to simplify ` +
+               `(base ${base.tris} tris), so the others would have been copies`);
 
   const bytes = base.bytes + (hi?.bytes ?? 0) + (lo?.bytes ?? 0);
   chainBytes += bytes;
@@ -273,6 +323,6 @@ if (problems.length === 0) {
   console.log('Every LOD chain is complete, ordered, textured on the base only, and keeps its UVs.');
   process.exit(0);
 }
-for (const p2 of problems) console.log();
-console.log();
+for (const p2 of problems) console.log(`FAIL  ${p2}`);
+console.log(`\n${problems.length} problem(s) in the LOD chains.`);
 process.exit(1);

@@ -285,12 +285,32 @@ const report = [];
  * costs seconds in an offline tool and buys three levels that are each the best answer for their own
  * budget.
  */
+/**
+ * How different a LOD level has to be from the base one to be worth writing at all.
+ *
+ * Some meshes simply cannot be simplified. The Terran Carrier is 797,000 triangles across 473,000
+ * vertices with nothing welded — every triangle its own island — and meshopt floors it at about
+ * 24,500 no matter what ratio, error tolerance or border locking it is given, because there are no
+ * shared edges left to collapse. All three of its levels came out within a whisker of each other, so
+ * the chain was three copies of one mesh doing one mesh's job and costing 4 MB to do it.
+ *
+ * A level within 30% of the base is not a level, it is a duplicate. ShipLOD already treats a missing
+ * sibling as ordinary, so skipping the write is the whole fix.
+ */
+const LOD_MIN_SEPARATION = 1.3;
+
 async function convert(srcGlb, destDir, name) {
   const srcSize = fs.statSync(srcGlb).size;
   let trisBefore = 0, outTotal = 0, dims = null;
   const levels = [];
 
-  for (const lod of LODS) {
+  // The BASE level first, whatever order it sits in the table. It is the required one — it carries
+  // every texture in the chain and it is the fallback — and the other two are only written if they
+  // turn out to differ from it enough to be worth having, which cannot be known until it exists.
+  const ordered = [...LODS].sort((a, b) => (b.textures ? 1 : 0) - (a.textures ? 1 : 0));
+  let baseTris = 0;
+
+  for (const lod of ordered) {
     const destFile = path.join(destDir, name + lod.suffix + '.glb');
 
     const doc = await io.read(srcGlb);
@@ -329,7 +349,27 @@ async function convert(srcGlb, destDir, name) {
     }
 
     const tris = triCount(doc);
-    if (lod.textures) dims = measure(doc);
+    if (lod.textures) { dims = measure(doc); baseTris = tris; }
+
+    // ---- is this level worth writing at all? ----
+    //
+    // The base one always is. The others only if they differ enough from it to be a different mesh —
+    // see LOD_MIN_SEPARATION. A hull the simplifier cannot reduce produces three near-identical
+    // levels, and writing them costs megabytes to give the renderer three ways to draw the same
+    // thing. A stale sibling from a previous run is deleted rather than left, or the game would keep
+    // loading last import's geometry against this import's textures.
+    let worth = true;
+    if (!lod.textures) {
+      worth = lod.tris > baseTris
+        ? tris > baseTris * LOD_MIN_SEPARATION      // a HIGH level must be meaningfully denser
+        : tris * LOD_MIN_SEPARATION < baseTris;     // a LOW level meaningfully sparser
+    }
+
+    if (!worth) {
+      if (!DRY && fs.existsSync(destFile)) fs.unlinkSync(destFile);
+      levels.push({ suffix: lod.suffix || '(base)', tris, size: 0, skipped: true });
+      continue;
+    }
 
     if (!DRY) {
       fs.mkdirSync(destDir, { recursive: true });
@@ -340,12 +380,17 @@ async function convert(srcGlb, destDir, name) {
     levels.push({ suffix: lod.suffix || '(base)', tris, size });
   }
 
+  // Report in the table's order rather than the order they were built in, so the line reads
+  // low-to-high like the chain does.
+  levels.sort((a, b) => a.tris - b.tris);
+  const baseLevel = levels.find(l => l.suffix === '(base)');
+
   report.push({ name, dest: path.relative(PROJ, path.join(destDir, name + '.glb')),
-                srcSize, outSize: outTotal, trisBefore, trisAfter: levels[1].tris, dims, levels });
+                srcSize, outSize: outTotal, trisBefore, trisAfter: baseLevel.tris, dims, levels });
 
   const mb = n => (n / 1048576).toFixed(2) + ' MB';
   console.log(`  ${name.padEnd(30)} ${String(trisBefore).padStart(8)} src  ->  ` +
-              levels.map(l => `${l.suffix} ${String(l.tris).padStart(5)}`).join('  ') +
+              levels.map(l => `${l.suffix} ${l.skipped ? '  --  ' : String(l.tris).padStart(6)}`).join('  ') +
               `   ${mb(srcSize)} -> ${mb(outTotal)}` +
               (dims ? `   dims ${dims.map(d => d.toFixed(2)).join(' x ')}` : ''));
 }

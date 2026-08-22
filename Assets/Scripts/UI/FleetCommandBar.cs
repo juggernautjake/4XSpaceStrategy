@@ -215,9 +215,7 @@ public class FleetCommandBar : MonoBehaviour
              () => CombatOrders.ReleaseSelection(sel), !anyFocused ? "on" : null,
              "ENGAGE AT WILL — cancel the focus order and let every ship pick its own target again.\n\n" +
              "The automatic choice is the most dangerous thing in reach, weighted so a screen of cheap " +
-             "hulls in front of a capital ship does not soak the fire meant for it.
-
-" +
+             "hulls in front of a capital ship does not soak the fire meant for it.\n\n" +
              "<color=#8FA3B5>Key: Y</color>")
             .SetEnabled(anyFocused);
 
@@ -229,16 +227,12 @@ public class FleetCommandBar : MonoBehaviour
                    "These ships will not be moved by their squadron's standing orders — no intercept, " +
                    "no closing on an escort, no walking a patrol route.\n\n" +
                    "<color=#8FA3B5>They are still fighting, and still flying evasively. Holding is not " +
-                   "the same as holding fire.
-
-Key: H</color>"
+                   "the same as holding fire.\n\nKey: H</color>"
                  : "HOLD POSITION — stop here and stay here.\n\n" +
                    "Cancels whatever these ships were doing and stops their squadron's AI from moving " +
                    "them. For a picket, a chokepoint, or anything you have parked deliberately.\n\n" +
                    "<color=#8FA3B5>They keep shooting, they keep jinking, and any move order you give " +
-                   "releases the hold.
-
-Key: H</color>");
+                   "releases the hold.\n\nKey: H</color>");
 
         Icon("Order_Withdraw", "Withdraw", 52f, () =>
         {

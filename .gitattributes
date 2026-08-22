@@ -9,3 +9,4 @@
 # Deliberately narrow: no repo-wide rules, so Unity's assets and .meta files keep whatever
 # handling they have now.
 *.sh text eol=lf
+Assets/Resources/SpaceAssets/**/*.glb filter=lfs diff=lfs merge=lfs -text
