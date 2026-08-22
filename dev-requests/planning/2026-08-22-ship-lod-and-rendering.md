@@ -114,3 +114,74 @@ for that one is in the source art, not the pipeline.
       textured quad would do
 - [ ] The **LOD thresholds are calibrated but not eyeballed.** They come from measured pixel footprints;
       whether the swap happens where it feels right is a thing only Unity can answer
+
+---
+
+# The recommended fixes, applied — 2026-08-22 (later)
+
+## G. A compile error I introduced, and the tripwire that should have caught it
+
+- [x] **G1.** Three tooltips in `FleetCommandBar` had **real newlines where `\n` escapes belonged** —
+      `error CS1010: Newline in constant`, each followed by a cascade of spurious syntax errors
+      pointing everywhere except at the fault. My own doing: a scripted edit written as a shell
+      command whose `\n\n` bash expanded before node ever saw it
+- [x] **G2.** `Check-Scripts.ps1` reported clean throughout. It checks structure, braces and enum
+      ordering, and an unterminated string literal is none of those. In a project with no compiler,
+      anything the tripwires miss is found by the person trying to play the game
+- [x] **G3.** `tools/check-string-literals.mjs` closes it. Counts quotes per line having removed the
+      ones that are not delimiters — escaped quotes, char literals, comments — and skips verbatim
+      strings, which legitimately span lines. **Verified by re-injecting the exact fault**, because a
+      checker that has only ever passed proves nothing
+
+## H. LOD levels that were copies of each other
+
+- [x] **H1.** Some meshes cannot be simplified. The Terran Carrier is **797,000 triangles across
+      473,000 vertices with nothing welded** — every triangle its own island — and meshopt floors it
+      at ~24,500 whatever ratio, error tolerance or border locking it is given. Measured, not assumed:
+      error 0.04 → 24,542; error 1.0 with borders unlocked → 24,540
+- [x] **H2.** The importer now writes a level only if it differs from the base by 30%, and deletes any
+      stale sibling from a previous run. **Twenty levels turned out to be copies, seventeen of them
+      stations** — which follows, since a station is masts and dishes and rings and so is the most
+      fragmented geometry in the game
+- [x] **H3.** The verifier reads the importer's own record to tell a deliberate skip from a missing
+      file. It cannot derive that itself — whether a level was worth writing depends on the triangle
+      count the simplifier actually reached, a fact about the source mesh only the import run knows.
+      The first version guessed from the budgets and **cried wolf on exactly the two hulls the
+      importer had handled correctly**
+
+## I. The verifier was only checking half the fleet
+
+- [x] **I1.** `inspect-ship-lod.mjs` scanned `Ships/` and never `Stations/`, so **nine hulls per
+      civilisation went unexamined** — and they are precisely the ones with the fragmented meshes that
+      needed examining. Now 29 hulls per civ instead of 20
+
+## J. Git LFS
+
+- [x] **J1.** The art is tracked by LFS. Git history stops accumulating a fresh copy of the fleet on
+      every import, clones fetch only the version they check out, and pushes resume instead of
+      disconnecting — the 170 MB push had failed twice and needed three attempts
+- [x] **J2.** **History is NOT rewritten.** The existing blobs stay where they are. Shrinking the repo
+      for real needs `git lfs migrate import`, which rewrites shared history and needs a force push —
+      not a thing to do to a pushed branch unasked. Say the word and it is one command
+
+### And the quota worry turned out to be mostly unfounded
+
+**The importer is byte-deterministic.** Re-running it over unchanged source produces byte-identical
+output and git reports **zero changes** — verified by re-importing all 87 hulls and comparing.
+
+So the 172 MB is a **one-time** cost, not a per-import one. Storage only grows when the source art or
+the import settings actually change, which is when it should. GitHub's 1 GB free LFS tier is
+comfortable at that rate rather than five imports from exhaustion.
+
+## K. Not done, and why
+
+- [ ] **Mesh quantization** (`KHR_mesh_quantization`) would cut geometry roughly in half — call it
+      40 MB off the fleet — with no visible loss. Not applied: there is no Unity here to confirm
+      gltfast decodes it, and the failure mode is every ship in the game failing to load. Worth doing
+      as a **one-hull trial** that can be looked at before the other 86 follow
+- [ ] **Tangent generation.** The source meshes carry `POSITION, NORMAL, TEXCOORD_0` and no `TANGENT`,
+      so gltfast computes them at load. Unity's generator is not mikktspace, which is what the normal
+      maps were almost certainly baked against, so there is a small fidelity loss. Baking tangents
+      would add ~16 bytes per vertex across three levels — a real size cost for a subtle gain
+- [ ] **LOD thresholds are calibrated but not eyeballed.** They come from measured pixel footprints;
+      whether the swap lands where it feels right is a question only Unity can answer

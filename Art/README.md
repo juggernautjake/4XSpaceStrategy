@@ -86,6 +86,7 @@ has been promoted into `Active/`, the staging copy is the same file twice and is
 |---|---|
 | generate a fleet | `node tools/meshy-rebuild-batch.mjs --token-file tools/meshy-token.txt --only <Civ>` |
 | import into the game | `node tools/import-ship-models.mjs` |
+| check the LOD chains | `node tools/inspect-ship-lod.mjs --civ <Civ>` |
 | check the wiring | `node tools/verify-wiring.mjs` |
 | check the textures | `node tools/verify-textures.mjs` |
 | look at a whole civ | `node tools/contact-sheet.mjs --dir Art/Active/<Civ> --match thumbnail` |
