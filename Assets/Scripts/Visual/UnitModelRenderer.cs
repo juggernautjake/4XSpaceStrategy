@@ -331,11 +331,13 @@ public static class UnitModelLibrary
     // ---- Prefab cache ----
     static readonly Dictionary<string, GameObject> prefabs = new Dictionary<string, GameObject>();
 
-    public static GameObject Prefab(string path)
+    /// `quiet` suppresses the "no model here" line, for lookups where absence is an ordinary answer
+    /// rather than a problem — the LOD siblings, which are optional by design (see ShipLOD).
+    public static GameObject Prefab(string path, bool quiet = false)
     {
         if (prefabs.TryGetValue(path, out var p)) return p;
         p = Resources.Load<GameObject>(path);
-        if (p == null)
+        if (p == null && !quiet)
             Debug.Log($"[UnitModel] No model at Resources/{path} — that class will use its billboard token. " +
                       "Drop an .fbx there to enable it (a .blend only imports if Blender is installed on this machine).");
         prefabs[path] = p;
@@ -615,6 +617,17 @@ public class UnitModelRenderer : MonoBehaviour
                 if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", Color.Lerp(Color.white, tint, 0.3f));
                 else if (mat.HasProperty("_Color")) mat.color = Color.Lerp(Color.white, tint, 0.3f);
             }
+
+        // ---- and now the other two levels of detail -------------------------------------------
+        //
+        // AFTER the livery and the faction tint, deliberately. Those iterate every renderer under the
+        // hull, and running them with the LOD levels already attached would recolour the same textures
+        // three times over — the livery is a hue-keyed repaint of the base map, and applying it three
+        // times is three times the shift. Attaching last means they run once, on the base's materials,
+        // and ShipLOD then hands those finished materials to the other levels.
+        //
+        // Also after FitTo, because the levels are parented at identity under an already-scaled root.
+        ShipLOD.Attach(go, civPath ?? entry.path);
 
         // If the FBX shipped with its own animation, let it play and don't fight it with procedural
         // motion. These models don't appear to have clips, but this costs nothing and means dropping in

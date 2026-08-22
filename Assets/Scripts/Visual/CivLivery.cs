@@ -142,8 +142,34 @@ public static class CivLivery
         Color.RGBToHSV(Primary, out float ph, out float ps, out _);
         Color.RGBToHSV(Secondary, out float sh, out float ss, out _);
 
+        // ============================================================================================
+        // THE FAST REJECTION, AND WHY IT EARNS ITS KEYSTROKES
+        //
+        // Most pixels on a hull are not livery. They are shadow, bare metal, scorching, glass — and
+        // every one of them used to pay for a full Color32 -> Color conversion and a Color.RGBToHSV
+        // before being thrown away by the very next line.
+        //
+        // That was tolerable at 512x512, which is 262,000 pixels. The LOD work took base colour to
+        // 1024, which is 1,048,000 — four times the work, per hull type, on the frame a hull of that
+        // type first appears. Four times a tolerable hitch is not a tolerable hitch.
+        //
+        // Saturation and value fall straight out of the max and min of the raw bytes, with no
+        // conversion and no division for the common case. Only a pixel that survives both thresholds
+        // pays for a hue, which on a typical hull is a small minority of them. Identical results —
+        // this is the same test, arranged so the answer arrives before the expensive part.
+        // ============================================================================================
+        int minS = Mathf.RoundToInt(MinSaturation * 255f);
+        int minV = Mathf.RoundToInt(MinValue * 255f);
+
         for (int i = 0; i < px.Length; i++)
         {
+            Color32 raw = px[i];
+            int mx = raw.r > raw.g ? (raw.r > raw.b ? raw.r : raw.b) : (raw.g > raw.b ? raw.g : raw.b);
+            if (mx < minV) continue;                                      // too dark to be paint
+            int mn = raw.r < raw.g ? (raw.r < raw.b ? raw.r : raw.b) : (raw.g < raw.b ? raw.g : raw.b);
+            // s = (max - min) / max, compared without dividing: (max-min)*255 < minS*max
+            if ((mx - mn) * 255 < minS * mx) continue;                    // too grey to be paint
+
             Color c = px[i];
             Color.RGBToHSV(c, out float h, out float s, out float v);
             if (s < MinSaturation || v < MinValue) continue;      // shadow or bare hull: leave it
@@ -163,7 +189,33 @@ public static class CivLivery
         }
 
         readable.SetPixels32(px);
-        readable.Apply(false, false);
+
+        // ---- mips regenerated from the REPAINTED pixels ----
+        //
+        // `updateMipmaps: true` matters as much as having a mip chain at all. Without it the small
+        // levels would still hold the colours the hull shipped in, so a liveried ship would fade back
+        // to its factory paint as it got further away — a bug that only shows at distance, which is
+        // where nobody looks for a colour problem.
+        readable.Apply(true, false);
+
+        // ---- and then compressed, because an uncompressed 1024 is four megabytes ----
+        //
+        // RGBA32 at 1024 with mips is 5.3 MB per hull type; the player's own civilisation across
+        // twenty-nine classes would be a hundred and fifty megabytes of texture that exists only
+        // because the paint is different. DXT brings that to about a quarter with a loss nobody has
+        // ever picked out on a hull, and it makes the GPU's texture cache four times more effective
+        // into the bargain.
+        //
+        // Guarded: compression needs dimensions that are multiples of four, and the importer resizes
+        // with `fit: inside`, so a non-square source can land somewhere awkward. An uncompressed
+        // texture is a cost, and a missing one is a white ship.
+        try { readable.Compress(false); readable.Apply(true, true); }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"CivLivery: could not compress a repainted texture ({e.Message}). " +
+                             "It stays uncompressed, which costs memory and looks identical.");
+        }
+
         cache[key] = readable;
         return readable;
     }
@@ -196,11 +248,28 @@ public static class CivLivery
         {
             Graphics.Blit(src, rt);
             RenderTexture.active = rt;
-            var tex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false);
+
+            // ---- WITH A MIP CHAIN, AND IT WAS NOT --------------------------------------------
+            //
+            // This built the copy with `mipChain: false`, which meant every hull the player's livery
+            // touched lost its mipmaps outright. A texture with no mips does not soften as it shrinks
+            // on screen — it samples one texel out of a thousand and picks a different one every
+            // frame the ship moves, which is the shimmering, crawling noise that reads as "the model
+            // is buzzing". The generated art keeps its mips; only the repainted copy lost them, so it
+            // was the PLAYER'S OWN fleet that shimmered and nobody else's.
+            //
+            // It also went from bad to much worse when the base colour went 512 -> 1024 for the LOD
+            // work: twice the texels in each direction is twice as much high-frequency detail with
+            // nothing to filter it, and the aliasing scales with it.
+            var tex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, true);
             tex.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0);
-            tex.Apply(false, false);
+            tex.Apply(true, false);
             tex.wrapMode = src.wrapMode;
             tex.filterMode = src.filterMode;
+            // Trilinear so the mip levels blend into each other rather than banding at the boundary,
+            // and a little anisotropy because a hull is nearly always seen at a glancing angle.
+            tex.filterMode = FilterMode.Trilinear;
+            tex.anisoLevel = 4;
             return tex;
         }
         catch (System.Exception e)

@@ -156,7 +156,11 @@ if (fs.existsSync(manifestPath)) {
       if (!fs.existsSync(dir)) continue;
       for (const f of fs.readdirSync(dir)) {
         if (!f.endsWith('.glb')) continue;
-        const type = f.replace(/\.glb$/, '').replace(`${civ}_`, '');
+        // The LOD siblings (see ShipLOD) are named after their base with a suffix, so a station's
+        // `..._hi.glb` did not match the station list and every one of them was reported as a
+        // misfiled ship. Stripping the suffix asks the question about the HULL, which is the thing
+        // that has a folder.
+        const type = f.replace(/\.glb$/, '').replace(`${civ}_`, '').replace(/_(hi|lo)$/, '');
         const wantStation = STATIONS.has(type);
         const want = wantStation ? 'Stations' : 'Ships';
         if (want !== sub) misfiled.push(`${sub}/${civ}/${f} should be under ${want}/`);
