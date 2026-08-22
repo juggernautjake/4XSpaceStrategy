@@ -71,6 +71,7 @@ public class ProjectileRenderer : MonoBehaviour
     readonly Stack<Transform> quadPool = new Stack<Transform>();
     readonly Stack<LineRenderer> beamPool = new Stack<LineRenderer>();
     readonly Stack<Light> lightPool = new Stack<Light>();
+    readonly Stack<Shot> shotPool = new Stack<Shot>();
 
     Material boltMat;
     Material beamMat;
@@ -116,14 +117,24 @@ public class ProjectileRenderer : MonoBehaviour
     {
         if (w == null) return;
 
-        var s = new Shot
-        {
-            weapon = w, shooter = shooter, target = target,
-            pos = from, aimPoint = aimPoint, damage = damage,
-            instant = w.IsInstant,
-            hasLock = target != null && !target.IsDestroyed,
-            phaseOffset = Random.Range(0f, Mathf.PI * 2f)
-        };
+        // ---- POOLED, like the quads and the beams and the lights ----
+        //
+        // Every other per-round object here is recycled and the Shot itself was not, which is the one
+        // that is created most: a fleet action firing two hundred rounds a second allocated two
+        // hundred short-lived objects a second, every one of them dead within a few seconds. That is a
+        // Gen-0 collection every few seconds, and a Gen-0 collection is a frame hitch — during a
+        // battle, which is the exact moment a hitch is least welcome.
+        var s = shotPool.Count > 0 ? shotPool.Pop() : new Shot();
+        s.weapon = w; s.shooter = shooter; s.target = target;
+        s.pos = from; s.vel = Vector3.zero; s.aimPoint = aimPoint; s.damage = damage;
+        s.age = 0f; s.maxLife = 0f;
+        s.instant = w.IsInstant;
+        s.hasLock = target != null && !target.IsDestroyed;
+        s.phaseOffset = Random.Range(0f, Mathf.PI * 2f);
+        // Every field is written, including the ones a fresh object would have had at zero — a pooled
+        // object carrying one stale field from its last flight is the classic way this goes wrong, and
+        // it would show up as a round that inherited the previous round's lock or lifetime.
+        s.tr = null; s.beam = null; s.light = null;
 
         if (s.instant) { FireInstant(s, from, aimPoint); }
         else           { FireTravelling(s, w, from, aimPoint); }
@@ -489,6 +500,16 @@ public class ProjectileRenderer : MonoBehaviour
         if (s.tr != null) { s.tr.gameObject.SetActive(false); quadPool.Push(s.tr); s.tr = null; }
         if (s.beam != null) { s.beam.enabled = false; beamPool.Push(s.beam); s.beam = null; }
         if (s.light != null) { s.light.enabled = false; lightPool.Push(s.light); s.light = null; }
+
+        // The references go too. A retired shot sitting in the pool holding a Unit would keep a dead
+        // ship alive until the pool happened to hand that slot out again — the same leak CombatManager
+        // clears its dictionaries for, arriving by a quieter route.
+        s.shooter = null; s.target = null; s.weapon = null;
+
+        // Bounded, so a pathological battle cannot leave a permanent heap of retired shots behind. The
+        // ceiling is the projectile ceiling: past that the pool is already big enough to serve every
+        // round the game will allow in the air at once.
+        if (shotPool.Count < 300) shotPool.Push(s);
     }
 
     /// A pooled point light for a round in flight.
