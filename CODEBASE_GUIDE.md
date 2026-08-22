@@ -647,7 +647,7 @@ powershell -ExecutionPolicy Bypass -File tools/Check-Scripts.ps1
 ```
 
 It exists for the case Unity cannot cover — work done on a machine with no editor and no .NET SDK,
-where the first sign a file is broken is the next person opening the project. Three checks:
+where the first sign a file is broken is the next person opening the project. Four checks:
 
 * **HEAD** — the first non-blank line of a file must look like the top of a C# file. Catches text
   dropped in above the `using` directives.
@@ -655,9 +655,27 @@ where the first sign a file is broken is the next person opening the project. Th
   truncated or duplicated block anywhere.
 * **ENUMS** — every `SomeEnum.Member` reference must name a real member (2,100-odd of them, across 38
   enums).
+* **STRING** — every regular string literal must close on the line it opens. Delegated to
+  `tools/check-string-literals.mjs` so there is one implementation of the rule rather than two that
+  drift apart.
+* **STATIC** — every `SomeType.Member` reference onto a project type must name a real member. This is
+  the ENUMS check applied to classes, and it is where a refactor actually bites: rename or delete a
+  static method and every call site still looks perfectly well-formed. Delegated to
+  `tools/check-static-refs.mjs`, which is deliberately conservative — it skips any type it cannot see
+  the whole of (ambiguous names, and anything inheriting from outside the project).
 
 The third earns its keep because the other two cannot see a *truncated identifier*. The stray line
 that once reached `main` above PlanetViewWindow's usings read
 `... activeIndex == SurfaceIndexKind.Minera ||` — perfectly balanced, and wrong. Comments, strings,
 verbatim strings and char literals are stripped before counting, with newlines preserved so reported
 line numbers are true. Exit code 0 clean, 1 with findings.
+
+The fourth earns its keep the same way, and for the same reason it had to be added: a scripted edit
+put **real newlines where `\n` escapes belonged** in three FleetCommandBar tooltips, and the first
+three checks all reported clean, because a stray newline inside a string leaves the head line, the
+braces, the parens and every enum reference perfectly intact. The first anyone knew was eighteen
+compiler errors in Unity, seventeen of them spurious and none pointing at the fault.
+
+**A skipped check exits 1, not 0.** The last two need `node` on `PATH`; if it is missing the script
+reports them as `DID NOT RUN` and fails, because this script's whole job is to stand in for a compiler
+that is not here — "Clean." has to mean all five checks ran, or it is a claim the script cannot back.

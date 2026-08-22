@@ -185,3 +185,60 @@ comfortable at that rate rather than five imports from exhaustion.
       would add ~16 bytes per vertex across three levels — a real size cost for a subtle gain
 - [ ] **LOD thresholds are calibrated but not eyeballed.** They come from measured pixel footprints;
       whether the swap lands where it feels right is a question only Unity can answer
+
+---
+
+# The eighteen errors were already fixed — and the tripwire was not wired in — 2026-08-22 (later still)
+
+> *"Assets\Scripts\UI\FleetCommandBar.cs(218,14): error CS1010: Newline in constant"* … and seventeen
+> more, reported from Unity.
+
+## L. The errors are the pre-fix file, and the fix is already on `main`
+
+- [x] **L1.** All eighteen are `a71d7e5`'s copy of `FleetCommandBar.cs`. The line and column numbers
+      match it **exactly** — 218,14 is the opening quote of
+      `"hulls in front of a capital ship does not soak the fire meant for it.` in that revision, and
+      220, 232, 234, 239, 241 and 254 line up the same way. In `a7ddc55` those lines carry `\n\n`
+      escapes and the file is clean
+- [x] **L2.** So nothing needed fixing in the code: the working tree is at `e2153ef`, which is
+      `a7ddc55` plus a README line, and it is pushed. **The build being compiled is one commit stale.**
+      `git pull` is the whole of it
+
+## M. What DID need fixing: the checker was never called
+
+- [x] **M1.** `tools/check-string-literals.mjs` was written to close exactly this gap and then left
+      sitting beside the script nobody had wired it into. `Check-Scripts.ps1` — the one command this
+      project's whole no-compiler workflow runs before a commit — never called it. A tripwire that has
+      to be remembered separately is a tripwire that gets forgotten on the day it matters, which is
+      the day somebody is in a hurry
+- [x] **M2.** It is now the fourth check. Delegated rather than ported: two implementations of one
+      rule drift, and the one that drifts is the one nobody is running
+- [x] **M3.** **A skipped check exits 1.** If `node` is not on `PATH` the script says so and fails
+      rather than printing "Clean." with a footnote. This script exists to stand in for a compiler
+      that is not here; "Clean." has to mean all four checks ran
+- [x] **M4.** **Verified in both directions.** Re-injected the exact fault — `\n\n` turned back into
+      real newlines in that same tooltip — and the check reported `FleetCommandBar.cs:218` and `:220`,
+      the same two lines Unity did, and exited 1. Then emptied `PATH` and confirmed the skip path
+      fails with its reason rather than crashing
+- [x] **M5.** And a fifth check, **STATIC**, written while sweeping for anything else that would fail
+      to build: every `SomeType.Member` reference onto a project type must name a real member. It is
+      the ENUMS check applied to classes, which is where a refactor actually bites — rename a static
+      method and every call site still looks perfectly well-formed. `tools/check-static-refs.mjs`.
+      **The codebase passes it**, which is the useful part of the answer to "is anything else broken":
+      2,000-odd static references across 227 files, 227 checkable types, nothing dangling.
+      Verified by dropping a file referring to `Squadrons.ThisMemberDoesNotExist` into the tree and
+      watching it fail. Its three first-pass false positives are all C# shapes a naive member scan
+      gets wrong, and are written down in the script's header
+- [x] **M6.** One trap found on the way, and it is worth writing down: **`Check-Scripts.ps1` is UTF-8
+      with no BOM, and Windows PowerShell 5.1 decodes it as ANSI.** A non-ASCII character inside a
+      *code string* becomes mojibake the parser chokes on — the first version of this change died on
+      an em dash. Inside comments it is harmless, which is why the ones already in the file are fine.
+      Code strings in that file stay ASCII
+
+### And the injector hit the original bug on the way to testing it
+
+The first attempt to re-inject the fault was a heredoc containing `\\n`, and the shell collapsed it to
+`\n` before node ever saw it — **the identical mechanism that produced the original defect**, in the
+act of testing the check for it. The injector now builds the backslash from `String.fromCharCode(92)`.
+The lesson is narrow and repeatable: never put an escape sequence in a shell-authored edit. Write the
+file with a tool that does not interpret it.

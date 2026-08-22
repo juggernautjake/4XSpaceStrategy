@@ -9,7 +9,7 @@
   stray fragment of an expression ended up sitting above the using directives in PlanetViewWindow.cs
   and reached main.
 
-  Three checks, chosen because each catches something the others cannot:
+  Five checks, chosen because each catches something the others cannot:
 
     HEAD     The first non-blank line of a file must look like the top of a C# file. This is the one
              that catches text pasted or dropped in above the usings.
@@ -18,6 +18,13 @@
     ENUMS    Every `SomeEnum.Member` reference must name a member that exists. Balance would never
              have caught the fragment that started this, because the identifier in it was TRUNCATED —
              `SurfaceIndexKind.Minera` — and a truncated identifier is perfectly balanced.
+    STRING   Every regular string literal must close on the line it opens. Delegated to
+             tools/check-string-literals.mjs — see the note beside the call for why it is here.
+    STATIC   Every `SomeType.Member` reference onto a project type must name a real member, which is
+             the ENUMS check applied to classes. Delegated to tools/check-static-refs.mjs.
+
+  The two delegated checks need `node` on PATH. If it is missing they are reported as NOT RUN and the
+  script exits 1 — "Clean." has to mean all five ran.
 
   Comments, strings, verbatim strings and char literals are stripped before counting, so a brace in a
   comment or a paren in a message cannot produce a false alarm.
@@ -174,13 +181,79 @@ foreach ($path in $sources.Keys) {
     }
 }
 
+# ---- DELEGATED CHECKS ---------------------------------------------------------------------------
+#
+# Two things the three checks above cannot see, both of which have now cost real time:
+#
+#   STRING  An unterminated string literal. A stray newline inside one leaves the head line, the
+#           braces, the parens and every enum reference perfectly intact -- and it is CS1010 followed
+#           by a cascade of spurious errors pointing everywhere except at the fault. It reached Unity
+#           exactly once, as eighteen errors in one file, and this script said "Clean." the whole way.
+#   STATIC  A `SomeType.Member` reference to a member that no longer exists. Rename or delete a static
+#           method and every call site still looks perfectly well-formed.
+#
+# Both rules live in their own .mjs rather than being ported into PowerShell here: two implementations
+# of one rule drift apart, and the one that drifts is the one nobody is running. So this delegates --
+# and SAYS SO when it cannot, because a check that silently skips is worse than no check. The "Clean."
+# line goes on claiming the same thing either way.
+#
+# NOTE: ASCII only inside the code strings below. This file is UTF-8 with no BOM and Windows
+# PowerShell 5.1 decodes it as ANSI, so a non-ASCII character in a STRING becomes mojibake the parser
+# chokes on. In comments it is harmless, which is why the em dashes further up are left alone.
+$toolsDir = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($toolsDir)) { $toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+$node = Get-Command node -ErrorAction SilentlyContinue
+
+$delegated = @(
+    @{ Tag = 'STRING'; Script = 'check-string-literals.mjs'; Noun = 'unterminated string literal(s)' },
+    @{ Tag = 'STATIC'; Script = 'check-static-refs.mjs';     Noun = 'suspect static reference(s)' }
+)
+
+$skipped = New-Object System.Collections.ArrayList
+$details = New-Object System.Collections.ArrayList
+foreach ($check in $delegated) {
+    $script = Join-Path $toolsDir $check.Script
+    if (-not (Test-Path $script)) {
+        [void]$skipped.Add("$($check.Tag): $($check.Script) is missing from $toolsDir")
+        continue
+    }
+    if ($null -eq $node) {
+        [void]$skipped.Add("$($check.Tag): node is not on PATH")
+        continue
+    }
+    $out = & $node.Source $script
+    if ($LASTEXITCODE -ne 0) {
+        $bad = @($out | Select-String -Pattern '^FAIL ').Count
+        [void]$findings.Add("$($check.Tag)   $bad $($check.Noun) - listed below")
+        [void]$details.Add($out)
+    }
+}
+
 Write-Output "Checked $($files.Count) C# files and $($enums.Count) enums."
+
+# A skip is reported as a FAILURE rather than a pass with a footnote. This script's whole job is to
+# stand in for a compiler that is not here, so "Clean." has to mean all five checks ran and all five
+# passed — anything less is a claim it cannot back.
+if ($skipped.Count -gt 0) {
+    Write-Output ""
+    foreach ($s in $skipped) { Write-Output "DID NOT RUN  $s" }
+    Write-Output ""
+    Write-Output "Head, balance and enums are clean; the checks above did NOT run, so what they cover"
+    Write-Output "is UNCHECKED. Install node, or run those scripts yourself, before treating this as a"
+    Write-Output "green light."
+    exit 1
+}
+
 if ($findings.Count -eq 0) {
     Write-Output "Clean."
     exit 0
 }
 Write-Output ""
 foreach ($f in $findings) { Write-Output $f }
+foreach ($block in $details) {
+    Write-Output ""
+    foreach ($line in $block) { Write-Output $line }
+}
 Write-Output ""
 Write-Output "$($findings.Count) finding(s)."
 exit 1
