@@ -89,6 +89,22 @@ a GUID nobody else has.
       than stamping an identity on a source file. The command icons are still sidecar-less like the 25
       that preceded them, and that is fine: they are loaded by path through `Resources.Load`, so no
       GUID is involved.
+- [x] **C4. And then they were taken straight back out, which is the actual lesson.** The sidecars
+      landed here and Jacob's next pull aborted: *"untracked working tree files would be overwritten
+      by merge"*. His Unity had ALREADY imported those 27 scripts and generated its own sidecars for
+      them, untracked — and git will not clobber an untracked file.
+
+      The check I ran before writing them was the right check and I ran it against the wrong tree. I
+      confirmed nothing in `SampleScene.unity` or the prefabs referenced the new GUIDs, which was true
+      and is why deleting either set is safe; what I did not establish is whether a working editor had
+      already answered the question somewhere I cannot see. **This checkout has no Unity, so "no
+      sidecar here" never meant "no sidecar anywhere."**
+
+      Reverted the same day. The rule that came out of it: **where an editor's sidecars exist, they
+      win.** They are what its Library database is keyed to, they carry real importer settings, and
+      they are the ones that should be committed — from the machine that has Unity, for every asset
+      under `Assets/`, not just the scripts. `make-script-metas.mjs` stays for the case it was written
+      for: a script with no sidecar and no editor anywhere to make one.
 
 ## D. Optimisation
 

@@ -680,8 +680,13 @@ compiler errors in Unity, seventeen of them spurious and none pointing at the fa
 reports them as `DID NOT RUN` and fails, because this script's whole job is to stand in for a compiler
 that is not here — "Clean." has to mean all five checks ran, or it is a claim the script cannot back.
 
-**`make-script-metas.mjs`** — **run this after adding any `.cs` file from an environment with no Unity
-in it**, which is every file written here.
+**`make-script-metas.mjs`** — for a `.cs` file that has no sidecar **and no Unity anywhere to make one**.
+
+> **Check whether an editor has already seen the file first.** A sidecar generated here for a script
+> a working Unity install has already imported does not merge — it lands as *"untracked working tree
+> files would be overwritten by merge"* and the pull aborts. That happened on 2026-08-22 for 27 files
+> and the answer was to take them back out: **where an editor's sidecars exist, they win**, because
+> they are the ones its Library database is already keyed to. This tool is for the other case.
 
 ```
 node tools/make-script-metas.mjs            # report what is missing
@@ -698,3 +703,8 @@ The GUID is the **MD5 of the asset path**, so the tool is deterministic: two run
 machines. It only ever writes a sidecar that is *missing*, never touches one that exists, and refuses
 to write at all if a GUID it generated is already in use. Scripts only — art and meshes have importer
 blocks whose settings matter, and inventing those is a different and riskier job.
+
+**The sidecars in this repo come from the editor.** Every `.meta` under `Assets/` should be committed,
+including the ones for the ship meshes, the command icons and the symbols: they carry real importer
+settings, and a sidecar that is never committed is regenerated differently by every checkout. Commit
+them from the machine that has Unity; do not generate them anywhere else.
