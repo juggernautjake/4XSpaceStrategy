@@ -679,3 +679,22 @@ compiler errors in Unity, seventeen of them spurious and none pointing at the fa
 **A skipped check exits 1, not 0.** The last two need `node` on `PATH`; if it is missing the script
 reports them as `DID NOT RUN` and fails, because this script's whole job is to stand in for a compiler
 that is not here — "Clean." has to mean all five checks ran, or it is a claim the script cannot back.
+
+**`make-script-metas.mjs`** — **run this after adding any `.cs` file from an environment with no Unity
+in it**, which is every file written here.
+
+```
+node tools/make-script-metas.mjs            # report what is missing
+node tools/make-script-metas.mjs --write    # create them
+```
+
+Unity identifies an asset by the GUID in its `.meta` sidecar, not by its path. A script without one is
+not broken — the editor writes one on import — but every checkout that imports the project invents a
+*different* GUID for the same file, and from then on they disagree about the identity of every script
+in the list. Drag one onto a prefab and that reference is a GUID nobody else has. 27 had accumulated
+by 2026-08-22.
+
+The GUID is the **MD5 of the asset path**, so the tool is deterministic: two runs agree, and so do two
+machines. It only ever writes a sidecar that is *missing*, never touches one that exists, and refuses
+to write at all if a GUID it generated is already in use. Scripts only — art and meshes have importer
+blocks whose settings matter, and inventing those is a different and riskier job.

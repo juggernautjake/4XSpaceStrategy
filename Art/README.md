@@ -92,3 +92,14 @@ has been promoted into `Active/`, the staging copy is the same file twice and is
 | look at a whole civ | `node tools/contact-sheet.mjs --dir Art/Active/<Civ> --match thumbnail` |
 | find which way a hull faces | `node tools/ship-silhouettes.mjs` |
 | re-pull everything from the Meshy account | `node tools/meshy-archive-tasks.mjs` |
+| draw the command symbols | `node tools/make-command-icons.mjs` |
+| check every control has a symbol | `node tools/verify-command-ui.mjs` |
+| look at the formations | `node tools/formation-check.mjs` |
+
+The last three are here rather than with the code checks because what they produce is a **picture**,
+and the picture is the point. `make-command-icons` renders a contact sheet at 24 pixels as well as 72
+— the size the bar actually draws them — which is what catches an icon too thin to survive the
+downscale, or two controls that have quietly ended up sharing a silhouette. `formation-check` draws
+all seven formations at three squadron sizes, and has now found two real faults nobody could have seen
+in source: a Globe packing two ships closer than the collision rule allows, and the cheapest hull
+being assigned to a wingtip instead of the point.
