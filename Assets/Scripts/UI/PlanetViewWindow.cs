@@ -4130,14 +4130,21 @@ public class PlanetViewWindow : MonoBehaviour
         Header("INDEX OVERLAYS");
         Note("Each overlay paints the grid with where a kind of building actually belongs. Survey a world to read its minerals; a deep survey by a research ship unlocks the rest.");
         // The blanket claim used to be "nothing under 70% is drawn". That is no longer true of the
-        // Geothermal Index, which paints its plate boundaries from 40 — so the sentence is split into
-        // the two statements it was always making, and only the YIELD one is universal.
+        // Geothermal Index, which paints its warm ground from 40 — so the sentence is split into the
+        // two statements it was always making, and only the YIELD one is universal.
+        //
+        // The plate line is described SEPARATELY from any percentage on purpose. It used to be drawn
+        // out of the heat field, so it genuinely did have a threshold and the old wording named it;
+        // now it is drawn from the plate map and has none, and a number beside it would re-teach the
+        // exact thing that was wrong with it.
         Note($"<color=#9FB4C8>Nothing under <b>{SurfaceIndex.ShowFloor * 100f:F0}%</b> yields anything or can be " +
              $"built on — a world's resources sit in a few patches rather than spread thinly over all of it. " +
              $"Every <b>{SurfaceIndex.BandStep * 100f:F0}%</b> above that is a brighter step with its own outline, " +
-             $"so the best ground is the innermost, brightest ring. The Geothermal Index also draws its plate " +
-             $"boundaries down at <b>{SurfaceIndex.PlateLineFloor * 100f:F0}%</b>, which mark where the crust is " +
-             $"moving rather than where it is hot. Zoom in near the cursor for the exact numbers.</color>");
+             $"so the best ground is the innermost, brightest ring. The Geothermal Index also paints its warm " +
+             $"ground from <b>{SurfaceIndex.PlateLineFloor * 100f:F0}%</b>, and draws the plate boundaries " +
+             $"themselves as an unbroken red line wherever they run — hot or cold, land or sea floor. The line " +
+             $"marks where the crust is MOVING, not where it is hot. Zoom in near the cursor for the exact " +
+             $"numbers.</color>");
 
         AddIndexToggle(SurfaceIndexKind.None, "None (plain terrain)");
         // PRESENT, not All. An index this world has nothing for — hydrology on a dry rock, farmland on a
@@ -4853,7 +4860,7 @@ public class PlanetViewWindow : MonoBehaviour
         // has already resolved — a plate map handed over before the survey reached that ground would be
         // giving away the very thing the survey is for.
         if (kind == SurfaceIndexKind.Geothermal && TectonicsMap.Active(body))
-            PaintPlateLines(px, tw, th, sub, step);
+            PaintPlateLines(px, tw, th, sub, reveal, maxBand);
     }
 
     /// Source-over. The straightforward compositing rule, written out because the alternative — letting
@@ -4878,9 +4885,31 @@ public class PlanetViewWindow : MonoBehaviour
     /// The fault lines, painted over a finished Geothermal overlay.
     ///
     /// Reads the SAME TectonicsMap.Tiles raster the standalone tectonics view does — one plate map, so
-    /// the line cannot be in one place on one overlay and somewhere else on the other. `step` carries
-    /// which tiles the survey has resolved; a tile at -1 has not been read yet and gets no line.
-    void PaintPlateLines(Color32[] px, int tw, int th, int sub, int[] step)
+    /// the line cannot be in one place on one overlay and somewhere else on the other.
+    ///
+    /// ============================================================================================
+    /// THE LINE IS NOT PART OF THE HEAT FIELD, AND USED TO BE DRAWN AS THOUGH IT WERE
+    /// ============================================================================================
+    ///
+    /// This took `step` — the tile's 10% heat band — and skipped any tile whose entry was -1. That
+    /// reads like a survey test and is not one: `step` is -1 for *ground the index does not reach*,
+    /// so the boundary was drawn only where the ground under it happened to be hot enough to paint.
+    ///
+    /// A margin's heat varies enormously along its own length. It reads 40 where the plates merely
+    /// touch and 100 where they drive together, it is cut by 45% under water, and the radiated band
+    /// around it fades with activity. So the red line was solid across active, dry, mountainous
+    /// stretches and simply absent across quiet or submerged ones — the same boundary, drawn in
+    /// pieces, with no way for the player to tell a gap in the line from a gap in the crust.
+    ///
+    /// Two rasters were being conflated. `map.border` is a plate boundary: a fact about the geometry
+    /// of the crust, true or false, with no magnitude at all. The heat field is a continuous quantity
+    /// that happens to peak near boundaries. The line belongs to the first one.
+    ///
+    /// So the only gate left is the SURVEY — which is a real reason to withhold a boundary, since a
+    /// plate map handed over before the survey reached that ground would be giving away the very
+    /// thing the survey is for. Asked here per border tile rather than precomputed for the whole
+    /// world, because the border is a hairline: a few hundred tiles out of tens of thousands.
+    void PaintPlateLines(Color32[] px, int tw, int th, int sub, Survey.Reveal reveal, int maxBand)
     {
         var map = TectonicsMap.Tiles(body);
         if (map == null) return;
@@ -4896,7 +4925,14 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 int i = y * w + x;
                 if (!map.border[i]) continue;
-                if (step[i] < 0) continue;      // not surveyed yet — nothing to annotate
+
+                // Exactly the rule the fill uses for whether the survey has resolved this ground —
+                // reached during the pass in progress, or already carried by an earlier one.
+                if (!reveal.complete)
+                {
+                    bool reached = Survey.Reached(body, x, y, reveal.frac);
+                    if ((reached ? maxBand : maxBand - 1) < 0) continue;
+                }
 
                 for (int sy = 0; sy < sub; sy++)
                     for (int sx = 0; sx < sub; sx++)

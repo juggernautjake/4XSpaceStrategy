@@ -516,23 +516,22 @@ public static class SurfaceIndex
         // A deep sea floor bleeds its heat into the water above it long before a plant could take any.
         // Applied last, so it cuts the finished figure rather than one of its inputs — a fault under an
         // ocean is still a fault, it is just not a building site.
-        float dry = geo;
         if (f.water) geo *= 0.55f;
 
-        // ...BUT THE PENALTY MUST NOT RUB THE BOUNDARY OUT.
+        // ---- AND NOTHING IS FLOORED BACK UP TO KEEP A LINE VISIBLE --------------------------------
         //
-        // A continental margin reads exactly PlateLineBase (0.40), and 0.40 x 0.55 is 0.22 — under
-        // PlateLineFloor, which is the value the overlay starts painting at. So every underwater plate
-        // boundary vanished from the map, and on a wet world that is nearly all of them: the push
-        // arrows (drawn from the plate LAYOUT, not from this index) kept shoving against a line that
-        // was no longer there.
+        // This used to end with `if (dry >= PlateLineFloor) geo = Max(geo, PlateLineFloor)`, which
+        // pushed every submerged plate margin back up to 0.40 so that the overlay — which starts
+        // painting at 0.40 — would still draw something there. The plate line was being drawn out of
+        // the HEAT FIELD, so the heat field had to be bent to carry it.
         //
-        // The two jobs this number does are separable, and here is where they separate. VISIBILITY is
-        // floored back to the plate line, so the fault stays on the map wherever it runs. PRODUCTION is
-        // untouched, because the floor is 0.40 and a geothermal plant needs 0.70 (SurfaceBuildManager)
-        // — a submarine fault is drawn and still unbuildable, which is exactly the truth about it.
-        if (dry >= PlateLineFloor) geo = Mathf.Max(geo, PlateLineFloor);
-
+        // It does not any more: PlanetViewWindow.PaintPlateLines reads the plate raster directly, and
+        // a boundary is drawn because it is a boundary rather than because the ground under it clears
+        // a threshold. So this number goes back to being only what it says it is.
+        //
+        // Which makes it honest again. A margin under deep ocean genuinely reads 0.22, not 0.40, and
+        // the overlay now shows exactly that: the red line runs across the sea floor with cool ground
+        // under it, instead of a warm smear that existed to hold the line up.
         return Mathf.Clamp01(geo);
     }
 
