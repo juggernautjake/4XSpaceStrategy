@@ -647,7 +647,7 @@ powershell -ExecutionPolicy Bypass -File tools/Check-Scripts.ps1
 ```
 
 It exists for the case Unity cannot cover — work done on a machine with no editor and no .NET SDK,
-where the first sign a file is broken is the next person opening the project. Four checks:
+where the first sign a file is broken is the next person opening the project. Seven checks:
 
 * **HEAD** — the first non-blank line of a file must look like the top of a C# file. Catches text
   dropped in above the `using` directives.
@@ -663,6 +663,15 @@ where the first sign a file is broken is the next person opening the project. Fo
   static method and every call site still looks perfectly well-formed. Delegated to
   `tools/check-static-refs.mjs`, which is deliberately conservative — it skips any type it cannot see
   the whole of (ambiguous names, and anything inheriting from outside the project).
+* **MEMBER** — the same question for a **local** whose type can be resolved: `var b = Type.Member;`
+  and then, two hundred lines later, something that is not on it. `tools/check-member-refs.mjs`. It
+  does not track scopes, so it counts every declaration of a name and throws the name away if there is
+  more than one — C# code reuses `d` and `m` constantly, and the first version reported 26 findings
+  that were all one variable being mistaken for another.
+* **FOREACH** — whatever a `foreach` iterates has to *be* iterable. `tools/check-foreach.mjs`. This is
+  `CS1579`, and it reached `main` once: `foreach (var b in SystemContext.Galaxy)`, where a `Galaxy` is
+  a bag of *systems* and the flattened walk is `SystemContext.AllBodies()`. Nothing else could see it
+  — the expression is balanced, correctly quoted, and every identifier in it is real.
 
 The third earns its keep because the other two cannot see a *truncated identifier*. The stray line
 that once reached `main` above PlanetViewWindow's usings read
@@ -676,9 +685,13 @@ three checks all reported clean, because a stray newline inside a string leaves 
 braces, the parens and every enum reference perfectly intact. The first anyone knew was eighteen
 compiler errors in Unity, seventeen of them spurious and none pointing at the fault.
 
-**A skipped check exits 1, not 0.** The last two need `node` on `PATH`; if it is missing the script
+**A skipped check exits 1, not 0.** The last four need `node` on `PATH`; if it is missing the script
 reports them as `DID NOT RUN` and fails, because this script's whole job is to stand in for a compiler
-that is not here — "Clean." has to mean all five checks ran, or it is a claim the script cannot back.
+that is not here — "Clean." has to mean all seven checks ran, or it is a claim it cannot back.
+
+**None of this is a type checker.** It will not catch a wrong argument count, a wrong return type, or
+an assignment to a get-only property. It catches the classes that have actually reached `main`, which
+is a different and much smaller claim. Unity is still the real check.
 
 **`make-script-metas.mjs`** — for a `.cs` file that has no sidecar **and no Unity anywhere to make one**.
 
