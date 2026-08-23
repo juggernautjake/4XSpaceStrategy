@@ -90,7 +90,14 @@ function station(kind, slot, count) {
     case 'Screen': {
       const screen = clamp(Math.floor(count / 2), 1, 8);
       if (slot < screen) {
-        const t = screen === 1 ? 0 : (slot / (screen - 1)) * 2 - 1;
+        // The arc fills from its MIDDLE outwards, so slot 0 -- the cheapest hull -- takes the point
+        // rather than a wingtip. Kept in step with FleetFormation.Station by hand; this port exists to
+        // draw the geometry, and a port that drew a shape the game does not fly would be worse than
+        // having no picture at all.
+        const mid = Math.floor((screen - 1) / 2);
+        const step = Math.floor((slot + 1) / 2);
+        const idx = clamp(slot % 2 === 0 ? mid - step : mid + step, 0, screen - 1);
+        const t = screen === 1 ? 0 : (idx / (screen - 1)) * 2 - 1;
         lateral = t * 2.2;
         back = -1.8 + Math.abs(t) * 1.0;
       } else {
@@ -103,7 +110,8 @@ function station(kind, slot, count) {
     case 'Globe': {
       const shell = clamp(Math.floor((count * 2) / 3), 1, 12);
       if (slot < shell) {
-        const ang = (slot * Math.PI * 2) / shell;
+        // Walked from the FRONT, so slot 0 -- the cheapest hull -- leads rather than trails.
+        const ang = Math.PI + (slot * Math.PI * 2) / shell;
         lateral = Math.sin(ang) * 2.0;
         back = Math.cos(ang) * 2.0;
         lift = (slot % 2 === 0 ? 0.7 : -0.7) * Math.abs(Math.sin(ang * 0.5));

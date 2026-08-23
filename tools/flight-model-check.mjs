@@ -271,6 +271,37 @@ console.log('Gold = where it was when the order came. Red = where it was told to
      rows.every(r => r.radius <= 0.9),
      `widest weave is ${Math.max(...rows.map(r => r.radius)).toFixed(2)} world units`);
 
+  // ---- THE HANDOVER between flying and jinking ------------------------------------------------
+  //
+  // The weave fades in as the hull's own crossing speed fades out, so a ship arriving under fire is
+  // never briefly still. Two ways to get that wrong, and each is a check:
+  //
+  //   A GAP.     Fade the weave out below its own peak and there is a band of speeds where the hull
+  //              makes less crossing than it would parked — a sitting duck in the middle of a dodge.
+  //   AN OVERLAP. Fade it out above cruise and a ship at full speed weaves as well, which
+  //              double-counts the one thing the weave exists to supply and fights the momentum model
+  //              for the same position.
+  const LOW = c(rend, 'WeaveCrossFadeLow');
+  const HIGH = c(rend, 'WeaveCrossFadeHigh');
+
+  // The worst point of the cross-fade, swept rather than reasoned about: own speed plus what is left
+  // of the weave at that speed, minimised over the transition.
+  let worst = Infinity, worstAt = 0;
+  for (let v = 0; v <= HIGH + 0.01; v += 0.05) {
+    const blend = 1 - clamp((v - LOW) / (HIGH - LOW), 0, 1);
+    const total = v + nimble.peak * blend;
+    if (total < worst) { worst = total; worstAt = v; }
+  }
+
+  ok('the handover never leaves a hull making less crossing than it would parked',
+     worst >= nimble.peak - 0.01,
+     `worst point is ${worst.toFixed(2)} u/s at ${worstAt.toFixed(2)} u/s of flight, ` +
+     `against ${nimble.peak.toFixed(2)} parked`);
+
+  ok('a hull at cruise gets no weave at all, so nothing is double-counted',
+     HIGH <= 8,
+     `the weave is fully off by ${HIGH.toFixed(1)} u/s; a hull in transit makes 10-16`);
+
   console.log('');
   let failed = 0;
   for (const k of checks) { if (!k.p) failed++; console.log(`${k.p ? 'ok  ' : 'FAIL'} ${k.n}\n     ${k.d}`); }

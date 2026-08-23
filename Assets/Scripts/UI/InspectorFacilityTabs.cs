@@ -176,6 +176,8 @@ public partial class InspectorWindow
             return $"Build Power: <color=#{hex}><b>{total - used}</b> free</color> of <b>{total}</b>";
         });
 
+        ReinforceRow(p, um);
+
         foreach (var info in UnitDatabase.All)
         {
             if (info == null) continue;
@@ -218,6 +220,61 @@ public partial class InspectorWindow
                 return (can, can ? (info.isStation ? "Construct" : "Build") : why);
             }, group);
         }
+    }
+
+    // ============================================================================================
+    // WHERE THE NEXT HULL GOES
+    //
+    // Nine buttons and an off switch, sitting directly above the catalogue — because the decision it
+    // records is "the ships I am ABOUT TO QUEUE belong to squadron 4", and a control for that placed
+    // anywhere other than beside the queue button is a control nobody presses at the right time.
+    //
+    // Deliberately shown even when there are no squadrons yet, with the reason in the note rather than
+    // by disappearing. A control that is invisible until some unstated condition is met is a feature
+    // the player never learns exists.
+    // ============================================================================================
+    void ReinforceRow(Transform p, UnitManager um)
+    {
+        Header(p, "REINFORCE");
+
+        var row = UIFactory.NewUI(p, "Reinforce"); UIFactory.AddLayout(row, 24);
+        var h = row.AddComponent<HorizontalLayoutGroup>();
+        h.spacing = 3; h.childControlWidth = true; h.childControlHeight = true; h.childForceExpandWidth = true;
+
+        var none = UIFactory.Button(row.transform, "Off", () => { um.SetReinforceSquadron(0); lastSig = null; }, 22);
+        live.Button(none, () => (um.ReinforceSquadron != 0, "Off"));
+        UIFactory.Tooltip(none.gameObject, "New ships stay at the yard that built them.");
+
+        for (int g = 1; g <= ControlGroups.Count; g++)
+        {
+            int captured = g;
+            var b = UIFactory.Button(row.transform, g.ToString(),
+                                     () => { um.SetReinforceSquadron(captured); lastSig = null; }, 22);
+            // Disabled rather than hidden for an empty slot, and the tooltip says why: a row of nine
+            // buttons that silently has gaps in it looks broken.
+            live.Button(b, () => (!ControlGroups.IsEmpty(captured) && um.ReinforceSquadron != captured,
+                                  captured.ToString()));
+            UIFactory.Tooltip(b.gameObject, ControlGroups.IsEmpty(captured)
+                ? $"Squadron {captured} is empty. Bind some ships to it first (Ctrl+{captured})."
+                : $"Send new hulls to {Squadrons.NameOf(captured)}" +
+                  (Squadrons.Of(captured).hasRally ? ", and on to its rally point." : "."));
+        }
+
+        var note = UIFactory.WrapText(p, "", UITheme.SmallSize, UITheme.SubText);
+        live.Text(note, () =>
+        {
+            int g = um.ReinforceSquadron;
+            if (g == 0)
+                return "Finished ships wait at the yard. Pick a squadron and they will join it as they " +
+                       "roll out — and fly to its rally point if it has one.";
+            var o = Squadrons.Of(g);
+            return $"<color=#4DFF6E>New hulls join {Squadrons.NameOf(g)}</color>" +
+                   (o != null && o.hasRally
+                       ? " and fly to its rally point."
+                       : ". Give it a rally point and they will fly there too.") +
+                   "  <color=#9FB4C8>Ships already on the stocks keep the destination they were queued " +
+                   "with.</color>";
+        });
     }
 
     void BuildShipyardStocks(Transform p)

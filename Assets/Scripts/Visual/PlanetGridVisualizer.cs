@@ -1,6 +1,5 @@
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.EventSystems;
 
 // The low-res "general" surface viewer: a chunky tile grid. Colours come from SurfaceTileUI/
 // TerrainColorMap. When a planet is selected you can walk a tile cursor with WASD/arrows (which is
@@ -104,7 +103,7 @@ public class PlanetGridVisualizer : MonoBehaviour
         if (gridWindow == null || !gridWindow.activeSelf) return;
         if (PlanetUI.Selected == null) return;
         if (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen) return;
-        if (IsTypingInField()) return;
+        if (UIFactory.IsTypingInField()) return;
 
         int dx = 0, dy = 0;
         if (Input.GetKeyDown(KeyCode.A) || Input.GetKeyDown(KeyCode.LeftArrow)) dx = -1;
@@ -117,14 +116,6 @@ public class PlanetGridVisualizer : MonoBehaviour
         cursorY = Mathf.Clamp(cursorY + dy, 0, surface.height - 1);
         var ui = tileUIs[cursorX, cursorY];
         if (ui != null) SelectTile(ui.tileData, ui);
-    }
-
-    static bool IsTypingInField()
-    {
-        var es = EventSystem.current;
-        if (es == null || es.currentSelectedGameObject == null) return false;
-        var input = es.currentSelectedGameObject.GetComponent<TMPro.TMP_InputField>();
-        return input != null && input.isFocused;
     }
 
     void ClearGrid()

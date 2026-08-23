@@ -51,16 +51,28 @@ public class PatrolTool : MonoBehaviour
         line.enabled = false;
     }
 
-    public void Arm(int g)
+    /// The mode the route will be walked in, chosen on the command bar BEFORE the route is laid.
+    ///
+    /// Carried on the tool rather than read off the squadron at Finish() time, so that the choice the
+    /// player made while looking at the map is the one that gets committed, even if something else
+    /// touches the squadron's orders while they are still clicking waypoints.
+    PatrolMode mode = PatrolMode.Loop;
+
+    public void Arm(int g, PatrolMode m)
     {
         if (!Squadrons.Valid(g)) return;
         squadron = g;
+        mode = m;
         arming = true;
         points.Clear();
         line.enabled = true;
         line.positionCount = 0;
         NotificationManager.Instance?.Push("Patrol route",
-            "Click two or more points to lay the route. Right-click to finish, Escape to cancel.",
+            mode == PatrolMode.Loop
+                ? "Click two or more points to lay the route. It will be walked round and round. " +
+                  "Right-click to finish, Escape to cancel."
+                : "Click two or more points to lay the route. It will be walked up and back down " +
+                  "again. Right-click to finish, Escape to cancel.",
             null, NotifKind.Info);
     }
 
@@ -101,9 +113,11 @@ public class PatrolTool : MonoBehaviour
             return;
         }
 
-        Squadrons.SetPatrol(squadron, points, PatrolMode.Loop);
+        Squadrons.SetPatrol(squadron, points, mode);
         NotificationManager.Instance?.Push($"{Squadrons.NameOf(squadron)} on patrol",
-            $"Walking {points.Count} points on a loop. It keeps its protocol while it patrols.",
+            $"Walking {points.Count} points " +
+            (mode == PatrolMode.Loop ? "on a loop" : "up and back down again") +
+            ". It keeps its protocol while it patrols.",
             null, NotifKind.Info);
         SimpleAudio.Instance?.PlayClick();
         Cancel();
@@ -131,12 +145,16 @@ public class PatrolTool : MonoBehaviour
 
     void Redraw()
     {
-        // The closing leg is drawn too, so a loop reads as a loop while it is being laid rather than
-        // only once it is committed.
+        // A LOOP gets its closing leg drawn, so it reads as a loop while it is being laid rather than
+        // only once it is committed. A SHUTTLE deliberately does not: the whole difference between the
+        // two is whether the squadron crosses back over the gap between the last point and the first,
+        // and drawing that leg on a route that will never fly it would show the player the wrong shape
+        // at exactly the moment they are deciding what shape they want.
         int n = points.Count;
-        line.positionCount = n >= 2 ? n + 1 : n;
+        bool closes = n >= 2 && mode == PatrolMode.Loop;
+        line.positionCount = closes ? n + 1 : n;
         for (int i = 0; i < n; i++) line.SetPosition(i, points[i] + Vector3.up * 0.4f);
-        if (n >= 2) line.SetPosition(n, points[0] + Vector3.up * 0.4f);
+        if (closes) line.SetPosition(n, points[0] + Vector3.up * 0.4f);
     }
 }
 

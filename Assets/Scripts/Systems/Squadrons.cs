@@ -157,6 +157,22 @@ public static class Squadrons
         OnChanged?.Invoke();
     }
 
+    /// Switch a squadron between walking its route round and shuttling back along it.
+    ///
+    /// Live, and deliberately so: the difference between a loop and a picket line is a thing a player
+    /// wants to change while watching what the route is actually covering, not something they have to
+    /// commit to before they have laid the first waypoint. The leg counter is left alone — a squadron
+    /// halfway down its route carries on from where it is — but the DIRECTION is reset to forwards,
+    /// since a ping-pong that inherited a reversed direction from an earlier stint would set off
+    /// backwards for no reason the player could see.
+    public static void SetPatrolMode(int g, PatrolMode mode)
+    {
+        if (!Valid(g)) return;
+        orders[g].patrolMode = mode;
+        orders[g].patrolDir = 1;
+        OnChanged?.Invoke();
+    }
+
     public static void SetPatrol(int g, List<Vector3> route, PatrolMode mode)
     {
         if (!Valid(g)) return;
@@ -191,6 +207,80 @@ public static class Squadrons
         for (int i = 0; i <= Count; i++) orders[i] = new SquadronOrders();
         OnChanged?.Invoke();
     }
+
+    // ============================================================================================
+    // WHAT A SQUADRON IS WORTH, AND WHAT IS HOLDING IT BACK
+    //
+    // Four numbers, and the reason they belong together is that two of them are SUMS and two of them
+    // are MINIMA. Attack and hull are what the squadron brings; speed and range are what it is limited
+    // BY, because a group travels at its slowest ship and turns back at its shortest-ranged one
+    // (UnitManager.SendUnits takes the minimum of both, and has always done).
+    //
+    // Reading a squadron as four sums would be actively misleading: adding up nine ships' speeds says
+    // nothing whatsoever about how fast the squadron gets anywhere.
+    //
+    // ---- AND THE SHIP THAT IS HOLDING IT BACK ---------------------------------------------------
+    //
+    // The pace-setter is worth naming rather than merely reporting, because the fix is a player
+    // action: detach it. A transport at speed 3 in a wing of scouts at 12 makes the whole wing a
+    // transport, and nothing on screen said so — the squadron simply felt slow. `slowest` is only
+    // filled in when one hull is genuinely the outlier, not merely the lowest of nine similar
+    // numbers, so the warning stays rare enough to mean something.
+    // ============================================================================================
+
+    /// The threshold for calling one hull a drag on its squadron: it has to be under this fraction of
+    /// what the rest of the squadron could do without it.
+    const float DragFraction = 0.75f;
+
+    public struct Strength
+    {
+        public int ships;
+        public int attack;             // rank-adjusted, summed
+        public float hull, hullMax;    // current and full, summed
+        public int speed;              // the SLOWEST ship's
+        public float range;            // the SHORTEST-ranged ship's; float.MaxValue means unlimited
+        public Unit pacer;             // the hull setting that speed, when it is an outlier. Else null
+        public int packSpeed;          // what the squadron would make without the pacer
+    }
+
+    public static Strength StrengthOf(IReadOnlyList<Unit> members)
+    {
+        var s = new Strength { speed = int.MaxValue, range = float.MaxValue, packSpeed = int.MaxValue };
+        if (members == null) { s.speed = 0; return s; }
+
+        var um = UnitManager.Instance;
+        Unit slowest = null;
+
+        foreach (var u in members)
+        {
+            if (u == null || u.IsDestroyed) continue;
+            s.ships++;
+            s.attack += u.EffectiveAttack;
+            s.hull += u.Health;
+            s.hullMax += Mathf.Max(1, u.EffectiveHealth);
+            if (um != null) s.range = Mathf.Min(s.range, um.EffectiveRange(u));
+
+            // Stations are skipped for pace: one under tow does not travel with the squadron under its
+            // own power, and letting a speed-zero hull set the group's speed would report every
+            // squadron with a station in it as motionless.
+            if (u.Info != null && u.Info.isStation) continue;
+
+            int sp = Mathf.Max(1, u.Speed);
+            if (sp < s.speed) { s.packSpeed = s.speed; s.speed = sp; slowest = u; }
+            else if (sp < s.packSpeed) s.packSpeed = sp;
+        }
+
+        if (s.ships == 0 || s.speed == int.MaxValue) { s.speed = 0; s.packSpeed = 0; return s; }
+        if (s.packSpeed == int.MaxValue) s.packSpeed = s.speed;    // one mover: nothing to compare to
+
+        // One ship is a drag only if the REST of the squadron would be meaningfully quicker without it.
+        if (slowest != null && s.packSpeed > s.speed && s.speed < s.packSpeed * DragFraction)
+            s.pacer = slowest;
+
+        return s;
+    }
+
+    public static Strength StrengthOfSquadron(int g) => StrengthOf(ControlGroups.Members(g));
 
     // ---- Save / load ---------------------------------------------------------------------------
 

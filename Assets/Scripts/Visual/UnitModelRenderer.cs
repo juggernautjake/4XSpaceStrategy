@@ -473,9 +473,15 @@ public class UnitModelRenderer : MonoBehaviour
         if (u == null || Instance == null) return Vector3.zero;
         if (!Instance.models.TryGetValue(u, out var m) || m == null) return Vector3.zero;
 
-        // Under way: the momentum model's own velocity.
+        // Under way: the momentum model's own velocity, PLUS whatever the weave is adding.
+        //
+        // The weave is normally zero here, because it fades out as a hull builds speed — but during an
+        // arrival under fire the two overlap by design, and reporting only the flight half would
+        // under-charge a braking ship for a dodge it is visibly making. They are added rather than
+        // maxed because the hull is genuinely doing both at once: the offset is applied on top of the
+        // flight position, so the drawn motion is the sum.
         if (u.status == UnitStatus.Traveling)
-            return m.flightReady ? m.flightVel : Vector3.zero;
+            return (m.flightReady ? m.flightVel : Vector3.zero) + m.evadeVel;
 
         // ---- STOPPED, BUT NOT NECESSARILY STILL ----
         //
@@ -1156,14 +1162,39 @@ public class UnitModelRenderer : MonoBehaviour
     /// into evasive flight the instant a hostile came into range would read as teleporting.
     const float WeaveBlendRate = 1.4f;
 
+    // ---- THE HANDOVER, IN WORLD UNITS PER SECOND -------------------------------------------------
+    //
+    // Below the first figure the hull is supplying no crossing of its own and the weave runs at full
+    // amplitude; above the second it is crossing plenty under its own power and the weave is off.
+    // Between them they cross-fade.
+    //
+    // This replaced a BINARY test on `status == Traveling`, which had a cliff in it. A ship arriving
+    // under fire brakes from 10-16 u/s to zero, and its crossing speed — the largest term in every
+    // firing solution against it — went to zero with it, while the weave took most of a second to
+    // ramp in behind. For that moment the hull was the sitting duck this whole mechanism exists to
+    // abolish, and it happened at the exact instant a fleet arrived in a fight.
+    //
+    // The numbers are chosen so the total never DIPS through the handover. A scout's weave peaks near
+    // 4.3 u/s, so fading out by 6 means the hull is always making at least about 5.7 of crossing
+    // somewhere in the middle of the transition — more than it makes parked, never less. Anything
+    // above 6 for the ceiling and the two sources would overlap and double-count; anything below the
+    // weave's own peak and there would be a hole between them. tools/flight-model-check.mjs asserts
+    // both ends of that.
+    const float WeaveCrossFadeLow = 1.5f, WeaveCrossFadeHigh = 6f;
+
     Vector3 CombatWeave(Unit u, Model m, float dt)
     {
-        // A ship under way is already crossing; adding a weave on top would double-count the one thing
-        // this exists to provide, and fight the momentum model for control of the same position.
-        bool want = u.status != UnitStatus.Traveling && CombatManager.InCombat(u) &&
-                    u.Info != null && !u.Info.isStation;
+        bool fighting = CombatManager.InCombat(u) && u.Info != null && !u.Info.isStation;
 
-        m.weaveBlend = Mathf.MoveTowards(m.weaveBlend, want ? 1f : 0f, WeaveBlendRate * dt);
+        // A ship under way is already crossing; adding a full weave on top would double-count the one
+        // thing this exists to provide, and fight the momentum model for control of the same position.
+        // So the weave is scaled by how much crossing the hull is NOT already making for itself.
+        float own = (u.status == UnitStatus.Traveling && m.flightReady) ? m.flightVel.magnitude : 0f;
+        float want = fighting
+            ? 1f - Mathf.InverseLerp(WeaveCrossFadeLow, WeaveCrossFadeHigh, own)
+            : 0f;
+
+        m.weaveBlend = Mathf.MoveTowards(m.weaveBlend, want, WeaveBlendRate * dt);
         if (m.weaveBlend <= 0.001f) { m.evadeVel = Vector3.zero; return Vector3.zero; }
 
         // BaseTurnRate is clamped 7..190 across the roster: a mega-station sits at the floor and a

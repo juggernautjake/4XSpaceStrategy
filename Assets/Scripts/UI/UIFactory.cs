@@ -206,6 +206,30 @@ public static class UIFactory
     /// member access on the result throws.
     ///
     /// `c == null` DOES call Unity's overload, which is why this works where `??` doesn't.
+    // ============================================================================================
+    // IS THE PLAYER TYPING?
+    //
+    // Every keyboard shortcut in this game has to ask, because the shortcuts are BARE LETTERS and
+    // DIGITS — 1..9 recall squadrons, T concentrates fire, H holds position, O opens the roster, F
+    // flies the camera. Name a save file "Fleet 1" without this check and the game recalls squadron 1,
+    // flies the camera to it, and the player has no idea why.
+    //
+    // Two copies of this test already existed — one in CameraController, one in PlanetGridVisualizer —
+    // and the handler that most needed it, the one that owns the digits, had none at all. So it lives
+    // here now and there is one of it.
+    //
+    // `isFocused` rather than merely "a field is selected": a field the player has tabbed away from is
+    // still `currentSelectedGameObject` in some states, and a shortcut that stayed dead afterwards
+    // would be a worse bug than the one this fixes, because it would look like the key was broken.
+    // ============================================================================================
+    public static bool IsTypingInField()
+    {
+        var es = EventSystem.current;
+        if (es == null || es.currentSelectedGameObject == null) return false;
+        var input = es.currentSelectedGameObject.GetComponent<TMP_InputField>();
+        return input != null && input.isFocused;
+    }
+
     public static T Ensure<T>(GameObject go) where T : Component
     {
         if (go == null) return null;

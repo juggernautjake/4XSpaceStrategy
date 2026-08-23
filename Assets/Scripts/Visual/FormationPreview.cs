@@ -51,6 +51,38 @@ public class FormationPreview : MonoBehaviour
     int squadron;
     FleetFormationKind kind;
 
+    // ---- PINNING ---------------------------------------------------------------------------------
+    //
+    // Hover-to-preview dies the moment the cursor leaves the button, and reading a formation against
+    // the map is exactly when a player wants to move the cursor — to pan, to look at what is coming,
+    // to compare it with where the enemy is. So right-clicking a formation button pins its preview
+    // and it stays until it is unpinned or the squadron changes.
+    //
+    // The pin OUTRANKS the hover rather than replacing it: hovering a different formation while one is
+    // pinned still previews the hovered one, because comparing two is the reason anybody pins the
+    // first. Leaving the button falls back to the pinned one instead of to nothing.
+    bool pinned;
+    int pinnedSquadron;
+    FleetFormationKind pinnedKind;
+
+    /// Which formation is pinned, or null. The command bar reads this to light the pinned button.
+    public static FleetFormationKind? PinnedKind
+        => Instance != null && Instance.pinned ? Instance.pinnedKind : (FleetFormationKind?)null;
+
+    public static int PinnedSquadron => Instance != null && Instance.pinned ? Instance.pinnedSquadron : 0;
+
+    // ---- The membership cache --------------------------------------------------------------------
+    //
+    // Build() runs every frame while a preview is up and needs the squadron's ships to do it. Asking
+    // ControlGroups for them sixty times a second to get the same ten ships is waste that scales with
+    // the size of the fleet, so it is re-read on a short interval instead. A quarter of a second is
+    // imperceptible for a list that only changes when the player binds or loses a ship, and it is the
+    // difference between the preview costing nothing and costing more the bigger the game gets.
+    const float MembersRefresh = 0.25f;
+    readonly List<Unit> members = new List<Unit>();
+    float membersAge = float.MaxValue;
+    int membersOf = -1;
+
     public static void Create()
     {
         if (Instance != null) return;
@@ -65,6 +97,16 @@ public class FormationPreview : MonoBehaviour
     {
         Instance = this;
         mat = new Material(Shader.Find("Sprites/Default"));
+        ControlGroups.OnChanged += OnSquadronsChanged;
+    }
+
+    // ControlGroups.OnChanged is a STATIC event, so a subscription outlives the object that made it.
+    // Without this, reloading a save leaves the old preview's handler on the event holding a destroyed
+    // MonoBehaviour, and every squadron change afterwards throws.
+    void OnDestroy()
+    {
+        ControlGroups.OnChanged -= OnSquadronsChanged;
+        if (Instance == this) Instance = null;
     }
 
     /// Start showing what `kind` would do to squadron `g`.
@@ -73,7 +115,37 @@ public class FormationPreview : MonoBehaviour
         squadron = g; kind = k; showing = g >= 1;
     }
 
-    public void Hide() { showing = false; }
+    /// Stop the hover preview. Falls back to the pinned one if there is one.
+    public void Hide()
+    {
+        if (pinned && Squadrons.Valid(pinnedSquadron)) { squadron = pinnedSquadron; kind = pinnedKind; return; }
+        showing = false;
+    }
+
+    /// Right-click a formation: pin it, or unpin it if it was already the pinned one.
+    ///
+    /// Returns true if it is now pinned, so the caller can say which of the two just happened rather
+    /// than leaving the player to work it out from a button that changed colour.
+    public bool TogglePin(int g, FleetFormationKind k)
+    {
+        if (pinned && pinnedSquadron == g && pinnedKind == k)
+        {
+            pinned = false;
+            return false;
+        }
+        pinned = true; pinnedSquadron = g; pinnedKind = k;
+        squadron = g; kind = k; showing = true;
+        return true;
+    }
+
+    public void Unpin() { pinned = false; }
+
+    /// Drop the pin when its squadron stops existing, so a disbanded squadron does not leave a set of
+    /// rings hanging in space with nothing to explain them.
+    void OnSquadronsChanged()
+    {
+        if (pinned && ControlGroups.Members(pinnedSquadron).Count == 0) { pinned = false; showing = false; }
+    }
 
     void LateUpdate()
     {
@@ -90,8 +162,19 @@ public class FormationPreview : MonoBehaviour
     /// Work out the stations and draw them. Returns how many rings are in use.
     int Build()
     {
-        var members = ControlGroups.Members(squadron);
-        if (members == null || members.Count < 2) return 0;
+        // Re-read the roster on the interval rather than every frame — see MembersRefresh. Changing
+        // squadron re-reads immediately, because that one IS a per-frame-visible change: hovering
+        // along a row of formation buttons must not show the previous squadron's ships.
+        membersAge += Time.unscaledDeltaTime;
+        if (membersOf != squadron || membersAge >= MembersRefresh)
+        {
+            members.Clear();
+            members.AddRange(ControlGroups.Members(squadron));
+            membersOf = squadron;
+            membersAge = 0f;
+        }
+
+        if (members.Count < 2) return 0;
 
         var um = UnitManager.Instance;
         if (um == null) return 0;

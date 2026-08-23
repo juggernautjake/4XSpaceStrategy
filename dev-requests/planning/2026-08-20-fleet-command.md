@@ -16,31 +16,34 @@ Legend: **[x]** built · **[~]** partly built · **[ ]** queued
 
 ---
 
-## STATUS — 2026-08-22
+## STATUS — 2026-08-22: **complete**
 
-**Nearly all of this is built, and the boxes below were simply never ticked as it landed.** Corrected
-on 2026-08-22 by reading the code item by item rather than trusting either this doc or the commit
-messages. The work went in across `9f45cdd` (the bar), `d1364fd` (battle orders and the 25 symbols),
-`a71d7e5` (the four open items) and `a7ddc55`; the narrative record of *why* each piece looks the way
-it does is in `2026-08-21-indexes-survey-and-solar.md`, sections J through T.
+Every item in this document is built. It got there in two steps on the same day, and both are worth
+recording because the second would not have happened without the first.
 
-That matters beyond tidiness: an unticked spec reads as a backlog, and the next person to open this
-file would have rebuilt a formation set that has been in the game for two days.
+**Step one — the boxes were never ticked.** Most of this shipped across `9f45cdd` (the bar),
+`d1364fd` (battle orders and the 25 symbols) and `a71d7e5` (the four open items), and nobody came back
+to mark it. An unticked spec reads as a backlog: the next person to open this file would have rebuilt
+a formation set that had been in the game for two days. Corrected by reading the code item by item
+rather than trusting the doc or the commit messages — which is also how the real gaps were found,
+because a claim of "built" checked against the source either holds or does not.
 
-**Seven items are genuinely not finished**, and they are the ones this doc's own §8 ordered last:
+**Step two — the seven that were genuinely missing.** They were the ones this doc's own §8 ordered
+last, and every one of them was an ergonomic addition rather than a load-bearing part:
 
-| item | what is missing |
+| item | what it needed |
 |---|---|
-| **1.4** Rename | `Squadrons.Rename` exists and has **no caller** — there is no way to type a name. `Fleets.Rename` is dead the same way |
-| **5.3** Ping-pong | The mode is implemented in `StepLeg` and saved, but `PatrolTool` hardcodes `PatrolMode.Loop`. Working code the player cannot reach |
-| **7.1** Rally on rollout | The rally point is set, saved, and used by Withdraw and Evade-and-Report. The *rollout* half is unwired: `AdvanceBuild` calls `CreateUnit` and nothing routes the new hull to a squadron |
-| **7.2** Strength readout | The roster and inspector show strength, slowest speed and shortest range in places; there is no one per-squadron readout of all four |
-| **7.3** Regroup | Not built |
-| **7.4** Reinforce | Not built. Same wiring as 7.1's missing half — a `BuildOrder` needs a destination squadron |
-| **7.5** Slowest-ship warning | The *readout* exists (`InspectorUnitTabs`); nothing flags the hull that is holding the squadron back |
+| **1.4** Rename | `Squadrons.Rename` and `Fleets.Rename` both existed with **no caller**. Now `UI/NamePrompt.cs` — one modal prompt serving both tiers, reached from a Name button on the squadron and fleet sections of the bar |
+| **5.3** Ping-pong | Implemented in `StepLeg` and saved since day one, and unreachable: `PatrolTool` hardcoded `Loop`. Now a Loop/Shuttle control beside Patrol, switchable mid-patrol, and the route preview stops drawing the closing leg for a shuttle |
+| **7.1** Rally on rollout | The retreat half was wired; the arrival half was not. `Reinforce()` in `AdvanceBuild` now puts a finished hull into its squadron and sends it to the rally point |
+| **7.2** Strength readout | `Squadrons.StrengthOf` — attack and hull SUMMED, speed and range MINIMISED. A second header line on the command bar, and the squadron tooltip in the roster |
+| **7.3** Regroup | `SquadronAI.Regroup` — a move order to the squadron's own centre of mass, which re-forms it without committing it to going anywhere |
+| **7.4** Reinforce | `BuildOrder.squadron`, stamped at queue time and saved. A destination row above the catalogue in both shipyard UIs, and the destination shown on each queue row |
+| **7.5** Slowest-ship warning | Falls out of 7.2: the pace-setter is NAMED in amber, and only when one hull is genuinely the outlier (under 75% of what the rest would make) |
 
-None of the seven is load-bearing: every one is an ergonomic addition to a fleet-command system that
-is complete and playable without it.
+Three further items from `2026-08-21-indexes-survey-and-solar.md` §T were closed in the same pass —
+the Screen's slot 0, the pinnable formation preview, and the combat weave's handover. See
+`2026-08-22-closing-the-backlog.md` for all of it, and for the two defects the work turned up.
 
 ---
 
@@ -83,7 +86,7 @@ Control groups become **squadrons**: the same 1-9 slots, plus per-slot state.
         This is the "select a group of ships within a larger group and turn it into a different
         group" case, and it is one keystroke because it is the common one
       - **Disband** — empty the squadron, leaving the ships selected and unassigned
-- [ ] **1.4** Renaming a squadron, so "Home Guard" and "Survey Wing" beat "3" and "5"
+- [x] **1.4** Renaming a squadron, so "Home Guard" and "Survey Wing" beat "3" and "5"
 - [x] **1.5** The squadron number keeps showing on the unit icon (already drawn from `GroupOf`)
 
 ---
@@ -150,7 +153,7 @@ The stance is asked once per squadron and then honoured every tick.
 - [x] **5.1** A patrol route: an ordered list of waypoints, each a body or a point in space
 - [x] **5.2** Laid down by clicking waypoints in sequence with the patrol tool armed; the route draws
       as a closed dashed path while it is being built, exactly like the move preview does now
-- [~] **5.3** **Loop** (…3→1→2→3→1…) or **ping-pong** (1→2→3→2→1→2…)
+- [x] **5.3** **Loop** (…3→1→2→3→1…) or **ping-pong** (1→2→3→2→1→2…)
 - [x] **5.4** A patrol is a standing order: it re-queues itself, so it runs until cancelled rather
       than falling off the end of the queue
 - [x] **5.5** The protocol still applies on patrol — an Aggressive patrol hunts, an Evade-and-Report
@@ -176,14 +179,14 @@ The stance is asked once per squadron and then honoured every tick.
 
 ## 7. Things not asked for that belong here anyway
 
-- [~] **7.1 Rally point** — a per-squadron destination that newly built ships fly to on rollout, so a
+- [x] **7.1 Rally point** — a per-squadron destination that newly built ships fly to on rollout, so a
       shipyard feeds the front instead of piling hulls over the capital
-- [~] **7.2 A formation-strength readout** — total attack, total hull, the slowest ship's speed and
+- [x] **7.2 A formation-strength readout** — total attack, total hull, the slowest ship's speed and
       the shortest range in the squadron, which is what actually governs the whole group
-- [ ] **7.3 "Regroup"** — one button that pulls a scattered squadron back into formation at its
+- [x] **7.3 "Regroup"** — one button that pulls a scattered squadron back into formation at its
       centre of mass, for after a fight
-- [ ] **7.4 Reinforce** — send newly built ships of a class straight into a named squadron
-- [ ] **7.5 The slowest-ship warning** — flag when one hull is holding an entire squadron back, since
+- [x] **7.4 Reinforce** — send newly built ships of a class straight into a named squadron
+- [x] **7.5 The slowest-ship warning** — flag when one hull is holding an entire squadron back, since
       the shared travel time is computed from exactly that ship
 - [x] **7.6 Formation and protocol are saved**, or a reloaded game quietly forgets how the fleet was
       told to fight

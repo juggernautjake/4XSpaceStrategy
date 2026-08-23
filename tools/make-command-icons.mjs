@@ -262,6 +262,48 @@ const ICONS = {
     ${hull(13, 15, 1.25, -45)} ${hull(51, 15, 1.25, 45)}
     ${hull(13, 49, 1.25, -135)} ${hull(51, 49, 1.25, 135)}
     ${circle(32, 32, 5, 3)}`,
+
+  // ---- NAMING, REINFORCING, REGROUPING, AND THE TWO PATROL SHAPES -----------------------------
+
+  // A luggage tag. Deliberately NOT a text field with a caret: a rectangle with a bar in it is what
+  // Order_Withdraw and Prot_WithdrawIfHurt already look like at 24 pixels, and three controls sharing
+  // a silhouette is worse than one control being slightly abstract. A tag has an outline nothing else
+  // in the set has.
+  Act_Rename: `
+    <path d="M10,19 L38,19 L56,32 L38,45 L10,45 Z" fill="none" stroke="#fff" stroke-width="4"
+      stroke-linejoin="round"/>
+    ${circle(21, 32, 4.5)}`,
+
+  // A hull, and a plus. The plus is the most legible mark in the set at 24 pixels — it is two thick
+  // strokes with a wide gap around them — and "one more of these" is exactly what the control does.
+  // Kept clear of the hull horizontally rather than layered over it, since overlapping white marks
+  // merge into one shape the moment the icon is scaled down.
+  Act_Reinforce: `
+    ${hull(18, 38, 1.7)}
+    ${line(46, 15, 46, 39, 5)} ${line(34, 27, 58, 27, 5)}`,
+
+  // Four arrowheads closing on an EMPTY centre.
+  //
+  // The first version put a dot in the middle and the arrowheads close around it, and at 24 pixels the
+  // five marks merged into one four-pointed star — which is what Act_Disband already looks like at
+  // that size. Two controls that mean opposite things must not share a silhouette.
+  //
+  // Two changes fix it, and both matter. The centre is left HOLLOW, so the eye reads a gap being
+  // closed rather than a solid star. And the arms are ORTHOGONAL where Disband's are diagonal: a plus
+  // and an X stay distinguishable long after the marks inside them have stopped being readable.
+  Order_Regroup: `
+    ${arrow(32, 9, 1.8, 180)} ${arrow(32, 55, 1.8, 0)}
+    ${arrow(9, 32, 1.8, 90)}  ${arrow(55, 32, 1.8, 270)}`,
+
+  // Round and round: a closed circuit with one head on it to say which way.
+  Order_PatrolLoop: `
+    ${circle(32, 34, 17, 4)}
+    ${arrow(32, 17, 1.5, 90)}`,
+
+  // Up and back: one line, a head at each end.
+  Order_PatrolShuttle: `
+    ${line(18, 32, 46, 32, 5)}
+    ${arrow(11, 32, 1.6, 270)} ${arrow(53, 32, 1.6, 90)}`,
 };
 
 // ============================================================================================

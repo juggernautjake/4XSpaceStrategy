@@ -50,8 +50,20 @@ public class ShipyardWindow : MonoBehaviour
         public Color lastColor;
     }
 
+    // One slot on the REINFORCE row: "Off", then squadrons 1-9. Built once and re-tinted, like
+    // everything else in this window — rebuilding a row of ten buttons as the economy ticks is what
+    // the signature machinery here exists to avoid.
+    class ReinforceButton
+    {
+        public int slot;                 // 0 = Off
+        public Button button;
+        public Image image;
+    }
+
     readonly List<ShipCard> cards = new List<ShipCard>();
     readonly List<QueueRow> rows = new List<QueueRow>();
+    readonly List<ReinforceButton> reinforce = new List<ReinforceButton>();
+    string lastReinforceSig = null;
     // null = "never built yet". An empty queue has an empty signature, so "" can't mean unbuilt.
     string lastCatalogueSig = null, lastQueueSig = null;
 
@@ -85,10 +97,33 @@ public class ShipyardWindow : MonoBehaviour
         yrt.anchorMin = new Vector2(0, 1); yrt.anchorMax = new Vector2(1, 1); yrt.pivot = new Vector2(0.5f, 1);
         yrt.sizeDelta = new Vector2(0, 18); yrt.anchoredPosition = new Vector2(0, -36);
 
+        // --- REINFORCE: where the hulls you are about to queue will go ---
+        //
+        // Directly above the catalogue, because it applies to the ships queued AFTER it is set. Put
+        // anywhere else and it becomes a setting the player finds once they have already built the
+        // fleet they wanted it for.
+        var reRow = UIFactory.NewUI(content, "ReinforceRow").GetComponent<RectTransform>();
+        reRow.anchorMin = new Vector2(0, 1); reRow.anchorMax = new Vector2(1, 1);
+        reRow.pivot = new Vector2(0.5f, 1);
+        reRow.sizeDelta = new Vector2(0, 22);
+        reRow.anchoredPosition = new Vector2(0, -56);
+        var reH = reRow.gameObject.AddComponent<HorizontalLayoutGroup>();
+        reH.spacing = 3;
+        reH.childControlWidth = true; reH.childControlHeight = true; reH.childForceExpandWidth = true;
+
+        var lbl = UIFactory.Text(reRow, "New ships ->", UITheme.SmallSize, UITheme.SubText,
+                                 TextAlignmentOptions.Right);
+        var lle = UIFactory.Ensure<LayoutElement>(lbl.gameObject);
+        lle.preferredWidth = 86; lle.flexibleWidth = 0;
+        lbl.raycastTarget = false;
+
+        AddReinforceButton(reRow, 0, "Off", "New ships stay at the yard that built them.");
+        for (int g = 1; g <= ControlGroups.Count; g++) AddReinforceButton(reRow, g, g.ToString(), null);
+
         // --- Catalogue (top half) ---
         var catHolder = UIFactory.NewUI(content, "CatalogueHolder").GetComponent<RectTransform>();
         catHolder.anchorMin = new Vector2(0, 0.42f); catHolder.anchorMax = new Vector2(1, 1);
-        catHolder.offsetMin = new Vector2(0, 4); catHolder.offsetMax = new Vector2(0, -58);
+        catHolder.offsetMin = new Vector2(0, 4); catHolder.offsetMax = new Vector2(0, -82);
         UIFactory.ScrollView(catHolder, out catalogue);
 
         // --- Stocks (bottom) ---
@@ -103,6 +138,61 @@ public class ShipyardWindow : MonoBehaviour
         UIFactory.ScrollView(stocksHolder, out stocks);
 
         root.SetActive(false);
+    }
+
+    void AddReinforceButton(Transform parent, int slot, string label, string tip)
+    {
+        var btn = UIFactory.Button(parent, label, () =>
+        {
+            UnitManager.Instance?.SetReinforceSquadron(slot);
+            lastReinforceSig = null;                       // re-tint on the next poll
+        }, 20f);
+        // Ensure, not AddComponent: UIFactory.Button already puts a LayoutElement on for its height,
+        // and a second one on the same object leaves the layout system resolving two sets of values.
+        var le = UIFactory.Ensure<LayoutElement>(btn.gameObject);
+        le.preferredWidth = slot == 0 ? 34 : 26; le.flexibleWidth = 0;
+
+        if (!string.IsNullOrEmpty(tip)) UIFactory.Tooltip(btn.gameObject, tip);
+
+        reinforce.Add(new ReinforceButton { slot = slot, button = btn, image = btn.GetComponent<Image>() });
+    }
+
+    /// Re-tint the reinforce row, and refresh the tooltips that name the squadrons.
+    ///
+    /// Signature-gated like the rest of this window: the squadron names and their emptiness change
+    /// rarely, and writing ten tooltips a frame would dirty the layout continuously for nothing.
+    void RefreshReinforce(UnitManager um)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(um.ReinforceSquadron).Append('|');
+        for (int g = 1; g <= ControlGroups.Count; g++)
+            sb.Append(ControlGroups.IsEmpty(g) ? '-' : 'x').Append(Squadrons.NameOf(g)).Append(',');
+        string sig = sb.ToString();
+        if (sig == lastReinforceSig) return;
+        lastReinforceSig = sig;
+
+        foreach (var r in reinforce)
+        {
+            bool empty = r.slot >= 1 && ControlGroups.IsEmpty(r.slot);
+            bool active = um.ReinforceSquadron == r.slot;
+
+            // An empty slot stays visible and goes dead rather than disappearing: a row of nine
+            // buttons with holes in it looks like a bug, and a control the player never sees is a
+            // feature they never learn about.
+            r.button.interactable = !empty && !active;
+            if (r.image != null)
+                r.image.color = active ? UITheme.Accent
+                              : empty ? new Color(0.10f, 0.12f, 0.15f, 0.85f)
+                                      : UITheme.ButtonBg;
+
+            if (r.slot >= 1)
+                UIFactory.Tooltip(r.button.gameObject, empty
+                    ? $"Squadron {r.slot} is empty. Bind ships to it first (Ctrl+{r.slot})."
+                    : $"Send new hulls to {Squadrons.NameOf(r.slot)}" +
+                      (Squadrons.Of(r.slot).hasRally
+                          ? ", and on to its rally point."
+                          : ". Give it a rally point and they will fly there too."));
+        }
     }
 
     // Nothing subscribes to the economy or build events: the window polls in Update while it is open,
@@ -128,6 +218,7 @@ public class ShipyardWindow : MonoBehaviour
         if (um == null) return;
 
         RefreshHeader(um);
+        RefreshReinforce(um);
 
         // Never tear widgets down while a row is being dragged — the dragged object would be destroyed
         // under the cursor and the drag would die with it.
@@ -436,7 +527,15 @@ public class ShipyardWindow : MonoBehaviour
             }
             if (barColor != r.lastColor) { r.lastColor = barColor; r.fill.color = barColor; }
 
-            string text = $"<b>{info.name}</b>  <size=10><color=#8FD0FF>{o.Power}p</color></size>  <size=10>{state}</size>";
+            // Where this hull is going, when it is going anywhere. On the row rather than only on the
+            // control that set it, because the setting applies at QUEUE time: two ships on the same
+            // list can be bound for different squadrons, and the only honest place to say so is beside
+            // each of them.
+            string bound = o.squadron >= 1 && !ControlGroups.IsEmpty(o.squadron)
+                ? $"  <size=10><color=#7FE0A0>-> {Squadrons.NameOf(o.squadron)}</color></size>"
+                : "";
+
+            string text = $"<b>{info.name}</b>  <size=10><color=#8FD0FF>{o.Power}p</color></size>{bound}  <size=10>{state}</size>";
             if (text != r.lastLabel) { r.lastLabel = text; r.label.text = text; }
 
             string pause = o.paused ? "»" : "||";

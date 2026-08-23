@@ -80,6 +80,7 @@ public static class GameBootstrap
         Safe("BodyUnitsPanel", () => BodyUnitsPanel.Create(canvas.transform));
         Safe("FleetRosterPanel", () => FleetRosterPanel.Create(canvas.transform));   // fleet > squadron > ship, with condition bars
         Safe("FleetCommandBar", () => FleetCommandBar.Create(canvas.transform));    // formation, protocol, patrol, rally, roster
+        Safe("NamePrompt", () => NamePrompt.Create(canvas.transform));         // naming a squadron or a fleet
         // "Around Homeworld" (AssociatedObjectsWindow) retired at Raptok's request: its moon-hopping list
         // is superseded by the Planet View's moon tabs. Not instantiated, so it never subscribes to
         // selection and never appears. The class is left in the tree as dead code for now.

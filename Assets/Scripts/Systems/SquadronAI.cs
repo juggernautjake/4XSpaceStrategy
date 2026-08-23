@@ -305,6 +305,38 @@ public class SquadronAI : MonoBehaviour
         o.patrolLeg = Mathf.Clamp(next, 0, n - 1);
     }
 
+    // ============================================================================================
+    // REGROUP — pull a scattered squadron back into its formation
+    //
+    // After a fight a squadron is wherever the fight left it: chasing, drifting, scattered across a
+    // volume with no shape at all. Every existing way to fix that is a move order to SOMEWHERE, which
+    // means picking a spot on the map and thereby committing the squadron to going there. What the
+    // player wants is "close up where you are".
+    //
+    // So the destination is the squadron's own centre of mass. The formation then does the rest for
+    // free: FleetFormation.Offset ramps the stations in over the crossing and closes them up on
+    // arrival, so ordering a squadron to its own middle IS the order to re-form.
+    //
+    // Held ships are excluded like every other standing order (see Movable) — a picket told to hold a
+    // chokepoint is not scattered, it is where it was put, and dragging it home would silently undo a
+    // deliberate instruction. The centre is computed from the movers alone for the same reason: a
+    // held ship a long way off would otherwise pull the whole rendezvous out towards it.
+    //
+    // Returns how many ships were moved, so the caller can say "nothing to regroup" rather than
+    // looking broken.
+    // ============================================================================================
+    public static int Regroup(int g)
+    {
+        var um = UnitManager.Instance;
+        if (um == null || !Squadrons.Valid(g)) return 0;
+
+        var able = Movable(ControlGroups.Members(g));
+        if (able.Count < 2) return 0;          // one ship is already in formation with itself
+
+        um.IssueMovePoint(able, CentreOf(um, able), false);
+        return able.Count;
+    }
+
     // ---- Helpers ---------------------------------------------------------------------------------
 
     /// The members this AI is allowed to move.

@@ -32,6 +32,14 @@ public class FleetCommandBar : MonoBehaviour
     RectTransform rowTop, rowBottom, row;
     TMP_Text header;
 
+    /// The second header line: what this squadron is worth and what is slowing it down.
+    ///
+    /// Its own line rather than more words on the first, because the two say different KINDS of thing.
+    /// The first line is identity and standing orders — who this is and what they have been told. This
+    /// one is arithmetic that changes as ships take damage, and a number that moves inside a line of
+    /// text that does not is hard to read and easy to miss.
+    TMP_Text readout;
+
     /// Rebuilt when the selection changes rather than every frame — it is a dozen buttons, and
     /// rebuilding those sixty times a second to show the same dozen buttons would be silly.
     bool dirty = true;
@@ -52,7 +60,7 @@ public class FleetCommandBar : MonoBehaviour
         rt.anchorMin = new Vector2(0.5f, 0f);
         rt.anchorMax = new Vector2(0.5f, 0f);
         rt.pivot = new Vector2(0.5f, 0f);
-        rt.sizeDelta = new Vector2(1060, 122);
+        rt.sizeDelta = new Vector2(1180, 138);
         rt.anchoredPosition = new Vector2(0, 8);
 
         header = UIFactory.Text(root.transform, "", 11, UITheme.Accent, TextAlignmentOptions.Left);
@@ -63,15 +71,38 @@ public class FleetCommandBar : MonoBehaviour
         hrt.anchoredPosition = new Vector2(0, -3);
         header.raycastTarget = false;
 
+        readout = UIFactory.Text(root.transform, "", 10, UITheme.SubText, TextAlignmentOptions.Left);
+        var rrt = readout.rectTransform;
+        rrt.anchorMin = new Vector2(0, 1); rrt.anchorMax = new Vector2(1, 1);
+        rrt.pivot = new Vector2(0.5f, 1);
+        rrt.sizeDelta = new Vector2(-16, 14);
+        rrt.anchoredPosition = new Vector2(0, -18);
+        readout.raycastTarget = false;
+        // One line, always. A long ship name in the pace warning would otherwise wrap onto a second
+        // line that renders straight through the top row of buttons — the rect is 14 pixels tall and
+        // the buttons start 16 below it. Ellipsis truncates instead, and the roster tooltip carries
+        // the full sentence for anyone who wants it.
+        readout.overflowMode = TextOverflowModes.Ellipsis;
+
         // ---- TWO ROWS ----
         //
-        // Twenty-five controls at 46 pixels is about 1,400 pixels of bar, which is most of a 1080p
-        // screen and all of a smaller one. Splitting them puts the things you reach for under fire —
-        // the squadron slots and the battle orders — on the top row, and the standing choices you set
-        // once and leave — formation, protocol, patrol, fleet — underneath. That is also the right
-        // grouping by urgency, so the split earns its keep rather than merely fitting.
-        rowTop = MakeRow("RowTop", -18f);
-        rowBottom = MakeRow("RowBottom", -66f);
+        // Thirty controls at 46 pixels is about 1,700 pixels of bar, which is most of a 1080p screen
+        // and all of a smaller one. Splitting them puts the things you reach for UNDER FIRE on the top
+        // row — the squadron slots, the roster verbs, the battle orders, and the fleet-wide versions of
+        // those same orders — and the standing choices you set once and leave underneath: formation,
+        // protocol, patrol, rally, reinforce.
+        //
+        // That is the right grouping by urgency, so the split earns its keep rather than merely
+        // fitting. The fleet block moved up here when Regroup, the patrol-mode switch and Reinforce
+        // were added: "order the whole fleet to break off" belongs beside "order this squadron to
+        // break off", not beside the menu where you pick a formation.
+        //
+        // The widths are hand-checked against the row: the top row runs to about 1,030 pixels of the
+        // 1,164 available and the bottom to about 1,020. A row that overflows does not clip, it
+        // SQUEEZES — LayoutElement carries no minWidth, so every icon on it silently shrinks — which
+        // reads as the icons having changed size rather than as anything being wrong.
+        rowTop = MakeRow("RowTop", -34f);
+        rowBottom = MakeRow("RowBottom", -82f);
         row = rowTop;
 
         UnitSelection.OnChanged += () => dirty = true;
@@ -132,9 +163,14 @@ public class FleetCommandBar : MonoBehaviour
         header.text = g >= 1
             ? $"<b>{Squadrons.NameOf(g)}</b>  ·  {sel.Count} selected  ·  " +
               $"{Squadrons.Of(g).formation} · {Squadrons.Of(g).protocol}" +
-              (Squadrons.Of(g).Patrolling ? $" · patrolling {Squadrons.Of(g).patrol.Count} points" : "")
+              (Squadrons.Of(g).Patrolling
+                  ? $" · patrolling {Squadrons.Of(g).patrol.Count} points" +
+                    (Squadrons.Of(g).patrolMode == PatrolMode.Loop ? " (loop)" : " (shuttle)")
+                  : "")
             : $"{sel.Count} ship(s) selected — <color=#9FB4C8>not one squadron, so formation and " +
               "protocol are unavailable. Form one first.</color>";
+
+        readout.text = StrengthLine(g, sel);
 
         // ---- roster ----
         Section("SQUADRON");
@@ -171,6 +207,18 @@ public class FleetCommandBar : MonoBehaviour
                  $"DISBAND — empty {Squadrons.NameOf(g)} completely.\n\nIts ships stay selected and " +
                  "keep flying; they simply belong to no squadron, and its standing orders — formation, " +
                  "protocol, patrol route, rally point — are forgotten.");
+
+            // Naming is not decoration. By the mid-game the player has nine squadrons and the only
+            // thing telling them apart is a digit, so every question about the fleet — which one is
+            // guarding home, which one is the survey wing — has to be answered by clicking each in
+            // turn and looking at what is in it.
+            Icon("Act_Rename", "Name", 46f, () => NamePrompt.Instance?.Ask(
+                     "Name this squadron", $"Squadron {g}", Squadrons.Of(g).name,
+                     s => Squadrons.Rename(g, s)), null,
+                 $"NAME — call {Squadrons.NameOf(g)} something you will recognise.\n\n" +
+                 "\"Home Guard\" and \"Survey Wing\" are worth more than \"3\" and \"5\" the moment " +
+                 "you have more than a couple of squadrons.\n\n" +
+                 "<color=#8FA3B5>Clear the box to go back to the number.</color>");
         }
 
         // ============================================================================================
@@ -252,6 +300,13 @@ public class FleetCommandBar : MonoBehaviour
         row = rowBottom;
 
         // ---- formation ----
+        //
+        // A pin belongs to the squadron it was set on. Selecting a different squadron drops it, or the
+        // map goes on drawing the last squadron's stations while the player is commanding this one —
+        // rings in the wrong place, attached to nothing they can see.
+        if (FormationPreview.PinnedSquadron != 0 && FormationPreview.PinnedSquadron != g)
+            FormationPreview.Instance?.Unpin();
+
         Section("FORMATION");
         foreach (FleetFormationKind f in System.Enum.GetValues(typeof(FleetFormationKind)))
         {
@@ -259,10 +314,30 @@ public class FleetCommandBar : MonoBehaviour
             // Hovering DRAWS it on the map before it is committed to — see FormationPreview. A tooltip
             // can describe a wedge and the icon diagrams one, but neither says what YOUR eleven ships
             // will look like standing in it.
+            bool isPinned = FormationPreview.PinnedKind == kind && FormationPreview.PinnedSquadron == g;
             Icon(FormIcon(kind), ShortLabel(kind), 46f, () => Squadrons.SetFormation(g, kind),
-                 Squadrons.Of(g).formation == kind ? "on" : null, FormationTip(kind))
+                 Squadrons.Of(g).formation == kind || isPinned ? "on" : null,
+                 FormationTip(kind) +
+                 (isPinned
+                     ? "\n\n<color=#FFD166>PINNED on the map. Right-click again to clear it.</color>"
+                     : "\n\n<color=#8FA3B5>Right-click to PIN this preview, so it stays on the map " +
+                       "while you pan around and look at it.</color>"))
                 .OnHover(() => FormationPreview.Instance?.Show(g, kind),
-                         () => FormationPreview.Instance?.Hide());
+                         () => FormationPreview.Instance?.Hide())
+                .OnRightClick(() =>
+                {
+                    if (FormationPreview.Instance == null) return;
+                    bool nowPinned = FormationPreview.Instance.TogglePin(g, kind);
+                    SimpleAudio.Instance?.PlayClick();
+                    dirty = true;                       // the pinned button lights up
+                    NotificationManager.Instance?.Push(
+                        nowPinned ? "Formation pinned" : "Formation unpinned",
+                        nowPinned
+                            ? $"{kind} stays drawn on the map for {Squadrons.NameOf(g)} until you " +
+                              "right-click it again. Hovering another formation still previews that one."
+                            : "The preview goes back to following the cursor.",
+                        null, NotifKind.Info);
+                });
         }
 
         // ---- protocol ----
@@ -279,23 +354,93 @@ public class FleetCommandBar : MonoBehaviour
         var o = Squadrons.Of(g);
 
         Icon("Order_Patrol", o.Patrolling ? "Stop" : "Patrol", 46f,
-             () => { if (o.Patrolling) Squadrons.ClearPatrol(g); else PatrolTool.Instance?.Arm(g); },
+             () => { if (o.Patrolling) Squadrons.ClearPatrol(g); else PatrolTool.Instance?.Arm(g, o.patrolMode); },
              o.Patrolling ? "on" : null,
              o.Patrolling
                  ? $"PATROLLING {o.patrol.Count} points. Click to cancel — the squadron holds where it is."
                  : "PATROL — lay down a route: click two or more points in space, then right-click to " +
                    "finish.\n\nThe squadron walks the route until you cancel it, keeping whatever " +
                    "protocol it is under: an aggressive patrol hunts, an evade-and-report patrol is a " +
-                   "picket line.");
+                   "picket line.\n\n<color=#8FA3B5>The button beside this one chooses whether it goes " +
+                   "round and round or up and back.</color>");
+
+        // ---- LOOP OR SHUTTLE ----
+        //
+        // Both modes were implemented and saved from the start, and there was no way to ask for the
+        // second one: the tool hardcoded Loop. Working code the player could not reach.
+        //
+        // It is a control of its own rather than a right-click on Patrol, because the choice matters
+        // BEFORE the route is laid — a loop and a shuttle want different routes. A ring around a system
+        // wants a loop; a line between two chokepoints wants a shuttle, and drawing it as a loop sends
+        // the squadron across open space on every lap.
+        bool loop = o.patrolMode == PatrolMode.Loop;
+        Icon(loop ? "Order_PatrolLoop" : "Order_PatrolShuttle", loop ? "Loop" : "Shuttle", 46f,
+             () => Squadrons.SetPatrolMode(g, loop ? PatrolMode.PingPong : PatrolMode.Loop), null,
+             loop
+                 ? "ROUTE: LOOP — the squadron walks 1, 2, 3 and back to 1, round and round.\n\n" +
+                   "Right for a ring: a circuit of your worlds, or a cordon around a system.\n\n" +
+                   "<color=#8FA3B5>Click to switch to a shuttle." +
+                   (o.Patrolling ? " The squadron changes over without stopping." : "") + "</color>"
+                 : "ROUTE: SHUTTLE — the squadron walks 1, 2, 3 and then back down 2, 1, turning round " +
+                   "at each end.\n\nRight for a line: a picket between two chokepoints, where a loop " +
+                   "would send it across open space every lap to get back to the start.\n\n" +
+                   "<color=#8FA3B5>Click to switch to a loop." +
+                   (o.Patrolling ? " The squadron changes over without stopping." : "") + "</color>");
+
+        // ---- REGROUP ----
+        Icon("Order_Regroup", "Regroup", 46f, () =>
+        {
+            int n = SquadronAI.Regroup(g);
+            if (n == 0)
+                NotificationManager.Instance?.Push("Nothing to regroup",
+                    "This squadron has fewer than two ships free to move — the rest are holding " +
+                    "position or are stations.", null, NotifKind.Info);
+            else SimpleAudio.Instance?.PlayClick();
+        }, null,
+             "REGROUP — close the squadron back up where it is.\n\nAfter a fight a squadron is " +
+             "wherever the fight left it. This sends every ship to the squadron's own centre, which " +
+             "puts them back into their formation without committing them to going anywhere.\n\n" +
+             "<color=#8FA3B5>Ships you have told to hold position stay where they are.</color>");
 
         Icon("Order_Rally", o.hasRally ? "Clear" : "Rally", 46f,
              () => { if (o.hasRally) Squadrons.ClearRally(g); else RallyTool.Instance?.Arm(g); },
              o.hasRally ? "on" : null,
              o.hasRally
-                 ? "A rally point is set. Click to forget it."
+                 ? "A rally point is set. Click to forget it.\n\nShaken ships run here, and newly built " +
+                   "ships fly here on rollout if the yards are reinforcing this squadron."
                  : "RALLY — set the point this squadron runs to.\n\nWhere an Evade-and-Report squadron " +
-                   "breaks off to, where a ship withdrawing below its hull threshold heads, and where " +
-                   "the Withdraw order sends it.");
+                   "breaks off to, where a ship withdrawing below its hull threshold heads, where the " +
+                   "Withdraw order sends it, and where new hulls report if the yards are reinforcing " +
+                   "this squadron.");
+
+        // ---- REINFORCE ----
+        //
+        // The other half of the rally point, and the answer to a shipyard that piles every hull it
+        // builds over the capital while the war is two systems away. Point the yards at a squadron and
+        // new ships join it as they roll out — and fly to its rally point if it has one.
+        //
+        // It lives on the SQUADRON bar rather than only in the shipyard because this is where the
+        // player is thinking about squadrons. The shipyard carries the same control, since that is
+        // where they are thinking about building; both drive the one setting.
+        var um = UnitManager.Instance;
+        bool reinforcing = um != null && um.ReinforceSquadron == g;
+        Icon("Act_Reinforce", "Reinforce", 52f,
+             () => um?.SetReinforceSquadron(reinforcing ? 0 : g),
+             reinforcing ? "on" : null,
+             reinforcing
+                 ? $"REINFORCING {Squadrons.NameOf(g)} — every hull you lay down from now joins it the " +
+                   "moment it is finished" + (o.hasRally ? ", and flies to its rally point" : "") +
+                   ".\n\nClick to stop. Ships already on the stocks keep the destination they were " +
+                   "queued with.\n\n<color=#8FA3B5>Set before you queue, not after: an order remembers " +
+                   "where it was going when it was laid down.</color>"
+                 : $"REINFORCE — send newly built ships straight into {Squadrons.NameOf(g)}.\n\n" +
+                   "Your shipyards otherwise stack every finished hull over the capital, and a war " +
+                   "two systems away gets reinforced by ships nobody noticed were ready.\n\n" +
+                   (o.hasRally
+                       ? "<color=#8FA3B5>This squadron has a rally point, so they will fly straight " +
+                         "to it.</color>"
+                       : "<color=#8FA3B5>Give this squadron a rally point too and they will fly " +
+                         "straight there.</color>"));
 
         // ---- fleet ----
         //
@@ -304,6 +449,9 @@ public class FleetCommandBar : MonoBehaviour
         int fleet = Fleets.FleetOf(g);
         if (fleet >= 1)
         {
+            // Back to the TOP row: "break off the whole fleet" is an order given in the same breath as
+            // "break off this squadron", and the two being on different rows made the player hunt.
+            row = rowTop;
             Section("FLEET");
             var ships = Fleets.Ships(fleet);
             var squads = Fleets.SquadronsIn(fleet);
@@ -311,6 +459,13 @@ public class FleetCommandBar : MonoBehaviour
             Icon("Unit_Fleet", "Select", 46f, () => UnitSelection.Set(ships), null,
                  $"<b>{Fleets.NameOf(fleet)}</b> — {squads.Count} squadron(s), {ships.Count} ship(s).\n\n" +
                  "Select the whole fleet.");
+
+            Icon("Act_Rename", "Name", 46f, () => NamePrompt.Instance?.Ask(
+                     "Name this fleet", $"Fleet {fleet}", Fleets.RawNameOf(fleet),
+                     s => Fleets.Rename(fleet, s)), null,
+                 $"NAME — call {Fleets.NameOf(fleet)} something you will recognise.\n\n" +
+                 "A fleet is the tier you plan at: \"First Strike Force\" is worth more on a roster " +
+                 "than \"Fleet 2\".");
 
             var fTarget = CombatOrders.FleetTarget(fleet);
             Icon("Order_FocusFire", "All fire", 46f,
@@ -334,6 +489,43 @@ public class FleetCommandBar : MonoBehaviour
                  "safety.\n\nEach squadron heads for its own rally point if it has one, otherwise the " +
                  "nearest world you hold.");
         }
+    }
+
+    // ============================================================================================
+    // THE STRENGTH LINE
+    //
+    // Four numbers, and the reason they are worth a permanent line rather than a tooltip is that two
+    // of them are SUMS and two are LIMITS, and only the sums are what a player expects.
+    //
+    // Attack and hull add up: nine ships bring nine ships' worth. Speed and range do not — the group
+    // travels at its slowest ship and turns back at its shortest-ranged one, so adding a transport to
+    // a wing of scouts makes the whole wing a transport. That is the single most common way a fleet
+    // disappoints its owner, it is invisible on the map, and it is fixed by one click of Detach once
+    // somebody says which hull is doing it.
+    //
+    // Which is why the pace-setter is NAMED and drawn in amber rather than reported as a number. It
+    // only appears when one hull is genuinely the outlier (see Squadrons.StrengthOf), so a line that
+    // is usually four quiet figures becomes a warning exactly when there is something to warn about.
+    // ============================================================================================
+    static string StrengthLine(int g, List<Unit> sel)
+    {
+        var members = g >= 1 ? ControlGroups.Members(g) : sel;
+        var s = Squadrons.StrengthOf(members);
+        if (s.ships == 0) return "";
+
+        string range = s.range >= float.MaxValue ? "unlimited" : $"{s.range:F0}";
+        string line =
+            $"<b>{s.attack}</b> attack  ·  hull <b>{s.hull:F0}</b>/{s.hullMax:F0}  ·  " +
+            $"speed <b>{s.speed}</b> <color=#7F8FA3>(slowest)</color>  ·  " +
+            $"range <b>{range}</b> <color=#7F8FA3>(shortest)</color>";
+
+        // No warning glyph: the triangle-in-a-box is not in the UI font and renders as a hollow
+        // rectangle (tools/check-ui-glyphs.mjs catches it). Amber and a plain sentence do the job.
+        if (s.pacer != null)
+            line += $"   <color=#FFBF4D><b>{s.pacer.name}</b> holds it to {s.speed}; " +
+                    $"the rest would make {s.packSpeed}</color>";
+
+        return line;
     }
 
     // ---- battle helpers ----------------------------------------------------------------------------

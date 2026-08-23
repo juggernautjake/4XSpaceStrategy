@@ -232,9 +232,26 @@ public static class FleetFormation
                 int screen = Mathf.Clamp(count / 2, 1, 8);
                 if (slot < screen)
                 {
+                    // ---- THE ARC FILLS FROM THE MIDDLE OUTWARDS ----
+                    //
+                    // Slots arrive cheapest-first (see Assign), and the arc's midpoint is its most
+                    // forward station — `back` is most negative at t = 0. So filling the arc left to
+                    // right, as this did, put the CHEAPEST hull at the left wingtip and whichever
+                    // ship happened to be halfway down the price list at the point.
+                    //
+                    // Nothing was wrong by the rules; it was just not what anybody would choose. A
+                    // screen exists so the least valuable thing meets the enemy first, and the station
+                    // that meets the enemy first is the middle one. Now slot 0 takes the point and the
+                    // rest alternate outwards from it, so the arc is ordered cheapest at the tip to
+                    // dearest at the wingtips — the ships most likely to survive being furthest from
+                    // whatever the squadron is flying into.
+                    int mid = (screen - 1) / 2;
+                    int step = (slot + 1) / 2;
+                    int idx = Mathf.Clamp((slot % 2 == 0) ? mid - step : mid + step, 0, screen - 1);
+
                     // Spread across the front, curving back at the wingtips so the arc is convex
                     // toward whatever it is meeting.
-                    float t = screen == 1 ? 0f : (slot / (float)(screen - 1)) * 2f - 1f;   // -1..1
+                    float t = screen == 1 ? 0f : (idx / (float)(screen - 1)) * 2f - 1f;   // -1..1
                     lateral = t * 2.2f;
                     back = -1.8f + Mathf.Abs(t) * 1.0f;
                 }
@@ -255,7 +272,12 @@ public static class FleetFormation
                 int shell = Mathf.Clamp((count * 2) / 3, 1, 12);
                 if (slot < shell)
                 {
-                    float ang = slot * Mathf.PI * 2f / shell;
+                    // The shell is walked from the FRONT, for the same reason the screen's arc fills
+                    // from its middle: slot 0 is the cheapest hull, and starting the walk at angle
+                    // zero put it at the BACK of the globe — the one bearing nothing is coming from.
+                    // A globe has no open bearing by design, but the ship a squadron flies INTO
+                    // something with should still be the one it can afford to lose.
+                    float ang = Mathf.PI + slot * Mathf.PI * 2f / shell;
                     lateral = Mathf.Sin(ang) * 2.0f;
                     back = Mathf.Cos(ang) * 2.0f;
                     // Alternate above and below so the shell has a third dimension without needing

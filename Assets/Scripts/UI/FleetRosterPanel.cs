@@ -145,11 +145,23 @@ public class FleetRosterPanel : MonoBehaviour
         var o = Squadrons.Of(g);
         bool open = openSquadrons.Contains(g);
 
+        // The same four numbers the command bar carries, for the same reason: speed and range are
+        // MINIMA, not sums, and a roster that let a player add up nine ships' speeds would be teaching
+        // them something false about their own fleet.
+        var st = Squadrons.StrengthOfSquadron(g);
+        string range = st.range >= float.MaxValue ? "unlimited" : $"{st.range:F0}";
+
         AddRow(indent, $"{(open ? "▼" : "▶")} <b>{g}</b> {Squadrons.NameOf(g)}", members.Count,
                Fleets.ConditionOf(members),
                $"{Squadrons.NameOf(g)} — {members.Count} ship(s).\n" +
                $"Formation: {o.formation}\nProtocol: {o.protocol}\n\n" +
-               $"Click the name to select it; press {g} anywhere to recall it.",
+               $"Attack {st.attack} · hull {st.hull:F0}/{st.hullMax:F0}\n" +
+               $"Speed {st.speed} (slowest ship) · range {range} (shortest)\n" +
+               (st.pacer != null
+                   ? $"<color=#FFBF4D>{st.pacer.name} is holding it to {st.speed}; the rest would " +
+                     $"make {st.packSpeed}.</color>\n"
+                   : "") +
+               $"\nClick the name to select it; press {g} anywhere to recall it.",
                () => UnitSelection.Set(members),
                () => { if (!openSquadrons.Remove(g)) openSquadrons.Add(g); Refresh(); },
                Magazines.GroupSupply(members), "Unit_Squadron");

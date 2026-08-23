@@ -44,6 +44,11 @@ public static class Fleets
     public static string NameOf(int f)
         => !Valid(f) ? "" : (string.IsNullOrWhiteSpace(fleets[f].name) ? $"Fleet {f}" : fleets[f].name);
 
+    /// The name the player actually typed, empty when they have not — as against NameOf, which falls
+    /// back to "Fleet 2". The rename prompt wants this one: pre-filling the field with the fallback
+    /// would make every unnamed fleet look as though it had already been named.
+    public static string RawNameOf(int f) => Valid(f) ? fleets[f].name : "";
+
     public static void Rename(int f, string name)
     {
         if (!Valid(f)) return;

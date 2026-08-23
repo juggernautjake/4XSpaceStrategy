@@ -297,10 +297,22 @@ abreast and stacks backwards, so it never reaches past one step laterally whatev
 
 Every formation now holds its shape at 3, 6 and 11 ships.
 
-## T. Still open
+## T. Still open — **all three closed 2026-08-22**
 
-- [ ] The **Screen** puts slot 0 — the cheapest hull — at a WINGTIP of the arc rather than the centre.
-      Correct by the rules and possibly not what anyone would choose
-- [ ] Formation preview is hover-only; there is no way to pin it while reading the map
-- [ ] Combat weave does not apply to ships **in transit**, which already cross, but a ship arriving
-      under fire has one abrupt handover between the two
+- [x] The **Screen** puts slot 0 — the cheapest hull — at a WINGTIP of the arc rather than the centre.
+      Correct by the rules and possibly not what anyone would choose.
+      **Fixed:** the arc now fills from its middle outwards, so the cheapest hull takes the point and
+      the rest alternate outwards from it. The Globe had the same fault for the same reason — its
+      shell was walked from angle zero, which is the BACK — and now starts at the front
+- [x] Formation preview is hover-only; there is no way to pin it while reading the map.
+      **Fixed:** right-click a formation button to pin its preview. The pin outranks the hover rather
+      than replacing it, so hovering another formation still previews that one and leaving the button
+      falls back to the pinned one — which is what makes comparing two of them possible
+- [x] Combat weave does not apply to ships **in transit**, which already cross, but a ship arriving
+      under fire has one abrupt handover between the two.
+      **Fixed:** the weave now cross-fades against the hull's OWN crossing speed rather than switching
+      on a boolean. `tools/flight-model-check.mjs` sweeps the transition and asserts the total never
+      dips below what the hull makes parked, and that it is fully off by 6 u/s so nothing is
+      double-counted against a ship at cruise
+
+See `2026-08-22-closing-the-backlog.md`.

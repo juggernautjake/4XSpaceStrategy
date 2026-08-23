@@ -358,9 +358,7 @@ public class CameraController : MonoBehaviour
         // A selected planet goes through PlanetUI.Selected; a selected star/facility/etc. through the
         // Inspector's current subject. Suppressed while typing into a text field so renaming a world (or a
         // save name) doesn't yank the camera.
-        bool typingField = EventSystem.current != null && EventSystem.current.currentSelectedGameObject != null &&
-                           EventSystem.current.currentSelectedGameObject.GetComponent<TMPro.TMP_InputField>() != null;
-        if (!menuOpen && !typingField && (Input.GetKeyDown(KeyCode.F) || Input.GetKeyDown(KeyCode.Q)))
+        if (!menuOpen && !UIFactory.IsTypingInField() && (Input.GetKeyDown(KeyCode.F) || Input.GetKeyDown(KeyCode.Q)))
         {
             // SHIPS FIRST. Selecting a ship is the most immediate "I mean that one" the game has, and
             // until now F ignored it entirely: it looked at the selected WORLD, and a player who had

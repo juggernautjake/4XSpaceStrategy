@@ -18,6 +18,14 @@ public class BuildOrder
     // technologies land, so re-deriving the price at cancel time would refund the wrong amount).
     public int metalPaid, energyPaid;
 
+    /// The squadron this hull joins the moment it rolls out, or 0 for none.
+    ///
+    /// Stamped when the order is QUEUED rather than read off a live setting when it completes, and
+    /// that is the whole design: a player who queues three fighters for the Home Guard and then
+    /// switches the destination to build a survey wing must not have the fighters follow the change.
+    /// An order is a decision made at a moment, and it keeps the decision that was made.
+    public int squadron;
+
     // Set by the scheduler each tick; the UI reads it rather than recomputing the allocation.
     public BuildState state = BuildState.WaitingForPower;
     public bool Active => state == BuildState.Building;
@@ -98,6 +106,7 @@ public class UnitManager : MonoBehaviour
     {
         units.Clear();
         buildQueue.Clear();
+        reinforceSquadron = 0;          // a new game has no squadrons for the yards to be pointed at
         ControlGroups.Clear();
         Fleets.Reset();
         Squadrons.Reset();            // ...and their standing orders, or a new game starts out holding
@@ -162,6 +171,44 @@ public class UnitManager : MonoBehaviour
         return true;
     }
 
+    // ============================================================================================
+    // WHERE NEW HULLS GO
+    //
+    // A shipyard used to pile every hull it built over the capital, and moving them anywhere was a
+    // manual job the player had to remember to do — which meant a war fought two systems away was
+    // reinforced by a stack of ships sitting at home that nobody had noticed were finished.
+    //
+    // So a shipyard can be pointed at a squadron. New hulls join it on rollout and, if that squadron
+    // has a rally point, fly straight there. This is the other half of the rally point: it was already
+    // where a shaken ship RETREATS to, and it is the obvious place for a fresh one to report.
+    //
+    // Empire-wide rather than per-shipyard, because build power is pooled empire-wide already — the
+    // player queues a hull, not a hull at a particular yard, so "which yard did this come from" is not
+    // a question the build UI ever asks them.
+    // ============================================================================================
+    int reinforceSquadron;
+
+    /// The squadron the yards are feeding, or 0.
+    ///
+    /// Reports 0 while that squadron has no ships in it. A wing wiped out in battle has its standing
+    /// orders cleared as its last ship dies (ControlGroups.PruneEmptied), so a slot that has emptied is
+    /// no longer the squadron the player pointed the yards at — it is an empty number with default
+    /// orders and no rally point, and quietly feeding replacements into it would strand them at the
+    /// yard while the UI claimed they were reinforcing something.
+    ///
+    /// The CHOICE is kept rather than erased, so binding ships to that slot again resumes the flow.
+    /// That is what a player who lost a squadron and rebuilt it in the same slot would expect, and the
+    /// row of buttons shows the difference honestly either way: while it is empty the control reads as
+    /// Off, and the slot's own tooltip says it is empty and how to fill it.
+    public int ReinforceSquadron
+        => reinforceSquadron >= 1 && !ControlGroups.IsEmpty(reinforceSquadron) ? reinforceSquadron : 0;
+
+    public void SetReinforceSquadron(int g)
+    {
+        reinforceSquadron = (g >= 1 && g <= ControlGroups.Count) ? g : 0;
+        OnBuildChanged?.Invoke();
+    }
+
     public bool QueueBuild(UnitType type)
     {
         var info = UnitDatabase.Get(type);
@@ -177,7 +224,8 @@ public class UnitManager : MonoBehaviour
             type = type,
             duration = info.buildTime * TechEffects.BuildTimeMult / speed,
             metalPaid = GameMode.DevMode ? 0 : cm,
-            energyPaid = GameMode.DevMode ? 0 : ce
+            energyPaid = GameMode.DevMode ? 0 : ce,
+            squadron = ReinforceSquadron
         });
         Schedule();
         OnBuildChanged?.Invoke();
@@ -287,14 +335,47 @@ public class UnitManager : MonoBehaviour
 
             buildQueue.RemoveAt(i);
             var yard = BestShipyardBody();
-            CreateUnit(o.type, FactionManager.Player, yard);
+            var built = CreateUnit(o.type, FactionManager.Player, yard);
+
+            // Called before the notification is composed rather than inside it: Reinforce MOVES the
+            // ship as well as describing what it did, and a side effect buried in a message argument
+            // is a thing the next reader has to notice.
+            string joined = Reinforce(built, o.squadron);
+
             SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
             NotificationManager.Instance?.Push($"{UnitDatabase.Get(o.type).name} built",
-                $"Ready at {(yard != null ? yard.name : "home")}. {o.Power} build power freed.", null, NotifKind.Info);
+                $"Ready at {(yard != null ? yard.name : "home")}. {o.Power} build power freed." + joined,
+                null, NotifKind.Info);
             completed = true;
         }
 
         if (completed) { Schedule(); OnBuildChanged?.Invoke(); }   // freed power starts the next ships now
+    }
+
+    /// Put a freshly built hull into the squadron its order was stamped for, and send it to that
+    /// squadron's rally point if it has one. Returns the sentence to append to the "ship built"
+    /// notification, or "" when the order had no destination.
+    ///
+    /// A station is deliberately excluded from the FLIGHT but not from the squadron: stations do not
+    /// travel, and ordering one to a rally point would either do nothing or look like a bug.
+    ///
+    /// The squadron is re-validated here rather than trusted from the order. Between laying a hull
+    /// down and it rolling out, the player may well have disbanded the squadron it was meant for —
+    /// dozens of in-game days can pass — and a ship silently joining a slot that now holds a different
+    /// fleet is worse than one that simply reports for duty at the yard.
+    string Reinforce(Unit u, int squadron)
+    {
+        if (u == null || squadron < 1 || squadron > ControlGroups.Count) return "";
+        if (ControlGroups.IsEmpty(squadron)) return "\n\nIts squadron no longer exists, so it is waiting at the yard.";
+
+        ControlGroups.AddTo(squadron, new List<Unit> { u });
+
+        var orders = Squadrons.Of(squadron);
+        if (orders == null || !orders.hasRally || u.Info == null || u.Info.isStation)
+            return $"\n\nJoined {Squadrons.NameOf(squadron)}.";
+
+        IssueMovePoint(new List<Unit> { u }, orders.rally, false);
+        return $"\n\nJoined {Squadrons.NameOf(squadron)} and is on its way to their rally point.";
     }
 
     // ---- Movement ----
@@ -1318,7 +1399,8 @@ public class UnitManager : MonoBehaviour
             list.Add(new BuildOrderDTO
             {
                 type = (int)o.type, elapsed = o.elapsed, duration = o.duration,
-                paused = o.paused, metalPaid = o.metalPaid, energyPaid = o.energyPaid
+                paused = o.paused, metalPaid = o.metalPaid, energyPaid = o.energyPaid,
+                squadron = o.squadron
             });
         return list;
     }
@@ -1326,13 +1408,18 @@ public class UnitManager : MonoBehaviour
     public void ImportBuildQueue(List<BuildOrderDTO> dtos)
     {
         buildQueue.Clear();
+        // The per-order destinations come back from the save; the yard's CURRENT setting does not, and
+        // is deliberately not saved. It is a "what am I doing right now" control, and a player loading
+        // a game from three sessions ago would not remember setting it.
+        reinforceSquadron = 0;
         nextOrderId = 1;
         if (dtos != null)
             foreach (var d in dtos)
                 buildQueue.Add(new BuildOrder
                 {
                     id = nextOrderId++, type = (UnitType)d.type, elapsed = d.elapsed, duration = d.duration,
-                    paused = d.paused, metalPaid = d.metalPaid, energyPaid = d.energyPaid
+                    paused = d.paused, metalPaid = d.metalPaid, energyPaid = d.energyPaid,
+                    squadron = d.squadron
                 });
         Schedule();
         OnBuildChanged?.Invoke();

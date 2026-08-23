@@ -117,6 +117,10 @@ public class BuildOrderDTO
     public float elapsed, duration;
     public bool paused;
     public int metalPaid, energyPaid;   // exact refund if the player cancels it
+
+    /// The squadron this hull joins on rollout, or 0. An older save has no field for it and loads as
+    /// 0, which is exactly the behaviour it had: the ship reports to the yard and waits.
+    public int squadron;
 }
 
 // One technology under study (see ResearchOrder). Order in the list is the capacity-allocation order.

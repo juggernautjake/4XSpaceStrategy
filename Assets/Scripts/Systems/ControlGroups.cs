@@ -131,14 +131,42 @@ public static class ControlGroups
             if (g >= 1 && g <= Count && groups[g].Count == 0) Squadrons.ResetSlot(g);
     }
 
-    // The living members of a group.
+    // ---- Members, and why it is written the way it is -------------------------------------------
+    //
+    // Scratch collections reused across calls rather than allocated per call. This is the hottest
+    // read in the fleet code: FormationPreview asks for it EVERY FRAME while a formation button is
+    // hovered, SquadronAI asks once a second for all nine squadrons, and the command bar asks nine
+    // times whenever the selection changes.
+    //
+    // The old shape was a nested loop — for each member id, scan the whole fleet — which is
+    // members x units. Ten ships against a late-game fleet of two hundred is two thousand comparisons
+    // to answer a question about ten ships, sixty times a second. One pass with a set lookup is
+    // units + members, and allocates nothing but the list it returns.
+    static readonly HashSet<int> wanted = new HashSet<int>();
+    static readonly Dictionary<int, Unit> found = new Dictionary<int, Unit>();
+
+    /// The living members of a group, in the order they were bound to it.
+    ///
+    /// Group order, NOT fleet order, and that is load-bearing: PatrolTool and the roster both read
+    /// members[0], and a list that reshuffled itself every time a ship was built somewhere else would
+    /// quietly move the reference point they hang off.
     public static List<Unit> Members(int group)
     {
         var list = new List<Unit>();
         if (group < 1 || group > Count || UnitManager.Instance == null) return list;
-        foreach (int id in groups[group])
-            foreach (var u in UnitManager.Instance.Units)
-                if (u.id == id) { list.Add(u); break; }
+
+        var ids = groups[group];
+        if (ids.Count == 0) return list;
+
+        wanted.Clear();
+        foreach (int id in ids) wanted.Add(id);
+
+        found.Clear();
+        foreach (var u in UnitManager.Instance.Units)
+            if (u != null && wanted.Contains(u.id)) found[u.id] = u;
+
+        foreach (int id in ids)
+            if (found.TryGetValue(id, out var u)) list.Add(u);
         return list;
     }
 
@@ -229,6 +257,11 @@ public class ControlGroupInput : MonoBehaviour
 
     void Update()
     {
+        // NOT WHILE THE PLAYER IS TYPING. Every key below is a bare letter or digit, so naming a
+        // squadron "Third Fleet" would otherwise recall squadron 3, and naming a save file "Home
+        // Guard" would hold the selection's position and open the roster on the way past.
+        if (UIFactory.IsTypingInField()) return;
+
         bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
         bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
         bool alt = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);

@@ -160,6 +160,23 @@ public class CmdIcon : MonoBehaviour
         return this;
     }
 
+    /// Run something on a RIGHT-click.
+    ///
+    /// Used by the formation buttons to PIN their preview. Hovering to preview is the right default —
+    /// it costs nothing and asks for nothing — but it means the preview dies the moment the cursor
+    /// leaves the button, and reading a formation against the map is exactly when the player wants to
+    /// move the cursor. Right-click is the natural second verb on a control whose left-click already
+    /// means "do it", and it costs no screen space at all.
+    ///
+    /// Left on the same handler as hover, and for the same reason: a Button with interactable=false
+    /// runs no pointer callbacks of its own, and a formation the squadron is already in is a control
+    /// a player may well still want to look at.
+    public CmdIcon OnRightClick(System.Action click)
+    {
+        if (hover != null) hover.onRightClick = click;
+        return this;
+    }
+
     /// Replace the tooltip — for controls whose explanation depends on the current state, like a
     /// button that reads "Hold position" one moment and "Release" the next.
     public CmdIcon SetTip(string tip)
@@ -193,13 +210,20 @@ public class CmdIcon : MonoBehaviour
 /// callbacks, and the control a player most wants to preview is frequently the one they cannot press.
 /// It also fires OnDisable, because a bar that is rebuilt while the cursor is over one of its buttons
 /// would otherwise leave the preview on screen with nothing left to turn it off.
-public class CmdIconHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+public class CmdIconHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
 {
-    public System.Action onEnter, onExit;
+    public System.Action onEnter, onExit, onRightClick;
     bool inside;
 
     public void OnPointerEnter(PointerEventData e) { inside = true; onEnter?.Invoke(); }
     public void OnPointerExit(PointerEventData e) { inside = false; onExit?.Invoke(); }
+
+    /// Right-click only. Left-click belongs to the Button component on the same object, and handling
+    /// it here as well would run every control's action twice.
+    public void OnPointerClick(PointerEventData e)
+    {
+        if (e.button == PointerEventData.InputButton.Right) onRightClick?.Invoke();
+    }
 
     void OnDisable() { if (inside) { inside = false; onExit?.Invoke(); } }
 }

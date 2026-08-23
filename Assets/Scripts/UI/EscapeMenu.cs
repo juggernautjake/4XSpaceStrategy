@@ -90,6 +90,10 @@ public class EscapeMenu : MonoBehaviour
     void Update()
     {
         // Esc opens the pause menu only once a game is actually running (the start menu handles launch).
+        //
+        // ...and never while a prompt is using Escape to mean "abandon what I was typing". A dialog
+        // that dismisses itself AND pauses the game is answering one keypress twice.
+        if (NamePrompt.SwallowsEscape) return;
         if (Input.GetKeyDown(KeyCode.Escape) && (IsOpen || GameRunning)) Toggle();
     }
 
