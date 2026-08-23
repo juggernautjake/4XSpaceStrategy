@@ -276,8 +276,11 @@ public static class CombatOrders
     /// further away is still the better answer.
     static CelestialBody NearestHold(Unit u)
     {
-        var bodies = SystemContext.Galaxy;
-        if (bodies == null || u == null) return null;
+        // SystemContext.AllBodies(), not SystemContext.Galaxy: a Galaxy is a bag of SYSTEMS, and each
+        // system holds planets which in turn hold moons. AllBodies is the walk that flattens all three
+        // levels, and it is what every other sweep over the map uses.
+        if (SystemContext.Galaxy == null || u == null) return null;
+        var bodies = SystemContext.AllBodies();
 
         Vector3 p = CombatManager.PosOf(u);
         CelestialBody bestSettled = null, bestClaimed = null;

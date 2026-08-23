@@ -9,7 +9,7 @@
   stray fragment of an expression ended up sitting above the using directives in PlanetViewWindow.cs
   and reached main.
 
-  Five checks, chosen because each catches something the others cannot:
+  Seven checks, chosen because each catches something the others cannot:
 
     HEAD     The first non-blank line of a file must look like the top of a C# file. This is the one
              that catches text pasted or dropped in above the usings.
@@ -22,9 +22,13 @@
              tools/check-string-literals.mjs — see the note beside the call for why it is here.
     STATIC   Every `SomeType.Member` reference onto a project type must name a real member, which is
              the ENUMS check applied to classes. Delegated to tools/check-static-refs.mjs.
+    MEMBER   The same question for a LOCAL whose type can be resolved. Delegated to
+             tools/check-member-refs.mjs.
+    FOREACH  Whatever a foreach iterates has to BE iterable — CS1579. Delegated to
+             tools/check-foreach.mjs.
 
-  The two delegated checks need `node` on PATH. If it is missing they are reported as NOT RUN and the
-  script exits 1 — "Clean." has to mean all five ran.
+  The four delegated checks need `node` on PATH. If it is missing they are reported as NOT RUN and
+  the script exits 1 — "Clean." has to mean all seven ran.
 
   Comments, strings, verbatim strings and char literals are stripped before counting, so a brace in a
   comment or a paren in a message cannot produce a false alarm.
@@ -206,7 +210,9 @@ $node = Get-Command node -ErrorAction SilentlyContinue
 
 $delegated = @(
     @{ Tag = 'STRING'; Script = 'check-string-literals.mjs'; Noun = 'unterminated string literal(s)' },
-    @{ Tag = 'STATIC'; Script = 'check-static-refs.mjs';     Noun = 'suspect static reference(s)' }
+    @{ Tag = 'STATIC'; Script = 'check-static-refs.mjs';     Noun = 'suspect static reference(s)' },
+    @{ Tag = 'MEMBER'; Script = 'check-member-refs.mjs';     Noun = 'suspect member access(es)' },
+    @{ Tag = 'FOREACH'; Script = 'check-foreach.mjs';        Noun = 'un-iterable foreach source(s)' }
 )
 
 $skipped = New-Object System.Collections.ArrayList
@@ -232,7 +238,7 @@ foreach ($check in $delegated) {
 Write-Output "Checked $($files.Count) C# files and $($enums.Count) enums."
 
 # A skip is reported as a FAILURE rather than a pass with a footnote. This script's whole job is to
-# stand in for a compiler that is not here, so "Clean." has to mean all five checks ran and all five
+# stand in for a compiler that is not here, so "Clean." has to mean all seven checks ran and all seven
 # passed — anything less is a claim it cannot back.
 if ($skipped.Count -gt 0) {
     Write-Output ""
