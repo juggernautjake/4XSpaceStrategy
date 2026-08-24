@@ -772,6 +772,26 @@ public class GalaxyStarProxy : MonoBehaviour
             // unreadable. The floor is angular, so nothing changes until distance would make it too thin.
             var minW = ring.gameObject.AddComponent<MinScreenWidthLine>();
             minW.baseWidth = size * 0.12f;
+
+            // ...and the empire's own crest on the systems the PLAYER holds, for the same reason the
+            // ring has a minimum thickness: which empire holds a system is information. The ring's
+            // colour already says it and a shape says it again, so the map still reads for a player
+            // who cannot separate two factions' hues. Rivals keep the ring alone until they have marks
+            // of their own (B13) — drawing the player's crest on a rival's system because it is the
+            // only crest that exists would be a lie about who owns the ground.
+            //
+            // The home system counts even before it has an owner recorded, which is the same case the
+            // ring's own `sys.isHome ||` above exists for.
+            //
+            // NOT `Attach(...)?.Show(true)` — `?.` does not route through Unity's overloaded `==`, so a
+            // badge whose native half is gone comes back as a live C# reference and Show throws. Same
+            // trap as ShipLOD.Attach; the UNITY check in Check-Scripts.ps1 catches this shape now.
+            if (sys.owner == FactionManager.Player || (sys.isHome && sys.owner == null))
+            {
+                var badge = CivMarkBadge.Attach(ring.transform, size * 1.1f,
+                                                new Vector3(size * 1.5f, 0f, 0f));
+                if (badge != null) badge.Show(true);
+            }
         }
 
         proxy.fade = root.AddComponent<FadeGroup>();

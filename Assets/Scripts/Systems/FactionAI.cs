@@ -279,7 +279,7 @@ public class FactionAI : MonoBehaviour
         if (b.visualObject != null)
         {
             var oc = b.visualObject.GetComponent<OrbitController>();
-            if (oc != null) oc.SetOwnerHighlight(FactionManager.OwnerColor(f), true);
+            if (oc != null) oc.SetOwnerHighlight(FactionManager.OwnerColor(f), true, f == FactionManager.Player);
         }
     }
 

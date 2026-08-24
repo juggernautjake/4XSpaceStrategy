@@ -65,6 +65,11 @@ public class LoadingScreen : MonoBehaviour
     const float BarWidth = 520f;
     const float BarHeight = 14f;
 
+    /// How far below the top edge the caption stack starts. Enough to clear the screen edge and read as
+    /// placed rather than jammed against it, small enough that the whole middle of the screen is free
+    /// for a star or a planet being formed.
+    const float TopMargin = 56f;
+
     public bool IsOpen => root != null && root.activeSelf;
 
     public static void Create(Transform parent)
@@ -91,12 +96,21 @@ public class LoadingScreen : MonoBehaviour
         // everything else on the panel.
         BuildSky(rt);
 
-        // Centred stack: headline, bar, stage line.
+        // ---- THE STACK SITS AT THE TOP, AND THE MIDDLE IS LEFT EMPTY ----------------------------
+        //
+        // Headline, bar and stage line used to be centred, which put them exactly where a star or a
+        // planet forming wants to be. The caption is the part that can move: it is a strip of text and
+        // a bar, it reads perfectly well pinned to the top, and everything below it then belongs to
+        // whatever the load is actually showing.
+        //
+        // Nothing INSIDE the column needs touching — every child already anchors to the column's own
+        // top edge (pivot (_, 1), negative Y offsets), so the stack keeps its internal spacing and
+        // simply starts somewhere else.
         var col = UIFactory.NewUI(rt, "Column").GetComponent<RectTransform>();
-        col.anchorMin = col.anchorMax = new Vector2(0.5f, 0.5f);
-        col.pivot = new Vector2(0.5f, 0.5f);
+        col.anchorMin = col.anchorMax = new Vector2(0.5f, 1f);
+        col.pivot = new Vector2(0.5f, 1f);
         col.sizeDelta = new Vector2(BarWidth, 150f);
-        col.anchoredPosition = Vector2.zero;
+        col.anchoredPosition = new Vector2(0f, -TopMargin);
 
         headline = UIFactory.Text(col, headlineBase, 30, UITheme.Accent, TextAlignmentOptions.Center);
         var hrt = headline.rectTransform;
@@ -474,11 +488,21 @@ public class LoadingScreen : MonoBehaviour
 
     void EnsureWelcome()
     {
-        if (welcomeLabel != null || barTrack == null) return;
-        welcomeLabel = UIFactory.Text(barTrack.parent, "", 34, UITheme.Accent, TextAlignmentOptions.Center);
+        if (welcomeLabel != null || root == null) return;
+
+        // PARENTED TO THE PANEL, NOT TO THE CAPTION COLUMN, and anchored to the SCREEN's centre.
+        //
+        // This used to hang off `barTrack.parent` at -150, which read as "below the planet" only because
+        // the column happened to be centred. The column is at the top of the screen now (that is the
+        // whole point — the middle belongs to the star and the planet), and inheriting that would have
+        // put the welcome message up in the caption stack instead of under the world it names.
+        //
+        // Anchoring to the panel's centre says what was actually meant, and is now independent of where
+        // the captions live.
+        welcomeLabel = UIFactory.Text(root.transform, "", 34, UITheme.Accent, TextAlignmentOptions.Center);
         welcomeRT = welcomeLabel.rectTransform;
-        welcomeRT.anchorMin = new Vector2(0, 1); welcomeRT.anchorMax = new Vector2(1, 1);
-        welcomeRT.pivot = new Vector2(0.5f, 1);
+        welcomeRT.anchorMin = new Vector2(0, 0.5f); welcomeRT.anchorMax = new Vector2(1, 0.5f);
+        welcomeRT.pivot = new Vector2(0.5f, 0.5f);
         welcomeRT.sizeDelta = new Vector2(0, 46);
         // Below the planet, which the sequence has just walked to the centre of the screen.
         welcomeRT.anchoredPosition = new Vector2(0, -150f);

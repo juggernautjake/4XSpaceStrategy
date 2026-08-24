@@ -68,9 +68,19 @@ public static class GeothermalMap
     //   minimum anywhere inside the band .. 70.0 (spec: "radiated minimum value should be 70")
     //   width of the >=70 band ........... 3.01 tiles either side (spec: "up to 3 in each direction")
 
-    /// At and above this the ground is a volcano. The request's "in the 97-100 range on Geothermal
-    /// Index" — the vent itself, not the mountain it sits on.
-    public const float VolcanoIndex = 0.97f;
+    /// At and above this the ground is a volcano — the vent itself, not the mountain it sits on.
+    ///
+    /// WAS 0.97, which is where the original request put it ("in the 97-100 range on Geothermal
+    /// Index"). Lowered to 0.95 on the follow-up ("Volcano biome threshold 97% -> 95%") after the
+    /// screenshots: at 0.97 the band above the line is three hundredths of the index wide, and the
+    /// field's top end is steep enough there that a whole world could carry hotspots reading 94-96 and
+    /// grow no cone at all. The survey would show the player a bright red bullseye and the map would
+    /// show them nothing standing on it.
+    ///
+    /// 0.95 doubles the width of the qualifying band, which is the difference between "the hottest
+    /// ground on this world has a volcano on it" and "the hottest ground on this world has a volcano on
+    /// it IF it happened to clear a threshold near the top of the field's range".
+    public const float VolcanoIndex = 0.95f;
 
     // ---- Hotspots ---------------------------------------------------------------------------------
 

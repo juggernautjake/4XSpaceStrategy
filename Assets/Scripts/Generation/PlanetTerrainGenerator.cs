@@ -275,6 +275,23 @@ public static class PlanetTerrainGenerator
 
         PlanetSurface surface = new PlanetSurface(width, height);
 
+        // ---- THE LAZY BAKES, PAID BEFORE THE SLICED LOOP AND NOT INSIDE IT --------------------------
+        //
+        // SampleNormalized asks TectonicsMap.Sample and GeothermalMap.HotspotAt per cell, and both build
+        // their world-level data on FIRST ASK. The budget check below runs after a whole COLUMN, so
+        // whatever those bakes cost was landing inside the first column's span — one unyielded frame
+        // carrying an entire world's plate layout on top of 320 cells of noise, which is exactly the
+        // shape of stall the loading screen reports and cannot attribute.
+        //
+        // Touching them here, with a yield of their own on either side, moves that cost somewhere the
+        // screen can draw through. Both are cached, so the loop below now finds them ready.
+        yield return null;
+        // Gated exactly as SampleNormalized gates it, so a world with no plates does not build a layout
+        // here that the sampler would never have asked for.
+        if (TectonicsMap.Active(body)) TectonicsMap.Get(body);
+        GeothermalMap.HotspotIntensity(body);   // seeds the intensity cache HotspotAt reads per cell
+        yield return null;
+
         var clock = System.Diagnostics.Stopwatch.StartNew();
         for (int x = 0; x < width; x++)
         {
@@ -306,14 +323,86 @@ public static class PlanetTerrainGenerator
         // Remove speckle BEFORE the water/shore pass, so flood-fill and beaches run on the terrain the
         // player will actually see rather than on a noisier draft of it.
         //
-        // Each gets its own frame. They are O(w*h) too — around twenty times cheaper per cell than
-        // sampling, but on a 640-wide world that is still long enough to be a visible hitch on its own.
+        // A frame each was not enough. "Twenty times cheaper per cell than sampling" is true and still
+        // leaves a 640x320 world doing two hundred thousand cells inside ONE frame, twice — which on the
+        // largest worlds is the second-biggest unyielded span in the whole load after the sampling itself.
+        // Both are sliced on the same 6 ms budget the sampler uses, so neither can produce a hitch that
+        // scales with world size.
         yield return null;
-        DespeckleTerrain(surface);
+        { var d = DespeckleStepped(surface); while (d.MoveNext()) yield return d.Current; }
         yield return null;
+        // ApplyWaterAndShores is NOT sliced, and deliberately so: its first phase is a flood fill, and a
+        // flood fill stopped half way is a half-connected ocean. Making it restartable would mean
+        // carrying the frontier across frames, which is a lot of state for a pass that is a few
+        // milliseconds even on the largest grid — it is the DESPECKLE above that was the expensive one,
+        // because that one is genuinely per-cell work with a neighbourhood scan inside it.
         ApplyWaterAndShores(surface);
 
         done?.Invoke(surface);
+    }
+
+    /// `DespeckleTerrain`, yielding on the same 6 ms budget the sampler uses.
+    ///
+    /// The snapshot is taken WHOLE before any cell is rewritten — that is the pass's defining property,
+    /// that every cell is judged against the original neighbourhood rather than against a map already
+    /// half-edited — so slicing must not interleave reading and writing. Two sliced loops, in order,
+    /// preserve it exactly: nothing in the first loop writes, and nothing in the second reads `tiles`.
+    static IEnumerator DespeckleStepped(PlanetSurface surf)
+    {
+        int w = surf.width, h = surf.height;
+        if (w < 3 || h < 3) yield break;   // too small for "isolated" to mean anything
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var src = new TerrainType[w, h];
+        for (int x = 0; x < w; x++)
+        {
+            for (int y = 0; y < h; y++) src[x, y] = surf.tiles[x, y].type;
+            if (clock.Elapsed.TotalMilliseconds >= StepBudgetMs) { yield return null; clock.Restart(); }
+        }
+
+        // A flat array indexed by the enum, not a Dictionary<TerrainType,int> — see the note on the
+        // original pass: Mono has no default comparer for a user enum, so a dictionary boxes every key.
+        int typeCount = System.Enum.GetValues(typeof(TerrainType)).Length;
+        var counts = new int[typeCount];
+
+        for (int x = 0; x < w; x++)
+        {
+            for (int y = 0; y < h; y++)
+            {
+                var t = src[x, y];
+                if (IsWater(t)) continue;
+                if (IsRareFeature(t)) continue;
+
+                // Longitude wraps, latitude does not — the same asymmetry the flood fill uses.
+                int xl = (x - 1 + w) % w, xr = (x + 1) % w;
+                System.Array.Clear(counts, 0, counts.Length);
+
+                bool anySame = false;
+                void Consider(TerrainType n)
+                {
+                    if (n == t) anySame = true;
+                    if (IsWater(n)) return;              // never promote a land tile to water
+                    counts[(int)n]++;
+                }
+
+                Consider(src[xl, y]);
+                Consider(src[xr, y]);
+                if (y > 0) Consider(src[x, y - 1]);
+                if (y < h - 1) Consider(src[x, y + 1]);
+
+                if (anySame) continue;                   // not isolated — leave it alone
+
+                TerrainType best = t; int bestCount = 0;
+                for (int i = 0; i < counts.Length; i++)
+                    if (counts[i] > bestCount) { bestCount = counts[i]; best = (TerrainType)i; }
+
+                // Needs a real majority: two of the four neighbours agreeing.
+                if (bestCount >= 2) surf.tiles[x, y].type = best;
+            }
+
+            if (clock.Elapsed.TotalMilliseconds >= StepBudgetMs) { yield return null; clock.Restart(); }
+        }
     }
 
     // Neighbour coherence: a tile with no neighbour of its own kind becomes the local majority.
@@ -349,62 +438,9 @@ public static class PlanetTerrainGenerator
         }
     }
 
-    static void DespeckleTerrain(PlanetSurface surf)
-    {
-        int w = surf.width, h = surf.height;
-        if (w < 3 || h < 3) return;   // too small for "isolated" to mean anything
-
-        var src = new TerrainType[w, h];
-        for (int x = 0; x < w; x++)
-            for (int y = 0; y < h; y++)
-                src[x, y] = surf.tiles[x, y].type;
-
-        // A flat array indexed by the enum, NOT a Dictionary<TerrainType,int>.
-        //
-        // On Unity's Mono runtime there is no default comparer for a user enum, so a dictionary keyed by
-        // one falls back to ObjectEqualityComparer and BOXES the key on every lookup and every write.
-        // This inner loop does up to eight of each per land cell, which on a 45,000-cell planet is a few
-        // hundred thousand throwaway allocations — enough to force a collection mid-load, and a GC pause
-        // is precisely the stutter this pass is supposed to be invisible for.
-        int typeCount = System.Enum.GetValues(typeof(TerrainType)).Length;
-        var counts = new int[typeCount];
-
-        for (int x = 0; x < w; x++)
-            for (int y = 0; y < h; y++)
-            {
-                var t = src[x, y];
-                if (IsWater(t)) continue;
-                if (IsRareFeature(t)) continue;
-
-                // Longitude wraps, latitude does not — the same asymmetry the flood fill uses.
-                int xl = (x - 1 + w) % w, xr = (x + 1) % w;
-                System.Array.Clear(counts, 0, counts.Length);
-
-                bool anySame = false;
-                void Consider(TerrainType n)
-                {
-                    if (n == t) anySame = true;
-                    if (IsWater(n)) return;              // never promote a land tile to water
-                    counts[(int)n]++;
-                }
-
-                Consider(src[xl, y]);
-                Consider(src[xr, y]);
-                if (y > 0) Consider(src[x, y - 1]);
-                if (y < h - 1) Consider(src[x, y + 1]);
-
-                if (anySame) continue;                   // not isolated — leave it alone
-
-                TerrainType best = t; int bestCount = 0;
-                for (int i = 0; i < counts.Length; i++)
-                    if (counts[i] > bestCount) { bestCount = counts[i]; best = (TerrainType)i; }
-
-                // Needs a real majority: two of the four neighbours agreeing. One vote is not a consensus,
-                // and at a genuine three-way border every choice is arbitrary — better to leave the
-                // classifier's answer than to pick one at random.
-                if (bestCount >= 2) surf.tiles[x, y].type = best;
-            }
-    }
+    // DespeckleTerrain (the unsliced version) lived here. Deleted rather than kept beside
+    // DespeckleStepped: two implementations of one rule drift, and the one that drifts is the one
+    // nobody is running.
 
     // Post-classification clean-up that needs to see a tile's NEIGHBOURS (the per-cell sampler can't).
     //   1. Water bodies are flood-filled: a large connected body is OCEAN, a small isolated one is a LAKE —
@@ -785,16 +821,17 @@ public static class PlanetTerrainGenerator
         // same category error as a forest on one — it was being drawn purely from "shallow and warm",
         // so a dead ocean world grew coral shallows with nothing in the galaxy to have built them.
         TerrainType t = Classify(classifyType, landHeight, seaShift, moisture, temperature, ridge, lat,
-                                 body.biosphereActive);
+                                 body.biosphereActive, body, u, v);
 
         // ============================================================================================
         // A VOLCANO IS WHERE THE GEOTHERMAL INDEX SAYS IT IS
         //
         // The request draws the line precisely: "if there are Geothermal hotspots that would generate a
-        // volcano (in the 97-100 range on Geothermal Index)". So the vent is not a separate roll on top
-        // of the terrain — it is the same field the overlay paints, read at its own threshold. Whatever
-        // the map shows as 97%+ has a cone standing on it, on a fault margin and on a plate-less hotspot
-        // world alike.
+        // volcano". So the vent is not a separate roll on top of the terrain — it is the same field the
+        // overlay paints, read at its own threshold. Whatever the map shows above GeothermalMap's
+        // VolcanoIndex has a cone standing on it, on a fault margin and on a plate-less hotspot world
+        // alike. The threshold itself lives there and has since moved 97% -> 95%; this reads it rather
+        // than restating it, so the two cannot drift.
         //
         // Not on a gas giant (no surface) and not under water (a submarine vent is not a mountain the
         // player can see or build on). Everything else is fair game, including an ice world — Enceladus
@@ -844,7 +881,7 @@ public static class PlanetTerrainGenerator
         {
             groundUnder = Classify(classifyType, landHeight, SeaShiftDry, moisture,
                                    Mathf.Max(temperature, ThawedTemperature), ridge, lat,
-                                   body.biosphereActive);
+                                   body.biosphereActive, body, u, v);
             // A drained, thawed world should never classify back to water — but the Ice classifier can
             // still return a Lake from its moisture test, and a bare rock is a better answer than a
             // recursion. Guarded rather than trusted.
@@ -993,9 +1030,47 @@ public static class PlanetTerrainGenerator
         if (above < 0.16f) return "lowland";
         if (above < 0.28f) return "plains";
         if (above < 0.40f) return "uplands";
-        if (above < 0.52f) return "highland";
+        if (above < AlpineAbove) return "highland";
         return "alpine";
     }
+
+    // ============================================================================================
+    // PAST A CERTAIN HEIGHT, GROUND IS SIMPLY MOUNTAIN
+    //
+    // "Biomes must not denote elevation... Past a certain elevation it should simply be mountain
+    // terrain. A biome says what ground IS; how high it is, is a separate fact."
+    //
+    // The screenshot behind that request is a geothermal vent ringed by concentric bands — Metallic
+    // Crust, then Badlands, then Canyon — which is an altitude ramp wearing three biome names. Two
+    // things produce it and both are fixed here:
+    //
+    //   1. The RAMP HAD NO TOP. Every classifier's highest ground fell through to whatever material
+    //      band it happened to clear, so the ring kept climbing through types instead of arriving
+    //      somewhere. It arrives at Mountains now, on every solid world.
+    //   2. METALLIC CRUST WAS AN ALTITUDE BAND, in Barren and Airless alike — `elev > 0.55` and
+    //      `elev > 0.7`, nothing else. Exposed metal-rich rock is a statement about what the ground is
+    //      MADE OF, and what exposes it is the crust being broken open, so it reads `ridge` now like
+    //      every other bare-rock type in this file.
+    //
+    // THE LINE IS THE ONE THE READOUT ALREADY PRINTS. `AlpineAbove` is both the top band in
+    // ElevationBand and the mountain cut here, so a tile that reports "alpine" in the hover panel is
+    // drawn as mountain on the map. One number, so the picture and the words cannot disagree — which is
+    // the whole complaint the elevation-band work was opened to fix, restated one level up.
+    //
+    // Sea-relative, like every other threshold that has to move when the water does: drain a world and
+    // its exposed seabed must not be promoted to alpine because the shoreline left.
+    //
+    // NOT a reintroduction of Highlands and Hills. Those were BANDS — every tile over 0.66 stopped
+    // being forest or grassland and became one undifferentiated brown. This is a CEILING, ~6,200 m above
+    // the waterline (MetresPerElevationUnit), and above it bare rock genuinely is the terrain whatever
+    // the climate says. Everything below it still falls through to its own climate and material tests.
+    // ============================================================================================
+
+    /// How far above the waterline ground stops being any kind of ground and is simply mountain.
+    public const float AlpineAbove = 0.52f;
+
+    /// That height in raw landHeight units, for a classifier holding this world's sea shift.
+    static float MountainHeight(float sea) => 0.36f + sea + AlpineAbove;
 
     /// The band for a body's tile, from its own water level. The form nearly every caller wants.
     public static string ElevationBand(CelestialBody b, float landHeight)
@@ -1014,6 +1089,38 @@ public static class PlanetTerrainGenerator
 
     public static float ElevationMetres(CelestialBody b, float landHeight)
         => ElevationMetres(landHeight, b == null ? 0.5f : b.terrainParams.SeaLevelOrNeutral);
+
+    // ============================================================================================
+    // CONTOURS — the topographic read that replaces biomes-as-elevation
+    //
+    // "Black contour lines every 500 m. A thin black border separating each elevation band — 0, +/-500,
+    // +/-1000, +/-1500, ... in both directions, giving the planet map a topographic read. This is what
+    // replaces biomes-as-elevation."
+    //
+    // The two halves of that request are one idea. Taking altitude OUT of the biome names (see
+    // MountainHeight) removes the only way the old map showed relief at all — a forest at 200 m and a
+    // forest at 4,000 m became the same green — so something has to put the relief back, and a contour
+    // is the honest way to draw it: it says how high the ground is WITHOUT claiming anything about what
+    // grows there. One tile, two independent facts, drawn as two independent things.
+    //
+    // BOTH DIRECTIONS, so the sea floor is contoured too. A drowned basin has shape, terraforming can
+    // raise it out of the water, and a map that goes flat black below the waterline hides exactly the
+    // ground the player is deciding whether to drain.
+    //
+    // The band index is what gets compared, not the metres: two tiles are on opposite sides of a contour
+    // when their band indices differ. Floor rather than round, so the zero line falls ON the waterline
+    // (band 0 is 0..500 m, band -1 is -500..0) rather than 250 m up it.
+    // ============================================================================================
+
+    /// Metres between contour lines on the planet map.
+    public const float ContourInterval = 500f;
+
+    /// Which 500 m band this height sits in. Adjacent tiles with different answers have a line between.
+    public static int ContourBand(float landHeight, float waterLevel)
+        => Mathf.FloorToInt(ElevationMetres(landHeight, waterLevel) / ContourInterval);
+
+    public static int ContourBand(CelestialBody b, float landHeight)
+        => ContourBand(landHeight, b == null ? 0.5f : b.terrainParams.SeaLevelOrNeutral);
 
     public static bool IsWater(TerrainType t)
     {
@@ -1097,8 +1204,22 @@ public static class PlanetTerrainGenerator
             }
         }
 
-        // --- Liquid rock. The hottest thing on the scale, and it outranks everything below. ---
-        if (tileC >= WorldClassifier.MagmaMinC && !IsWater(t))
+        // ============================================================================================
+        // LIQUID ROCK. The hottest thing on the scale, and it outranks everything below.
+        //
+        // ROCK MELTS FROM BELOW. `tileC` is the tile's TOTAL temperature, and PlanetTemperature builds
+        // that from starlight plus greenhouse plus internal heat — so gating molten ground on it alone
+        // meant a world that happens to orbit close to its sun grew liquid rock across its whole
+        // surface. That is the reported Geothermal bug at its source: the Geothermal index reads a
+        // MagmaField tile as direct evidence of crustal heat (SurfaceIndex.CrustHeat = 0.95), so a
+        // sun-baked rock reported 95% geothermal on every tile of the map, and the player was invited
+        // to build a geothermal plant on ground with a cold core under it.
+        //
+        // A world baked from OUTSIDE is scorched, not molten. Its ground is LavaRock and AshWaste, and
+        // the reverse gate a few lines down is what puts it there.
+        // ============================================================================================
+        if (tileC >= WorldClassifier.MagmaMinC && !IsWater(t)
+            && PlanetTemperature.InternalCelsius(body) >= WorldClassifier.MagmaInternalMinC)
             return TerrainType.MagmaField;
 
         // ...AND THE SAME GATE IN REVERSE, which is the half that was missing.
@@ -1270,13 +1391,19 @@ public static class PlanetTerrainGenerator
     /// waterline stands in those same units — see SeaShift. Classifiers add `sea` to their WATER tests
     /// and to the shoreline band that hugs them, and to nothing else: a mountain is a mountain at any
     /// tide, and is simply submerged once the water is over it.
+    ///
+    /// The body and the surface coordinates are threaded through for the GAS GIANT branch alone. A
+    /// great spot is an
+    /// OBJECT at a place on the surface (see GasGiantStorms), so unlike every other classifier this one
+    /// cannot work from scalar fields — it has to know where on the world it is standing.
     static TerrainType Classify(CelestialBodyType planet, float elev, float sea, float moist, float temp,
-                                float ridge, float lat, bool living)
+                                float ridge, float lat, bool living,
+                                CelestialBody body, float u, float v)
     {
         switch (planet)
         {
-            case CelestialBodyType.GasGiant:       return GasGiant(lat, elev, moist);
-            case CelestialBodyType.VolcanicPlanet: return Volcanic(elev, temp, ridge, lat);
+            case CelestialBodyType.GasGiant:       return GasGiant(body, u, v, moist);
+            case CelestialBodyType.VolcanicPlanet: return Volcanic(elev, sea, temp, ridge, lat);
             case CelestialBodyType.IcePlanet:      return Ice(elev, sea, moist, temp, ridge, lat);
             // `moist` is the jitter field: independent of latitude, so it can actually break up a
             // latitude threshold. See PolarIceEdge.
@@ -1289,23 +1416,98 @@ public static class PlanetTerrainGenerator
         }
     }
 
-    static TerrainType GasGiant(float lat, float elev, float moist)
+    // ============================================================================================
+    // A GAS GIANT IS BANDS, AND THE BANDS BEND ROUND THE SPOTS
+    //
+    // The old body of this method was two lines, and the second of them was:
+    //
+    //     if (elev > 0.78f) return TerrainType.Storm;      // great-spot style storm
+    //
+    // The comment says what was wanted and the code cannot deliver it. `elev` on a giant is fractal
+    // noise, and a threshold on fractal noise is SPECKLE — a scatter of small ragged patches wherever
+    // the field happens to peak. It has no size, no shape, and no relationship to the belt it lands in.
+    // It read as static laid over the deck, which is why the request asks for the feature that was
+    // supposedly already here.
+    //
+    // A great spot is an object with a position and a size, so it comes from GasGiantStorms, and the
+    // one thing that makes it look like weather rather than a decal is that the cloud lanes around it
+    // are DEFLECTED. That is the `bend` below: inside a spot's halo the latitude used to pick the band
+    // is pushed away from the spot's centre, so the lanes crowd against it on the way past and close up
+    // again behind it. Take that out and the bands run straight through the storm.
+    // ============================================================================================
+    static TerrainType GasGiant(CelestialBody body, float u, float v, float moist)
     {
-        float band = Mathf.Repeat((lat + moist * 0.3f) * 6f, 1f);
-        if (elev > 0.78f) return TerrainType.Storm;      // great-spot style storm
+        int n = GasGiantStorms.Spots(body, out var spots);
+
+        float bend = 0f;
+        for (int i = 0; i < n; i++)
+        {
+            float d = GasGiantStorms.Distance(spots[i], u, v);
+
+            // Inside the storm. No band test at all — a great spot is one body of weather, not a
+            // striped one.
+            if (d <= 1f) return TerrainType.Storm;
+
+            // THE PALE HOLLOW. A ring of cloud punched out of the belt around the storm.
+            //
+            // Without it a spot was a dark ellipse in the middle of a dark band and could not be seen
+            // at all — which is what the contact sheet showed, and what no amount of reading this
+            // function would have revealed. Jupiter has exactly this: the Great Red Spot sits in a
+            // bright hollow in the South Equatorial Belt.
+            if (d <= 1f + GasGiantStorms.Hollow) return TerrainType.GasClouds;
+
+            if (d >= 1f + GasGiantStorms.FlowHalo) continue;
+
+            // In the wake. Push the sampling latitude AWAY from the spot's centre, hardest at the
+            // storm's edge and fading to nothing at the halo's rim. Squared so the falloff is smooth
+            // where it meets undisturbed deck — a linear one leaves a visible ring.
+            float t = 1f - (d - 1f) / GasGiantStorms.FlowHalo;
+            float dv = v - spots[i].v;
+            bend += (dv < 0f ? -1f : 1f) * t * t * spots[i].rv * 1.35f;
+        }
+
+        // Latitude is derived HERE rather than taken as an argument, because `bend` has to move it and
+        // the caller's `lat` was computed before any of this ran. Same formula as the caller's:
+        // 0 at the equator, 1 at a pole.
+        float lat = Mathf.Abs((v + bend) - 0.5f) * 2f;
+
+        // The jitter that keeps band edges from being drawn with a ruler. HALVED from 0.3: at the old
+        // value it did not waver the edges, it PINCHED them shut, and the contact sheet came back with
+        // lens-shaped 'eyes' scattered across worlds that have no storms at all — phantom spots, which
+        // is worse than no texture, because it made the real ones stop reading as special.
+        float band = Mathf.Repeat((lat + moist * 0.15f) * GasGiantStorms.BandCycles, 1f);
         return band < 0.5f ? TerrainType.GasClouds : TerrainType.Storm;
     }
 
-    static TerrainType Volcanic(float elev, float temp, float ridge, float lat)
+    static TerrainType Volcanic(float elev, float sea, float temp, float ridge, float lat)
     {
         float hot = temp + (1f - lat) * 0.2f;
         if (hot > 0.9f && ridge > 0.7f) return TerrainType.Volcano;
+        // MOLTEN GROUND OUTRANKS ALTITUDE, so the mountain cut sits below these two rather than above
+        // them. A magma field on a high shoulder is still a magma field — the ground being liquid is a
+        // stronger statement about what it IS than how far above the datum it sits, and a volcanic
+        // world whose peaks all read as bare mountain would lose the lava exactly where it is hottest.
         if (hot > 0.78f) return TerrainType.MagmaField;
+        if (elev >= MountainHeight(sea)) return TerrainType.Mountains;   // the top of the ramp
         if (ridge > 0.72f) return TerrainType.Mountains;
-        if (elev > 0.62f)  return TerrainType.LavaRock;
+
+        // ObsidianFlat keeps its elevation test for the same reason Barren's SaltFlat and Airless's
+        // Crater do: it is a BASIN. Low ground on a volcanic world is where the flows pooled and cooled
+        // flat, which is a statement about the shape of the ground rather than a name for its altitude.
         if (elev < 0.32f)  return TerrainType.ObsidianFlat;
+
+        // WAS `elev > 0.62f`, and it was the last elevation band left in this file — caught by
+        // tools/terrain-elevation-check.mjs sweeping elevation with roughness pinned, which is the one
+        // probe that can tell an altitude band from a roughness one. A volcanic world's high ground
+        // came out as a solid LavaRock cap whatever the ground was actually like up there.
+        //
+        // Solidified flow is BROKEN ground — ropy, fractured, cooled under tension — so it reads the
+        // roughness field, one step above CrackedGround, which is the same material less shattered.
+        // CrackedGround drops to 0.40 to keep a real slice of its own now that LavaRock sits above it
+        // rather than off in the elevation axis where the two never competed.
+        if (ridge > 0.58f) return TerrainType.LavaRock;
         if (temp > 0.6f)   return TerrainType.AshWaste;
-        if (ridge > 0.55f) return TerrainType.CrackedGround;
+        if (ridge > 0.40f) return TerrainType.CrackedGround;
         return TerrainType.GeyserField;
     }
 
@@ -1398,8 +1600,15 @@ public static class PlanetTerrainGenerator
         // to a mountain because the sea left.
         if (elev >= 0.64f + sea)
         {
-            if (elev > 0.80f) return TerrainType.Mountains;
-            if (elev > 0.70f) return TerrainType.Island;
+            // The mountain cut was a bare `elev > 0.80f` here — the one threshold in this block that did
+            // NOT move with the water, while the two either side of it did. Drain an ocean world and its
+            // shoreline dropped while its snowline stayed put, so the exposed seabed grew mountains from
+            // the bottom up. It is MountainHeight(sea) now, the same line every other classifier uses.
+            if (elev >= MountainHeight(sea)) return TerrainType.Mountains;
+            // Sea-relative for the same reason, and by the same offset it always had: the island band
+            // began 0.06 above the shoreline at neutral water. Left raw, a flooded ocean world put this
+            // line BELOW its own waterline and every scrap of land above the surface was an island.
+            if (elev > 0.64f + sea + 0.06f) return TerrainType.Island;
             return TerrainType.Beach;
         }
 
@@ -1442,6 +1651,9 @@ public static class PlanetTerrainGenerator
         // rather than folding into a mountain range that happens to be underwater.
         if (elev < 0.3f + sea) return temp < 0.22f ? TerrainType.FrozenSea : TerrainType.Ocean;
 
+        // The top of the ramp. See MountainHeight — alpine ground is mountain, whatever it is made of.
+        if (elev >= MountainHeight(sea)) return TerrainType.Mountains;
+
         if (ridge > 0.82f) return TerrainType.Mountains;
         if (ridge > 0.7f)  return TerrainType.Canyon;
 
@@ -1459,7 +1671,11 @@ public static class PlanetTerrainGenerator
         if (elev < 0.3f)   return TerrainType.SaltFlat;
 
         if (ridge > 0.5f)  return TerrainType.Badlands;
-        if (elev > 0.55f)  return TerrainType.MetallicCrust;
+        // WAS `elev > 0.55f` — the middle rung of the altitude ramp. Metal is exposed where the crust is
+        // broken, not where it is high, so this reads the same roughness field Badlands and Canyon do,
+        // one step below Badlands. A dead world still gets metallic ground; it now gets it on the
+        // shattered ground rather than as a contour band.
+        if (ridge > 0.34f) return TerrainType.MetallicCrust;
         return TerrainType.Wasteland;
     }
 
@@ -1467,10 +1683,17 @@ public static class PlanetTerrainGenerator
     {
         // An airless world has no weathering, so its broken ground stays broken: bare rock, not an
         // altitude band. Mountains rather than Highlands, for the same reason as everywhere else.
+        if (elev >= MountainHeight(sea)) return TerrainType.Mountains;   // the top of the ramp
         if (ridge > 0.85f) return TerrainType.Mountains;
-        if (elev > 0.7f)   return TerrainType.MetallicCrust;
         if (elev < 0.28f)  return TerrainType.Crater;
         if (ridge > 0.72f) return TerrainType.CrystalField;
+        // WAS `elev > 0.7f`, ABOVE the Crater and CrystalField tests. Same fix as Barren's: metal is
+        // exposed by the crust breaking open, not by the ground being high. It sits BELOW CrystalField
+        // now rather than above it — a ridge cut of 0.55 placed where the old elevation cut was would
+        // have swallowed the 0.72 band whole and quietly deleted crystal fields from the game.
+        // Crater keeps its elevation test: an impact basin genuinely IS low ground, which is a fact
+        // about the shape of the ground rather than a name for its altitude.
+        if (ridge > 0.55f) return TerrainType.MetallicCrust;
         // A moon's own orbital heat (SolarSystemGenerator.BiasHeat sets terrainParams.heat from its
         // distance from the star, same as its parent planet's band) used to be computed and stored but
         // never actually read here — every moon showed frost in its low ground regardless of how hot its
@@ -1495,6 +1718,13 @@ public static class PlanetTerrainGenerator
         if (elev < 0.36f + sea) return temp < 0.22f ? TerrainType.FrozenSea : TerrainType.Ocean;
         if (elev < 0.40f + sea) return temp < 0.22f ? TerrainType.Snow : TerrainType.Beach;
 
+        // THE CEILING. Alpine ground is mountain — see MountainHeight. This is not the Highlands band
+        // coming back: that was a BAND at 0.66 that swallowed a third of every temperate world's map and
+        // stripped the climate out of it. This is one cut ~6,200 m up, where bare rock genuinely is the
+        // terrain whatever the temperature and moisture say, and everything under it still falls through
+        // to the climate tests below exactly as it did.
+        if (elev >= MountainHeight(sea)) return TerrainType.Mountains;
+
         if (ridge > 0.82f) return TerrainType.Mountains;
 
         // HIGHLANDS AND HILLS USED TO BE RETURNED HERE, at elev > 0.74 and > 0.66, and they are gone.
@@ -1510,8 +1740,11 @@ public static class PlanetTerrainGenerator
         // independent facts, which is what they always were.
         //
         // Mountains stay, because a mountain genuinely is a terrain rather than an altitude: bare rock,
-        // too steep and too broken to be anything else. That is why the test above it is `ridge` — how
-        // BROKEN the ground is — and not elevation.
+        // too steep and too broken to be anything else. That is why the PRIMARY test for it is `ridge` —
+        // how BROKEN the ground is — rather than elevation. The alpine cut above is a second, much
+        // higher door into the same type, and the distinction matters: a rugged coastal headland is
+        // mountain because it is shattered, and a smooth 6-kilometre shoulder is mountain because
+        // nothing else grows up there. Neither of them is mountain merely for being above a band edge.
 
         // No-biosphere flooring (CelestialBody.biosphereActive) already happened in SampleNormalized
         // before moist reached here, so this function doesn't need to know about it at all — moist is

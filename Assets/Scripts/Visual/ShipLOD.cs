@@ -97,7 +97,21 @@ public static class ShipLOD
             levels[levels.Count - 1] = new LOD(CullBelow, baseRenderers);
         }
 
-        var group = root.GetComponent<LODGroup>() ?? root.AddComponent<LODGroup>();
+        // ---- NOT `??`. ----
+        //
+        // `GetComponent<LODGroup>() ?? AddComponent<LODGroup>()` is the shape this used to be, and it is
+        // the single most reliable way to produce a MissingComponentException in Unity. `??` is a C#
+        // operator and it tests the REFERENCE; Unity's `== null` is an OVERLOAD that also reports true for
+        // a component whose native half has been destroyed. So a destroyed-but-still-referenced LODGroup —
+        // which is what a re-used or pooled `Model_Scout` root carries — sails straight through `??`, gets
+        // handed back as though it were live, and throws on the first call:
+        //
+        //     MissingComponentException: There is no 'LODGroup' attached to the "Model_Scout 1" game
+        //     object, but a script is trying to access it.
+        //
+        // UIFactory.Ensure is the same two lines written once, and it uses `== null` so the overload runs.
+        var group = UIFactory.Ensure<LODGroup>(root);
+        if (group == null) return;
         group.SetLODs(levels.ToArray());
 
         // CROSS-FADE rather than a hard swap. A hull popping between two silhouettes is the one

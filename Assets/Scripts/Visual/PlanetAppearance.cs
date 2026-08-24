@@ -174,7 +174,20 @@ public static class PlanetAppearance
             case CelestialBodyType.RockyPlanet:   color = new Color(0.55f, 0.72f, 1.00f, 0.20f); thickness = 1.08f; return true;
             case CelestialBodyType.IcePlanet:     color = new Color(0.65f, 0.88f, 1.00f, 0.18f); thickness = 1.07f; return true;
             case CelestialBodyType.VolcanicPlanet:color = new Color(1.00f, 0.45f, 0.22f, 0.20f); thickness = 1.08f; return true;
-            case CelestialBodyType.GasGiant:      color = new Color(0.92f, 0.78f, 0.52f, 0.34f); thickness = 1.14f; return true;
+            // A GAS GIANT'S SHELL HUGS THE SPHERE — 1.02, not 1.14.
+            //
+            // "Make the sphere representing Gas Giants atmospheres in solar system view much closer to
+            // the actual size of the sphere representing the planet. My reasoning is that Gas Giants
+            // surfaces that we can see IS the atmosphere."
+            //
+            // That reasoning is exactly right and it is why this was wrong. On a rocky world the shell
+            // is a real object: there is a solid surface and then, above it, air — so drawing a
+            // boundary 8% out says something true. A giant has no such boundary. The banded cloud deck
+            // the terrain generator draws IS the atmosphere, so a second shell standing 14% off it was
+            // drawing an edge that does not exist, and at a giant's size that edge was several units of
+            // visible haze. What is left at 1.02 is a limb glow, which is the only part of the effect
+            // that was ever describing anything.
+            case CelestialBodyType.GasGiant:      color = new Color(0.92f, 0.78f, 0.52f, 0.34f); thickness = 1.02f; return true;
             default: color = Color.clear; thickness = 1f; return false; // Moon / Asteroid / Barren: airless
         }
     }

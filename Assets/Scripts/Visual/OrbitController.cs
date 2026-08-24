@@ -34,6 +34,7 @@ public class OrbitController : MonoBehaviour
     LineRenderer orbitRing;
     LineRenderer habitableRing;
     LineRenderer ownerRing;
+    CivMarkBadge ownerBadge;   // the empire crest beside the ring, on the players own worlds
     Transform Container => transform.parent; // unscaled system container
 
     // ---- Setup ----
@@ -116,6 +117,9 @@ public class OrbitController : MonoBehaviour
         if (orbitRing != null) orbitRing.enabled = ringVisible && !ringConcealed && RevealAlpha > 0.001f;
         if (habitableRing != null) habitableRing.enabled = habitableWanted && !bodyConcealed;
         if (ownerRing != null) ownerRing.enabled = ownerWanted && !bodyConcealed;
+        // The crest follows the ring exactly. A badge left showing over a concealed world is the same
+        // defect the rings had: a labelled marker saying where the thing you just hid is.
+        if (ownerBadge != null) ownerBadge.Show(ownerWanted && !bodyConcealed);
     }
 
     /// Concealment's handle on everything this controller draws. Kept apart from `ringVisible` and from
@@ -359,11 +363,16 @@ public class OrbitController : MonoBehaviour
 
     // Coloured ring showing which faction owns this body (kept slightly larger than the green
     // habitable ring so they can both show).
-    public void SetOwnerHighlight(Color c, bool on)
+    //
+    // `mine` adds the EMPIRE'S CREST beside the ring — see CivMarkBadge. It is a separate argument
+    // rather than inferred from the colour because a colour is not an identity: two factions can be
+    // handed neighbouring hues, and "is this ring the player's" has to be answered from the owner.
+    public void SetOwnerHighlight(Color c, bool on, bool mine = false)
     {
         ownerWanted = on;   // intent; concealment gates it — see SetHabitableHighlight
         if (on)
         {
+            float r = Mathf.Max(1.6f, transform.lossyScale.x * 1.9f);
             if (ownerRing == null)
             {
                 var go = new GameObject(gameObject.name + "_OwnerRing");
@@ -373,17 +382,25 @@ public class OrbitController : MonoBehaviour
                 ownerRing.loop = true;
                 ownerRing.material = new Material(Shader.Find("Sprites/Default"));
                 ownerRing.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                float r = Mathf.Max(1.6f, transform.lossyScale.x * 1.9f);
                 ownerRing.startWidth = ownerRing.endWidth = 0.14f;
                 DrawEllipse(ownerRing, r, r);
             }
             ownerRing.startColor = ownerRing.endColor = c;
+
+            // Hung off the RING's own object, so it inherits the ring's position for free and cannot
+            // drift from the thing it labels. Sat on the ring's edge rather than at its centre, where
+            // it would cover the world.
+            if (mine) ownerBadge = CivMarkBadge.Attach(ownerRing.transform, r * 0.9f,
+                                                       new Vector3(r * 1.15f, 0f, 0f));
+            else if (ownerBadge != null) ownerBadge.Show(false);
+
             ApplyRingEnabled();
             UpdatePosition();
         }
         else if (ownerRing != null)
         {
             ownerRing.enabled = false;
+            if (ownerBadge != null) ownerBadge.Show(false);
         }
     }
 

@@ -269,19 +269,10 @@ public class PlanetViewWindow : MonoBehaviour
         selected.HasValue &&
         SurfaceBuildingDatabase.Get(selected.Value).index == SurfaceIndexKind.Mineral;
 
-    /// The Mineral Index is up — chosen in the Survey tab, or automatically with a mining piece in hand.
-    ///
-    /// This is now the ONLY circumstance under which named ore deposits are drawn anywhere. They used to
-    /// be baked into the terrain texture and so were visible in every view, at every zoom, forever; the
-    /// deposits still generate exactly as they did, but reading them is now something you do on purpose.
-    bool MineralOverlayActive =>
-        body != null && body.surface != null && SurfaceIndex.Unlocked(body, SurfaceIndexKind.Mineral) &&
-        // No `!showPowerOverlay` here any more. Leaving it in meant switching the grid on quietly
-        // downgraded the Mineral view: it still looked mineral-coloured, but fell through to the plain
-        // ramp and lost the NAMED ORE DEPOSITS, which this is the only place that draws. A map that
-        // looks the same and silently stops answering the question is the worst kind of regression.
-        ((tab == Tab.Survey && activeIndex == SurfaceIndexKind.Mineral) ||
-         (tab == Tab.Build && CarryingMiningPiece));
+    // MineralOverlayActive lived here. It made Mineral the ONLY overlay whenever it was up, which is
+    // what erased Solar when the player switched Mineral on. Named ore deposits are drawn by
+    // PaintIndexInto's own Mineral branch in every case, so no exclusive path is needed — see
+    // RefreshOverlays.
     int rotation;
     Vector2Int hoverCell = new Vector2Int(-1, -1);
     bool hoverValid;
@@ -306,7 +297,18 @@ public class PlanetViewWindow : MonoBehaviour
     // Survey-mode state.
     // Kept only so the Survey tab's cards still have something to reflect; the OVERLAY is driven by
     // IndexToggles now. Clicking a card sets both, so the tab and the icon bar agree.
-    SurfaceIndexKind activeIndex = SurfaceIndexKind.None;
+    /// The index the side panel describes: the LAST one switched on, or None.
+    ///
+    /// Derived from IndexToggles rather than stored. There used to be an `activeIndex` field holding a
+    /// second opinion beside the set, and that is how the map and the buttons came to disagree about
+    /// which overlays were showing.
+    SurfaceIndexKind TopIndex()
+    {
+        if (body == null) return SurfaceIndexKind.None;
+        scratchKinds.Clear();
+        IndexToggles.Active(body, scratchKinds);
+        return scratchKinds.Count > 0 ? scratchKinds[scratchKinds.Count - 1] : SurfaceIndexKind.None;
+    }
     readonly List<SurfaceIndexKind> scratchKinds = new List<SurfaceIndexKind>();
     // The Power grid is now a Survey overlay rather than its own tab: this flag is the "showing the power
     // grid" option. NOT exclusive with the index ramps any more — the grid has its own layer above the
@@ -784,7 +786,11 @@ public class PlanetViewWindow : MonoBehaviour
         // canvas SIZE CHANGE — which setting sizeDelta here isn't — so it would otherwise leave the window
         // hanging off the edge (the UISanity "off-canvas" warning). Fit() shrinks it to the canvas and
         // nudges it fully on-screen right now.
-        root.GetComponent<WindowFit>()?.Fit();
+        // Not `?.` — that tests the C# reference and cannot see a WindowFit whose native half has been
+        // destroyed, which is exactly what a closed-and-reopened window carries. See
+        // tools/check-unity-null.mjs.
+        var rootFit = root.GetComponent<WindowFit>();
+        if (rootFit != null) rootFit.Fit();
         rrt.SetAsLastSibling();
         RefreshMapTexture();
 
@@ -1279,7 +1285,7 @@ public class PlanetViewWindow : MonoBehaviour
         scratchKinds.Clear();
         IndexToggles.Active(body, scratchKinds);
         for (int i = 0; i < scratchKinds.Count; i++) sb.Append((int)scratchKinds[i]).Append(',');
-        sb.Append('|').Append((int)activeIndex).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
+        sb.Append('|').Append((int)TopIndex()).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
 
         // A SURVEY IN PROGRESS IS A CHANGING PICTURE, and the whole point of it is that you can watch.
         // Quantised rather than raw so this is not a rebuild every frame: 200 steps across a level is
@@ -1677,6 +1683,7 @@ public class PlanetViewWindow : MonoBehaviour
                 {
                     var sur = new System.Text.StringBuilder();
 
+                    var activeIndex = TopIndex();
                     if (activeIndex != SurfaceIndexKind.None)
                     {
                         sur.Append($"<b>{SurfaceIndex.Name(activeIndex)}</b> — {SurfaceIndex.Describe(activeIndex)}");
@@ -4244,7 +4251,6 @@ public class PlanetViewWindow : MonoBehaviour
             // IndexToggles means pressing either one moves both, rather than the tab quietly holding a
             // different opinion from the map it is describing.
             IndexToggles.Toggle(body, k);
-            activeIndex = IndexToggles.IsOn(body, k) ? k : SurfaceIndexKind.None;
             lastSig = null;
         }, 24);
         live.Button(btn, () =>
@@ -4580,12 +4586,21 @@ public class PlanetViewWindow : MonoBehaviour
         // ever needed to be above them, and it has its own.
         SetOverlayBelowPieces();
 
-        if (MineralOverlayActive && body.surface != null)
-        {
-            overlayImage.gameObject.SetActive(true);
-            RefreshIndexOverlay(SurfaceIndexKind.Mineral);
-            return;
-        }
+        // ---- THE MINERAL EARLY-OUT IS GONE, AND IT WAS A REAL BUG -------------------------------
+        //
+        // "When turning on the Solar Index and then activating the Mineral Index... it turns off the
+        // solar index (even though the solar index still says it is 'showing')."
+        //
+        // It did. This block used to repaint the overlay with Mineral ALONE and return, so switching
+        // Mineral on genuinely erased every other index from the map while their buttons stayed lit.
+        // The one thing it existed for — drawing named ore deposits — is not exclusive to it at all:
+        // PaintIndexInto already draws them inside its own Mineral branch, and that runs whether
+        // Mineral is the only index up or one of six. So the early-out bought nothing and cost the
+        // player every other overlay.
+        //
+        // The activeIndex field went with it. It was a second, single-valued opinion about which index
+        // was up, living beside IndexToggles, which is a set — and two sources of truth for one
+        // question is exactly how the two came to disagree in front of the player.
 
         // ---- WHICH INDEXES ARE UP ----------------------------------------------------------------
         //
@@ -5192,7 +5207,9 @@ public class PlanetViewWindow : MonoBehaviour
     }
 
     // Reused between rebuilds; matches Survey's own scratch size.
-    static readonly Survey.Block[] fogBlocks = new Survey.Block[8];
+    // Eight ships times Survey.MaxHeads rects each — a ship on a large world works several adjacent
+    // blocks at once and draws a marker over each. Sized off the constant so the two cannot drift.
+    static readonly Survey.Block[] fogBlocks = new Survey.Block[8 * Survey.MaxHeads];
 
     // Per-row block sizes for the world currently being painted. Grown by Survey.RowBlocks when the
     // world changes size, which for a moon pane means every time a different moon is opened.
@@ -6238,44 +6255,84 @@ public class PlanetViewWindow : MonoBehaviour
         yieldSig = null;
     }
 
-    /// Which index the numbers should be about: the held structure's on Build, the chosen overlay's on
-    /// Survey. One place, so the numbers can never be about a different map than the colours under them.
-    SurfaceIndexKind YieldIndex()
+    // ============================================================================================
+    // EVERY INDEX THAT REACHES A TILE PRINTS ITS OWN NUMBER, STACKED
+    //
+    // "When Multiple indexes are highlighting the same grid, Stack the index values vertically and keep
+    // the index color for the Texts the same as their respective index."
+    //
+    // This used to print ONE index — YieldIndex, "the last one switched on" — and that is the other
+    // half of the reported cross-toggling. Switch Solar on and every lit tile carries a number; switch
+    // Mineral on as well and every one of those numbers becomes Mineral's, which on an asteroid with no
+    // minerals means they all vanish. The Solar button still says "showing", the Solar wash is still on
+    // the map, and the figures the player was reading are gone. That reads as Solar being switched off,
+    // and the report says so almost exactly.
+    //
+    // Every active index now contributes a line, in its own colour, stacked down the cell.
+    // ============================================================================================
+
+    /// Which indexes the numbers should be about: the held structure's on Build (that is the one being
+    /// scored, and the only one that matters while placing), every active one otherwise.
+    void YieldIndexes(List<SurfaceIndexKind> into)
     {
+        into.Clear();
+        if (body == null) return;
+
         if (tab == Tab.Build)
         {
             var info = BuildPlacement.IsFor(body) ? BuildPlacement.Info
                      : selected.HasValue ? SurfaceBuildingDatabase.Get(selected.Value) : null;
-            return info?.index ?? SurfaceIndexKind.None;
+            if (info != null && info.index != SurfaceIndexKind.None) into.Add(info.index);
+            return;
         }
-        // The numbers under the cursor follow the LAST index switched on, on any tab. With several up
-        // at once something has to be chosen, and the most recently added is the one the player was
-        // most recently thinking about.
-        scratchKinds.Clear();
-        IndexToggles.Active(body, scratchKinds);
-        return scratchKinds.Count > 0 ? scratchKinds[scratchKinds.Count - 1] : SurfaceIndexKind.None;
+
+        IndexToggles.Active(body, into);
     }
+
+    readonly List<SurfaceIndexKind> yieldKinds = new List<SurfaceIndexKind>();
+
+    /// The index lines a single cell has to show, in canonical order. Filtered to the ones that are
+    /// READABLE — surveyed, finished, and actually reaching this tile.
+    ///
+    /// The "finished" gate is per index and not per map: a finished Solar may stack beside a Mineral
+    /// survey still in its second pass, and the unfinished one simply does not contribute a line rather
+    /// than suppressing the whole readout. Printing an exact figure over a map that is still coarse is
+    /// the thing that gate exists to prevent, and it is a fact about one index at a time.
+    int LinesFor(int x, int y, SurfaceIndexKind[] kinds, float[] vals, float[] ts, int max)
+    {
+        int n = 0;
+        for (int i = 0; i < yieldKinds.Count && n < max; i++)
+        {
+            var k = yieldKinds[i];
+            if (!SurfaceIndex.Unlocked(body, k)) continue;
+            if (!Survey.RevealOf(body, k).complete) continue;
+
+            float v = SurfaceIndex.Get(body, k, x, y);
+            if (!SurfaceIndex.ShownFor(body, k, v, out float t)) continue;
+
+            kinds[n] = k; vals[n] = v; ts[n] = t; n++;
+        }
+        return n;
+    }
+
+    /// The most lines one cell will print. Past this the stack is taller than the cell and the numbers
+    /// overlap the neighbours — six indexes at eleven point is sixty-six pixels of text.
+    const int MaxYieldLines = 4;
 
     void RefreshYieldIcons()
     {
-        var kind = YieldIndex();
+        YieldIndexes(yieldKinds);
 
-        // The numbers wait for the index to be FINISHED, not merely started.
-        //
-        // A level-2 survey resolves an index in three passes, and until the last one lands the colours
-        // on the map are deliberately coarse — the whole 70-and-up region painted as one band, then
-        // splitting. An exact per-tile figure printed over that would be a precise answer sitting on
-        // top of an approximate picture, and the player would site a building off a number the map
-        // underneath does not yet support.
-        if (body?.surface == null || kind == SurfaceIndexKind.None
-            || !SurfaceIndex.Unlocked(body, kind)      // not surveyed: nothing honest to show
-            || !Survey.RevealOf(body, kind).complete   // still being read: the map is coarse, so is the truth
-            || !HasHoverCell)                          // nothing to centre on
+        if (body?.surface == null || yieldKinds.Count == 0 || !HasHoverCell)
         { ClearYieldIcons(); return; }
 
         int w = body.surface.width, h = body.surface.height;
         float tileW = mapRT.rect.width / w, tileH = mapRT.rect.height / h;
-        if (Mathf.Min(tileW, tileH) < YieldIconMinTilePx) { ClearYieldIcons(); return; }
+
+        // The size gate scales with the STACK. One number needs a cell 22px tall; four need four times
+        // the room, or they are drawn on top of each other and none of them is readable.
+        int lines = Mathf.Min(yieldKinds.Count, MaxYieldLines);
+        if (Mathf.Min(tileW, tileH) < YieldIconMinTilePx * (0.55f + 0.45f * lines)) { ClearYieldIcons(); return; }
 
         // The block, clipped to the map. Latitude does not wrap, so the block simply runs out at the
         // poles rather than folding over — there is no tile on the other side of the top row.
@@ -6284,10 +6341,12 @@ public class PlanetViewWindow : MonoBehaviour
         int y1 = Mathf.Min(h - 1, hoverCell.y + YieldIconRadius);
         if (y1 < y0) { ClearYieldIcons(); return; }
 
-        // Everything the drawn output depends on. The tile size is bucketed to whole pixels because it
-        // moves continuously while zooming and the labels only need to be re-laid out when a cell
-        // actually changes size on screen — anchored positions rescale themselves.
-        string sig = $"{kind}|{hoverCell.x},{hoverCell.y}|{Mathf.RoundToInt(tileW)}";
+        // Everything the drawn output depends on. THE WHOLE ACTIVE SET, not one kind — keyed on a single
+        // index, switching a second one on would not redraw the stack, which is the same class of bug as
+        // the one this method is fixing.
+        var sb = new System.Text.StringBuilder();
+        foreach (var k in yieldKinds) sb.Append((int)k).Append(',');
+        string sig = $"{sb}|{hoverCell.x},{hoverCell.y}|{Mathf.RoundToInt(tileW)}";
         if (sig == yieldSig && yieldLayer != null) return;
         yieldSig = sig;
 
@@ -6300,6 +6359,10 @@ public class PlanetViewWindow : MonoBehaviour
         }
         ClearLayer(yieldLayer);
 
+        var kinds = new SurfaceIndexKind[MaxYieldLines];
+        var vals = new float[MaxYieldLines];
+        var ts = new float[MaxYieldLines];
+
         for (int y = y0; y <= y1; y++)
             for (int gx = x0; gx <= x1; gx++)
             {
@@ -6307,28 +6370,44 @@ public class PlanetViewWindow : MonoBehaviour
                 // stopping dead — the same rule the map itself draws by.
                 int x = ((gx % w) + w) % w;
 
-                float v = SurfaceIndex.Get(body, kind, x, y);
-                if (!SurfaceIndex.ShownFor(body, kind, v, out float t)) continue;
-
-                // Coloured by the tile's own band, in that band's outline colour — so a number is the
-                // same brightness as the ring drawn around the ground it is standing on, and the two
-                // readings reinforce each other instead of competing.
-                var col = SurfaceIndex.Outline(kind, t);
-                bool top = t >= 0.999f;
+                int n = LinesFor(x, y, kinds, vals, ts, MaxYieldLines);
+                if (n == 0) continue;
 
                 var go = UIFactory.NewUI(yieldLayer, "Y");
-                var label = UIFactory.Text(go.transform, top ? $"<b>{v * 100f:F0}</b>" : $"{v * 100f:F0}",
-                    top ? 12 : 11, col, TextAlignmentOptions.Center);
+                var rt = go.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(x / (float)w, y / (float)h);
+                rt.anchorMax = new Vector2((x + 1) / (float)w, (y + 1) / (float)h);
+                rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+
+                // ONE TMP OBJECT PER CELL, not one per line. A 9x9 block of cells with four indexes up
+                // is 324 labels if each line is its own object, and the reason this readout was cut down
+                // to a block around the cursor in the first place was the cost of the objects. Rich-text
+                // colour tags do the same job inside a single label.
+                //
+                // Canonical order (SurfaceIndex.All), so two cells never list the same pair of indexes
+                // in different orders — that would read as noise even though every number is right.
+                var text = new System.Text.StringBuilder();
+                for (int i = 0; i < n; i++)
+                {
+                    if (i > 0) text.Append('\n');
+                    string hex = ColorUtility.ToHtmlStringRGB(SurfaceIndex.Outline(kinds[i], ts[i]));
+                    bool top = ts[i] >= 0.999f;
+                    text.Append("<color=#").Append(hex).Append('>');
+                    if (top) text.Append("<b>");
+                    text.Append(Mathf.RoundToInt(vals[i] * 100f));
+                    if (top) text.Append("</b>");
+                    text.Append("</color>");
+                }
+
+                var label = UIFactory.Text(go.transform, text.ToString(),
+                                           n > 2 ? 10 : 11, Color.white, TextAlignmentOptions.Center);
                 label.raycastTarget = false;
+                label.lineSpacing = -18f;   // tight, so a four-line stack still sits inside its cell
 
                 var sh = label.gameObject.AddComponent<Shadow>();
                 sh.effectColor = new Color(0f, 0f, 0f, 0.85f);
                 sh.effectDistance = new Vector2(1f, -1f);
 
-                var rt = go.GetComponent<RectTransform>();
-                rt.anchorMin = new Vector2(x / (float)w, y / (float)h);
-                rt.anchorMax = new Vector2((x + 1) / (float)w, (y + 1) / (float)h);
-                rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
                 UIFactory.Stretch(label.rectTransform);
             }
     }
@@ -7364,9 +7443,21 @@ public class PlanetViewWindow : MonoBehaviour
         // those stopped being biomes and became what they always were: a statement about height. The
         // metres are measured against this world's own waterline, so the number means what a player
         // expects it to mean whether the world is drowned or bone dry.
-        float metres = PlanetTerrainGenerator.ElevationMetres(b, tile.elevation);
-        string band = PlanetTerrainGenerator.ElevationBand(b, tile.elevation);
-        sb.Append($"\n<color=#B8C6D4>{band}</color> <size=10><color=#9FB4C8>{metres:N0} m</color></size>");
+        // ...EXCEPT ON A GAS GIANT, WHICH HAS NO GROUND TO BE HIGH OR LOW.
+        //
+        // "Lets also remove the elevation indicator and index indicator on the mouse window when
+        // inspecting Gas Giants surfaces. Elevation has no meaning for a Gaseous surface with no solid
+        // ground."
+        //
+        // Right, and worse than meaningless: the metres are measured against a WATERLINE, so on a world
+        // with neither ground nor water the readout was a number derived from a noise field, quoted to
+        // the metre, about a place that does not exist. A blank line is more honest than that.
+        if (b.type != CelestialBodyType.GasGiant)
+        {
+            float metres = PlanetTerrainGenerator.ElevationMetres(b, tile.elevation);
+            string band = PlanetTerrainGenerator.ElevationBand(b, tile.elevation);
+            sb.Append($"\n<color=#B8C6D4>{band}</color> <size=10><color=#9FB4C8>{metres:N0} m</color></size>");
+        }
 
         // Elevation included — a peak and the plain beside it are not the same temperature, and the map
         // plainly shows they are not.
@@ -7431,7 +7522,12 @@ public class PlanetViewWindow : MonoBehaviour
             sb.Append($"\n<size=11><color=#{hex}>{SurfaceIndex.ShortName(k)} <b>{v * 100f:F0}%</b></color></size>");
         }
 
-        if (listed == 0)
+        // "The 'no resource here' indicator will never have anything to show on Gas Giants."
+        //
+        // Correct — SurfaceIndex returns 0 for GasClouds and Storm in every one of the six indexes, so
+        // on a giant this line is not reporting an empty tile, it is reporting a question that does not
+        // apply. "Nothing here" reads as bad luck; the truth is that there is nothing to have.
+        if (listed == 0 && b.type != CelestialBodyType.GasGiant)
             sb.Append("\n<size=10><color=#5A6A7A><i>no resource here</i></color></size>");
 
         if (locked > 0)
@@ -7531,7 +7627,19 @@ public class PlanetViewWindow : MonoBehaviour
         moonTabStrip.gameObject.SetActive(true);
         if (body != null) BuildMapTab(body, PlanetTabSize);           // the planet's own (bigger) tab first
         foreach (var m in MoonsClosestFirst()) BuildMapTab(m, MoonTabSize);
+
+        // The View button sits under this strip, so it moves whenever the strip's height does. The
+        // ContentSizeFitter has not run yet at this point in the frame — it resolves at the end of the
+        // layout pass — so the height is computed from the tabs we just built rather than read back.
+        int tabs = moonTabStrip.childCount;
+        pendingTabStripHeight = tabs <= 0 ? 0f
+                              : PlanetTabSize + (tabs - 1) * (MoonTabSize + 7f) + (tabs - 1) * 0f;
+        PositionViewFormatButton();
     }
+
+    /// The tab strip's height as of the last rebuild. See BuildMapTabStrip for why it is not read off
+    /// the RectTransform.
+    float pendingTabStripHeight;
 
     // One tab: a square terrain thumbnail of the body it opens, tinted when that map is open, with a hover
     // survey card. Used for both the planet (bigger) and each moon.
@@ -7602,15 +7710,42 @@ public class PlanetViewWindow : MonoBehaviour
     // arrangement of the open panes (moons above / below / split / beside the planet).
     void BuildViewFormatButton()
     {
+        // ---- TOP LEFT, UNDER THE MAP TABS. IT USED TO BE TOP RIGHT, ON TOP OF THE INDEX BAR. -------
+        //
+        // "No index Icons are visible within the top right of the map itself unless the map is
+        // minimized by the Grid Map Icon on the top left."
+        //
+        // Nothing was conditional on minimising. Both this button and IndexIconBar were anchored to
+        // gridHolder's top-right corner at (-6, -6) — the same six pixels — and this one is created
+        // LATER (BuildViewFormatButton runs after the bar is attached), so it is a later sibling and
+        // draws on top. A 150x26 opaque button over a 26-tall icon bar hides it completely. Minimising
+        // the map moved the bar out from under it, which is why it appeared to depend on that.
+        //
+        // "Lets move the View: Moons button to the left side instead of the right side. Have it next to
+        // the Map Toggle buttons." Which fixes the overlap as a side effect, and is where it belongs
+        // anyway: it is a control ABOUT the map tabs, and it now sits directly under them.
         var b = UIFactory.Button(gridHolder, "", CycleMapLayout, 24f);
         viewFormatBtn = b.GetComponent<RectTransform>();
-        viewFormatBtn.anchorMin = viewFormatBtn.anchorMax = new Vector2(1f, 1f);
-        viewFormatBtn.pivot = new Vector2(1f, 1f);
-        viewFormatBtn.anchoredPosition = new Vector2(-6f, -6f);
+        viewFormatBtn.anchorMin = viewFormatBtn.anchorMax = new Vector2(0f, 1f);
+        viewFormatBtn.pivot = new Vector2(0f, 1f);
         viewFormatBtn.sizeDelta = new Vector2(150f, 26f);
+        PositionViewFormatButton();
         viewFormatLabel = b.GetComponentInChildren<TMP_Text>();
         if (viewFormatLabel != null) viewFormatLabel.fontSize = UITheme.SmallSize;
         UpdateViewFormatLabel();
+    }
+
+    /// Park the View button just below the map-tab strip, whatever height that strip currently is.
+    ///
+    /// The strip is a VerticalLayoutGroup with a ContentSizeFitter, so it grows and shrinks with the
+    /// number of moons — a fixed offset would sit on top of the tabs on a four-moon giant and float in
+    /// space on a bare rock. Called again from SetupMapTabs, which is the only thing that changes it.
+    void PositionViewFormatButton()
+    {
+        if (viewFormatBtn == null) return;
+        float stripHeight = Mathf.Max(pendingTabStripHeight,
+                                      moonTabStrip != null ? moonTabStrip.rect.height : 0f);
+        viewFormatBtn.anchoredPosition = new Vector2(6f, -(6f + stripHeight + 8f));
     }
 
     void CycleMapLayout()

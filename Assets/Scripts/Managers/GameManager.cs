@@ -176,7 +176,11 @@ public class GameManager : MonoBehaviour
             // Stepped: this yields once per WORLD, not once per system, so a system with six planets and
             // their moons renders a dozen frames instead of one. That is what lets the bar move and the
             // dots animate during the part of the load that actually takes the time.
-            var step = GalaxyGenerator.AddSystemStepped(galaxy, solarSystemGenerator, i, count);
+            // Wrapped in the profiler so a stall names itself. An unyielded span IS one MoveNext, so
+            // this measures exactly the thing the loading screen can only report the total of — see
+            // GenProfiler. Silent on a healthy load.
+            var step = GenProfiler.Watch($"system {i + 1}/{count}",
+                                         GalaxyGenerator.AddSystemStepped(galaxy, solarSystemGenerator, i, count));
             while (step.MoveNext()) yield return step.Current;
 
             // The home system's star gets NAMED on screen. Passing it as the stage string rather than

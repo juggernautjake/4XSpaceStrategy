@@ -60,7 +60,11 @@ public static class TerrainColorMap
             case TerrainType.CrystalField:  return new Color(0.60f, 0.80f, 0.86f);
             case TerrainType.MetallicCrust: return new Color(0.52f, 0.54f, 0.60f);
             case TerrainType.GasClouds:     return new Color(0.80f, 0.72f, 0.52f);
-            case TerrainType.Storm:         return new Color(0.60f, 0.56f, 0.66f);
+            // A REDDISH ORANGE, not the purple-grey it was. "Currently the Storm grid color is purple,
+            // lets make the default like a reddish orange color for Storm." This is the AMMONIA default —
+            // GasGiantPalette.StormColor overrides it per variant, so a methane giant gets a blue storm
+            // and an ember giant a deeper red. See GasGiantPalette.
+            case TerrainType.Storm:         return new Color(0.78f, 0.38f, 0.24f);
         }
 
         return Color.magenta; // Should never happen now; a magenta tile means a missing case above.

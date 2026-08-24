@@ -138,8 +138,9 @@ public static class UIFactory
     public static VerticalLayoutGroup VerticalLayout(RectTransform container, float spacing = 6f, RectOffset padding = null)
     {
         if (container == null) return null;
-        var v = container.gameObject.GetComponent<VerticalLayoutGroup>()
-             ?? container.gameObject.AddComponent<VerticalLayoutGroup>();
+        // Ensure, not `??`. Ensure tests with `== null`, which is the overload that also reports a
+        // destroyed component as null; `??` does not. See tools/check-unity-null.mjs.
+        var v = Ensure<VerticalLayoutGroup>(container.gameObject);
         v.spacing = spacing;
         v.padding = padding ?? new RectOffset(14, 14, 10, 10);
         v.childControlWidth = true; v.childControlHeight = true;

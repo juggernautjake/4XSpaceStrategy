@@ -240,7 +240,7 @@ public class SystemVisualizer : MonoBehaviour
             // could not be sliced apart from the cheap half. VisualizeGalaxyStepped's appearance pass
             // replaces this a few bodies per frame. See the note there.
             visual.AddComponent<BodyFog>().Init(body);
-            if (body.owner != null) oc.SetOwnerHighlight(FactionManager.OwnerColor(body.owner), true);
+            if (body.owner != null) oc.SetOwnerHighlight(FactionManager.OwnerColor(body.owner), true, Claim.IsMine(body));
 
             // --- Moons ---
             foreach (var moon in body.moons)
@@ -260,7 +260,7 @@ public class SystemVisualizer : MonoBehaviour
                 var moc = UIFactory.Ensure<OrbitController>(moonVisual);
                 moc.SetupFromData(body.visualObject.transform, moon);
                 moonVisual.AddComponent<BodyFog>().Init(moon);   // same as the planet above
-                if (moon.owner != null) moc.SetOwnerHighlight(FactionManager.OwnerColor(moon.owner), true);
+                if (moon.owner != null) moc.SetOwnerHighlight(FactionManager.OwnerColor(moon.owner), true, Claim.IsMine(moon));
             }
         }
     }

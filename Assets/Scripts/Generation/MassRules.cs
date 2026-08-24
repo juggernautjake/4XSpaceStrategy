@@ -43,8 +43,15 @@ public static class MassRules
 
     // ---- The budget ------------------------------------------------------------------------------
 
-    /// Solar System Mass per solar mass of star. One Sun-like star funds a hundred.
-    public const float SsmPerSolarMass = 100f;
+    /// Solar System Mass per solar mass of star. "Decrease the Solar System Mass total so that 1 Solar
+    /// Mass is equal to 70 Solar System Mass."
+    ///
+    /// Was 100. A 30% cut on its own does NOT produce a 30% smaller system — the budget is a ceiling
+    /// and the old lane walk spent it down to the last decimal — so this works together with the ring
+    /// system's explicit body-count target (SolarSystemGenerator.ChooseFilledRings) rather than
+    /// instead of it. What the cut does is make the ceiling bind sooner on the dim stars, so a red
+    /// dwarf runs out of allowance part-way down its ladder and genuinely cannot fill nine rings.
+    public const float SsmPerSolarMass = 70f;
 
     /// Floor and ceiling on a system's allowance.
     ///
@@ -53,8 +60,22 @@ public static class MassRules
     /// (mass 14, and therefore 1400 unclamped) and at the O-type giants: a system with fourteen hundred
     /// mass to spend would lay out three dozen bodies and lay them out past where the camera can frame
     /// them. Four hundred is about four gas giants and a scatter of rock, which is already a big system.
-    public const float BudgetMin = 45f, BudgetMax = 400f;
+    /// Scaled with SsmPerSolarMass (100 -> 70) so the clamps keep meaning what they meant: the floor is
+    /// still "a bit less than a red dwarf's own allowance" and the ceiling is still "about four gas
+    /// giants and a scatter of rock".
+    public const float BudgetMin = 32f, BudgetMax = 280f;
 
+    // ---- THE TABLE BELOW IS STALE. ----------------------------------------------------------------
+    //
+    // It was measured against SsmPerSolarMass = 100 AND against the outward LANE WALK, and both are
+    // gone: the allowance is 70 now and placement is a fixed nine-ring ladder with an explicit body
+    // count (SolarSystemGenerator.ChooseFilledRings). Every figure here is therefore an upper bound on
+    // what the generator now produces rather than a description of it.
+    //
+    // Left in place rather than deleted or guessed at, because it is the only record of what the old
+    // system did and the new numbers have to be MEASURED, not estimated — see
+    // tools/system-composition-check.mjs, which regenerates it.
+    //
     // MEASURED (Node port of this file plus SolarSystemGenerator's lane loop, 4,000 systems each):
     //
     //   star            budget  spent      planets  giants  terrestrial  belts  moons   avg giant
@@ -177,15 +198,21 @@ public static class MassRules
 
     /// How much mass a host may spend on ITS ENTIRE MOON SYSTEM.
     ///
-    /// The request's two rules, in one place: a terrestrial planet may spend half its own mass, a gas
-    /// giant a tenth of its. That asymmetry is doing real work — a mass-4 super-Earth gets a 2.0
-    /// allowance and could have one large moon, while a mass-40 giant gets 4.0 and typically spreads it
-    /// across several. It is also, again, a CEILING: most planets spend a fraction of it and some spend
-    /// none at all.
+    /// The request's two rules, in one place: a terrestrial planet may spend a QUARTER of its own mass,
+    /// a gas giant a tenth of its.
+    ///
+    /// The terrestrial share was a half, and "Terrestrial planets max Moon Mass to use for generating
+    /// moons should only be 25% of the host planets Mass" halves it. That is a bigger change than it
+    /// looks: an Earth-mass world's whole moon allowance is now 0.25, which is two moons at the 0.1
+    /// floor and nothing more — so a rocky world with a full retinue of three stops being possible
+    /// below about mass 1.2, and the moon-heavy systems the report describes cannot form.
+    ///
+    /// A CEILING, as ever: most planets spend a fraction of it, and after the moonless roll in
+    /// SolarSystemGenerator most spend none.
     public static float MoonBudget(float hostMass)
     {
         if (hostMass <= 0f) return 0f;
-        return hostMass >= WorldClassifier.GasGiantMassFloor ? hostMass / 10f : hostMass * 0.5f;
+        return hostMass >= WorldClassifier.GasGiantMassFloor ? hostMass / 10f : hostMass * 0.25f;
     }
 
     /// Roll one moon's mass out of what is left of its host's moon allowance.
@@ -245,12 +272,29 @@ public static class MassRules
 
     const float OneThird = 1f / 3f;
 
+    /// A gas giant renders at TWICE what the cube-root law alone gives it.
+    ///
+    /// "Increase the current size scale of the stars and Gas Giants by 2 in solar system view. They seem
+    /// far too small." They do, and the cube root is why: it is physically correct — mass is a volume —
+    /// but a mass-30 giant is only 3.1 times an Earth's diameter under it, where the real Jupiter is
+    /// eleven. The cube root is kept (it is the reason a 40-mass giant is not six times an Earth, and
+    /// the reason OrbitSafety's reservations stay sane), and a flat factor on top brings the class up to
+    /// something that reads as a giant next to the rocky worlds.
+    ///
+    /// OrbitSafety.Scale reads VisualDiameter, so the orbital band a giant reserves grows with it and
+    /// the ring-skipping in SolarSystemGenerator sees the new size for free.
+    public const float GasGiantDiameterScale = 2f;
+
     public static float VisualDiameter(float mass, bool isMoon)
     {
         // Saves written before Mass existed can carry 0; callers back-fill from surfaceSize, but guard
         // anyway so a missing mass renders as something rather than a zero-size dot.
         if (mass <= 0.0001f) mass = 0.1f;
         float d = Mathf.Pow(mass, OneThird) * (isMoon ? MoonDiameterPerCubeRootMass : PlanetDiameterPerCubeRootMass);
+
+        // A moon is never a giant however heavy it is — the moon coefficient already says it is a
+        // satellite, and GiantMoonMassMax keeps it well under the floor anyway.
+        if (!isMoon && mass >= WorldClassifier.GasGiantMassFloor) d *= GasGiantDiameterScale;
         // Floors low enough that they never bind for a real body (the smallest mass is 0.1), so they are
         // a guard against bad data rather than the thing deciding how big small moons look.
         return Mathf.Max(isMoon ? 0.10f : 0.18f, d);

@@ -63,7 +63,7 @@ public static class SurfaceTextureRenderer
                 // table is keyed on terrain type and so cannot tell one giant from another; this is the
                 // only place the BODY gets a say. Banding, storms and the per-tile jitter are all
                 // structure and survive untouched — see GasGiantPalette.
-                c = GasGiantPalette.Apply(body, c);
+                c = GasGiantPalette.Apply(body, c, tile.type);
 
                 // The same per-tile shade jitter the detailed map uses, so the two views still look
                 // like the same world — just at different fidelity.
@@ -139,7 +139,11 @@ public static class SurfaceTextureRenderer
         {
             var type = (TerrainType)t;
             pattern[t] = TerrainTextureMap.Pattern(type, scale);
-            colour[t] = TerrainColorMap.Get(type);
+            // PER BODY, not per type. This array used to be the raw table, which meant the detailed map
+            // ignored GasGiantPalette entirely — a methane giant drew blue on the grid and tan here.
+            // Folding the palette in as the array is built keeps the one-lookup-per-type optimisation
+            // and costs one extra call per TYPE rather than per tile.
+            colour[t] = GasGiantPalette.Apply(body, TerrainColorMap.Get(type), type);
         }
 
         var px = new Color32[tw * th];
@@ -160,7 +164,8 @@ public static class SurfaceTextureRenderer
                 }
 
                 int ti = (int)tile.type;
-                Color c = (uint)ti < (uint)typeCount ? colour[ti] : TerrainColorMap.Get(tile.type);
+                Color c = (uint)ti < (uint)typeCount ? colour[ti]
+                                                    : GasGiantPalette.Apply(body, TerrainColorMap.Get(tile.type), tile.type);
                 float[] pat = (uint)ti < (uint)typeCount ? pattern[ti] : null;
 
                 // The same per-tile shade jitter BuildGrid uses, so the two views still look like the
@@ -191,9 +196,92 @@ public static class SurfaceTextureRenderer
                 }
             }
 
+        PaintContours(body, px, w, h, tw, scale);
+
         tex.SetPixels32(px);
         tex.Apply();
         return tex;
+    }
+
+    // ============================================================================================
+    // CONTOUR LINES — 500 m apart, on the cell edges, both above and below the water
+    //
+    // "A thin black border separating each elevation band ... giving the planet map a topographic read.
+    // This is what replaces biomes-as-elevation."
+    //
+    // A SEPARATE PASS over the finished texture rather than a test inside the fill loop, for one
+    // reason: a contour is a property of the BOUNDARY between two cells, so drawing it needs both of
+    // them, and the fill loop only ever has one. Trying to do it inline means either sampling the
+    // neighbour's tile again per texel or carrying a row of state, and both are more work than walking
+    // the grid a second time over an array that is already hot.
+    //
+    // ONE TEXEL, on the inside edge of the LOWER cell — not both cells, or every line is two texels
+    // wide and the map reads as a mesh laid over the ground rather than as contours on it. Which side
+    // owns the line is arbitrary but must be consistent, or a slope drawn east-to-west and the same
+    // slope drawn west-to-east would sit half a cell apart.
+    //
+    // LONGITUDE WRAPS and latitude does not. The map is a cylinder: the cell at x = w-1 borders the one
+    // at x = 0, and a contour that stops at the seam is a contour with a visible join in it. The poles
+    // are the top and bottom of the texture and border nothing, so the y comparison simply stops.
+    //
+    // ONLY IN THE TEXTURED PATH. BuildGrid draws one texel per cell and feeds the moon thumbnails, the
+    // moon panes and the 3D globes; there is no edge to put a line on at that size, and a black texel
+    // per cell boundary would be a black grid over a hundred-pixel picture. The Planet View map is the
+    // one the request is about and the only one ever zoomed far enough to read a contour.
+    // ============================================================================================
+
+    /// Contour lines are drawn this far toward black. Not pure black: at scale 4 a line is a quarter of
+    /// the cell edge, and full black there reads as a heavy grid rather than as a hairline over terrain.
+    const float ContourDarken = 0.22f;
+
+    static void PaintContours(CelestialBody body, Color32[] px, int w, int h, int tw, int scale)
+    {
+        // One band lookup per CELL rather than per comparison — every interior cell is otherwise read
+        // twice (once as itself, once as its west/south neighbour), and the band is a divide and a floor.
+        var band = new int[w * h];
+        float water = body.terrainParams.SeaLevelOrNeutral;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                var t = body.surface.tiles[x, y];
+                band[y * w + x] = t == null ? 0
+                    : PlanetTerrainGenerator.ContourBand(t.elevation, water);
+            }
+
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int here = band[y * w + x];
+                int ox = x * scale, oy = y * scale;
+
+                // ---- the eastern edge, wrapping at the seam ----
+                int east = band[y * w + (x + 1 == w ? 0 : x + 1)];
+                if (east != here)
+                {
+                    // The lower of the two owns the line, so it lands on one side of the step only.
+                    int col = here < east ? ox + scale - 1 : (x + 1 == w ? 0 : ox + scale);
+                    if (col < tw)
+                        for (int sy = 0; sy < scale; sy++) Darken(px, (oy + sy) * tw + col);
+                }
+
+                // ---- the northern edge; the poles have no neighbour ----
+                if (y + 1 < h)
+                {
+                    int north = band[(y + 1) * w + x];
+                    if (north != here)
+                    {
+                        int row = here < north ? oy + scale - 1 : oy + scale;
+                        for (int sx = 0; sx < scale; sx++) Darken(px, row * tw + ox + sx);
+                    }
+                }
+            }
+    }
+
+    static void Darken(Color32[] px, int i)
+    {
+        var c = px[i];
+        px[i] = new Color32((byte)(c.r * ContourDarken), (byte)(c.g * ContourDarken),
+                            (byte)(c.b * ContourDarken), 255);
     }
 
     /// Texels per cell edge: the largest power of two, capped at the art's own size, whose square times
@@ -234,7 +322,10 @@ public static class SurfaceTextureRenderer
                 float v = (y + 0.5f) / h;
 
                 var s = PlanetTerrainGenerator.SampleNormalized(body, u, v, p, 6);
-                Color c = TerrainColorMap.Get(s.terrain);
+                // Through the palette, like the other two views. Without this the globe was the only
+                // place a giant kept the raw tan table — so a blue giant turned tan as the camera pulled
+                // back, which is the sort of inconsistency nobody reports because nobody believes it.
+                Color c = GasGiantPalette.Apply(body, TerrainColorMap.Get(s.terrain), s.terrain);
                 float b = Mathf.Lerp(0.80f, 1.18f, s.shade);
                 c = new Color(c.r * b, c.g * b, c.b * b, 1f);
 

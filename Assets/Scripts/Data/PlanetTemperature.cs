@@ -95,6 +95,17 @@ public static class PlanetTemperature
     static float InternalC(CelestialBodyType type, float geothermal01)
         => type == CelestialBodyType.VolcanicPlanet ? Mathf.Clamp01(geothermal01) * InternalMaxC : 0f;
 
+    /// How much of THIS world's temperature comes from inside it, in °C. Public because the terrain
+    /// classifier has to be able to tell a world melted from below from one baked from outside — see
+    /// PlanetTerrainGenerator's magma gate, and the Geothermal index in SurfaceIndex.
+    ///
+    /// The distinction is the whole of the reported bug. A world close enough to its sun to sit at
+    /// 800 °C grew liquid rock across its entire surface, and the Geothermal index then read that
+    /// liquid rock as evidence of crustal heat and reported 95% everywhere. Neither is true: starlight
+    /// heats the SURFACE, and there is nothing under it for a geothermal plant to tap.
+    public static float InternalCelsius(CelestialBody b)
+        => b == null ? 0f : InternalC(b.type, GeothermalMap.WorldIntensity(b));
+
     static float BaseCelsius(CelestialBody b)
         => BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, b.type, GeothermalMap.WorldIntensity(b));
 

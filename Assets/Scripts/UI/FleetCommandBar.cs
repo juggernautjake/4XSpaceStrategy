@@ -622,7 +622,9 @@ public class FleetCommandBar : MonoBehaviour
     GameObject Btn(string label, float width, System.Action onClick, string tip = null)
     {
         var b = UIFactory.Button(row, label, onClick, 40f);
-        var le = b.gameObject.GetComponent<LayoutElement>() ?? b.gameObject.AddComponent<LayoutElement>();
+        // Ensure, not `??`: `??` is a C# operator and never runs Unity's == overload, so a destroyed
+        // LayoutElement comes back as a live reference. See tools/check-unity-null.mjs.
+        var le = UIFactory.Ensure<LayoutElement>(b.gameObject);
         le.preferredWidth = width; le.flexibleWidth = 0;
         var txt = b.GetComponentInChildren<TMP_Text>();
         if (txt != null) { txt.fontSize = 10; txt.alignment = TextAlignmentOptions.Center; }

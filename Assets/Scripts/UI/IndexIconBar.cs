@@ -116,12 +116,25 @@ public class IndexIconBar : MonoBehaviour
     RectTransform bar;
     readonly List<SurfaceIndexKind> built = new List<SurfaceIndexKind>();
     readonly List<Image> frames = new List<Image>();
+    readonly List<Image> plates = new List<Image>();
     readonly List<SurfaceIndexKind> scratch = new List<SurfaceIndexKind>();
 
     const float IconPx = 26f;      // the art is 16x16; drawn larger so it is a comfortable click target
     const float GapPx = 4f;
     const float MarginPx = 6f;
-    const float FramePx = 2f;      // the active square's thickness
+    // THREE, not two. "Buttons should have a border outline when selected." There WAS one at 2px, and
+    // at 26px across a two-pixel edge reads as an anti-aliasing artefact rather than as a selection.
+    const float FramePx = 3f;      // the active square's thickness
+
+    /// The dark plate behind an icon, inactive then ACTIVE.
+    ///
+    /// "The background fill is fine but lower the opacity a LOT because the icon can barely be seen
+    /// when the button is toggled on." Both plates were 0.82, and on top of the frame and the wash the
+    /// lit button was the one you could read LEAST — which is backwards. The inactive plate keeps most
+    /// of its opacity because an unlit icon still has to be legible over terrain (that is what the
+    /// plate is for); the active one drops to a quarter, because the frame is already saying it is on.
+    static readonly Color PlateIdle = new Color(0.04f, 0.06f, 0.09f, 0.78f);
+    static readonly Color PlateOn   = new Color(0.04f, 0.06f, 0.09f, 0.22f);
 
     /// Attach a bar to a map frame. `parent` should be the frame the map is clipped to rather than the
     /// map image itself — the bar is furniture pinned to the window, and a bar that panned and zoomed
@@ -133,7 +146,7 @@ public class IndexIconBar : MonoBehaviour
         rt.anchorMin = rt.anchorMax = new Vector2(1f, 1f);
         rt.pivot = new Vector2(1f, 1f);
         rt.anchoredPosition = new Vector2(-MarginPx, -MarginPx);
-        rt.sizeDelta = new Vector2(10f, IconPx);
+        rt.sizeDelta = new Vector2(IconPx, 10f);
 
         var bar = go.AddComponent<IndexIconBar>();
         bar.bar = rt;
@@ -184,6 +197,7 @@ public class IndexIconBar : MonoBehaviour
         for (int i = bar.childCount - 1; i >= 0; i--) Destroy(bar.GetChild(i).gameObject);
         built.Clear();
         frames.Clear();
+        plates.Clear();
 
         if (body == null) { bar.gameObject.SetActive(false); return; }
 
@@ -193,24 +207,28 @@ public class IndexIconBar : MonoBehaviour
         bar.gameObject.SetActive(built.Count > 0);
         if (built.Count == 0) return;
 
-        float wide = built.Count * IconPx + (built.Count - 1) * GapPx;
-        bar.sizeDelta = new Vector2(wide, IconPx);
+        // A COLUMN, not a row. "The index toggle buttons should stack vertically, not horizontally."
+        // Six icons across the top of the map is a strip of furniture over the ground you are reading;
+        // down the right edge they are out of the way of everything except the map's own margin.
+        float tall = built.Count * IconPx + (built.Count - 1) * GapPx;
+        bar.sizeDelta = new Vector2(IconPx, tall);
 
         for (int i = 0; i < built.Count; i++)
         {
             var kind = built[i];
 
             var cell = UIFactory.NewUI(bar, $"Index_{kind}").GetComponent<RectTransform>();
-            cell.anchorMin = cell.anchorMax = new Vector2(0f, 0.5f);
-            cell.pivot = new Vector2(0f, 0.5f);
+            cell.anchorMin = cell.anchorMax = new Vector2(0.5f, 1f);
+            cell.pivot = new Vector2(0.5f, 1f);
             cell.sizeDelta = new Vector2(IconPx, IconPx);
-            cell.anchoredPosition = new Vector2(i * (IconPx + GapPx), 0f);
+            cell.anchoredPosition = new Vector2(0f, -i * (IconPx + GapPx));
 
             // A dark plate behind the art. The icons are 16x16 pixel art with transparent margins and
             // they sit over a planet's terrain — without something to sit ON, a brown mineral icon over
             // brown desert is invisible, which is the one thing a button must never be.
             var plate = cell.gameObject.AddComponent<Image>();
-            plate.color = new Color(0.04f, 0.06f, 0.09f, 0.82f);
+            plate.color = PlateIdle;
+            plates.Add(plate);
 
             // The active frame, drawn as four edges rather than a sprite so its thickness stays constant
             // and it never depends on an asset that might not import.
@@ -279,6 +297,8 @@ public class IndexIconBar : MonoBehaviour
             // The index's own BRIGHTEST colour, which is the top band's outline — so the square round
             // the button is literally the colour of the strongest ground that button will show.
             frames[i].color = active ? SurfaceIndex.Outline(built[i], 1f) : new Color(0, 0, 0, 0);
+            // ...and the plate gets out of the icon's way once the frame is carrying the state.
+            if (i < plates.Count && plates[i] != null) plates[i].color = active ? PlateOn : PlateIdle;
         }
     }
 

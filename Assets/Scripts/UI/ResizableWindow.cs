@@ -37,6 +37,8 @@ public class ResizableWindow : MonoBehaviour, IDragHandler, IPointerDownHandler
 
         // Growing from a corner can push the opposite edge off-screen even at a legal size, so re-clamp
         // the position as well. Cheap, and it is the component that already knows how.
-        target.GetComponent<WindowFit>()?.Fit();
+        // Unity's == null, not `?.` — see tools/check-unity-null.mjs.
+        var fit = target.GetComponent<WindowFit>();
+        if (fit != null) fit.Fit();
     }
 }

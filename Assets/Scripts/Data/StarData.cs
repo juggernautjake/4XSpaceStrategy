@@ -47,15 +47,41 @@ public class StarData
 
 public static class StarDatabase
 {
-    // 1 astronomical unit expressed in the game's orbit-radius units.
-    // Planets are laid out starting ~8 units out and stepping outward, so this keeps the
-    // Sun-like habitable zone landing among the inner-to-mid planets.
-    public const float AU = 14f;
+    // ============================================================================================
+    // 1 astronomical unit, in the game's orbit-radius units. THE NUMBER THE WHOLE LAYOUT HANGS OFF.
+    //
+    // It was 14, and that was the root cause of "the green habitable zone is far too close to the
+    // star" — not a mis-tuned zone, a mis-scaled ruler.
+    //
+    // At 14, a Sun-like star's rendered radius (~2.9 units) is 0.21 AU. The real Sun's radius is
+    // 0.005 AU — forty times smaller. So the star was physically enormous relative to the distances
+    // around it, and OrbitSafety's clearance (star radius + 4.5) swallowed the entire inner system:
+    // the habitable zone sat at 11-22 units while no planet could legally orbit closer than ~10, and
+    // after a moon system's reach was reserved the innermost lane was routinely past the zone's
+    // OUTER edge. That is the reported case exactly — a homeworld at 35.8 with a zone ending at 33.9,
+    // and it was the closest planet to its sun.
+    //
+    // Worse, EnsureHabitableWorld and OrbitSafety.EnforceSystem were then fighting: the first moved
+    // the chosen world into the zone, and the second immediately shoved it back out past the
+    // clearance. Whichever ran last won, and the one that ran last was the safety pass.
+    //
+    // At 40 a G-type's zone is 32-62 against a star reach of ~10, so there is room for three orbital
+    // rings INSIDE the zone's inner edge — which is what makes our own solar system's arrangement
+    // (Mercury and Venus inside it, Earth and Mars within it) reachable at all.
+    //
+    // Nothing that reads this changes shape: ReferenceDistance, TempReference, hzInner/hzOuter,
+    // SystemSpread and every `rel` band threshold are all defined as multiples of it, so they move
+    // together and every RATIO in the game is exactly what it was. Only the star stops being a
+    // significant fraction of its own system.
+    public const float AU = 40f;
 
-    // The render radius (visualScale) a "typical" star sits at, after the 2x-larger change below. Density
+    // The render radius (visualScale) a "typical" star sits at, after the 4x-larger change below. Density
     // is measured relative to it: a star of this size and one solar mass has density 1. It's the anchor for
     // the mass<->radius<->density triangle the Dev editor exposes.
-    public const float RefScale = 6f;
+    //
+    // 6 -> 12 alongside the star scale doubling, so that sentence stays true and every density readout in
+    // the Dev editor keeps meaning what it meant.
+    public const float RefScale = 12f;
 
     // The three ways of reading the mass/radius/density triangle. density = mass / (radius/RefScale)^3, so
     // any two give the third. The Dev star sliders use these to keep themselves consistent: change the size
@@ -284,8 +310,22 @@ public static class StarDatabase
         // a small B giant, which made size actively misleading across the whole range. Now the ends are
         // cleanly separated — the smallest O is 12.4 against the largest M at 4.8 — so a giant always
         // reads as a giant even if neighbouring classes shade into each other.
+        // ---- DOUBLED AGAIN: baseScale * 4, not * 2 ----------------------------------------------
+        //
+        // "Increase the current size scale of the stars and Gas Giants by 2 in solar system view. They
+        // seem far too small." They were, and the screenshot shows why: the sun is a dot at the centre
+        // of a system whose orbit rings fill the screen.
+        //
+        // SAFE ONLY BECAUSE AU MOVED FIRST. At AU = 14 a bigger star made the inner-system problem worse
+        // — OrbitSafety reserves star radius + clearance before the first planet, so doubling the radius
+        // pushed the innermost orbit further out and the habitable zone further out of reach. At AU = 40
+        // there is room: a G-type now renders at 11.6 across against a ring 1 at 14.4 units.
+        //
+        // Everything downstream follows for free, which is the reason this is one number: OrbitSafety
+        // .StarRadius reads visualScale, so clearance grows with it; StarDatabase.CoronaScale is a
+        // multiple of it, so the halo tracks; and DensityOf is recomputed from it on the next line.
         float lumFactor = Mathf.Pow(Mathf.Max(0.001f, s.luminosity / Mathf.Max(0.0001f, baseLum)), 0.12f);
-        s.visualScale = baseScale * 2f * lumFactor * Random.Range(0.85f, 1.18f);
+        s.visualScale = baseScale * 4f * lumFactor * Random.Range(0.85f, 1.18f);
 
         // Density is the relationship between the two independent rolls above (~1 typical, varying either
         // side). Kept in sync with mass/visualScale here and by the Dev editor.

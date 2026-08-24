@@ -9,7 +9,7 @@
   stray fragment of an expression ended up sitting above the using directives in PlanetViewWindow.cs
   and reached main.
 
-  Seven checks, chosen because each catches something the others cannot:
+  Eight checks, chosen because each catches something the others cannot:
 
     HEAD     The first non-blank line of a file must look like the top of a C# file. This is the one
              that catches text pasted or dropped in above the usings.
@@ -26,9 +26,14 @@
              tools/check-member-refs.mjs.
     FOREACH  Whatever a foreach iterates has to BE iterable — CS1579. Delegated to
              tools/check-foreach.mjs.
+    UNITY    No `??` or `?.` on a UnityEngine.Object. Those are C# operators and never run Unity's
+             == overload, so a DESTROYED component sails through them as though it were alive and
+             the next call throws MissingComponentException. The one check here that catches a
+             runtime fault rather than a compile error, and it is here because that fault reads
+             exactly like a compile error in the console. Delegated to tools/check-unity-null.mjs.
 
-  The four delegated checks need `node` on PATH. If it is missing they are reported as NOT RUN and
-  the script exits 1 — "Clean." has to mean all seven ran.
+  The five delegated checks need `node` on PATH. If it is missing they are reported as NOT RUN and
+  the script exits 1 — "Clean." has to mean all eight ran.
 
   Comments, strings, verbatim strings and char literals are stripped before counting, so a brace in a
   comment or a paren in a message cannot produce a false alarm.
@@ -212,7 +217,8 @@ $delegated = @(
     @{ Tag = 'STRING'; Script = 'check-string-literals.mjs'; Noun = 'unterminated string literal(s)' },
     @{ Tag = 'STATIC'; Script = 'check-static-refs.mjs';     Noun = 'suspect static reference(s)' },
     @{ Tag = 'MEMBER'; Script = 'check-member-refs.mjs';     Noun = 'suspect member access(es)' },
-    @{ Tag = 'FOREACH'; Script = 'check-foreach.mjs';        Noun = 'un-iterable foreach source(s)' }
+    @{ Tag = 'FOREACH'; Script = 'check-foreach.mjs';        Noun = 'un-iterable foreach source(s)' },
+    @{ Tag = 'UNITY'; Script = 'check-unity-null.mjs';       Noun = 'Unity fake-null operator(s)' }
 )
 
 $skipped = New-Object System.Collections.ArrayList
@@ -238,7 +244,7 @@ foreach ($check in $delegated) {
 Write-Output "Checked $($files.Count) C# files and $($enums.Count) enums."
 
 # A skip is reported as a FAILURE rather than a pass with a footnote. This script's whole job is to
-# stand in for a compiler that is not here, so "Clean." has to mean all seven checks ran and all seven
+# stand in for a compiler that is not here, so "Clean." has to mean all eight checks ran and all eight
 # passed — anything less is a claim it cannot back.
 if ($skipped.Count -gt 0) {
     Write-Output ""

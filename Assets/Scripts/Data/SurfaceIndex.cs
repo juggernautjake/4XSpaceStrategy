@@ -508,10 +508,28 @@ public static class SurfaceIndex
     {
         float geo = GeothermalMap.At(b, u, v);
 
-        // WHAT IS ACTUALLY ON THE TILE can only raise the reading, never lower it. A volcano or a geyser
-        // field is direct evidence of heat under this exact spot — the field says where the heat is, and
-        // a vent says it has already found its way out here.
-        geo = Mathf.Max(geo, CrustHeat(f.terrain));
+        // ---- WHAT IS ON THE TILE IS EVIDENCE, WEIGHTED BY WHETHER THIS WORLD HAS A LIVE INTERIOR ----
+        //
+        // "Geothermal Index still seems to take into account the surface heat."
+        //
+        // It did, and this line was how. A volcano or a geyser field IS direct evidence of heat under
+        // that exact spot, which is why the reading is raised rather than replaced — but CrustHeat is
+        // keyed on TERRAIN TYPE, and terrain type is decided partly by how hot the tile is, and how hot
+        // the tile is includes STARLIGHT. So the chain ran:
+        //
+        //     world orbits close to its sun  ->  every tile clears the magma threshold
+        //         ->  every tile classifies as MagmaField  ->  CrustHeat returns 0.95
+        //             ->  the Geothermal index reads 95 on every tile of the map
+        //
+        // and none of that involved the world's interior at any point. The screenshot is a volcanic
+        // world reading a flat 95 from pole to pole.
+        //
+        // PlanetTerrainGenerator now refuses to call ground molten unless the world's internal heat
+        // clears MagmaInternalMinC, which breaks the chain at its source. This is the second half:
+        // surface evidence is scaled by how geothermally active the world actually is, so a volcano on a
+        // world with a live core still reads ~100 and the same tile on a cold, sun-baked rock reads
+        // near zero. Which is the truth — there is no heat down there to build a plant on.
+        geo = Mathf.Max(geo, CrustHeat(f.terrain) * GeothermalMap.WorldIntensity(b));
 
         // A deep sea floor bleeds its heat into the water above it long before a plant could take any.
         // Applied last, so it cuts the finished figure rather than one of its inputs — a fault under an
@@ -1264,6 +1282,11 @@ public static class SurfaceIndex
         // so the overlay, the earthquakes and the temperature model all stop describing the world this
         // one used to be at the same moment the other overlays do.
         GeothermalMap.Invalidate(b);
+
+        // A gas giant's great spots are memoised against its seed too, and the memo is a single entry —
+        // so a reseed that happens to leave the seed comparing equal (a resize) would keep the old
+        // spots. Dropped here alongside everything else keyed on the same two facts.
+        GasGiantStorms.Invalidate();
     }
 
     public static void InvalidateAll()
@@ -1273,6 +1296,7 @@ public static class SurfaceIndex
         waterPresence.Clear();
         bands.Clear();
         GeothermalMap.InvalidateAll();
+        GasGiantStorms.Invalidate();
     }
 
     /// Where this tile ranks on this world, 0 (worst) .. 1 (best).

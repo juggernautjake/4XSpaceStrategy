@@ -15,11 +15,11 @@
 //    pattern is either obviously that or obviously not.
 //
 // 2. HOW LONG. This is the one that needed measuring rather than asserting. The request asks for a
-//    5x5 block every 4 seconds and a 7x7 every 3.5 — and at a LITERAL 5x5 cells, a 200x100 world is
-//    eight hundred blocks, which is fifty-three minutes. The rest of the game is balanced on surveys
-//    of ten to ninety seconds. So the block grows with the world instead (Survey.CellsPerUnit), and
-//    this table is what says whether that scaling actually lands in a sane range across every grid
-//    size in the game. If a column here reads in the hundreds of seconds, the constants are wrong.
+//    fixed 5x5 block every 4 seconds and a fixed 7x7 every 3.5 — and at a LITERAL 7x7, a 200x100 world
+//    is 435 blocks, which is twenty-five minutes, and a 640x320 gas giant is four HOURS. The block size
+//    is fixed anyway, because that is what was asked for; what floats instead is the DWELL (shortened
+//    on big worlds, floored so the marker cannot strobe) and then the number of blocks the ship works
+//    at once. This table is what says whether that lands in a sane range across every grid in the game.
 // ============================================================================================
 
 import sharp from 'sharp';
@@ -35,37 +35,69 @@ const OUT = path.resolve(PROJ, arg('--out', 'Art/_review/survey.png'));
 // ---- the constants, read from the game so they cannot drift ----------------------------------
 const SRC = fs.readFileSync(path.join(PROJ, 'Assets/Scripts/Systems/Survey.cs'), 'utf8');
 
-function num(re, fallback) {
+// A parse failure is FATAL rather than falling back to a default. This file reported the OLD block
+// behaviour for a while after the rework precisely because its regexes silently missed and its
+// fallbacks were the previous numbers — a check that lies is worse than no check.
+function must(re, what) {
   const m = new RegExp(re).exec(SRC);
-  return m ? parseFloat(m[1]) : fallback;
+  if (!m) { console.error(`FAIL  could not read ${what} from Survey.cs`); process.exit(1); }
+  return parseFloat(m[1]);
 }
 
-// TargetBlocks: clamp(K * pow(cells / REF, EXP), LO, HI)
-const TB_K = num(String.raw`Mathf\.Clamp\(([0-9.]+)f \* Mathf\.Pow\(cells / [0-9.]+f`, 6);
-const TB_REF = num(String.raw`Mathf\.Pow\(cells / ([0-9.]+)f, [0-9.]+f\)`, 800);
-const TB_EXP = num(String.raw`Mathf\.Pow\(cells / [0-9.]+f, ([0-9.]+)f\)`, 0.3);
-const TB_LO = num(String.raw`Mathf\.Pow\(cells / [0-9.]+f, [0-9.]+f\), ([0-9.]+)f, [0-9.]+f\)`, 4);
-const TB_HI = num(String.raw`Mathf\.Pow\(cells / [0-9.]+f, [0-9.]+f\), [0-9.]+f, ([0-9.]+)f\)`, 40);
-
-const SCIENCE_UNITS = num(String.raw`canResearch\) \? ([0-9]+) : [0-9]+;`, 7);
-const OTHER_UNITS = num(String.raw`canResearch\) \? [0-9]+ : ([0-9]+);`, 5);
-const SCIENCE_SECS = num(String.raw`canResearch\) \? ([0-9.]+)f : [0-9.]+f;`, 3.5);
-const OTHER_SECS = num(String.raw`canResearch\) \? [0-9.]+f : ([0-9.]+)f;`, 4.0);
+const SCIENCE_UNITS = must(String.raw`ScoutUnits = [0-9]+, ScienceUnits = ([0-9]+)`, 'ScienceUnits');
+const OTHER_UNITS   = must(String.raw`ScoutUnits = ([0-9]+)`, 'ScoutUnits');
+const SCIENCE_SECS  = must(String.raw`ScienceBlockSeconds = ([0-9.]+)f`, 'ScienceBlockSeconds');
+const OTHER_SECS    = must(String.raw`ScoutBlockSeconds = ([0-9.]+)f`, 'ScoutBlockSeconds');
+const MIN_SECS      = must(String.raw`MinBlockSeconds = ([0-9.]+)f`, 'MinBlockSeconds');
+const SOFT_CAP      = must(String.raw`SoftCapSeconds = ([0-9.]+)f`, 'SoftCapSeconds');
+const COMPRESSION   = must(String.raw`SurveyCompression = ([0-9.]+)f`, 'SurveyCompression');
+const SCI_ADV       = must(String.raw`ScienceAdvantage = ([0-9.]+)f`, 'ScienceAdvantage');
+const MAX_HEADS     = must(String.raw`MaxHeads = ([0-9]+)`, 'MaxHeads');
 
 // ---- Survey, ported ---------------------------------------------------------------------------
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-const targetBlocks = (w, h) =>
-  clamp(TB_K * Math.pow((w * h) / TB_REF, TB_EXP), TB_LO, TB_HI);
-
-const cellsPerUnit = (w, h) =>
-  Math.max(0.2, Math.sqrt((w * h) / targetBlocks(w, h)) / 5);
-
-const blockCells = (w, h, units) =>
-  clamp(Math.round(units * cellsPerUnit(w, h)), 2, Math.max(2, Math.min(w, h)));
+/// THE BLOCK IS THE SURVEY UNITS. No per-world scaling — see the header on Survey.BlockCells.
+const blockCells = (w, h, units) => clamp(units, 2, Math.max(2, Math.min(w, h)));
 
 const blocksAcross = (w, bc) => Math.max(1, Math.ceil(w / bc));
 const bandCount = (h, bc) => Math.max(1, Math.ceil(h / bc));
+const blockCount = (w, h, bc) => Math.max(1, blocksAcross(w, bc) * bandCount(h, bc));
+
+/// Survey.BandY: every band is exactly bc tall and spread across [0, h - bc], so none hangs off the
+/// map and the middle one is centred.
+function bandY(h, bc, i) {
+  bc = clamp(bc, 1, h);
+  const ny = bandCount(h, bc);
+  if (ny <= 1) return 0;
+  return clamp(Math.round(i * (h - bc) / (ny - 1)), 0, h - bc);
+}
+
+/// Survey.WorldSurveySeconds — the world's own difficulty, quoted against a baseline scout.
+function worldSurveySeconds(w, h) {
+  const bc = clamp(OTHER_UNITS, 2, Math.max(2, Math.min(w, h)));
+  const ideal = blockCount(w, h, bc) * OTHER_SECS;
+  return ideal <= SOFT_CAP ? ideal : SOFT_CAP * Math.pow(ideal / SOFT_CAP, COMPRESSION);
+}
+
+/// Survey.SurveySeconds, at survey rate 1, tech 1 and a neutral world.
+function surveySeconds(w, h, science) {
+  const speed = (science ? SCI_ADV : 1) * (0.6 + 0.4 * 1);
+  return Math.max(1, worldSurveySeconds(w, h) / speed);
+}
+
+/// Survey.BlockSeconds.
+function blockSeconds(w, h, units, base, science) {
+  const bc = blockCells(w, h, units);
+  return clamp(surveySeconds(w, h, science) / blockCount(w, h, bc), MIN_SECS, base);
+}
+
+/// Survey.HeadSpeed — a FLOAT, which is what keeps blocks * dwell / speed exactly SurveySeconds.
+function headSpeed(w, h, units, base, science) {
+  const bc = blockCells(w, h, units);
+  return Math.max(1, blockCount(w, h, bc) * blockSeconds(w, h, units, base, science) / surveySeconds(w, h, science));
+}
+const heads = (w, h, units, base, science) => clamp(Math.ceil(headSpeed(w, h, units, base, science) - 0.001), 1, MAX_HEADS);
 
 /// Survey.BandOrder, ported. Middle band first, then alternately to the favoured side and the other.
 function bandOrder(bands, upFirst) {
@@ -81,11 +113,12 @@ function bandOrder(bands, upFirst) {
   return order;
 }
 
-/// Survey.ColRank, ported: 0 at the middle column, running right and wrapping.
-const colRank = (w, x) => (((x - Math.floor(w / 2)) % w) + w) % w;
+/// Survey.ColOrigin / ColBlock: block 0 STRADDLES the middle column, so the first square a survey
+/// draws sits centred on the map rather than starting at the middle and running off to the right.
+const colOrigin = (w, bc) => (((Math.floor(w / 2) - Math.floor(bc / 2)) % w) + w) % w;
+const colBlock = (w, bc, x) => Math.floor(((((x - colOrigin(w, bc)) % w) + w) % w) / bc);
 
-/// The order every CELL of a world is uncovered in, as a block index. Mirrors ReachedGround: a cell
-/// belongs to the block its column rank falls in, on the band its row falls in.
+/// The order every CELL of a world is uncovered in, as a block index.
 function revealOrder(w, h, units, upFirst) {
   const bc = blockCells(w, h, units);
   const across = blocksAcross(w, bc);
@@ -95,14 +128,20 @@ function revealOrder(w, h, units, upFirst) {
   const rank = new Int32Array(bands);
   for (let i = 0; i < order.length; i++) rank[order[i]] = i;
 
-  const out = new Int32Array(w * h);
-  for (let y = 0; y < h; y++) {
-    const band = Math.min(bands - 1, Math.floor(y / bc));
-    for (let x = 0; x < w; x++) {
-      const col = Math.floor(colRank(w, x) / bc);
-      out[y * w + x] = rank[band] * across + col;
+  // Which band owns a row. Bands overlap by a row or two where the world does not divide evenly, and
+  // the first one containing the row wins — matching Survey.BlockRank.
+  const bandOf = new Int32Array(h).fill(bands - 1);
+  for (let y = 0; y < h; y++)
+    for (let i = 0; i < bands; i++) {
+      const y0 = bandY(h, bc, i);
+      if (y >= y0 && y < y0 + bc) { bandOf[y] = i; break; }
     }
-  }
+
+  const out = new Int32Array(w * h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++)
+      out[y * w + x] = rank[bandOf[y]] * across + colBlock(w, bc, x);
+
   return { out, bc, across, bands, total: bands * across };
 }
 
@@ -119,21 +158,26 @@ const WORLDS = [
   { name: 'gas giant', w: 640, h: 320 },
 ];
 
-console.log('constants read from Survey.cs: ' +
-            `blocks = clamp(${TB_K} * (cells/${TB_REF})^${TB_EXP}, ${TB_LO}, ${TB_HI}), ` +
-            `scout ${OTHER_UNITS}u/${OTHER_SECS}s, science ${SCIENCE_UNITS}u/${SCIENCE_SECS}s\n`);
+console.log('constants read from Survey.cs: the block IS the survey units, literally ' +
+            `(scout ${OTHER_UNITS}, science ${SCIENCE_UNITS}); dwell ${OTHER_SECS}s / ${SCIENCE_SECS}s, ` +
+            `floored at ${MIN_SECS}s. A world past ${SOFT_CAP}s is compressed by ^${COMPRESSION}; ` +
+            `a research hull is ${SCI_ADV}x a scout; the head is drawn as at most ${MAX_HEADS} blocks.\n`);
 
-console.log('world              grid       scout block   blocks    time     science block   blocks    time');
+console.log('world            grid       scout blk    n  dwell  hd   time     sci blk    n  dwell  hd   time');
 const rows = [];
 for (const world of WORLDS) {
   const s = revealOrder(world.w, world.h, OTHER_UNITS, true);
   const c = revealOrder(world.w, world.h, SCIENCE_UNITS, true);
-  const sT = s.total * OTHER_SECS, cT = c.total * SCIENCE_SECS;
-  rows.push({ world, s, c, sT, cT });
+  const sD = blockSeconds(world.w, world.h, OTHER_UNITS, OTHER_SECS, false);
+  const cD = blockSeconds(world.w, world.h, SCIENCE_UNITS, SCIENCE_SECS, true);
+  const sH = heads(world.w, world.h, OTHER_UNITS, OTHER_SECS, false);
+  const cH = heads(world.w, world.h, SCIENCE_UNITS, SCIENCE_SECS, true);
+  const sT = surveySeconds(world.w, world.h, false), cT = surveySeconds(world.w, world.h, true);
+  rows.push({ world, s, c, sT, cT, sD, cD, sH, cH });
   console.log(
-    `  ${world.name.padEnd(15)} ${String(world.w + 'x' + world.h).padEnd(9)} ` +
-    `${String(s.bc + 'x' + s.bc).padStart(9)} ${String(s.total).padStart(8)} ${(sT).toFixed(0).padStart(6)}s   ` +
-    `${String(c.bc + 'x' + c.bc).padStart(11)} ${String(c.total).padStart(8)} ${(cT).toFixed(0).padStart(6)}s`);
+    `  ${world.name.padEnd(13)} ${String(world.w + 'x' + world.h).padEnd(9)} ` +
+    `${String(s.bc + 'x' + s.bc).padStart(8)} ${String(s.total).padStart(5)} ${sD.toFixed(2).padStart(6)}s ${String(sH).padStart(2)} ${sT.toFixed(0).padStart(5)}s  ` +
+    `${String(c.bc + 'x' + c.bc).padStart(7)} ${String(c.total).padStart(5)} ${cD.toFixed(2).padStart(6)}s ${String(cH).padStart(2)} ${cT.toFixed(0).padStart(5)}s`);
 }
 
 // ---- render -----------------------------------------------------------------------------------
@@ -186,9 +230,20 @@ await sharp({ create: { width: SW, height: SH, channels: 3, background: { r: 11,
 const checks = [];
 const ok = (n, p, d) => checks.push({ n, p, d });
 
+// THE BOUNDS MOVED, DELIBERATELY, AND THIS IS THE TRADE THE FIXED BLOCK BOUGHT.
+//
+// It used to be 10s..200s for a scout, which was reachable because the block grew with the world — a
+// gas giant was 32 bites of a 113x113 patch. A fixed 7x7 makes that same giant 4,232 bites, and no
+// arrangement of dwell and sweep head turns four thousand steps into two minutes without the steps
+// becoming invisible. So a survey is a longer job now: one to four minutes for a research hull, two to
+// eight for a scout, and a scout on a gas giant is genuinely a slog — which is the correct answer to
+// sending the wrong ship.
+//
+// The ceiling is what actually matters and it is what is checked: nothing may run past ten minutes.
 ok('every world is surveyed in a time a player will sit through',
-   rows.every(r => r.sT >= 10 && r.sT <= 200),
-   rows.map(r => `${r.world.name} ${r.sT.toFixed(0)}s`).join(', '));
+   rows.every(r => r.sT >= 30 && r.sT <= 600 && r.cT >= 20 && r.cT <= 300),
+   'scout ' + rows.map(r => `${r.world.name} ${r.sT.toFixed(0)}s`).join(', ') +
+   '\n     science ' + rows.map(r => `${r.cT.toFixed(0)}s`).join(', '));
 
 ok('bigger worlds take longer, without taking proportionally longer',
    rows.every((r, i) => i === 0 || r.sT >= rows[i - 1].sT),
@@ -219,16 +274,54 @@ ok('and beats it by roughly the 2.2x the two numbers imply',
      bad.length ? `wrong on ${bad.join(', ')}` : 'true on every world tested');
 }
 
-// A block must never be so large it is most of the world — at that point it is not a survey, it is a
-// reveal in two steps.
-// A block must never be so large that a survey is a reveal in two steps. Two fifths is the line, and it
-// is deliberately loose: on the smallest moons the block IS inevitably a big fraction of a small map —
-// a science ship takes a 40x20 moon in six bites — and that is the correct outcome rather than a
-// failure. What would be a failure is a block covering half the world, at which point there is nothing
-// to watch.
-ok('no block is more than two fifths of the world across',
-   rows.every(r => r.s.bc <= r.world.w * 0.4 && r.c.bc <= r.world.w * 0.4),
-   `widest is ${Math.max(...rows.map(r => r.c.bc / r.world.w * 100)).toFixed(0)}% of the map`);
+// THE BLOCK IS THE SHIP'S UNITS, ON EVERY WORLD. This is the whole point of the rework and the one
+// thing a future change must not quietly undo — the report was a science hull drawing 2x2 on an
+// asteroid and 14x14 on a large world, and both of those are this check failing.
+ok('a block is always exactly the survey units, whatever the world',
+   rows.every(r => r.c.bc === Math.min(SCIENCE_UNITS, r.world.h) && r.s.bc === Math.min(OTHER_UNITS, r.world.h)),
+   rows.map(r => `${r.world.name} ${r.c.bc}x${r.c.bc}`).join(', '));
+
+// AND IT ALWAYS FITS. Every band is exactly bc tall and inside [0, h - bc], so a marker can never be
+// drawn over ground that is not there — the "the entire 14x14 survey area was not even within the
+// surveyable area to begin with" case.
+{
+  const bad = [];
+  for (const { world, c } of rows) {
+    for (let i = 0; i < bandCount(world.h, c.bc); i++) {
+      const y0 = bandY(world.h, c.bc, i);
+      if (y0 < 0 || y0 + c.bc > world.h) { bad.push(`${world.name} band ${i}`); break; }
+    }
+  }
+  ok('every survey block is wholly inside the map', bad.length === 0,
+     bad.length ? `off the map: ${bad.join(', ')}` : 'no band overhangs the top or bottom edge');
+}
+
+// AND IT STARTS IN THE MIDDLE. Block 0 of the running order must contain the centre cell.
+{
+  const bad = [];
+  for (const { world, c } of rows) {
+    const mid = c.out[Math.floor(world.h / 2) * world.w + Math.floor(world.w / 2)];
+    if (mid !== 0) bad.push(`${world.name} (centre is block ${mid})`);
+  }
+  ok('the survey starts on the block holding the centre of the map', bad.length === 0,
+     bad.length ? bad.join(', ') : 'block 0 holds the centre cell on every world tested');
+}
+
+// AND THE WHOLE MAP IS COVERED. Bands overlap where a world does not divide evenly, which is fine; a
+// GAP would leave a stripe no survey ever reaches, i.e. a world that can never finish.
+{
+  const bad = [];
+  for (const { world, c } of rows) {
+    const seen = new Uint8Array(world.h);
+    for (let i = 0; i < bandCount(world.h, c.bc); i++) {
+      const y0 = bandY(world.h, c.bc, i);
+      for (let y = y0; y < y0 + c.bc && y < world.h; y++) seen[y] = 1;
+    }
+    for (let y = 0; y < world.h; y++) if (!seen[y]) { bad.push(`${world.name} row ${y}`); break; }
+  }
+  ok('every row of every world falls in some band', bad.length === 0,
+     bad.length ? `uncovered: ${bad.join(', ')}` : 'no gaps between bands');
+}
 
 console.log('');
 let failed = 0;

@@ -82,10 +82,19 @@ public static class SurveyVeil
     /// On the fleet beat, like the running lights, the drive plumes and the plasma bolts — everything
     /// in the game that breathes, breathes to one clock. A marker on a clock of its own is the one
     /// thing on screen that is out of step with everything else, and the eye finds it.
+    /// The ceiling on the marker's fill. "Lets make it 20% opacity (or 80% transparency) so the player
+    /// can see the 'veil' fading."
+    ///
+    /// The old ceiling was 0.42, and the screenshot shows why that was far too much: the fill is drawn
+    /// OVER the veil it is supposed to let you watch thin out, so the two stack. At 42% white over an
+    /// 88%-opaque veil the block was a solid white rectangle, and the thing the marker exists to draw
+    /// attention to — the ground resolving underneath it — was completely hidden by the marker.
+    public const float MarkerFillMax = 0.20f;
+
     public static Color MarkerColor()
     {
         float pulse = 0.55f + 0.45f * Mathf.Sin(FleetClock.Beats * Mathf.PI * 2f);
-        return new Color(0.92f, 0.96f, 1f, Mathf.Lerp(0.14f, 0.42f, pulse));
+        return new Color(0.92f, 0.96f, 1f, Mathf.Lerp(0.06f, MarkerFillMax, pulse));
     }
 
     /// The marker's border, which pulses with the fill but stays firmly visible at its dimmest — the

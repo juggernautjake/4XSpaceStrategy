@@ -21,10 +21,9 @@ public class SolarSystemGenerator : MonoBehaviour
     // the other direction: nothing is generated past it.
     // ============================================================================================
 
-    /// The most orbital lanes a system will ever lay out, whatever it can still afford. A backstop
-    /// against a very heavy cluster sprawling past what the camera can frame, not a target — most
-    /// systems run out of budget well before this.
-    public const int MaxLanes = 10;
+    /// The most orbital lanes a system will ever lay out. Nine, because that is how many placement
+    /// rings a star has — see PlacementRings, which owns the ladder and the reasoning behind it.
+    public const int MaxLanes = PlacementRings.Count;
 
     public StarType currentStarType;
     public StarData currentStar;     // combined physical data for the cluster (light/heat/HZ/orbits)
@@ -86,27 +85,107 @@ public class SolarSystemGenerator : MonoBehaviour
         currentSystemName = systemName;
         NameStars(systemName);
 
-        // Start the innermost planet just past the star's SURFACE plus the standard clearance, derived from
-        // the star's actual render size — not a fixed 9–12 that predated the 2x-larger stars and would let a
-        // big sun sit almost touching (or swallowing) its first planet. A dim red dwarf keeps its planets
-        // tucked in close; a large bright star holds them further out, both by construction here and as the
-        // EnforceSystem pass (below) guarantees. The small random spread keeps systems from all starting at
-        // the identical radius.
-        float starRadius = OrbitSafety.StarRadius(currentStar);   // whole cluster reach for a binary/ternary
-        float currentRadius = starRadius + OrbitSafety.StarClearance + Random.Range(1f, 4f);
-        float prevOuterReach = 0f;                     // outermost point the previous planet's system reaches
+        // ---- THE RINGS -------------------------------------------------------------------------
+        //
+        // Nine fixed radii for this star, and the only decision per ring is fill it or skip it. See
+        // PlacementRings for why the ladder is shaped the way it is, and for why the outward WALK it
+        // replaces could not reliably put a planet in the habitable zone.
+        var ringR = new float[PlacementRings.Count];
+        PlacementRings.Radii(currentStar, ringR);
+        var ringInZone = new bool[PlacementRings.Count];
+        PlacementRings.InZone(currentStar, ringR, ringInZone);
+        int habitableRing = PlacementRings.HabitableRing(currentStar, ringR, ringInZone);
 
-        for (int lane = 0; lane < MaxLanes; lane++)
+        var fillRing = new bool[PlacementRings.Count];
+        ChooseFilledRings(fillRing, habitableRing);
+
+        // AT MOST ONE INCLINED WORLD PER SYSTEM. See RollInclination.
+        bool inclinedAlready = false;
+
+        // How far out the last placed body's whole system reaches. A ring inside this is SKIPPED
+        // rather than filled and then shoved outward by OrbitSafety — being shoved would leave the
+        // body off its ring, which is the one thing a fixed ladder must not allow. In practice only a
+        // gas giant with a full retinue on a close-in ring ever triggers it.
+        float clearedTo = 0f;
+
+        // A world's Roman numeral is its position among the bodies that EXIST, not its ring index —
+        // or a system whose first filled ring is the fourth would open with "<Star> IV".
+        int placed = 0;
+
+        // ============================================================================================
+        // WHERE BELTS MAY GO, AND HOW MANY
+        //
+        // "Asteroid belts no closer than beyond the 3rd planet, out to the furthest orbit — anything
+        // that small nearer in would have been swept up long ago."
+        // "Belt count: max 4, and 4 very rare. 1 far more common, if a system gets one at all. A system
+        // that rolls fewer gas giants may roll more belts instead."
+        //
+        // Two separate limits, and they are counted rather than rolled per lane, because both requests
+        // are statements about the SYSTEM. A per-lane probability cannot express "at most four" or
+        // "beyond the third planet" at all — it can only make them likely, and likely is what produced
+        // the systems the request is complaining about.
+        //
+        // PLANETS, NOT RINGS. The gate is "beyond the 3rd PLANET", so it counts worlds actually built,
+        // not ladder positions walked past. A system whose rings 1-3 were skipped for want of allowance
+        // has not yet had three planets and still may not have a belt on ring 4 — which is right: the
+        // reasoning is about how much material the inner system swept up, and a ring nothing accreted
+        // on swept up nothing.
+        //
+        // Both counters are read by ChooseLane and neither is advisory — a belt that fails either test
+        // becomes a terrestrial instead, and the lane is still filled.
+        // ============================================================================================
+        int planetsPlaced = 0, beltsPlaced = 0, giantsPlaced = 0;
+        int beltCap = RollBeltCap();
+
+        for (int ring = 0; ring < PlacementRings.Count; ring++)
         {
+            if (!fillRing[ring]) continue;
+
+            float currentRadius = ringR[ring];
+            // Swallowed by the previous body's reach — skip it, UNLESS it is the ring the habitable zone
+            // sits on, which is the one ring worth handing to OrbitSafety to sort out rather than losing.
+            if (currentRadius < clearedTo && ring != habitableRing) continue;
+
+            int lane = placed;
+            // ---- THE HABITABLE RING IS PAID FOR FIRST ------------------------------------------
+            //
+            // Measured (tools/system-composition-check.mjs): without this, an M dwarf put a world in
+            // its own habitable zone only 81% of the time. The ring was always CHOSEN — ChooseFilledRings
+            // forces it in — and then two things could still take it away: the inner rings spent the
+            // whole allowance before the loop reached it, or ChooseLane rolled it as a belt.
+            //
+            // So a terrestrial world's worth of mass is held back until the habitable ring has been
+            // built, and that ring is never anything but a terrestrial. Both are cheap: the reserve is
+            // 0.6 out of an allowance of at least 32, and the belt it displaces would have been one lane
+            // of rubble in the one place a system most wants a planet.
+            bool habitablePending = habitableRing >= 0 && ring <= habitableRing;
+            float reserve = (habitablePending && ring < habitableRing) ? MassRules.TerrestrialMin : 0f;
+            float spendable = Mathf.Max(0f, budget - reserve);
+
             // OUT OF ALLOWANCE. The cheapest thing a lane can hold is a single 0.1 asteroid, so once
             // even that is unaffordable the system is finished however many lanes are left. This is the
             // hard ceiling the request asks for: "generate no more mass after this point".
-            if (budget < MassRules.AsteroidMin) break;
+            //
+            // ...EXCEPT while the habitable ring is still ahead of us, which is the entire purpose of
+            // the reserve. Breaking here would leave the 0.6 held back and never spent — and that was
+            // measurably happening: an M dwarf that rolled a gas giant on an inner ring ate its whole
+            // 32-mass allowance and the loop exited before ever reaching the ring the zone is on.
+            // Skipping the ring instead walks on to the one that matters.
+            if (spendable < MassRules.AsteroidMin)
+            {
+                if (!habitablePending) break;
+                continue;
+            }
 
             // How far out this lane sits, as a multiple of the star's Earth-warmth distance. Everything
             // about what the lane may CONTAIN is decided from this one number — see ChooseLane.
             float rel = currentRadius / Mathf.Max(0.5f, TempReference(currentStar));
-            LaneKind kind = ChooseLane(rel, budget);
+            // A belt is only on the table beyond the third planet, while the system is under its own
+            // belt cap. See the counters above.
+            bool beltsAllowed = planetsPlaced >= BeltMinPlanets && beltsPlaced < beltCap;
+            LaneKind kind = ring == habitableRing
+                ? LaneKind.Terrestrial
+                : ChooseLane(rel, spendable, beltsAllowed, giantsPlaced);
 
             // How far the lane's contents reach either side of its orbit line. Filled in by whichever
             // branch runs, and used to step outward to the next lane.
@@ -135,12 +214,12 @@ public class SolarSystemGenerator : MonoBehaviour
                 int placed = 0;
                 for (int a = 0; a < wanted; a++)
                 {
-                    if (budget < MassRules.AsteroidMin) break;
+                    if (spendable < MassRules.AsteroidMin) break;
 
                     CelestialBody rock = new(CelestialBodyType.Asteroid) { id = _idCounter++ };
                     rock.name = $"{beltName} {(char)('a' + a)}";
-                    rock.mass = MassRules.RollAsteroid(budget);
-                    budget -= rock.mass;
+                    rock.mass = MassRules.RollAsteroid(spendable);
+                    budget -= rock.mass; spendable -= rock.mass;
                     rock.distanceFromStar = currentRadius;
                     rock.orbitRadius = currentRadius;
                     rock.beltId = beltId;
@@ -177,6 +256,11 @@ public class SolarSystemGenerator : MonoBehaviour
                 }
 
                 if (placed == 0) break;   // could not afford even one rock: nothing more will fit
+
+                // ONE BELT, however many rocks are in it — the request counts belts, and so does the
+                // cap. Incremented here rather than at the top of the branch so a lane that could not
+                // afford a single asteroid does not spend one of the system's four.
+                beltsPlaced++;
             }
             else
             {
@@ -198,14 +282,14 @@ public class SolarSystemGenerator : MonoBehaviour
                     // Reserve a tenth for its moons before rolling, so a giant that eats the entire
                     // allowance still leaves itself something to be orbited by. Falls back to a
                     // terrestrial if the reservation puts the smallest giant out of reach.
-                    float giant = MassRules.RollGasGiant(budget * 0.92f);
-                    body.mass = giant > 0f ? giant : MassRules.RollTerrestrial(TerrestrialBandMax(rel), budget);
+                    float giant = MassRules.RollGasGiant(spendable * 0.92f);
+                    body.mass = giant > 0f ? giant : MassRules.RollTerrestrial(TerrestrialBandMax(rel), spendable);
                 }
                 else
                 {
-                    body.mass = MassRules.RollTerrestrial(TerrestrialBandMax(rel), budget);
+                    body.mass = MassRules.RollTerrestrial(TerrestrialBandMax(rel), spendable);
                 }
-                budget -= body.mass;
+                budget -= body.mass; spendable -= body.mass;
 
                 ApplyWorldPipeline(body, rel, isMoon: false);
                 ResourceGenerator.GenerateResources(body);   // type is settled, so resources match it
@@ -226,7 +310,7 @@ public class SolarSystemGenerator : MonoBehaviour
                 body.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
                 body.orbitPhase = Random.Range(0f, 360f);
                 body.orbitDirection = Random.value < 0.9f ? 1 : -1;
-                body.inclination = Random.Range(-7f, 7f);
+                body.inclination = RollInclination(isMoon: false, ref inclinedAlready);
                 body.eccentricity = Random.Range(0f, 0.14f);
 
                 ApplyHabitability(body);
@@ -234,18 +318,30 @@ public class SolarSystemGenerator : MonoBehaviour
 
                 // ---- Moons, out of this planet's own allowance ----
                 //
-                // A terrestrial world may spend half its mass on moons, a gas giant a tenth of its (see
-                // MassRules.MoonBudget) — and neither may spend more than the SYSTEM has left, because
-                // moons come out of the same pot as everything else. Like the system allowance, it is a
-                // ceiling: most worlds spend a fraction of it and some spend none at all.
-                float moonPot = Mathf.Min(MassRules.MoonBudget(body.mass), budget);
+                // A terrestrial world may spend a QUARTER of its mass on moons, a gas giant a tenth of
+                // its (see MassRules.MoonBudget) — and neither may spend more than the SYSTEM has left,
+                // because moons come out of the same pot as everything else. Like the system allowance,
+                // it is a ceiling: most worlds spend a fraction of it and some spend none at all.
+                float moonPot = Mathf.Min(MassRules.MoonBudget(body.mass), spendable);
                 bool giantHost = body.mass >= WorldClassifier.GasGiantMassFloor;
-                // NOT EVERY WORLD HAS MOONS. Deliberately not too high a chance — the request's own
-                // framing — and lower for a giant, which is exactly the arrangement in our system: the
-                // four giants have dozens of moons between them and two of the four terrestrials have none.
-                if (Random.value < (giantHost ? 0.15f : 0.34f)) moonPot = 0f;
 
-                int maxMoons = giantHost ? 5 : 3;
+                // ---- MOST WORLDS HAVE NO MOONS AT ALL ----
+                //
+                // "It is far too common for planets to spawn with multiple moons. Some planets should be
+                // able to spawn by themselves with no moons."
+                //
+                // At 0.34 a rocky world went moonless one time in three, so having moons was the common
+                // case by two to one — the opposite of our own system, where two of the four terrestrials
+                // have none and a third has two captured rocks a few kilometres across. At 0.62 a bare
+                // rocky world is the DEFAULT and a moon is worth noticing. Giants keep their retinues,
+                // but a bare one is now a real outcome rather than a one-in-seven curiosity.
+                if (Random.value < (giantHost ? 0.30f : 0.62f)) moonPot = 0f;
+
+                // "I don't want Terrestrial planets to be able to generate more than 2-3 Moons. Gas
+                // Giants should not be able to generate more than 3-4 Moons." Three and four are the
+                // hard ceilings; the early-stop roll below is what makes the top of each range rare
+                // rather than routine.
+                int maxMoons = giantHost ? 4 : 3;
                 float planetVisRadius = OrbitSafety.DiscRadius(body);
                 float moonR = planetVisRadius + MaxMoonVisRadius + MoonSurfaceGap;
 
@@ -253,13 +349,18 @@ public class SolarSystemGenerator : MonoBehaviour
                 {
                     if (moonPot < MassRules.AsteroidMin) break;
                     // ...and a chance to simply stop, so the allowance is genuinely a maximum rather
-                    // than a quota that always gets filled to the last decimal. At 0.30 a Sun-like system
-                    // came out with thirteen moons across it (measured); 0.42 lands it near nine, which
-                    // is a system you can read at a glance and still one where the giants clearly have
-                    // retinues and the rocky worlds mostly do not.
-                    if (m > 0 && Random.value < 0.42f) break;
+                    // than a quota that always gets filled to the last decimal. Raised from 0.42 to 0.55
+                    // alongside the moonless roll above: with the ceiling down to 3 and 4, this is what
+                    // decides whether a world with moons has ONE or has its full complement, and one
+                    // should be the common answer.
+                    if (m > 0 && Random.value < 0.55f) break;
 
-                    float moonMass = MassRules.RollMoon(moonPot);
+                    // A GIANT'S MOONS ARE CAPPED AT 1.5 EACH, whatever its allowance can afford.
+                    // "Gas Giants should only be able to generate Moons with Mass up to 1.5 and below."
+                    // Without this a mass-40 giant's 4.0 pot could go on one 4.0 moon — a super-Earth in
+                    // orbit around a planet, which is a double system rather than a moon.
+                    float moonCap = giantHost ? Mathf.Min(moonPot, GiantMoonMassMax) : moonPot;
+                    float moonMass = MassRules.RollMoon(moonCap);
                     if (moonMass < MassRules.AsteroidMin) break;
 
                     CelestialBody moon = new(CelestialBodyType.Moon) { id = _idCounter++ };
@@ -293,7 +394,7 @@ public class SolarSystemGenerator : MonoBehaviour
                     moon.orbitSpeed = OrbitalMechanics.MoonAngularSpeed(body, moonR);
                     moon.orbitPhase = Random.Range(0f, 360f);
                     moon.orbitDirection = Random.value < 0.85f ? 1 : -1;
-                    moon.inclination = Random.Range(-15f, 15f);
+                    moon.inclination = RollInclination(isMoon: true, ref inclinedAlready);
                     moon.eccentricity = Random.Range(0f, 0.2f);
                     ApplyHabitability(moon);
                     POIGenerator.Populate(moon);
@@ -305,27 +406,20 @@ public class SolarSystemGenerator : MonoBehaviour
 
                 system.Add(body);
                 laneReach = OuterReach(body);   // moons already assigned -> real reach
+
+                // A PLANET, for the belt gate — and a giant is one. "Beyond the 3rd planet" counts
+                // worlds, and a gas giant is emphatically a world; excluding them would let a system of
+                // three giants put a belt on ring 2 on the grounds that it had no planets yet.
+                planetsPlaced++;
+                if (body.mass >= WorldClassifier.GasGiantMassFloor) giantsPlaced++;
             }
 
-            // ---- Step outward to the next LANE ----
-            // A lane doesn't occupy a line, it occupies a BAND: its contents' own discs plus the whole
-            // reach of any moon system, which sweeps inward and outward as the planet goes round.
+            // ---- WHAT THIS RING'S CONTENTS REACH ----
             //
-            // The old step added this planet's moon extent but nothing for the NEXT planet's, so a world
-            // with a big moon system reached back INTO the previous planet's band and the two sets of
-            // moons flew through each other. We now reserve room for both sides plus a visible gap, and
-            // remember this lane's outer reach so the next one can clear it explicitly.
-            prevOuterReach = currentRadius + laneReach;
-
-            // Reserve for the next planet reaching inward: its own disc + a typical moon system, then
-            // widen the whole step by this star's spread. The reserved parts are NOT scaled — a moon
-            // system is the size it is regardless of which sun it orbits — so only the empty lane between
-            // worlds grows. That keeps the guarantee that nothing intersects while still letting a blue
-            // giant's system read as genuinely vast next to a red dwarf's huddle.
-            float spread = SystemSpread(currentStar);
-            currentRadius = prevOuterReach + LaneGap + TypicalInnerReach
-                          + (LaneGap + TypicalInnerReach) * (spread - 1f)
-                          + Random.Range(0f, 2.5f * spread);
+            // Nothing steps outward any more — the next radius is already decided. This is recorded
+            // only so a ring the last body's moons would sit on top of can be skipped.
+            clearedTo = currentRadius + laneReach + LaneGap;
+            placed++;
         }
 
         // Lean towards a living world: make sure at least one planet sits in the habitable zone.
@@ -358,11 +452,122 @@ public class SolarSystemGenerator : MonoBehaviour
     // means the layout reserves too little room and OrbitSafety has to push the whole system outward
     // afterwards, which is exactly the case the layout exists to avoid.
     const float MaxMoonVisRadius = 0.4f;
+
+    /// The largest a single moon of a GAS GIANT may be, whatever its host's allowance could afford.
+    /// The request's number. Ganymede is 0.025 Earths, so 1.5 is already extremely generous — it is a
+    /// ceiling against a giant spending its whole pot on one body, not a target.
+    const float GiantMoonMassMax = 1.5f;
     const float MoonSurfaceGap = OrbitSafety.MoonSurfaceGap;
     const float LaneGap = OrbitSafety.LaneGap;
-    const float TypicalInnerReach = 8f;     // room reserved for the NEXT planet's disc + moon system
+    // TypicalInnerReach (room the NEXT planet would need) is gone with the outward walk: on a fixed
+    // ladder there is no "next radius" to reserve for, only a ring to skip. See PlacementRings.
 
     static float OuterReach(CelestialBody body) => OrbitSafety.SystemReach(body);
+
+    // ============================================================================================
+    // HOW MANY RINGS GET FILLED, AND WHICH
+    //
+    // "The default amount of celestial bodies per solar system should be around 5 (not a fixed number
+    // but around this should be good). And it should not be uncommon for some solar systems to have
+    // fewer than 3 Celestial bodies."
+    //
+    // Two rolls rather than one, because a single distribution cannot say both things. A triangular
+    // peaked at five puts only about 7% of systems under three — which is uncommon, not "not
+    // uncommon". So the common case is the bell, and one system in five instead rolls a genuinely
+    // SPARSE layout: one to three bodies, drawn flat.
+    //
+    //     80%  bell over 1..9, mode 5      -> the ordinary system
+    //     20%  flat over 1..3              -> the sparse one
+    //
+    // which lands about 19% of systems under three bodies and still leaves five the single most
+    // likely answer. Measured against the old walk, which produced 8.6 planets around a Sun-like star
+    // before its moons were counted.
+    //
+    // THE BUDGET IS STILL A CEILING ON TOP OF THIS. A target of nine around a red dwarf will run out
+    // of allowance somewhere around ring five and simply stop, which is the correct interaction: the
+    // target says how many rings we would LIKE to fill, the budget says what can be afforded.
+    // ============================================================================================
+
+    /// Triangular 0..1, peaked in the middle. The same shape (and the same reasoning) as
+    /// MassRules.Bell, which is private to that file.
+    static float Bell() => (Random.value + Random.value) * 0.5f;
+
+    /// How likely each ring is to be chosen, before the habitable ring is forced in.
+    ///
+    /// Leaning to the middle rather than flat. A flat weight scatters a five-body system across the
+    /// whole ladder as often as not, and a system whose only worlds are ring 1 and ring 9 reads as
+    /// broken rather than as sparse. The middle is also where the interesting ground is — the zone,
+    /// the frost line and the belt that sits at it.
+    static readonly float[] RingWeight = { 0.55f, 0.75f, 0.95f, 1.00f, 1.00f, 0.95f, 0.85f, 0.70f, 0.55f };
+
+    /// Decide which of the nine rings this system fills. `habitableRing` is forced in when the star
+    /// has a zone at all, which is what guarantees a liveable world without moving one afterwards.
+    void ChooseFilledRings(bool[] fill, int habitableRing)
+    {
+        for (int i = 0; i < fill.Length; i++) fill[i] = false;
+
+        int target = Random.value < 0.20f
+            ? Random.Range(1, 4)                                    // the sparse system: 1..3
+            : Mathf.Clamp(1 + Mathf.RoundToInt(Bell() * 8f), 1, PlacementRings.Count);
+
+        int chosen = 0;
+
+        // The habitable ring first and unconditionally. It counts against the target, so forcing it
+        // does not quietly make every system one body larger than it rolled.
+        if (habitableRing >= 0 && habitableRing < fill.Length)
+        {
+            fill[habitableRing] = true;
+            chosen = 1;
+        }
+
+        // Weighted draw without replacement for the rest.
+        while (chosen < target)
+        {
+            float total = 0f;
+            for (int i = 0; i < PlacementRings.Count; i++) if (!fill[i]) total += RingWeight[i];
+            if (total <= 0f) break;                                 // every ring already taken
+
+            float r = Random.value * total;
+            for (int i = 0; i < PlacementRings.Count; i++)
+            {
+                if (fill[i]) continue;
+                r -= RingWeight[i];
+                if (r > 0f) continue;
+                fill[i] = true;
+                chosen++;
+                break;
+            }
+        }
+    }
+
+    // ============================================================================================
+    // AN INCLINED ORBIT IS A STORY, SO IT HAS TO BE RARE
+    //
+    // "There are still too many planets with orbital inclination. Having one with an inclination
+    // should already be rare and not every solar system should generate one."
+    //
+    // It was not rare and it was not one: EVERY planet got Random.Range(-7, 7) and every moon
+    // Random.Range(-15, 15), so inclination was universal and the only variable was how much. What
+    // the report describes is exactly what that code does.
+    //
+    // Worlds form in a disc and mostly stay in it. A tilted orbit means something HAPPENED to that
+    // world — a close pass, a capture, a collision — so it is a one-in-eight event, and never twice
+    // in the same system, because two independent catastrophes in one system is not a story, it is
+    // noise. Everything else keeps a fraction of a degree, which is enough to stop the orbit lines
+    // drawing as one perfectly flat sheet.
+    // ============================================================================================
+    static float RollInclination(bool isMoon, ref bool alreadyInclined)
+    {
+        // A moon is a little likelier: it is far easier to tilt something held by a planet than
+        // something held by a star, and our own system's irregular moons are the evidence.
+        float chance = isMoon ? 0.15f : 0.12f;
+        if (!alreadyInclined && Random.value < chance)
+        {
+            alreadyInclined = true;
+            return isMoon ? Random.Range(-12f, 12f) : Random.Range(-9f, 9f);
+        }
+        return isMoon ? Random.Range(-1.5f, 1.5f) : Random.Range(-0.8f, 0.8f);
+    }
 
     // If no life-friendly planet already sits in the (default-species) habitable zone, convert the
     // nearest planet into one and place it inside the zone.
@@ -419,10 +624,35 @@ public class SolarSystemGenerator : MonoBehaviour
             hi = Mathf.Min(hi, outerNb.distanceFromStar - OrbitSafety.SystemReach(outerNb) - LaneGap - OrbitSafety.SystemReach(best));
         }
 
-        if (hi > lo)
+        // ---- MOVE IT TO A RING, NOT TO A RANDOM RADIUS ----------------------------------------------
+        //
+        // This used to be `Random.Range(lo, hi)`, and that was the second half of the reported bug. A
+        // random radius inside the zone is not necessarily a radius the layout considers legal, so
+        // OrbitSafety.EnforceSystem — which runs immediately after this — would push the world straight
+        // back out past the star's clearance. The zone said one thing, the safety pass said another, and
+        // the safety pass ran last. That is how a promoted homeworld ended up at 35.8 with its own
+        // habitable zone ending at 33.9.
+        //
+        // A ring radius is legal by construction (PlacementRings clears the star's reach before it
+        // returns anything), so moving to one cannot be undone by the pass that follows. Nearest ring to
+        // the zone centre that also fits between this world's neighbours; if none does, the world stays
+        // exactly where it is and only its TYPE changes — which was always the more important half.
+        var rings = new float[PlacementRings.Count];
+        PlacementRings.Radii(currentStar, rings);
+
+        float wantCentre = (inner + outer) * 0.5f;
+        float chosen = -1f, chosenD = float.MaxValue;
+        for (int i = 0; i < PlacementRings.Count; i++)
         {
-            best.distanceFromStar = Random.Range(lo, hi);
-            best.orbitRadius = best.distanceFromStar;
+            if (rings[i] < lo || rings[i] > hi) continue;
+            float d = Mathf.Abs(rings[i] - wantCentre);
+            if (d < chosenD) { chosenD = d; chosen = rings[i]; }
+        }
+
+        if (chosen > 0f)
+        {
+            best.distanceFromStar = chosen;
+            best.orbitRadius = chosen;
             best.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, best.orbitRadius);
         }
 
@@ -646,9 +876,46 @@ public class SolarSystemGenerator : MonoBehaviour
     /// bigger sun's worth of budget behind it, and it left nothing for anything else to be interesting
     /// with. At 0.42 a Sun-like system runs about two and a half giants and still has room for its rocky
     /// worlds, its moons and a belt.
-    const float OuterGiantChance = 0.42f;
+    // RAISED from 0.42 with the ring system. That number was tuned when a system laid out eight or
+    // nine lanes and the outer ones were always reached; a system now fills about four rings out of
+    // nine, weighted to the middle, so the three rings past the frost line come up far less often.
+    // Measured, 0.42 left a Sun-like system with 0.6 giants — most systems had none at all, which is
+    // not a place to put a gas giant feature set. 0.70 lands it near one per system.
+    const float OuterGiantChance = 0.70f;
 
-    static LaneKind ChooseLane(float rel, float budgetLeft)
+    /// How many planets a system must already have before a belt is allowed. Request: "asteroid belts
+    /// no closer than beyond the 3rd planet".
+    public const int BeltMinPlanets = 3;
+
+    /// The hard ceiling on belts in one system. Request: "max 4".
+    public const int BeltCapMax = 4;
+
+    // ============================================================================================
+    // HOW MANY BELTS THIS SYSTEM MAY HAVE
+    //
+    // "Belt count: max 4, and 4 very rare. 1 far more common, if a system gets one at all."
+    //
+    // A CAP, NOT A TARGET — the same distinction PlacementRings draws about the nine rings. This rolls
+    // the system's ceiling; whether it is reached depends on the belt odds, the allowance and the
+    // three-planet gate, and most systems never come close. The shape of the roll is what makes 1 the
+    // common answer and 4 the rare one, so the cap is doing the request's work even in systems that
+    // never bump into it.
+    //
+    //   1  62%      one belt is what a system with a belt has
+    //   2  25%
+    //   3  10%
+    //   4   3%      "very rare", and it still has to find four qualifying lanes to use it
+    // ============================================================================================
+    static int RollBeltCap()
+    {
+        float r = Random.value;
+        if (r < 0.62f) return 1;
+        if (r < 0.87f) return 2;
+        if (r < 0.97f) return 3;
+        return BeltCapMax;
+    }
+
+    static LaneKind ChooseLane(float rel, float budgetLeft, bool beltsAllowed, int giantsPlaced)
     {
         bool beyondFrost = rel >= WorldClassifier.FrostLineRel;
 
@@ -658,6 +925,20 @@ public class SolarSystemGenerator : MonoBehaviour
             float giantChance = beyondFrost ? OuterGiantChance : WorldClassifier.HotGiantChance;
             if (Random.value < giantChance) return LaneKind.GasGiant;
         }
+
+        // ---- NOT HERE ----------------------------------------------------------------------------
+        //
+        // Inside the third planet, or the system has spent its belts. "Anything that small nearer in
+        // would have been swept up long ago" is the reasoning, and it is right: the inner system is
+        // where accretion ran to completion.
+        //
+        // A REFUSED BELT IS A TERRESTRIAL, not an empty ring. This includes the out-of-allowance case
+        // below, which is the one that matters: on a nearly-spent budget the old code RETURNED a belt
+        // unconditionally, so an early ring on a poor star could open the system with a field of rubble
+        // where the request wants a planet. RollTerrestrial takes the remaining allowance as its ceiling
+        // and the caller has already guaranteed at least an asteroid's worth of it, so the small world
+        // this produces is exactly the small world that budget can afford.
+        if (!beltsAllowed) return LaneKind.Terrestrial;
 
         // A BELT is a lane whose material never accreted into anything. Two places that happens:
         //
@@ -672,6 +953,13 @@ public class SolarSystemGenerator : MonoBehaviour
             beltChance = 0.28f;
         if (budgetLeft < MassRules.TerrestrialMax) beltChance = 0.50f;
         if (budgetLeft < MassRules.TerrestrialMin * 2f) return LaneKind.AsteroidBelt;
+
+        // "A system that rolls fewer gas giants may roll more belts instead." The mechanism the frost
+        // line spike models is a giant stirring the material — so a system that HAS no giant out here
+        // has to be given the odds some other way, or the one clause of the request that asks for more
+        // belts could never fire. Half again, beyond the frost line only, and only while the system is
+        // still giant-less: it is compensation for a missing giant, not a bonus for being far out.
+        if (beyondFrost && giantsPlaced == 0) beltChance *= 1.5f;
 
         return Random.value < beltChance ? LaneKind.AsteroidBelt : LaneKind.Terrestrial;
     }
@@ -699,22 +987,10 @@ public class SolarSystemGenerator : MonoBehaviour
     /// the system sat between 8 and 30 and was therefore classified as scorched.
     static float TempReference(StarData star) => StarDatabase.ReferenceDistance(star);
 
-    /// How much wider this star's system is laid out than a Sun-like one's.
-    ///
-    /// Tied to the same FluxScale as the habitable zone, so THE TWO CAN NEVER DRIFT APART: a star that
-    /// pushes its zone outward pushes its planets outward with it, and a habitable world therefore lands
-    /// among its siblings rather than ten times further out. That was the actual bug — not that the zone
-    /// was in the wrong place, but that nothing else knew where it had gone.
-    ///
-    /// Damped to 70% of the full flux scale so a blue giant's system does not sprawl past what the camera
-    /// can frame, then floored at 1 and multiplied by a flat 1.18.
-    ///
-    /// THE FLOOR MATTERS. Without it the damped lerp returns 0.81 for a red dwarf, so the dimmest systems
-    /// would have come out TIGHTER than before — the opposite of "spread the planets out a little", and
-    /// on precisely the systems that are already the most cramped. Flooring at 1 means the 1.18 is a
-    /// genuine across-the-board loosening, and brighter stars widen from there.
-    static float SystemSpread(StarData star)
-        => 1.18f * Mathf.Max(1f, Mathf.Lerp(1f, StarDatabase.FluxScale(star), 0.70f));
+    // SystemSpread lived here: it widened the outward WALK by the star's flux so a bright star's
+    // system came out larger. PlacementRings does that job now and does it better — its ladder is
+    // quoted in multiples of the star's own reference distance, so the spread is not a correction
+    // applied to the spacing, it IS the spacing.
 
     // Bias a world's terrain temperature by how close it is to the star: closer = hotter climate,
     // further = colder. Call before generating the surface so biomes reflect it.

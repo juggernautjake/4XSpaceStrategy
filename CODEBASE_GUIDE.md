@@ -64,8 +64,14 @@ Enum `OreType` (None + 14 ores from Ferralite → Xenocryst).
 - `class StarData` — `temperatureK, luminosity, lightIntensity, color, visualScale`,
   `hasHabitableZone, hzInner, hzOuter`; helpers `HzCenter`, `HzWidth`.
 - **`StarDatabase.Get(type)`** — builds a `StarData` from spectral class; computes light + base
-  habitable zone (`hzInner/Outer` scale with √luminosity); O/B stars get no zone. `AU` maps
-  astronomical units → game units.
+  habitable zone; O/B stars get no zone.
+- **`AU = 40`** maps astronomical units → game units, and it is the number the whole layout hangs off.
+  It was 14, which made a Sun-like star's rendered radius 0.21 AU against the real Sun's 0.005 — so
+  `OrbitSafety`'s clearance swallowed the entire inner system and no planet could physically orbit
+  inside the habitable zone. That is the "green habitable zone is far too close to the star" report,
+  and its root cause was the ruler rather than the zone. See the header in the file.
+- Star render size is `baseScale * 4` (was `* 2`), and `RefScale` doubled with it so every density
+  readout in the Dev editor keeps meaning what it meant.
 
 ### Habitability.cs  *(species-aware)*
 - **`GetZone(star, species, out inner, out outer)`** — the species' shifted/scaled Goldilocks band.
@@ -91,16 +97,44 @@ Enum `OreType` (None + 14 ores from Ferralite → Xenocryst).
 **1 Mass is 1 Earth.** Terrestrial worlds 0.6–4 to one decimal, gas giants 10–40 in multiples of five,
 anything at or under 0.5 not orbiting a planet is an asteroid. `SurfaceSize = mass × 6` (so an Earth is
 6, the same size class every downstream threshold was tuned against back when Earth was mass 2).
-- **`SystemBudget(stars)`** — the SOLAR SYSTEM MASS allowance: 100 per solar mass, clamped 45–400. This
+- **`SystemBudget(stars)`** — the SOLAR SYSTEM MASS allowance: **70 per solar mass**, clamped 32–280. This
   replaced the New Game menu's "average planets per system" slider entirely. A system is built by
   SPENDING it outward — planets, their moons and every asteroid out of one pot — and stops when it can
   no longer afford anything. A binary really is richer than a red dwarf, by arithmetic rather than by
   a setting.
-- **`RollGasGiant / RollTerrestrial / RollAsteroid / RollMoon`**, `MoonBudget(hostMass)` (half a
-  terrestrial's mass, a tenth of a giant's), and the `Quantize*` family.
+- **`RollGasGiant / RollTerrestrial / RollAsteroid / RollMoon`**, `MoonBudget(hostMass)` (**a quarter**
+  of a terrestrial's mass, a tenth of a giant's), and the `Quantize*` family.
+- **`GasGiantDiameterScale`** — a giant renders at twice what the cube root alone gives it. The cube
+  root is physically right and puts a mass-30 giant at only 3.1 Earth diameters, where Jupiter is
+  eleven; the flat factor brings the class back to reading as a giant beside the rocky worlds.
 - **`VisualDiameter`** is a CUBE root now, not a square root: mass is a volume, and the square root put a
   40-mass giant far enough across that OrbitSafety pushed every outer orbit off the screen.
 - Measured distributions and per-star-class system census are recorded in the file.
+
+### PlacementRings.cs  *(where a system is allowed to put things)*
+Nine fixed radii per star, quoted as multiples of `StarDatabase.ReferenceDistance`, and the generator's
+only decision per ring is fill it or skip it. This replaced an outward WALK, which had two failures the
+ladder does not: a five-body system piled up against the star (a walk has no concept of a gap), and
+whether any lane fell in the habitable zone was luck. The ladder is anchored so **rings 1–3 sit inside
+the zone, 4 and 5 are in it, 6–9 are beyond** — Mercury and Venus inside, Earth and Mars within, which
+is the arrangement the request asked for. Around a dim star the inner three are COMPRESSED into the
+room between the star and the zone rather than the whole ladder being shifted, because shifting pushed
+ring 3 into the zone and put the Earthlike world third from its sun.
+- **`Radii(star, into)` / `InZone` / `HabitableRing`**. Generation-time only — nothing at runtime snaps
+  to a ring, so the Dev orbit slider and terraforming's orbit-moving are unaffected.
+
+### GasGiantStorms.cs  *(the Great Red Spot)*
+0–3 elliptical storm cells per giant, deterministic from the body's seed, snapped to the centre of a
+band the generator already draws as `Storm`. Replaced `if (elev > 0.78f) return Storm`, which was a
+threshold on fractal noise and therefore produced speckle rather than a spot. Two details do the work:
+the cloud lanes are **deflected** around a spot (`FlowHalo`), and the spot sits in a pale **`Hollow`** —
+without the hollow a dark storm inside a dark belt is invisible, which is what the render showed.
+- **`Spots(b, out spots)` / `Distance` / `Invalidate`**. `tools/gas-giant-check.mjs` draws twelve.
+
+### GenProfiler.cs  *(which part of generation ate the frame)*
+`Watch(label, iterator)` times every unyielded span in a generation coroutine and logs any over 50 ms;
+`Section(label, work)` brackets straight-line work. Added for a reported 84-second single frame that
+the loading screen could report the total of but not attribute.
 
 ### RotationRules.cs  *(rotation, and the magnetic field it drives)*
 A magnetic field is a CONSEQUENCE of spin now, not a coin flip: **`GeneratesField(type, mass, spin)`**
@@ -647,7 +681,7 @@ powershell -ExecutionPolicy Bypass -File tools/Check-Scripts.ps1
 ```
 
 It exists for the case Unity cannot cover — work done on a machine with no editor and no .NET SDK,
-where the first sign a file is broken is the next person opening the project. Seven checks:
+where the first sign a file is broken is the next person opening the project. Eight checks:
 
 * **HEAD** — the first non-blank line of a file must look like the top of a C# file. Catches text
   dropped in above the `using` directives.
@@ -672,6 +706,15 @@ where the first sign a file is broken is the next person opening the project. Se
   `CS1579`, and it reached `main` once: `foreach (var b in SystemContext.Galaxy)`, where a `Galaxy` is
   a bag of *systems* and the flattened walk is `SystemContext.AllBodies()`. Nothing else could see it
   — the expression is balanced, correctly quoted, and every identifier in it is real.
+* **UNITY** — no `??`, `??=` or `?.` on a `UnityEngine.Object`. `tools/check-unity-null.mjs`. The odd
+  one out: it catches a *runtime* fault rather than a compile error, and it is here because that fault
+  reads exactly like a compile error in the console. Unity overloads `operator ==` so a component whose
+  native half has been destroyed compares equal to null — and `??` and `?.` are C# *language* operators
+  that never run the overload. So `GetComponent<LODGroup>() ?? AddComponent<LODGroup>()` hands back the
+  DEAD component and the next call throws `MissingComponentException: There is no 'LODGroup' attached
+  to the "Model_Scout 1" game object`. That reached `main`, and the check found four more of the same
+  shape the first time it ran. The fix is always `x = GetComponent<T>(); if (x == null) x = ...`,
+  which is what `UIFactory.Ensure<T>` already is.
 
 The third earns its keep because the other two cannot see a *truncated identifier*. The stray line
 that once reached `main` above PlanetViewWindow's usings read
@@ -685,13 +728,57 @@ three checks all reported clean, because a stray newline inside a string leaves 
 braces, the parens and every enum reference perfectly intact. The first anyone knew was eighteen
 compiler errors in Unity, seventeen of them spurious and none pointing at the fault.
 
-**A skipped check exits 1, not 0.** The last four need `node` on `PATH`; if it is missing the script
+**A skipped check exits 1, not 0.** The last five need `node` on `PATH`; if it is missing the script
 reports them as `DID NOT RUN` and fails, because this script's whole job is to stand in for a compiler
-that is not here — "Clean." has to mean all seven checks ran, or it is a claim it cannot back.
+that is not here — "Clean." has to mean all eight checks ran, or it is a claim it cannot back.
 
 **None of this is a type checker.** It will not catch a wrong argument count, a wrong return type, or
 an assignment to a get-only property. It catches the classes that have actually reached `main`, which
 is a different and much smaller claim. Unity is still the real check.
+
+**`terrain-elevation-check.mjs`** — does a biome still secretly mean *"how high"*, and do the contour
+lines read as contours?
+
+```
+node tools/terrain-elevation-check.mjs      # writes Art/_review/terrain-elevation.png
+```
+
+Two requests, one tool, because they are halves of one change: taking altitude out of the biome names
+removes the only thing that showed relief, so the 500 m contours have to put it back. Checking either
+alone passes a map that is either flat or striped.
+
+The probe **holds `ridge`, moisture and temperature fixed and sweeps elevation alone**, at five
+roughness levels per classifier. Under a correct classifier that sweep is nearly silent — nothing
+about the ground changed except its height — so every extra type it produces is an altitude band
+wearing a biome's name, and the count is the measurement. It is a harsher test than a rendered world:
+on a real map elevation and roughness correlate, so an elevation-driven band hides inside a
+roughness-driven one, and here they are decoupled by construction.
+
+**It caught the band that reading the code had missed** — `Volcanic`'s `elev > 0.62f -> LavaRock`,
+which capped every volcanic world's high ground in one type whatever the ground was like up there. The
+same sweep confirmed the two that were fixed on purpose (`Barren` and `Airless`'s Metallic Crust).
+
+The contour half draws a cone **on the longitude seam**, which is the whole reason for its position:
+centred instead, its rings run parallel to the seam and nothing ever crosses it, so a broken wrap
+passes unnoticed — which is exactly what the first version of this probe did.
+
+**`verify-civ-marks.mjs`** — does every empire crest the game will ask for actually exist, and does
+the mark reach the map?
+
+```
+node tools/verify-civ-marks.mjs
+```
+
+The command-icon lesson applied to a second directory. `CivEmblem.Mask` builds a Resources path out of
+the `Symbols` array and `Resources.Load` returns **null** for a name that is not there — not an
+exception. So a crest renamed by one character takes the mark off every colony marker, every system
+marker and every hull in the game, and the only symptom is an absence.
+
+Both directions, like `verify-command-ui`: a name with no file is a missing mark, and a file no name
+reaches is either a typo in the array or a crest nobody can pick. It also asserts that `CivMarkBadge`
+is actually *attached* at both sites rather than merely existing — a badge nothing calls is exactly as
+invisible as a missing PNG, with the added trap that it looks built — and that the player-only gate is
+still in place, since the player's crest must never be drawn over a rival's ground.
 
 **`make-script-metas.mjs`** — for a `.cs` file that has no sidecar **and no Unity anywhere to make one**.
 

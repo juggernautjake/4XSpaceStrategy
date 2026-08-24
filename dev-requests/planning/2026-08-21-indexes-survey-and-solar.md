@@ -212,12 +212,16 @@ warn or draw. It checks both directions and that every control carries a tooltip
 flaws in itself**: reading the formation enum from the wrong file and reporting zero formations as a
 pass, and counting thirteen used icons as unused.
 
-## N. Still open
+## N. Still open — ALL FOUR CLOSED, see sections O-R below
 
-- [ ] Focus fire has no **hotkey** — right-click is the only way to designate
-- [ ] No **formation preview** on the map before committing
-- [ ] **Point defence still covers only its own hull**
-- [ ] Ships still do not **manoeuvre in combat**
+Left in place rather than deleted: this list is what the next request was answering, and a plan
+that erases the problem it was given reads afterwards as though it invented the work.
+
+
+- [x] Focus fire has no **hotkey** — right-click is the only way to designate
+- [x] No **formation preview** on the map before committing
+- [x] **Point defence still covers only its own hull**
+- [x] Ships still do not **manoeuvre in combat**
 
 ---
 

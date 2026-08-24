@@ -1341,7 +1341,7 @@ public class UnitManager : MonoBehaviour
     {
         if (b.visualObject == null) return;
         var oc = b.visualObject.GetComponent<OrbitController>();
-        if (oc != null) oc.SetOwnerHighlight(FactionManager.OwnerColor(b.owner), true);
+        if (oc != null) oc.SetOwnerHighlight(FactionManager.OwnerColor(b.owner), true, Claim.IsMine(b));
     }
 
     static bool Crossed(float before, float after, float t) => before < t && after >= t;

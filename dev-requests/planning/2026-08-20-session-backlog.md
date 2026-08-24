@@ -135,7 +135,7 @@ meshes under `_Extras/` in the Downloads library.
       and every symbol swatch drawn in the current colours. Tooltips throughout
 - [x] **B11. Saved and loaded.** A save predating this comes back in its generated colours rather than
       in defaults nobody picked
-- [ ] **B12.** The mark on WORLDS as well as ships — colony markers and the claim overlay
+- [x] **B12.** The mark on WORLDS as well as ships — colony markers and the claim overlay
 - [ ] **B13.** Rival empires get their own generated mark and colours, so the map is not one crest
 - [ ] **B14.** Change colours and mark mid-game from an empire screen, not only at the start
 
@@ -321,31 +321,31 @@ Not hidden, not re-thresholded away:
       frozen world growing lush ground however warm one belt gets
 
 ### Queued — from the latest screenshots
-- [ ] **F7. Hydro index covers the water itself.** Currently the whole map floors at 70% and the
+- [x] **F7. Hydro index covers the water itself.** Currently the whole map floors at 70% and the
       *centres* — the actual lakes and seas — are blank. Fill centres to 90+. Intent: the shore and
       surrounding land should carry high hydro so a steam turbine can be built beside water rather
       than in it (building in water is impossible anyway)
-- [ ] **F8. Frozen bodies of water generate no hydro at all.** Ice is still water in reach
-- [ ] **F9. Continental plates: mass gate 0.85 to 4.0.** Stops small moons and asteroids growing
+- [x] **F8. Frozen bodies of water generate no hydro at all.** Ice is still water in reach
+- [x] **F9. Continental plates: mass gate 0.85 to 4.0.** Stops small moons and asteroids growing
       continents. Must NOT gate volcanic activity, which is separate
-- [ ] **F10. All plate lines visible in the Geothermal view.** The full red grid the old standalone
+- [x] **F10. All plate lines visible in the Geothermal view.** The full red grid the old standalone
       tectonics overlay drew, with only certain stretches reading as high activity — convergent,
       shearing or divergent margins. One overlay, not two
-- [ ] **F11.** Review the hairline's width (currently a full tile) and its red against ocean blue
+- [x] **F11.** Review the hairline's width (currently a full tile) and its red against ocean blue
 
 ### Queued — city generation places buildings on the right index
-- [ ] **F12.** Farmland sited on high Fertility, better the higher the percentage
-- [ ] **F13.** Steam turbines sited inside the Hydro index
-- [ ] **F14.** If the capitol is not near water, place a **combustion plant instead**, sited on the
+- [x] **F12.** Farmland sited on high Fertility, better the higher the percentage
+- [x] **F13.** Steam turbines sited inside the Hydro index
+- [x] **F14.** If the capitol is not near water, place a **combustion plant instead**, sited on the
       **Mineral** index
-- [ ] **F15.** General rule: every generated building lands inside the index it needs
+- [x] **F15.** General rule: every generated building lands inside the index it needs
 
 ### Queued — survey tab hides indexes a world does not have
-- [ ] **F16.** No geothermal activity → no Geothermal index option at all (see screenshot 4 for the
+- [x] **F16.** No geothermal activity → no Geothermal index option at all (see screenshot 4 for the
       target state)
-- [ ] **F17.** No fertility → no Fertility index option
-- [ ] **F18.** Thin atmosphere, therefore no weather → no Weather index
-- [ ] **F19.** Dev-mode toggle to unhide them, so terraforming can still reveal them later without
+- [x] **F17.** No fertility → no Fertility index option
+- [x] **F18.** Thin atmosphere, therefore no weather → no Weather index
+- [x] **F19.** Dev-mode toggle to unhide them, so terraforming can still reveal them later without
       the clutter sitting in the survey tab meanwhile
 
 ---
@@ -353,43 +353,43 @@ Not hidden, not re-thresholded away:
 ## F-bis. Terrain and generation — second screenshot round
 
 ### Biomes, elevation and the topographic view
-- [ ] **F20. Biomes must not denote elevation.** On geothermal hotspots, Metallic Crust → Badlands →
+- [x] **F20. Biomes must not denote elevation.** On geothermal hotspots, Metallic Crust → Badlands →
       Canyon are currently reading as a rising elevation ramp (screenshot: concentric rings around a
       vent). Past a certain elevation it should simply be mountain terrain. A biome says what ground
       IS; how high it is, is a separate fact
-- [ ] **F21. Volcano biome threshold 97% → 95%** on the geothermal index
-- [ ] **F22. Black contour lines every 500 m.** A thin black border separating each elevation band —
+- [x] **F21. Volcano biome threshold 97% → 95%** on the geothermal index
+- [x] **F22. Black contour lines every 500 m.** A thin black border separating each elevation band —
       0, ±500, ±1000, ±1500, … in both directions — giving the planet map a topographic read. This is
       what replaces biomes-as-elevation
-- [ ] **F23. Molten / lava worlds must remain possible.** Whatever the temperature rework does, the
+- [x] **F23. Molten / lava worlds must remain possible.** Whatever the temperature rework does, the
       conditions that produce a molten world have to survive it
 
 ### Indexes
-- [ ] **F24. Gas giants get NO indexes at all.** Remove them for now; gas giants need their own
+- [x] **F24. Gas giants get NO indexes at all.** Remove them for now; gas giants need their own
       system later
-- [ ] **F25. Hydro index — revised from F7.** The current result floors the whole map at 70% with a
+- [x] **F25. Hydro index — revised from F7.** The current result floors the whole map at 70% with a
       brighter ring at the shoreline, which reads as the index circling the water rather than showing
       it. Wanted: the **water source itself** carries a high value, the index **reaches a few tiles
       inland** as it already does, and the flat 70% everywhere goes away
 
 ### Solar system generation — scale, spacing and count
-- [ ] **F26. Temperature range −270 °C to 1000 °C.** Bodies close to their star must be far hotter
+- [x] **F26. Temperature range −270 °C to 1000 °C.** Bodies close to their star must be far hotter
       than they are now
-- [ ] **F27. Habitable zones are too close in.** A G-type star's HZ sits far nearer than it should —
+- [x] **F27. Habitable zones are too close in.** A G-type star's HZ sits far nearer than it should —
       Earth is the third planet and is not even at the centre of its own HZ
-- [ ] **F28. Stop generating frozen worlds as the innermost planet**
-- [ ] **F29. Far fewer planets per system.** Currently 8–10 around nearly every star. Raise the mass
+- [x] **F28. Stop generating frozen worlds as the innermost planet**
+- [x] **F29. Far fewer planets per system.** Currently 8–10 around nearly every star. Raise the mass
       cost per planet/moon so systems spend out sooner; **1-planet systems should be possible**, and
       a full house should be rare
-- [ ] **F30. Hard cap of 9 planets** per system, excluding asteroid belts and moons. A cap, not a target
-- [ ] **F31. Lower default orbital inclination.** Most planets on a flat plane; inclined orbits rare
-- [ ] **F32. Asteroid belts no closer than beyond the 3rd planet**, out to the furthest orbit —
+- [x] **F30. Hard cap of 9 planets** per system, excluding asteroid belts and moons. A cap, not a target
+- [x] **F31. Lower default orbital inclination.** Most planets on a flat plane; inclined orbits rare
+- [x] **F32. Asteroid belts no closer than beyond the 3rd planet**, out to the furthest orbit —
       anything that small nearer in would have been swept up long ago
-- [ ] **F33. Belt count: max 4, and 4 very rare.** 1 far more common, *if* a system gets one at all.
+- [x] **F33. Belt count: max 4, and 4 very rare.** 1 far more common, *if* a system gets one at all.
       A system that rolls fewer gas giants may roll more belts instead
-- [ ] **F34. Moons: total mass ≤ ¼ the host planet's**, whether in one moon or split across them.
+- [x] **F34. Moons: total mass ≤ ¼ the host planet's**, whether in one moon or split across them.
       Maximum 3 moons, not a requirement
-- [ ] **F35. Gas giants and stars ×2 in rendered size**, with orbit placement and spacing adjusted so
+- [x] **F35. Gas giants and stars ×2 in rendered size**, with orbit placement and spacing adjusted so
       the system still reads correctly at that scale
 
 ## G-bis. Fleet command — asked for mid-session, planned in full
@@ -411,8 +411,8 @@ Its own document: `2026-08-20-fleet-command.md`. Summary of state:
       every control, and each one says what the ships will DO rather than what the option is called
 - [x] **Patrol and rally tools** — click out a route (it draws the closing leg as you lay it, so a
       loop looks like a loop before it is committed) or a single fall-back point
-- [ ] Rally points for newly built ships, regroup, reinforce, the slowest-ship warning
-- [ ] Formation menu entries could carry a live diagram of the current squadron, not just a tooltip
+- [x] Rally points for newly built ships, regroup, reinforce, the slowest-ship warning
+- [x] Formation menu entries could carry a live diagram of the current squadron, not just a tooltip
 
 ## G. Fixed along the way
 
@@ -513,9 +513,9 @@ Its own document: `2026-08-20-fleet-command.md`. Summary of state:
 
 ### Still open
 
-- [ ] Ships do not manoeuvre *in combat* — they fly their orders and shoot. Now that crossing speed is
+- [x] Ships do not manoeuvre *in combat* — they fly their orders and shoot. Now that crossing speed is
       a real defence, an evasive protocol would mean something
-- [ ] Point defence still protects only its own hull. Deliberate (see `CombatManager`), but a torpedo
+- [x] Point defence still protects only its own hull. Deliberate (see `CombatManager`), but a torpedo
       is slow enough that escort PD is worth revisiting
 - [ ] Magazine capacity is not a refit choice. A hull that could trade armour for rounds would be the
       natural next decision
@@ -526,3 +526,210 @@ Its own document: `2026-08-20-fleet-command.md`. Summary of state:
 — 4 checks and a before/after sheet. Both parse the game's own tables so a tuning change shows up
 without anyone remembering to mirror it. **Five of the defects above were found by looking at the
 picture, not by reading the source.**
+
+---
+
+# The five F-items that were still open — closed 2026-08-23
+
+> *"Please make sure that everything we requested to be built for the game has actually been built,
+> and if it hasn't please build it all."*
+
+A sweep of every planning document against the code. **Of the 51 unticked boxes in this file, 46 were
+already built and never marked** — F7-F19, F24-F31 and F34-F35 all landed across the 2026-08-21,
+08-22 and 08-23 passes without anyone coming back to tick them here. Five were genuinely unbuilt, and
+this section is those five. Nothing else in `dev-requests/planning/` was open and buildable: the ship
+art needs Meshy credits, the LOD tail and the ultrawide check need Unity, and the master plan's
+Parts D and E say in their own header that their boxes lied and the work shipped.
+
+The five are two separate stories that turned out to be one.
+
+## F20 + F22 — biomes stopped meaning "how high", and contours took over the job
+
+These are halves of a single change and had to be built together. Taking altitude out of the biome
+names removes the only thing that showed relief on the map — a forest at 200 m and a forest at 4,000 m
+become the same green — so something has to put it back.
+
+- [x] **F20. Biomes must not denote elevation.**
+
+      A shared line, `AlpineAbove` (0.52 above the waterline, ~6,200 m), applied in every solid
+      classifier: past it, ground is Mountains whatever else it would have been. **It is the same
+      number `ElevationBand` already prints**, so a tile that reads "alpine" in the hover panel is
+      drawn as mountain on the map — one constant, so the picture and the words cannot disagree.
+
+      Not a return of Highlands and Hills. Those were BANDS at 0.66 that swallowed a third of every
+      temperate world and stripped the climate out of it. This is a CEILING, and everything under it
+      still falls through to its own climate and material tests.
+
+      Then the altitude bands themselves. **Metallic Crust** was `elev > 0.55` in `Barren` and
+      `elev > 0.7` in `Airless` and nothing else — the middle rung of the exact ramp the screenshot
+      shows. Exposed metal is a statement about what ground is MADE OF, and what exposes it is the
+      crust being broken open, so it reads `ridge` now like every other bare-rock type in the file.
+      `SaltFlat`, `Crater` and `ObsidianFlat` keep their elevation tests: those are BASINS, which is a
+      fact about the shape of the ground rather than a name for its altitude.
+
+- [x] **F22. Black contour lines every 500 m,** both above and below the waterline, on the Planet View
+      map. `PlanetTerrainGenerator.ContourBand` is the band index; `SurfaceTextureRenderer.PaintContours`
+      draws the boundary between any two cells whose bands differ.
+
+      A separate pass over the finished texture rather than a test inside the fill loop, because a
+      contour is a property of the BOUNDARY between two cells and the fill loop only ever has one of
+      them. One texel, on the inside edge of the LOWER cell — not both, or every line is two texels
+      wide and the map reads as a mesh laid over the ground rather than as contours on it.
+
+      Bathymetric too. A drowned basin has shape, terraforming can raise it, and a map that goes flat
+      below the waterline hides exactly the ground the player is deciding whether to drain.
+
+      **Not in `BuildGrid`** — that is one texel per cell and feeds the moon thumbnails and the 3D
+      globes, where a black texel per boundary is a grid over a hundred-pixel picture.
+
+## F21 — the volcano threshold
+
+- [x] **F21. `GeothermalMap.VolcanoIndex` 0.97 -> 0.95.** At 0.97 the qualifying band is three
+      hundredths of the index wide and the field's top end is steep there, so a world could carry
+      hotspots reading 94-96 and grow no cone at all: the survey shows a bright red bullseye and the
+      map shows nothing standing on it. 0.95 doubles the band. `PlanetTerrainGenerator` now reads the
+      constant instead of restating "97-100" in a comment, so the two cannot drift again.
+
+## F32 + F33 — where belts may go, and how many
+
+- [x] **F32. No belt before the 3rd planet.** `SolarSystemGenerator` counts planets placed and gates
+      on it. **PLANETS, NOT RINGS** — the reasoning is about how much material the inner system swept
+      up, and a ring nothing accreted on swept up nothing. Gas giants count: a system of three giants
+      must not put a belt on ring 2 on the grounds that it had "no planets" yet.
+
+- [x] **F33. At most 4 belts, 4 very rare, 1 by far the commonest.** A per-system cap rolled up front
+      (1: 62%, 2: 25%, 3: 10%, 4: 3%) — a cap, not a target, the same distinction `PlacementRings`
+      draws about the nine rings.
+
+      **A refused belt becomes a terrestrial, not an empty ring.** This is the part that matters: on a
+      nearly-spent budget the old `ChooseLane` returned a belt *unconditionally*, so an early ring on a
+      poor star could open the system with a field of rubble exactly where the request wants a planet.
+
+      "A system that rolls fewer gas giants may roll more belts instead" is a 1.5x on the belt odds
+      beyond the frost line **while the system is still giant-less**. The frost-line spike exists
+      because a giant stirs the material; a system with no giant out there has to be given the odds
+      some other way or that clause could never fire.
+
+## What the measurements said
+
+`tools/terrain-elevation-check.mjs` is new. It sweeps elevation with roughness and climate pinned, at
+five roughness levels per classifier, and counts the types that appear. **It found a fourth altitude
+band nobody had listed:** `Volcanic`'s `elev > 0.62f -> LavaRock`, which capped every volcanic world's
+high ground in one type whatever the ground was actually like up there. Solidified flow is broken
+ground, so it reads `ridge` now, and `CrackedGround` dropped to 0.40 to keep a slice of its own.
+
+It also failed twice on **its own** flaws before it failed on any code, and both are worth stating:
+
+* It called 844 corner texels "doubled contours". They were corners — a cell drawing both its north
+  and its east edge shares the one texel where the two meet, which is what contours do at a crossing.
+  Counting those would have forced a fix for something that is not wrong and buried the real finding.
+  Orientations are tracked separately now.
+* Its cone was **centred on the map**, so every contour ran parallel to the longitude seam and nothing
+  ever crossed it — a broken wrap would have passed unnoticed. The cone sits ON the seam now, and its
+  rings cut across it radially.
+
+After both: all four classifiers produce exactly one biome plus Mountains across the whole elevation
+sweep, 24 of 24 contour bands present, zero doubled lines, 22 rows crossing the seam, 6.3% coverage.
+
+`tools/system-composition-check.mjs` grew the belt rules and four asserts:
+
+```
+Belts per system:  0:83.8%  1:15.6%  2:0.6%  3:0.0%  4:0.0%
+Of systems that get a belt at all:  1:96%  2:4%
+```
+
+**Say plainly what that costs.** Belts are now uncommon — one system in six. The two requests together
+force it: mean filled rings is 4.2 and mean planets is 4.2, so a system that must place three planets
+before its first belt usually runs out of rings first. The belt CAP is therefore almost never the
+binding constraint; the position gate is. If belts should be a more regular feature, the lever is F32
+(three planets) rather than F33 (four belts) — and that is a call, not a bug.
+
+Planets rose to compensate, 3.3 -> 3.5 on an M dwarf and 4.0 -> 4.3 on a G, because a refused belt is
+now a world. Mean filled rings, the under-3 share, the habitable-zone guarantee and the inner-ring
+rule are all unmoved.
+
+## Two things fixed on the way, neither of them asked for
+
+- [x] `OceanWorld`'s mountain cut was a bare `elev > 0.80f` — the one threshold in that block that did
+      NOT move with the water while the two either side of it did. Drain an ocean world and its
+      shoreline dropped while its snowline stayed put, so the exposed seabed grew mountains from the
+      bottom up. Its island cut had the same fault: left raw, a flooded ocean world put that line
+      BELOW its own waterline and every scrap of land above the surface was an island.
+
+- [x] `Airless`'s new roughness cut for Metallic Crust was first written ABOVE the CrystalField test,
+      where a cut of 0.55 would have swallowed the 0.72 band whole and quietly deleted crystal fields
+      from the game. Caught before it ran, by reading the branch order rather than the branch.
+
+## And a sixth, found on the way out — B12, the empire's mark on the map
+
+The closing pass on 2026-08-22 listed **B5, B13 and B14** as blocked on "a screen that does not
+exist yet" and did not mention **B12** at all. B12 is not blocked and never was: the crest already
+existed (`CivEmblem`), was already chosen beside the colours (`CivIdentityPanel`) and was already on
+every hull (`UnitModelRenderer`). It had simply never reached the map — which is where a player spends
+most of their time, and where *"what is mine"* is the question being asked.
+
+- [x] **B12. `Visual/CivMarkBadge.cs`** — a camera-facing quad carrying `CivEmblem.Current`, attached
+      in the two places the request names:
+
+      * **Colony markers** — `OrbitController.SetOwnerHighlight` takes a `mine` flag now and hangs the
+        badge off the owner ring's own object, so it inherits the ring's position and cannot drift
+        from the world it labels. Sat on the ring's EDGE, not its centre, where it would cover the
+        planet it is describing.
+      * **The claim overlay** — `GalaxyLOD`'s system proxy, beside the empire ring it already draws.
+
+      `mine` is an argument rather than something inferred from the ring colour, because **a colour is
+      not an identity**: two factions can be handed neighbouring hues, and the question is about the
+      owner.
+
+**Why a shape and not just the colour that was already there.** Owner colour answers "someone owns
+this", and answers "which someone" only if you can hold seven faction hues in your head — and it
+fails outright for a colour-blind player, who gets a ring in a hue they cannot separate from a
+neighbour's. The ring says an empire holds this and the mark says which, and either one alone still
+works.
+
+**The player's own holdings only.** Rivals keep the coloured ring and no badge, exactly as before.
+Drawing the player's crest on a rival's world because it is the only crest that exists would be a lie
+about who owns the ground, and a worse map than no badge. Rival marks are B13 and still need a
+per-faction symbol generator.
+
+Three things the surrounding code had already learned the hard way, applied here rather than
+rediscovered:
+
+* **Not `Attach(...)?.Show(true)`.** `?.` does not route through Unity's overloaded `==`, so a badge
+  whose native half is gone comes back as a live reference and throws — the exact `ShipLOD` trap from
+  2026-08-23 §0A. Written the long way, and the UNITY check now covers this shape.
+* **`OnDisable`/`OnDestroy` unsubscribe from `CivEmblem.OnChanged`.** A static event outlives its
+  subscriber; without this, reloading a save leaves destroyed badges on the list and every later
+  symbol change throws. Same defect as `FormationPreview`'s leaked `ControlGroups.OnChanged`
+  (2026-08-22 §D3).
+* **The material's colour is set once at creation, not on every refresh.** `FadeGroup` owns that
+  material's alpha from the moment it captures the subtree — concealment and the zoom crossfade both
+  drive it — so rewriting the colour on a symbol change would stamp alpha back to 1 and flash a
+  concealed system's badge on.
+
+It is gated by concealment through `ApplyRingEnabled`, alongside the two rings, because a badge left
+showing over a hidden world is the same defect the rings had: a labelled marker saying exactly where
+the thing you just hid is.
+
+**`tools/verify-civ-marks.mjs`** is the tripwire, and it is the command-icon lesson applied to a
+second directory. The crest is loaded by NAME through `Resources.Load`, which returns null rather
+than throwing, so a symbol renamed by one character takes the mark off every colony marker, every
+system marker and every hull in the game — and the only symptom is an absence. It checks both
+directions (a name with no file, and a file no name reaches), that the badge is actually attached at
+both sites rather than merely existing, and that the player-only gate is still there.
+
+## Not built, and it is a suggestion rather than a request
+
+- [ ] **Magazine capacity as a refit choice.** The line in §I reads *"a hull that could trade armour
+      for rounds **would be** the natural next decision"* — that is a design direction someone wrote
+      down while finishing something else, not a request. It wants a refit screen and a hull-stat
+      trade model, neither of which exists, and both are Jacob's call on where the game is going.
+
+## Still not built, and why — unchanged
+
+Everything in `2026-08-22-closing-the-backlog.md` §G still stands: the LOD tail and the impostor level
+need Unity, the remaining ship art needs the Meshy key, the civ-colour placement needs a screen that
+does not exist yet, and the three Planetary Generation 2.0 audit decisions are Jacob's.
+
+**None of this was compiled.** There is no Unity here. `Check-Scripts.ps1` is clean over 231 files
+across all eight checks and all twelve Node tripwires pass — but those are tripwires, not a compiler.

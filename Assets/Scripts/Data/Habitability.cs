@@ -12,16 +12,39 @@ public static class Habitability
         inner = outer = 0f;
         if (star == null || !star.hasHabitableZone || species == null) return false;
 
-        // Hotter-preferring species pull the band inward (closer = hotter); colder push it outward.
-        // Range widened so cold species reach noticeably further out than warm ones.
-        float tempShift = Mathf.Lerp(1.95f, 0.5f, Mathf.Clamp01(species.idealTemp));
+        // ============================================================================================
+        // A SPECIES SHADES THE STAR'S ZONE. IT DOES NOT INVENT ITS OWN.
+        //
+        // The old numbers reported, for a default Terran around a G-type whose own band was 10.1-19.6,
+        // a species band of 8.9-33.9 — a zone 2.3 times as wide as the star's, whose centre sat 22%
+        // further out than the star's, and which was therefore mostly in places the star does not
+        // actually warm. "Any way you look at it the current habitable zone band system is broken" is
+        // a fair reading of that, and these three lines are where it came from:
+        //
+        //   tempShift  Lerp(1.95, 0.5)   a mid-temperature species was displaced outward by 22%, and
+        //                                the extremes by nearly a factor of two in either direction
+        //   half       HzWidth * 1.15    already wider than the star's whole band before tolerance
+        //   asymmetry  -0.85 / +1.45     and then stretched to 2.3x by the two ends disagreeing
+        //
+        // The physics being modelled is real — a cold-adapted species genuinely can live further out —
+        // but it is a SHADE on the star's zone, not a relocation of it. A species that prefers Earth's
+        // temperature should sit on the star's own Goldilocks band, because that is the definition of
+        // the band.
+        // ============================================================================================
+
+        // +/-25% at the extremes of idealTemp, and dead on the star's centre in the middle.
+        float tempShift = Mathf.Lerp(1.25f, 0.80f, Mathf.Clamp01(species.idealTemp));
         float center = star.HzCenter * tempShift;
 
-        // Broader, more forgiving bands, and asymmetric so the zone extends further OUTWARD than in.
-        float half = star.HzWidth * Mathf.Max(0.35f, species.tolerance) * 1.15f;
+        // Half the star's band as the baseline — so a typical species' zone is about the star's own
+        // width, not double it — scaled by tolerance within a range that cannot collapse or run away.
+        float half = star.HzWidth * 0.5f * Mathf.Clamp(species.tolerance, 0.6f, 1.4f);
 
-        inner = Mathf.Max(0.5f, center - half * 0.85f);
-        outer = center + half * 1.45f;   // reaches further from the star
+        // Still asymmetric, because a real habitable zone does reach further out than in: past the
+        // outer edge a thick atmosphere can hold warmth, while inside the inner edge nothing helps.
+        // 0.9 / 1.2 rather than 0.85 / 1.45 — a lean, not a different zone.
+        inner = Mathf.Max(0.5f, center - half * 0.9f);
+        outer = center + half * 1.2f;
         return true;
     }
 

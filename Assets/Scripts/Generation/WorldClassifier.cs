@@ -83,7 +83,21 @@ public static class WorldClassifier
     /// being a decoration and starts being what the surface literally is — the request's 650-1000 °C
     /// band. Shared with the terrain generator so the world's NAME and its map cannot disagree about
     /// whether it is molten.
-    public const float MagmaMinC = 650f;
+    // 800, up from 650. "Lets also raise the minimum requirement of temperature for magma fields to
+    // 800 C." The screenshot that came with it shows the reason it mattered: a MagmaField tile reading
+    // 794 degrees, which is to say a tile called molten rock that was a hundred and fifty degrees short
+    // of the basalt solidus and is now correctly demoted to LavaRock.
+    public const float MagmaMinC = 800f;
+
+    /// ...and how much of that heat has to come from INSIDE the world for its ground to be molten.
+    ///
+    /// Rock melts from below. Without this the magma gate reads a tile total that includes starlight,
+    /// so a world orbiting close to its sun grew liquid rock everywhere — and the Geothermal index then
+    /// read that liquid rock back as evidence of a hot crust and reported 95% across the whole map.
+    /// 300 degrees of genuine internal heat is about half what a fully active volcanic world carries
+    /// (PlanetTemperature.InternalMaxC is 620), so a quiet volcanic world still qualifies and a merely
+    /// scorched rocky one never does.
+    public const float MagmaInternalMinC = 300f;
 
     /// The type-INDEPENDENT surface temperature, in Celsius — heat and greenhouse only, with the type
     /// modifier deliberately left out because the type is the very thing being decided. Classifying on
