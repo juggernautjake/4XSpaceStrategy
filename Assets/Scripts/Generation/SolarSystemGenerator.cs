@@ -211,7 +211,11 @@ public class SolarSystemGenerator : MonoBehaviour
                 // a per-body value, at which point the belt slowly shears itself apart.
                 float beltSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
 
-                int placed = 0;
+                // NOT `placed` — that name is the ring counter in the enclosing scope, and C# forbids
+                // shadowing it here (CS0136). Two different quantities that were nearly given one name:
+                // this counts ROCKS in this belt, the outer one counts BODIES placed in the system and
+                // is what supplies each world its Roman numeral.
+                int placedRocks = 0;
                 for (int a = 0; a < wanted; a++)
                 {
                     if (spendable < MassRules.AsteroidMin) break;
@@ -252,10 +256,10 @@ public class SolarSystemGenerator : MonoBehaviour
 
                     system.Add(rock);
                     laneReach = Mathf.Max(laneReach, OrbitSafety.DiscRadius(rock));
-                    placed++;
+                    placedRocks++;
                 }
 
-                if (placed == 0) break;   // could not afford even one rock: nothing more will fit
+                if (placedRocks == 0) break;   // could not afford even one rock: nothing more will fit
 
                 // ONE BELT, however many rocks are in it — the request counts belts, and so does the
                 // cap. Incremented here rather than at the top of the branch so a lane that could not

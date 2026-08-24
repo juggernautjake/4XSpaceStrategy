@@ -733,3 +733,81 @@ does not exist yet, and the three Planetary Generation 2.0 audit decisions are J
 
 **None of this was compiled.** There is no Unity here. `Check-Scripts.ps1` is clean over 231 files
 across all eight checks and all twelve Node tripwires pass — but those are tripwires, not a compiler.
+
+---
+
+# Errata — two compile errors that shipped, and the check that now catches one
+
+The commit above went out with `Check-Scripts.ps1` clean over 232 files and thirteen Node tripwires
+passing, and it did not compile. Jacob opened Unity and got two errors:
+
+```
+SolarSystemGenerator.cs(214,21):  error CS0136: A local or parameter named 'placed' cannot be
+                                  declared in this scope because that name is used in an enclosing
+                                  local scope to define a local or parameter
+PlanetTerrainGenerator.cs(1222,50): error CS0103: The name 'body' does not exist in the current context
+```
+
+Both were in the 2026-08-23 work, not in the gap-closing pass — but that is not much of a defence,
+since the whole point of committing them together was that they were finished.
+
+**Neither was catchable by anything that existed.** All eight checks ask about a NAME — does this
+enum member exist, does this static exist, does this string close. Both of these are about SCOPE:
+where a name is *live*. That is invisible to a regex over `Type.Member`, and it is now the ninth
+check's whole job.
+
+## CS0136 — `placed`, twice
+
+- [x] The ring loop counts filled rings in `placed`; the belt branch four hundred lines in counted
+      asteroids in a second `placed`. Both are readable, both are correct alone, and C# forbids the
+      pair. The inner one is `placedRocks` now, which is what it always meant — and is the name the
+      Node port had been using for the same quantity all along, which is worth noticing: the port and
+      the C# disagreed about a name for weeks and nothing could see it.
+
+## CS0103 — `body` in a method that has no body
+
+- [x] Phase 7B's molten-ground gate reads the world's internal heat, and landed in `ClimateCoherence`
+      — the one method in that neighbourhood with no `CelestialBody` parameter. Every method around it
+      has one, which is exactly why the line looked right.
+
+      Fixed by passing the NUMBER rather than the body: `PlanetTemperature.InternalCelsius` is a
+      per-WORLD value that calls `GeothermalMap.WorldIntensity` every time it is asked, and this sat
+      in the per-TILE path — 200,000 calls a world for one answer. It is resolved once at the call
+      site now, beside the other per-world figures. The bug forced a fix that is also the faster one.
+
+## The ninth check — `tools/check-scope.mjs`
+
+- [x] **SCOPE**, wired into `Check-Scripts.ps1` beside the other eight. Verified the way a check
+      should be: the bug was reintroduced, the check flagged
+      `SolarSystemGenerator.cs:218 'placed'`, and the fix was restored.
+
+It models scope as **extents** — every declaration gets the span of text it is live in, and one
+shadows another exactly when the other's extent strictly contains it. The obvious model, a stack
+pushed on `{` and popped on `}`, is wrong about the most common declaration in the language: a `for`
+header's variable is scoped to its loop, not to the block the loop sits in. That version reported
+**59 findings across code Unity compiles daily**, and getting from 59 to 1 was three separate model
+bugs, each found by looking at a flagged line and asking why the compiler disagrees:
+
+1. **Sequential `for` loops read as nested.** The scan for where a `for` statement ends looked for the
+   next `;`, and `for (…) for (…) { … }` ends on a brace with no semicolon at all — so it ran on and
+   swallowed whatever followed. It recurses now.
+2. **`foreach` variables were scoped to the enclosing block.** The pattern matched from the word
+   `foreach`, which sits OUTSIDE the header parentheses, so the extent lookup could not tell the
+   declaration belonged to the loop. Every offset is the name's own now, via the regex `/d` flag.
+3. **Lambda bodies.** Two pairs in `InspectorBodyTabs` and `PlanetViewWindow` shadow across a lambda
+   and Unity accepts both, so the rule here is evidently not the C# 7 one. Rather than guess at which
+   version's rule applies with no compiler to ask, those are skipped and the header says so.
+
+**A check for CS0103 was written and thrown away.** Deciding "this identifier is declared nowhere"
+means resolving base classes, partials, extension methods and using-statics; the version that only
+compared against other methods' locals produced **239 findings**, essentially all of them declaration
+forms the parser had missed — `int w = …, h = …;` alone accounted for dozens. A check that cries wolf
+gets ignored and then gets deleted. That gap is real, it is stated in the tool's header rather than
+papered over, and closing it needs a resolver rather than a tripwire.
+
+## What this changes about the claim at the top of these documents
+
+"`Check-Scripts.ps1` is clean" has never meant "it compiles", and every one of these documents says
+so. What it did not say clearly enough is which *classes* of error it cannot see. Nine checks is not
+a compiler either — it still cannot see a wrong argument count, a wrong return type, an assignment to
+a get-only property, or the CS0103 above. **Unity is the only thing that knows.**

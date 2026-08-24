@@ -9,7 +9,7 @@
   stray fragment of an expression ended up sitting above the using directives in PlanetViewWindow.cs
   and reached main.
 
-  Eight checks, chosen because each catches something the others cannot:
+  Nine checks, chosen because each catches something the others cannot:
 
     HEAD     The first non-blank line of a file must look like the top of a C# file. This is the one
              that catches text pasted or dropped in above the usings.
@@ -31,9 +31,14 @@
              the next call throws MissingComponentException. The one check here that catches a
              runtime fault rather than a compile error, and it is here because that fault reads
              exactly like a compile error in the console. Delegated to tools/check-unity-null.mjs.
+    SCOPE    No local may shadow one from an ENCLOSING scope — CS0136. Every other check here asks
+             about a NAME: does this member exist, does this string close. This one asks where a name
+             is LIVE, which is the thing a regex over `Type.Member` cannot see, and it is here because
+             one reached main on 2026-08-23 past all eight of the others. Delegated to
+             tools/check-scope.mjs.
 
-  The five delegated checks need `node` on PATH. If it is missing they are reported as NOT RUN and
-  the script exits 1 — "Clean." has to mean all eight ran.
+  The six delegated checks need `node` on PATH. If it is missing they are reported as NOT RUN and
+  the script exits 1 — "Clean." has to mean all nine ran.
 
   Comments, strings, verbatim strings and char literals are stripped before counting, so a brace in a
   comment or a paren in a message cannot produce a false alarm.
@@ -218,7 +223,8 @@ $delegated = @(
     @{ Tag = 'STATIC'; Script = 'check-static-refs.mjs';     Noun = 'suspect static reference(s)' },
     @{ Tag = 'MEMBER'; Script = 'check-member-refs.mjs';     Noun = 'suspect member access(es)' },
     @{ Tag = 'FOREACH'; Script = 'check-foreach.mjs';        Noun = 'un-iterable foreach source(s)' },
-    @{ Tag = 'UNITY'; Script = 'check-unity-null.mjs';       Noun = 'Unity fake-null operator(s)' }
+    @{ Tag = 'UNITY'; Script = 'check-unity-null.mjs';       Noun = 'Unity fake-null operator(s)' },
+    @{ Tag = 'SCOPE'; Script = 'check-scope.mjs';            Noun = 'shadowed local(s)' }
 )
 
 $skipped = New-Object System.Collections.ArrayList
@@ -244,7 +250,7 @@ foreach ($check in $delegated) {
 Write-Output "Checked $($files.Count) C# files and $($enums.Count) enums."
 
 # A skip is reported as a FAILURE rather than a pass with a footnote. This script's whole job is to
-# stand in for a compiler that is not here, so "Clean." has to mean all eight checks ran and all eight
+# stand in for a compiler that is not here, so "Clean." has to mean all nine checks ran and all nine
 # passed — anything less is a claim it cannot back.
 if ($skipped.Count -gt 0) {
     Write-Output ""

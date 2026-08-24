@@ -859,7 +859,13 @@ public static class PlanetTerrainGenerator
         BiosphereRules.LiquidRange(body, out float freezeC, out float boilC);
         // baseC is the WORLD average before the equator/pole swing is added — see the frozen-world
         // gate at the top of ClimateCoherence.
-        t = ClimateCoherence(t, tileC, freezeC, boilC, baseC);
+        //
+        // Internal heat is passed as a NUMBER rather than by handing ClimateCoherence the body it would
+        // read it from. It is a property of the WORLD, not of the tile — one value for all 200,000 of
+        // them — and PlanetTemperature.InternalCelsius calls GeothermalMap.WorldIntensity every time it
+        // is asked. Resolved once here, where the other per-world figures are already being resolved.
+        float internalC = PlanetTemperature.InternalCelsius(body);
+        t = ClimateCoherence(t, tileC, freezeC, boilC, baseC, internalC);
 
         // ============================================================================================
         // WHAT IS UNDERNEATH — water and ice as MODIFIERS rather than as the biome
@@ -1173,7 +1179,8 @@ public static class PlanetTerrainGenerator
     //                     grids over the boiling point", and it is enforced per TILE rather than per
     //                     world, so a world can hold an ocean at its poles and none at its equator.
     //   ABOVE MAGMA     — the ground itself is liquid. See WorldClassifier.MagmaMinC.
-    static TerrainType ClimateCoherence(TerrainType t, float tileC, float freezeC, float boilC, float worldC)
+    static TerrainType ClimateCoherence(TerrainType t, float tileC, float freezeC, float boilC, float worldC,
+                                        float internalC)
     {
         // ---- A FROZEN WORLD GROWS NO LUSH GROUND, however warm one belt of it gets ----------------
         //
@@ -1219,7 +1226,7 @@ public static class PlanetTerrainGenerator
         // the reverse gate a few lines down is what puts it there.
         // ============================================================================================
         if (tileC >= WorldClassifier.MagmaMinC && !IsWater(t)
-            && PlanetTemperature.InternalCelsius(body) >= WorldClassifier.MagmaInternalMinC)
+            && internalC >= WorldClassifier.MagmaInternalMinC)
             return TerrainType.MagmaField;
 
         // ...AND THE SAME GATE IN REVERSE, which is the half that was missing.

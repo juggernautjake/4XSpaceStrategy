@@ -681,7 +681,7 @@ powershell -ExecutionPolicy Bypass -File tools/Check-Scripts.ps1
 ```
 
 It exists for the case Unity cannot cover — work done on a machine with no editor and no .NET SDK,
-where the first sign a file is broken is the next person opening the project. Eight checks:
+where the first sign a file is broken is the next person opening the project. Nine checks:
 
 * **HEAD** — the first non-blank line of a file must look like the top of a C# file. Catches text
   dropped in above the `using` directives.
@@ -715,6 +715,25 @@ where the first sign a file is broken is the next person opening the project. Ei
   to the "Model_Scout 1" game object`. That reached `main`, and the check found four more of the same
   shape the first time it ran. The fix is always `x = GetComponent<T>(); if (x == null) x = ...`,
   which is what `UIFactory.Ensure<T>` already is.
+* **SCOPE** — no local may shadow one from an *enclosing* scope (`CS0136`). `tools/check-scope.mjs`.
+  Every other check here asks about a **name**: does this member exist, does this string close. This
+  one asks where a name is **live**, which is the thing a regex over `Type.Member` cannot see — and it
+  is here because one got past all eight of the others on 2026-08-23. `SolarSystemGenerator` counted
+  filled rings in `placed`, then counted asteroids in a second `placed` four hundred lines further in.
+  Both readable, both correct alone, illegal together.
+
+  It models scope as **extents** rather than as a brace stack, because a `for` header's variable is
+  scoped to its loop and not to the block the loop sits in. The stack version reported 59 findings
+  across code Unity compiles daily; every one was a sequential `for (int i …)`. It deliberately does
+  not claim same-scope redeclaration (`CS0128`, equally loud from the compiler) or anything across a
+  **lambda boundary**, where the language rule has moved between versions and this repo has no
+  compiler to ask.
+
+  **What it does not cover:** `CS0103`, an identifier used where it is not declared — which shipped in
+  the same commit, `ClimateCoherence` reading a `body` that only its neighbours have. A check for it
+  was written and thrown away at 239 findings, essentially all of them declaration forms the parser
+  had missed (`int w = …, h = …;` alone accounted for dozens). Catching it needs a resolver, and a
+  check that cries wolf gets ignored and then gets deleted.
 
 The third earns its keep because the other two cannot see a *truncated identifier*. The stray line
 that once reached `main` above PlanetViewWindow's usings read
@@ -728,9 +747,9 @@ three checks all reported clean, because a stray newline inside a string leaves 
 braces, the parens and every enum reference perfectly intact. The first anyone knew was eighteen
 compiler errors in Unity, seventeen of them spurious and none pointing at the fault.
 
-**A skipped check exits 1, not 0.** The last five need `node` on `PATH`; if it is missing the script
+**A skipped check exits 1, not 0.** The last six need `node` on `PATH`; if it is missing the script
 reports them as `DID NOT RUN` and fails, because this script's whole job is to stand in for a compiler
-that is not here — "Clean." has to mean all eight checks ran, or it is a claim it cannot back.
+that is not here — "Clean." has to mean all nine checks ran, or it is a claim it cannot back.
 
 **None of this is a type checker.** It will not catch a wrong argument count, a wrong return type, or
 an assignment to a get-only property. It catches the classes that have actually reached `main`, which
