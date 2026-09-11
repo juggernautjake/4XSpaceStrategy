@@ -22,9 +22,10 @@ using UnityEngine;
 //                    live attributes rather than stored, so it re-reads correctly the moment a
 //                    world is terraformed, with no new field and no migration.
 //
-// WHY THE HOT END IS BAND-DRIVEN. The temperature model (PlanetTemperature) tops out around 160C
-// from orbit and greenhouse alone; a lava world's real heat comes from the type MODIFIER (+90C for
-// Volcanic), which is a consequence of the type, not an input to it. So "how close to the star"
+// WHY THE HOT END IS BAND-DRIVEN. Inside the zone's inner edge the temperature law runs away
+// (InsolationRules) and no world there can hold liquid water, so the band and the physics agree by
+// construction; a lava world's real heat still comes from the type MODIFIER (+90C for Volcanic) and
+// its internal heat, which are consequences of the type, not inputs to it. So "how close to the star"
 // (`rel`) decides the scorched/hot/temperate/cold band, exactly as the spec frames it, and the
 // attributes decide the type within the band.
 // ============================================================================================
@@ -46,8 +47,11 @@ public static class WorldClassifier
     // Orbital-band cuts, as a fraction of the star's Earth-warmth distance (`rel`). Shared with the
     // old RollBodyByTemperature bands so the galaxy's overall hot/temperate/cold mix is unchanged.
     public const float ScorchingRel = 0.45f;      // right by the star — Mercury/lava
-    public const float HotRel = 0.85f;            // inside the habitable zone
-    public const float TemperateRelMax = 1.5f;    // the habitable band's outer edge
+    // THE ZONE'S OWN EDGES, not a near copy of them. These were 0.85 and 1.5 against a drawn zone of
+    // 0.80..1.55, so a world could orbit inside the green ring and be classified as a scorched rock —
+    // or sit just outside it and be handed a temperate roll. See StarDatabase.HzInnerRel.
+    public const float HotRel = StarDatabase.HzInnerRel;            // inside the habitable zone
+    public const float TemperateRelMax = StarDatabase.HzOuterRel;   // the habitable band's outer edge
     public const float CoolRelMax = 3f;           // beyond it, genuinely cold
 
     // ============================================================================================

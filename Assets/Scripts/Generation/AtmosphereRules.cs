@@ -212,7 +212,7 @@ public static class AtmosphereRules
     /// beyond the habitable zone's inner edge; falling toward the star inside it.
     public static float InnerOrbitRetention(float rel)
     {
-        const float ZoneInner = 0.85f;   // matches WorldClassifier.HotRel
+        const float ZoneInner = StarDatabase.HzInnerRel;   // the zone's own edge, shared everywhere
         if (rel >= ZoneInner) return 1f;
         return Mathf.Lerp(0.12f, 1f, Mathf.Clamp01(rel / ZoneInner));
     }

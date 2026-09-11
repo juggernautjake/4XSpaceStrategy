@@ -248,7 +248,7 @@ public class SolarSystemGenerator : MonoBehaviour
                     rock.inclination = 0f;
                     rock.eccentricity = 0f;
                     rock.spinSpeed = RotationRules.Roll(rock.mass, isMoon: false);
-                    rock.rotationDirection = RotationRules.RollDirection(isMoon: false);
+                    rock.rotationDirection = rock.orbitDirection;   // turns the way it goes round — see RotationRules
                     rock.showRing = a == 0;    // one ring drawn for the lane, not five on top of each other
 
                     ApplyHabitability(rock);
@@ -314,6 +314,11 @@ public class SolarSystemGenerator : MonoBehaviour
                 body.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
                 body.orbitPhase = Random.Range(0f, 360f);
                 body.orbitDirection = Random.value < 0.9f ? 1 : -1;
+                // PROGRADE ORBIT, PROGRADE ROTATION. "As viewed from above, if their orbit around the
+                // star is prograde, so too should their rotation." The pipeline rolled a direction
+                // before the orbit existed; the orbit is the fact, so the spin now follows it. See
+                // RotationRules.RollDirection for why the independent roll is gone.
+                body.rotationDirection = body.orbitDirection;
                 body.inclination = RollInclination(isMoon: false, ref inclinedAlready);
                 body.eccentricity = Random.Range(0f, 0.14f);
 
@@ -397,7 +402,10 @@ public class SolarSystemGenerator : MonoBehaviour
                     moon.orbitRadius = moonR;
                     moon.orbitSpeed = OrbitalMechanics.MoonAngularSpeed(body, moonR);
                     moon.orbitPhase = Random.Range(0f, 360f);
-                    moon.orbitDirection = Random.value < 0.85f ? 1 : -1;
+                    // Prograde for a moon means the way its HOST turns; a captured moon (15%) goes the
+                    // other way. And a moon turns the way it orbits, like everything else.
+                    moon.orbitDirection = Random.value < 0.85f ? body.rotationDirection : -body.rotationDirection;
+                    moon.rotationDirection = moon.orbitDirection;
                     moon.inclination = RollInclination(isMoon: true, ref inclinedAlready);
                     moon.eccentricity = Random.Range(0f, 0.2f);
                     ApplyHabitability(moon);
@@ -689,7 +697,7 @@ public class SolarSystemGenerator : MonoBehaviour
         // RotationRules) so the figure still varies between one game and the next.
         best.spinSpeed = Mathf.Max(RotationRules.MagneticFieldSpin + 2f,
                                    RotationRules.Roll(best.mass, isMoon: false));
-        best.rotationDirection = RotationRules.RollDirection(isMoon: false);
+        best.rotationDirection = best.orbitDirection == 0 ? 1 : best.orbitDirection;   // spin follows orbit
         best.hasMagneticField = true;
         best.type = CelestialBodyType.RockyPlanet;             // provisional, for the tectonics/air rolls
         best.hasTectonics = TectonicsRules.Roll(best.type, best.mass);
@@ -772,6 +780,8 @@ public class SolarSystemGenerator : MonoBehaviour
         // happens, and is stored apart from the rate so that turning backwards never costs a world its
         // magnetosphere.
         body.spinSpeed = RotationRules.Roll(body.mass, isMoon);
+        // PROVISIONAL. The orbit has not been rolled yet at this point, and the direction is set to
+        // match it once it has (see the planet, moon and belt branches of GenerateSystemStepped).
         body.rotationDirection = RotationRules.RollDirection(isMoon);
         body.hasMagneticField = RotationRules.GeneratesField(body.type, body.mass, body.spinSpeed);
         body.hasTectonics = TectonicsRules.Roll(body.type, body.mass);
@@ -996,13 +1006,14 @@ public class SolarSystemGenerator : MonoBehaviour
     // quoted in multiples of the star's own reference distance, so the spread is not a correction
     // applied to the spacing, it IS the spacing.
 
-    // Bias a world's terrain temperature by how close it is to the star: closer = hotter climate,
-    // further = colder. Call before generating the surface so biomes reflect it.
+    // A world's terrain temperature from how close it is to the star. Call before generating the
+    // surface so biomes reflect it. The law lives in InsolationRules — anchored on the habitable zone,
+    // so inside the zone's inner edge a world is a furnace and beyond its outer edge a snowball. The
+    // 0.45..1.85 clamp that used to sit here is what put liquid seas on worlds a ring inside the zone.
     static void BiasHeat(CelestialBody b, float distance, StarData star)
     {
-        float rel = TempReference(star) / Mathf.Max(1f, distance);    // >1 hot (close), <1 cold (far)
         var p = b.terrainParams;
-        p.heat = Mathf.Clamp(rel * Random.Range(0.9f, 1.15f), 0.45f, 1.85f);
+        p.heat = InsolationRules.RollHeat(star, distance);
         b.terrainParams = p;
     }
 

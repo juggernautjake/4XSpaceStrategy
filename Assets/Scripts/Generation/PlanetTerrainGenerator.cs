@@ -93,6 +93,32 @@ public static class PlanetTerrainGenerator
         return w - 0.5f;
     }
 
+    // ---- Where ZERO METRES is, which is not always where the water is ------------------------------
+    //
+    // "The terrain altitudes range from 11,000 to nearly 17,000 meters. There needs to be a baseline of
+    // 0 Meters for there to be that much of a height increase. Worlds should always have a 'sea level'
+    // or a level around or just above 0 M and then you can expand upwards or downwards. Most planets
+    // follow this rule, but moons seem to be irregular."
+    //
+    // They were irregular because the readout's zero was the WATERLINE, and on a dry world the waterline
+    // is deliberately pushed below the deepest basin (SeaShiftDry, so that "no water" really means none).
+    // On a moon with a water level near zero that put the datum 0.74 units under the mid-line, and the
+    // stored elevation is clamped to 0..1 on top of that — so every tile on the world read between 8,900
+    // and 20,900 m. The number was measuring the distance to a sea that did not exist.
+    //
+    // THE DATUM IS THE WATERLINE WHEN THERE IS A SEA, AND A FIXED LEVEL WHEN THERE IS NOT. Above a water
+    // level of 0.40 — everything the classifier calls a world with water, LandWater being 0.35 — zero is
+    // the shoreline exactly, as before, so an ocean world's coasts are its 0 m contour. Below that the
+    // datum stops following the water down and holds at the shoreline a 0.40 world would have had: a
+    // dry world's typical ground then reads a couple of thousand metres, its basins a few hundred below
+    // zero, and a small moon spans zero to a kilometre or so. Max(), so the two regimes meet without a
+    // step, and the classifiers' own water tests still read SeaShift — this moves the ruler, not the sea.
+    const float DryDatumWaterLevel = 0.40f;
+
+    /// Where 0 m stands for a world at this water level, in the same units as SeaShift.
+    public static float DatumShift(float waterLevel)
+        => Mathf.Max(SeaShift(waterLevel), SeaShift(DryDatumWaterLevel));
+
     // Back-compat shims for callers that still speak in elevation. A world loaded from a save made
     // before seaLevel existed had its water baked into its elevation amplitude, so this recovers the
     // water level that amplitude used to mean.
@@ -183,6 +209,52 @@ public static class PlanetTerrainGenerator
     // gradient you can terraform along rather than a switch.
     const float VariationGain = 0.24f;
     const float DeadWorldVariationGain = 0.55f;
+
+    // ---- HOW FINE THE VARIATION MAY BE, AND HOW MUCH OF IT A SMALL WORLD GETS --------------------
+    //
+    // "Some worlds have extremely varied altitudes between grids. This is far too inconsistent and
+    // should be smoothed out quite a bit... especially for what are essentially tiny moons or asteroid
+    // sized objects."
+    //
+    // Two causes, measured in tools/terrain-relief-check.mjs, and neither is the gain above.
+    //
+    // THE FIRST IS SAMPLING. The pass was six octaves at a fixed frequency whatever the grid. On a 15-cell
+    // moon the base period is three cells wide, so octaves two to five have periods of a cell and a half,
+    // three quarters, and under — which is not terrain, it is per-tile static, and every tile of it
+    // crossed a 500 m contour against its neighbour (66% of cell edges carried a line). So the number of
+    // octaves is now a property of the WORLD: the finest one kept is the finest whose period is still at
+    // least this many cells wide on that world's own grid. A big world keeps all six; a moon keeps the
+    // two that describe anything. Deterministic per body (grid size is a function of mass and id), so
+    // the field is still the same field however densely it is sampled.
+    //
+    // THE SECOND IS SCALE. The same amplitude was applied to a 0.1-mass moon and a 4-mass super-earth,
+    // so a rock a few hundred kilometres across carried six kilometres of relief — and with a 500 m
+    // contour every fifth of a cell, a 50-cell moon with a 3 km spread drew a line on more than half of
+    // its cell edges however smooth the field was (measured: 54%). A contour map is only legible when
+    // there are a few cells BETWEEN the lines, so relief is scaled by how many cells a base feature
+    // spans on this world's grid: a feature 32 cells across keeps everything, a ten-cell one keeps a
+    // third, down to a floor so the smallest rock still has shape. That is a statement about mass,
+    // because the grid is one (MapMetrics.WidthForMass), and it is the form of the statement the
+    // contours actually care about.
+    public const float MinVariationPeriodCells = 3f;
+    /// The base noise period may never be narrower than this many cells — see the frequency cap in
+    /// SampleNormalized. Six is two octaves' worth of room above the variation floor.
+    public const float MinBasePeriodCells = 6f;
+    public const float SmallBodyReliefFloor = 0.20f;
+    public const float FullReliefPeriodCells = 32f;
+
+    /// The octaves the variation pass may use on this world without dropping under the cell size.
+    static int VariationOctaves(float cellsPerPeriod, int cap)
+    {
+        int n = 1;
+        while (n < cap && cellsPerPeriod / (1 << n) >= MinVariationPeriodCells) n++;
+        return n;
+    }
+
+    /// How much of its rolled relief a world keeps, from how many cells its base feature spans on its
+    /// own grid: everything at 32 cells and up (an Earth-sized grid), a fifth on the smallest rock.
+    public static float ReliefScale(float cellsPerPeriod)
+        => Mathf.Clamp(cellsPerPeriod / FullReliefPeriodCells, SmallBodyReliefFloor, 1f);
 
     // How much a plate boundary moves the GROUND ITSELF, as a fraction of the world's relief.
     //
@@ -576,6 +648,19 @@ public static class PlanetTerrainGenerator
         float seed = body.terrainSeed;
         float freq = Mathf.Max(1f, body.continentFrequency) * p.scale;
 
+        // NEVER FINER THAN THE GRID CAN DRAW. continentFrequency has a floor of 2.5, chosen for worlds
+        // hundreds of cells across; on a fifteen-cell moon that is five base periods across the map,
+        // three cells each, and every field built on it — elevation, moisture, the ridge texture — is
+        // static rather than terrain: no two neighbouring tiles agree about anything, and the map is a
+        // scatter of one-tile rock patches under a mesh of contour lines. Capping the frequency by the
+        // world's own cell count keeps a base period at least MinBasePeriodCells wide, so a small moon
+        // gets one or two real features instead of thirty imaginary ones. Bites only below ~0.5 mass;
+        // an Earth-sized grid is already coarser than this cap at every scale roll.
+        int gridW = MapMetrics.SurfW(body);
+        freq = Mathf.Min(freq, gridW / (2f * MinBasePeriodCells));
+        // How many cells one base feature spans here. The octave cap and the relief scale both read it.
+        float cellsPerPeriod = gridW / Mathf.Max(0.001f, freq * 2f);
+
         // 2:1 map aspect -> stretch u so continents stay roughly square. The u term is folded into WrapU
         // (which needs the span, not the coordinate), so only the v term is precomputed here.
         float fy = v * freq;
@@ -683,7 +768,9 @@ public static class PlanetTerrainGenerator
         // any water at all floods the entire surface in one step rather than filling its low ground.
         // Basins have to come from somewhere, and on a dead world the only thing left to draw them with
         // is noise. It is still far too small to raise a mountain (see RidgeFromRelief).
-        float rawElev = WrapU(u, freq * 2f, 1f, fy, seed, seed * 1.3f, octaves);
+        // CAPPED AT THE GRID'S OWN RESOLUTION — see MinVariationPeriodCells. An octave whose period is
+        // under a cell cannot draw a hill; it can only make two neighbouring tiles disagree.
+        float rawElev = WrapU(u, freq * 2f, 1f, fy, seed, seed * 1.3f, VariationOctaves(cellsPerPeriod, octaves));
         float variationGain = hasPlates ? VariationGain : DeadWorldVariationGain;
         landHeight += (rawElev - 0.5f) * 2f * variationGain;
 
@@ -700,7 +787,10 @@ public static class PlanetTerrainGenerator
         // clamping here would pin every peak to exactly 1 and every basin to exactly 0, turning both
         // ends of the world into flat plateaus at precisely the setting chosen to get dramatic terrain.
         //
-        landHeight = 0.5f + (landHeight - 0.5f) * p.elevation;
+        // ...AND SCALED DOWN ON A SMALL WORLD. A moon a few hundred kilometres across does not carry a
+        // continent's worth of relief; see FullReliefPeriodCells. Applied here, with the slider, so it
+        // scales the deviation from the mid-line exactly as the slider does and a flat sheet stays flat.
+        landHeight = 0.5f + (landHeight - 0.5f) * p.elevation * ReliefScale(cellsPerPeriod);
 
         // WHERE THE SEA STANDS, in the same units as landHeight. The classifiers get the ground's REAL
         // height and this line separately, and only their WATER tests add it — so raising the Water Level
@@ -1030,9 +1120,13 @@ public static class PlanetTerrainGenerator
     // ============================================================================================
     public static string ElevationBand(float landHeight, float waterLevel)
     {
-        float above = landHeight - (0.36f + SeaShift(waterLevel));   // Terran's shoreline is the zero
-        if (above < 0f) return "submerged";
-        if (above < 0.06f) return "coastal";
+        // Under the water is submerged whatever the datum says — but on a dry world the datum sits ABOVE
+        // the (notional) waterline (see DatumShift), and ground between the two is dry land below zero:
+        // a basin, which is a real thing on a real dry world and not a sea.
+        if (landHeight < 0.36f + SeaShift(waterLevel)) return "submerged";
+        float above = landHeight - (0.36f + DatumShift(waterLevel));   // the zero the metres use
+        if (above < 0f) return "basin";
+        if (above < 0.06f) return waterLevel < DryDatumWaterLevel ? "lowland" : "coastal";
         if (above < 0.16f) return "lowland";
         if (above < 0.28f) return "plains";
         if (above < 0.40f) return "uplands";
@@ -1091,7 +1185,7 @@ public static class PlanetTerrainGenerator
     public const float MetresPerElevationUnit = 12000f;
 
     public static float ElevationMetres(float landHeight, float waterLevel)
-        => (landHeight - (0.36f + SeaShift(waterLevel))) * MetresPerElevationUnit;
+        => (landHeight - (0.36f + DatumShift(waterLevel))) * MetresPerElevationUnit;
 
     public static float ElevationMetres(CelestialBody b, float landHeight)
         => ElevationMetres(landHeight, b == null ? 0.5f : b.terrainParams.SeaLevelOrNeutral);
@@ -1449,28 +1543,39 @@ public static class PlanetTerrainGenerator
         float bend = 0f;
         for (int i = 0; i < n; i++)
         {
-            float d = GasGiantStorms.Distance(spots[i], u, v);
+            float d = GasGiantStorms.Distance(spots[i], u, v, out float along, out float side,
+                                              out float ell);
 
             // Inside the storm. No band test at all — a great spot is one body of weather, not a
-            // striped one.
+            // striped one. The outline is a leaning lens now, not an ellipse — see GasGiantStorms.
             if (d <= 1f) return TerrainType.Storm;
 
-            // THE PALE HOLLOW. A ring of cloud punched out of the belt around the storm.
+            // THE PALE HOLLOW. A collar of cloud punched out of the belt around the storm.
             //
             // Without it a spot was a dark ellipse in the middle of a dark band and could not be seen
             // at all — which is what the contact sheet showed, and what no amount of reading this
             // function would have revealed. Jupiter has exactly this: the Great Red Spot sits in a
             // bright hollow in the South Equatorial Belt.
-            if (d <= 1f + GasGiantStorms.Hollow) return TerrainType.GasClouds;
+            //
+            // FULL ON THE FLANKS, PINCHED AT THE TIPS. A collar of even width is the outline of a
+            // sticker. The pale cloud is the belt being pushed aside, and it is pushed aside where the
+            // storm is broad, not where it comes to a point — so the hollow is Hollow wide across the
+            // storm and a third of that at its ends, where the belt runs straight back in.
+            float hollow = GasGiantStorms.Hollow * (1f - 0.65f * along * along);
+            if (d <= 1f + hollow) return TerrainType.GasClouds;
 
-            if (d >= 1f + GasGiantStorms.FlowHalo) continue;
+            // THE WAKE. The deflection reaches WakeStretch times further along the flow than across it,
+            // so the lanes bow round the flanks and only close up again a spot's length past the tips.
+            // Measured in the ELLIPSE metric, not the lens one, so the wake carries on past the tips.
+            float halo = GasGiantStorms.FlowHalo * (1f + (GasGiantStorms.WakeStretch - 1f) * along * along);
+            if (ell >= 1f + halo) continue;
 
-            // In the wake. Push the sampling latitude AWAY from the spot's centre, hardest at the
-            // storm's edge and fading to nothing at the halo's rim. Squared so the falloff is smooth
-            // where it meets undisturbed deck — a linear one leaves a visible ring.
-            float t = 1f - (d - 1f) / GasGiantStorms.FlowHalo;
-            float dv = v - spots[i].v;
-            bend += (dv < 0f ? -1f : 1f) * t * t * spots[i].rv * 1.35f;
+            // Push the sampling latitude AWAY from the spot's outline, hardest at the storm's edge and
+            // fading to nothing at the halo's rim. Squared so the falloff is smooth where it meets
+            // undisturbed deck — a linear one leaves a visible ring. Eased off toward the tips, where
+            // the lanes are rejoining rather than being parted.
+            float t = Mathf.Clamp01(1f - (ell - 1f) / halo);
+            bend += side * t * t * spots[i].rv * 1.35f * (1f - 0.5f * along * along);
         }
 
         // Latitude is derived HERE rather than taken as an argument, because `bend` has to move it and

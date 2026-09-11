@@ -130,6 +130,13 @@ public static class StarDatabase
     /// this, so it and the habitable zone move together automatically.
     public static float ReferenceDistance(StarData s) => FluxScale(s) * AU;
 
+    /// The habitable zone's edges as multiples of ReferenceDistance. ONE pair of numbers for the green
+    /// rings, the classifier's hot/temperate/cold bands, the atmosphere's inner-orbit cut and the
+    /// temperature law (InsolationRules) — they used to be quoted in four places as 0.80/0.85 and
+    /// 1.5/1.55, which is how a world could sit inside the drawn zone and be classified as outside it.
+    public const float HzInnerRel = 0.80f;
+    public const float HzOuterRel = 1.55f;
+
     /// Pull a raw blackbody colour toward white so a sun reads as tinted rather than as a vivid crayon,
     /// and so the light it throws on its worlds stays believable.
     ///
@@ -343,8 +350,8 @@ public static class StarDatabase
         // thin line on screen. A band you can see, and that two neighbouring planets can both sit in, is
         // worth more than a precise one.
         float reach = ReferenceDistance(s);
-        s.hzInner = 0.80f * reach;
-        s.hzOuter = 1.55f * reach;
+        s.hzInner = HzInnerRel * reach;
+        s.hzOuter = HzOuterRel * reach;
 
         // Blue giants (O/B) are too hot and short-lived to hold a stable Goldilocks zone.
         s.hasHabitableZone = (type != StarType.O && type != StarType.B);
@@ -434,8 +441,8 @@ public static class StarDatabase
         // luminosity ADDS, so a pair of bright suns used to throw the zone even further out than either
         // would alone — the worst case of the off-screen problem, in the systems most worth visiting.
         float reach = ReferenceDistance(c);
-        c.hzInner = 0.80f * reach;
-        c.hzOuter = 1.55f * reach;
+        c.hzInner = HzInnerRel * reach;
+        c.hzOuter = HzOuterRel * reach;
         return c;
     }
 }

@@ -1,7 +1,8 @@
 using UnityEngine;
 
 // A believable Celsius reading for a world, built ON TOP OF the existing `terrainParams.heat`
-// multiplier (0.45 cold .. 1.85 hot) rather than as a second, disconnected number — heat already
+// multiplier (~0.08 at the outermost ring to ~6 at the innermost — see InsolationRules; the old
+// 0.45..1.85 clamp is gone) rather than as a second, disconnected number — heat already
 // drives the terrain classifier and is already what TerraformVisuals blends toward the species'
 // ideal as a world is terraformed, so reading through it here means this reading moves correctly
 // as a world terraforms too, for free.
@@ -13,7 +14,15 @@ public static class PlanetTemperature
     // T_eq(K) = 288.15 * sqrt(heat), i.e. the equilibrium-temperature law T ~ (L/d^2)^0.25 with heat
     // already standing in for L/d^2 (see BiasHeat in SolarSystemGenerator) and calibrated so heat=1
     // (this star's temperate band) reads as Earth's ~15C average.
-    const float ReferenceKelvin = 288.15f;
+    public const float ReferenceKelvin = 288.15f;
+
+    /// The heat parameter that reads as this many Kelvin from starlight alone — the inverse of the line
+    /// above. InsolationRules decides a world's climate in Kelvin and stores it through this.
+    public static float HeatForKelvin(float kelvin)
+    {
+        float root = Mathf.Max(0f, kelvin) / ReferenceKelvin;
+        return Mathf.Max(0.01f, root * root);
+    }
 
     // A tile's local reading: the body's baseline plus a small equator-warmer/pole-cooler swing. The
     // swing is deliberately small next to the type nudges below, so it can vary a world's own tiles

@@ -50,7 +50,37 @@ public static class GasGiantStorms
     {
         public float u, v;     // centre, in 0..1 surface coordinates
         public float ru, rv;   // radii, same units
+        /// How far the lens leans: its leading tip is shifted one way in latitude and its trailing tip
+        /// the other, by this fraction of rv per ru. Signed, so spots lean either way.
+        public float skew;
     }
+
+    // ---- THE SHAPE OF A STORM ---------------------------------------------------------------------
+    //
+    // "The top storm cell is more along the lines of how I want the storm cells to look in shape. The
+    // bands of storm should look as though they flow with it and around it."
+    //
+    // An ellipse cut into a band, with a ring of pale cloud round it, is a sticker: the band stops at
+    // the ring and starts again on the other side. A real spot is a LENS. It is pointed at the ends,
+    // because the jets on either side of it are shearing it into the flow; it is fuller on one flank
+    // than the other, because the two jets are not the same strength; and it leans, because the
+    // leading end is dragged ahead of the trailing one. Three numbers state that:
+    //
+    //   LensPower     the outline is |c| <= (1 - a^2)^LensPower in the spot's own normalised
+    //                 coordinates. 0.5 would be the old ellipse; higher pulls the ends to points.
+    //   FlankSqueeze  the poleward flank is this fraction as tall as the equatorward one, so the spot
+    //                 sits against one edge of its belt rather than in the middle of it.
+    //   SkewMax       the most a spot may lean, per spot, either way.
+    //
+    // And the collar and the halo follow the lens: the pale hollow is full width on the flanks and
+    // pinches to nothing at the tips, and the deflection reaches further along the flow than across it
+    // — so the lanes crowd against the storm's flanks, stream past its points, and close up again a
+    // spot's length downstream. That is the "flows with it and around it".
+    public const float LensPower = 0.85f;
+    public const float FlankSqueeze = 0.70f;
+    public const float SkewMax = 0.30f;
+    /// How much further along the flow than across it the halo reaches, as a multiplier on FlowHalo.
+    public const float WakeStretch = 1.6f;
 
     /// Three is the ceiling. Jupiter has one famous spot and a handful of white ovals; a giant covered
     /// in great spots has no great spot.
@@ -165,6 +195,7 @@ public static class GasGiantStorms
                 u = Next(),
                 v = Mathf.Clamp(v, 0.06f, 0.94f),   // never so close to a pole that it wraps over it
                 rv = rv,
+                skew = (Next() * 2f - 1f) * SkewMax,
                 // CAPPED. rv * aspect at the top of both ranges was 0.53 — a spot slightly WIDER than the
                 // whole world, which the contact sheet duly drew as a band-coloured stripe with a pale
                 // outline. The real Great Red Spot spans about an ninth of Jupiter's circumference; 0.15
@@ -174,19 +205,49 @@ public static class GasGiantStorms
         }
     }
 
-    /// How far a point is from a spot's centre, in units of that spot's own radii: below 1 is inside
-    /// the storm, 1 is exactly on its edge.
+    /// How far a point is from a spot's centre, in units of that spot's own outline: below 1 is inside
+    /// the storm, 1 is exactly on its edge. `along` is the fraction of that distance that is ALONG the
+    /// flow (0 on the flanks, 1 at the tips), which is what shapes the collar and the halo; `side` is
+    /// which flank of the LEANING outline the point is on (+1 above it, -1 below), which is the
+    /// direction the lanes are pushed. Read off the skewed frame rather than off raw latitude, or the
+    /// push changes sign across the tips of a leaning spot and leaves a hooked sliver of pale cloud
+    /// trailing from each end. `ellipse` is the plain elliptical distance in the same frame, which is
+    /// what the WAKE is measured in: the lens metric goes to infinity just past the tips (the outline
+    /// has no height there), and a wake measured in it would stop dead at the tip's longitude.
     ///
     /// LONGITUDE WRAPS and latitude does not — the same asymmetry every other surface pass uses. A spot
     /// near u = 0 has to reach round to u = 1 or it would be cut in half by the date line.
-    public static float Distance(in Spot s, float u, float v)
+    public static float Distance(in Spot s, float u, float v, out float along, out float side,
+                                 out float ellipse)
     {
-        float du = Mathf.Abs(u - s.u);
-        if (du > 0.5f) du = 1f - du;
+        float du = u - s.u;
+        if (du > 0.5f) du -= 1f; else if (du < -0.5f) du += 1f;
         float dv = v - s.v;
 
+        // Lean: shift the latitude by how far along the storm we are, so the tips sit at different
+        // latitudes and the outline is a leaning lens rather than an upright one.
         float a = du / Mathf.Max(0.0001f, s.ru);
-        float c = dv / Mathf.Max(0.0001f, s.rv);
-        return Mathf.Sqrt(a * a + c * c);
+        float c = dv / Mathf.Max(0.0001f, s.rv) - a * s.skew;
+
+        side = c < 0f ? -1f : 1f;
+
+        // The squeezed flank: the poleward side is FlankSqueeze as tall as the equatorward side.
+        bool poleward = (s.v >= 0.5f) ? c > 0f : c < 0f;
+        if (poleward) c /= FlankSqueeze;
+
+        float aa = Mathf.Abs(a), ac = Mathf.Abs(c);
+        float r = Mathf.Sqrt(a * a + c * c);
+        ellipse = r;
+        along = r > 0.0001f ? aa / r : 0f;
+
+        // The lens is the ellipse narrowed by the profile, which reaches zero at the tips — so past
+        // them everything off the axis is far away, and the collar drawn from this metric pinches to
+        // a point exactly as the outline does. (The old "outside the ellipse" branch handed back the
+        // ellipse distance there instead, and drew a pale crescent standing off each tip.)
+        float profile = Mathf.Pow(Mathf.Max(0f, 1f - aa * aa), LensPower);
+        return Mathf.Max(r, profile > 0.0001f ? ac / profile : (ac > 0.0001f ? 99f : r));
     }
+
+    /// The ellipse form, for callers that only need "roughly how near".
+    public static float Distance(in Spot s, float u, float v) => Distance(s, u, v, out _, out _, out _);
 }

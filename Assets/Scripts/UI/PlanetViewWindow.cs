@@ -7441,8 +7441,9 @@ public class PlanetViewWindow : MonoBehaviour
         // "You could see information such as 'Mountain, [elevation], [Temperature]' inside the mouse
         // window." The band is the word the terrain used to be NAMED after (Highlands, Hills) before
         // those stopped being biomes and became what they always were: a statement about height. The
-        // metres are measured against this world's own waterline, so the number means what a player
-        // expects it to mean whether the world is drowned or bone dry.
+        // metres are measured against this world's own datum — its waterline when it has a sea, a
+        // fixed level when it does not (PlanetTerrainGenerator.DatumShift) — so the number means what a
+        // player expects it to mean whether the world is drowned or bone dry.
         // ...EXCEPT ON A GAS GIANT, WHICH HAS NO GROUND TO BE HIGH OR LOW.
         //
         // "Lets also remove the elevation indicator and index indicator on the mouse window when
@@ -7735,17 +7736,20 @@ public class PlanetViewWindow : MonoBehaviour
         UpdateViewFormatLabel();
     }
 
-    /// Park the View button just below the map-tab strip, whatever height that strip currently is.
+    /// Park the View button at the TOP of the map, immediately to the right of the tab strip.
     ///
-    /// The strip is a VerticalLayoutGroup with a ContentSizeFitter, so it grows and shrinks with the
-    /// number of moons — a fixed offset would sit on top of the tabs on a four-moon giant and float in
-    /// space on a bare rock. Called again from SetupMapTabs, which is the only thing that changes it.
+    /// It used to sit UNDER the strip, and the strip is a VerticalLayoutGroup that grows with the
+    /// number of moons — so on a four-moon giant the button floated a third of the way down the map,
+    /// over the terrain (that is the "View: Moons Above" hanging mid-left in the report's screenshot).
+    /// Beside the strip its position no longer depends on how many tabs there are: the strip is one
+    /// planet tab wide whatever it holds, so the button is always at the same spot, top-left, next to
+    /// the map toggles it belongs with. Kept as a method because the strip's width is a layout fact.
     void PositionViewFormatButton()
     {
         if (viewFormatBtn == null) return;
-        float stripHeight = Mathf.Max(pendingTabStripHeight,
-                                      moonTabStrip != null ? moonTabStrip.rect.height : 0f);
-        viewFormatBtn.anchoredPosition = new Vector2(6f, -(6f + stripHeight + 8f));
+        float stripWidth = Mathf.Max(PlanetTabSize,
+                                     moonTabStrip != null ? moonTabStrip.rect.width : 0f);
+        viewFormatBtn.anchoredPosition = new Vector2(6f + stripWidth + 8f, -6f);
     }
 
     void CycleMapLayout()

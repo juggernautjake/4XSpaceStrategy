@@ -40,6 +40,10 @@ const MAX_SPOTS = num(STORMS, 'MaxSpots = ([0-9]+)', 'MaxSpots');
 const FLOW_HALO = num(STORMS, 'FlowHalo = ([0-9.]+)f', 'FlowHalo');
 const BANDS     = num(STORMS, 'BandCycles = ([0-9.]+)f', 'BandCycles');
 const HOLLOW    = num(STORMS, 'Hollow = ([0-9.]+)f', 'Hollow');
+const LENS      = num(STORMS, 'LensPower = ([0-9.]+)f', 'LensPower');
+const SQUEEZE   = num(STORMS, 'FlankSqueeze = ([0-9.]+)f', 'FlankSqueeze');
+const SKEW_MAX  = num(STORMS, 'SkewMax = ([0-9.]+)f', 'SkewMax');
+const WAKE      = num(STORMS, 'WakeStretch = ([0-9.]+)f', 'WakeStretch');
 // Spot size is quoted as a MULTIPLE OF BAND HEIGHT now, not in absolute surface units.
 const RV_BAND   = (() => {
   const m = /bandHeight \* Mathf\.Lerp\(([\d.]+)f, ([\d.]+)f, Next\(\)\)/.exec(STORMS);
@@ -114,30 +118,42 @@ function spotsFor(id, seed) {
     const v = north ? 0.5 + lat * 0.5 : 0.5 - lat * 0.5;
     const rv = RV_MIN + (RV_MAX - RV_MIN) * next();
     const aspect = ASPECT_LO + (ASPECT_HI - ASPECT_LO) * next();
-    spots.push({ u: next(), v: Math.min(0.94, Math.max(0.06, v)), rv, ru: Math.min(rv * aspect, RU_CAP) });
+    // Field order matches the C# object initialiser: u, v, rv, skew, ru — the RNG stream is shared.
+    const u = next(), vv = Math.min(0.94, Math.max(0.06, v));
+    const skew = (next() * 2 - 1) * SKEW_MAX;
+    spots.push({ u, v: vv, rv, skew, ru: Math.min(rv * aspect, RU_CAP) });
   }
   return spots;
 }
 
+// GasGiantStorms.Distance, ported: a leaning lens with a squeezed poleward flank.
 const dist = (s, u, v) => {
-  let du = Math.abs(u - s.u);
-  if (du > 0.5) du = 1 - du;
+  let du = u - s.u;
+  if (du > 0.5) du -= 1; else if (du < -0.5) du += 1;
   const a = du / Math.max(1e-4, s.ru);
-  const c = (v - s.v) / Math.max(1e-4, s.rv);
-  return Math.sqrt(a * a + c * c);
+  let c = (v - s.v) / Math.max(1e-4, s.rv) - a * s.skew;
+  const side = c < 0 ? -1 : 1;
+  const poleward = s.v >= 0.5 ? c > 0 : c < 0;
+  if (poleward) c /= SQUEEZE;
+  const aa = Math.abs(a), ac = Math.abs(c);
+  const r = Math.sqrt(a * a + c * c);
+  const along = r > 1e-4 ? aa / r : 0;
+  const profile = Math.pow(Math.max(0, 1 - aa * aa), LENS);
+  return { d: Math.max(r, profile > 1e-4 ? ac / profile : (ac > 1e-4 ? 99 : r)), along, side, ell: r };
 };
 
 // ---- PlanetTerrainGenerator.GasGiant, ported ----------------------------------------------------
 function classify(spots, u, v, moist) {
   let bend = 0;
   for (const s of spots) {
-    const d = dist(s, u, v);
+    const { d, along, side, ell } = dist(s, u, v);
     if (d <= 1) return 'Storm';
-    if (d <= 1 + HOLLOW) return 'GasClouds';
-    if (d >= 1 + FLOW_HALO) continue;
-    const t = 1 - (d - 1) / FLOW_HALO;
-    const dv = v - s.v;
-    bend += (dv < 0 ? -1 : 1) * t * t * s.rv * 1.35;
+    const hollow = HOLLOW * (1 - 0.65 * along * along);
+    if (d <= 1 + hollow) return 'GasClouds';
+    const halo = FLOW_HALO * (1 + (WAKE - 1) * along * along);
+    if (ell >= 1 + halo) continue;
+    const t = Math.min(1, Math.max(0, 1 - (ell - 1) / halo));
+    bend += side * t * t * s.rv * 1.35 * (1 - 0.5 * along * along);
   }
   const lat = Math.abs((v + bend) - 0.5) * 2;
   const band = ((lat + moist * MOIST_JITTER) * BANDS) % 1;

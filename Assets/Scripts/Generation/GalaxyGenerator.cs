@@ -277,6 +277,19 @@ public static class GalaxyGenerator
             if (d < bestD) { bestD = d; planet = b; }
         }
 
+        // ...AND IF "NEAREST" IS STILL OUTSIDE THE ZONE, MOVE IT IN.
+        //
+        // "The terran homeworld is just before the habitable zone." Nearest-to-centre is not
+        // inside-the-zone: when neither in-zone ring was filled, the nearest world was the one on ring
+        // 3, just inside the inner edge — and now that the inner edge is where the temperature law
+        // runs away (InsolationRules), a cradle parked there would be the one temperate world in a
+        // furnace lane. So it goes to the in-zone ring nearest the centre. A free ring if there is one;
+        // otherwise it SWAPS lanes with whatever holds the best one, which keeps every body on a legal
+        // ring and the system's spacing exactly as the layout left it. The orbit safety pass at the end
+        // of this method re-checks the result either way.
+        if (planet.distanceFromStar < inner || planet.distanceFromStar > outer)
+            MoveCradleIntoZone(home, planet, inner, outer);
+
         planet.type = BestTypeFor(species);
 
         // THE CRADLE'S MASS IS THE SPECIES' OWN, AND FOR TERRANS IT IS EXACTLY ONE.
@@ -306,7 +319,7 @@ public static class GalaxyGenerator
         // day length still differs from one game to the next.
         planet.spinSpeed = Mathf.Max(RotationRules.MagneticFieldSpin + 2f,
                                      RotationRules.Roll(planet.mass, isMoon: false));
-        planet.rotationDirection = 1;   // a cradle turns the right way round
+        planet.rotationDirection = planet.orbitDirection == 0 ? 1 : planet.orbitDirection;   // turns the way it orbits
         planet.hasMagneticField = true;
         planet.hasTectonics = TectonicsRules.Roll(planet.type, planet.mass);
 
@@ -390,7 +403,9 @@ public static class GalaxyGenerator
             moon.surfaceSize = MassRules.SurfaceSize(moon.mass);
             // Rotation first: the field is a consequence of it now. See RotationRules.
             moon.spinSpeed = RotationRules.Roll(moon.mass, isMoon: true);
-            moon.rotationDirection = RotationRules.RollDirection(isMoon: true);
+            // A home moon goes round the way its world turns, and turns the way it goes round.
+            moon.orbitDirection = planet.rotationDirection;
+            moon.rotationDirection = moon.orbitDirection;
             moon.hasMagneticField = RotationRules.GeneratesField(moon.type, moon.mass, moon.spinSpeed);
             moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.mass);
             SeedTerrain(moon);
@@ -487,6 +502,55 @@ public static class GalaxyGenerator
 
         if (!OrbitSafety.Validate(home.bodies, out string problem))
             Debug.LogWarning($"[OrbitSafety] home system {home.name}: {problem}");
+    }
+
+    /// Put the cradle on the in-zone placement ring nearest the zone's centre — an empty one if any is,
+    /// else by trading lanes with the world that holds it. Moons follow their hosts.
+    static void MoveCradleIntoZone(StarSystemData home, CelestialBody planet, float inner, float outer)
+    {
+        var star = home.combinedStar;
+        var rings = new float[PlacementRings.Count];
+        int count = PlacementRings.Radii(star, rings);
+        float centre = (inner + outer) * 0.5f;
+
+        float freeR = -1f, freeD = float.MaxValue;
+        CelestialBody occupant = null; float occR = -1f, occD = float.MaxValue;
+        for (int i = 0; i < count; i++)
+        {
+            float r = rings[i];
+            if (r < inner || r > outer) continue;
+            float d = Mathf.Abs(r - centre);
+
+            CelestialBody holder = null;
+            foreach (var b in home.bodies)
+                if (b != planet && Mathf.Abs(b.distanceFromStar - r) < 0.5f) { holder = b; break; }
+
+            // A belt's lane is neither free nor tradeable: dropping an Earth into a ring of rubble is
+            // the one thing OrbitSafety must never be asked to fix (see EnsureHabitableWorld).
+            if (holder != null && holder.beltId != 0) continue;
+
+            if (holder == null) { if (d < freeD) { freeD = d; freeR = r; } }
+            else if (d < occD) { occD = d; occupant = holder; occR = r; }
+        }
+
+        if (freeR > 0f)
+        {
+            Place(planet, freeR, star);
+            return;
+        }
+        if (occupant == null) return;   // a zone with no ring in it at all — leave the layout alone
+
+        float was = planet.distanceFromStar;
+        Place(planet, occR, star);
+        Place(occupant, was, star);
+    }
+
+    static void Place(CelestialBody b, float radius, StarData star)
+    {
+        b.distanceFromStar = radius;
+        b.orbitRadius = radius;
+        b.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(star, radius);
+        foreach (var m in b.moons) m.distanceFromStar = radius;
     }
 
     // ============================================================================================

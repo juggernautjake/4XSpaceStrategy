@@ -66,8 +66,9 @@ public static class SurfaceTextureRenderer
                 c = GasGiantPalette.Apply(body, c, tile.type);
 
                 // The same per-tile shade jitter the detailed map uses, so the two views still look
-                // like the same world — just at different fidelity.
-                float b = Mathf.Lerp(0.86f, 1.12f, tile.shade);
+                // like the same world — just at different fidelity. Times the ELEVATION shade, so the
+                // globe and the thumbnails show the same relief the map does.
+                float b = Mathf.Lerp(0.86f, 1.12f, tile.shade) * ElevationShade(body, tile.elevation);
                 c = new Color(c.r * b, c.g * b, c.b * b, 1f);
 
                 // NO ore tint here — deliberately.
@@ -124,7 +125,8 @@ public static class SurfaceTextureRenderer
         if (scale <= 1) return BuildGrid(body);
 
         int tw = w * scale, th = h * scale;
-        var tex = new Texture2D(tw, th, TextureFormat.RGBA32, false)
+        // MIPMAPPED — see BuildMips for why, and for why the levels are built here rather than by Unity.
+        var tex = new Texture2D(tw, th, TextureFormat.RGBA32, true)
         {
             filterMode = FilterMode.Point,   // still hard edges: this is pixel art, not a photograph
             wrapMode = TextureWrapMode.Repeat
@@ -169,8 +171,9 @@ public static class SurfaceTextureRenderer
                 float[] pat = (uint)ti < (uint)typeCount ? pattern[ti] : null;
 
                 // The same per-tile shade jitter BuildGrid uses, so the two views still look like the
-                // same world — and so a field of one biome is not a field of one repeated stamp.
-                float b = Mathf.Lerp(0.86f, 1.12f, tile.shade);
+                // same world — and so a field of one biome is not a field of one repeated stamp. Times
+                // the elevation shade: brighter every 500 m up, darker every 500 m down.
+                float b = Mathf.Lerp(0.86f, 1.12f, tile.shade) * ElevationShade(body, tile.elevation);
                 float cr = c.r * b * 255f, cg = c.g * b * 255f, cb = c.b * b * 255f;
 
                 // Slide the pattern by a per-tile amount. The art tiles seamlessly, so any offset is a
@@ -196,11 +199,109 @@ public static class SurfaceTextureRenderer
                 }
             }
 
-        PaintContours(body, px, w, h, tw, scale);
+        // NOT ON A GAS GIANT. "Gas Giants do not need topography lines on their grid as they have no
+        // surface." Its 'elevation' is cloud-deck noise, and a contour through it is a line about
+        // nothing — the same reason the hover readout already leaves the metres off a giant.
+        bool[] contour = body.type == CelestialBodyType.GasGiant ? null
+                       : PaintContours(body, px, w, h, tw, scale);
 
-        tex.SetPixels32(px);
-        tex.Apply();
+        tex.SetPixels32(px, 0);
+        BuildMips(tex, px, contour, tw, th);
+        tex.Apply(false);
         return tex;
+    }
+
+    // ============================================================================================
+    // THE MIP CHAIN — why a contour line went missing when you zoomed out
+    //
+    // "When zoomed out far enough the topography lines are not all being rendered. When zoomed in on
+    // the grid surface, the lines will render clearly."
+    //
+    // A contour is one texel wide in a texture that is 4 to 16 texels per cell, and the texture had no
+    // mip levels and Point filtering. Zoomed out to fit the pane, a 3200-texel map is drawn across
+    // ~1450 pixels, so the GPU takes one texel in every 2.2 and skips the rest — and a one-texel line
+    // is skipped wherever the stride happens to step over it. That is the dashed, half-missing look:
+    // the lines were all there, and the sampler was reading between them. Zoomed in, every texel gets
+    // a pixel and the lines come back whole. A 2.2-texel-wide line would have "fixed" the fit zoom and
+    // been a 20-pixel bar at full zoom.
+    //
+    // MIPMAPS are the answer to minification and always were: each level is a half-resolution copy
+    // the sampler reads instead of striding through level 0. But Unity's own generator box-filters, and
+    // a box filter turns a one-texel line at 22% brightness into a two-texel smear at 60%, then 80%,
+    // then nothing — the line fades out exactly as fast as it stops being skipped. So the levels are
+    // built HERE, with one rule: a 2x2 block that contains any contour texel becomes a contour texel,
+    // coloured from the line texels alone. A line is therefore at least one texel wide and full dark on
+    // every level, which on screen means at least one pixel wide at every zoom. Everything else is a
+    // plain box average, so the biome grain minifies cleanly instead of sparkling.
+    //
+    // Point filtering stays: magnified, the map still reads as hard-edged cells; it simply picks the
+    // nearest LEVEL as well as the nearest texel when it shrinks.
+    // ============================================================================================
+    static void BuildMips(Texture2D tex, Color32[] level0, bool[] contour0, int tw, int th)
+    {
+        Color32[] src = level0; bool[] mask = contour0;
+        int sw = tw, sh = th, level = 1;
+        while (sw > 1 || sh > 1)
+        {
+            int dw = Mathf.Max(1, sw >> 1), dh = Mathf.Max(1, sh >> 1);
+            var dst = new Color32[dw * dh];
+            bool[] dmask = mask != null ? new bool[dw * dh] : null;
+            for (int y = 0; y < dh; y++)
+                for (int x = 0; x < dw; x++)
+                {
+                    int x0 = Mathf.Min(x * 2, sw - 1), x1 = Mathf.Min(x * 2 + 1, sw - 1);
+                    int y0 = Mathf.Min(y * 2, sh - 1), y1 = Mathf.Min(y * 2 + 1, sh - 1);
+                    int i00 = y0 * sw + x0, i01 = y0 * sw + x1, i10 = y1 * sw + x0, i11 = y1 * sw + x1;
+
+                    int r = 0, g = 0, b = 0, n = 0;
+                    if (mask != null)
+                    {
+                        // The line wins the block. Average only the line texels, so the colour under a
+                        // contour on a bright plateau and a dark seabed stays that plateau's or seabed's.
+                        if (mask[i00]) { r += src[i00].r; g += src[i00].g; b += src[i00].b; n++; }
+                        if (mask[i01]) { r += src[i01].r; g += src[i01].g; b += src[i01].b; n++; }
+                        if (mask[i10]) { r += src[i10].r; g += src[i10].g; b += src[i10].b; n++; }
+                        if (mask[i11]) { r += src[i11].r; g += src[i11].g; b += src[i11].b; n++; }
+                        if (n > 0) dmask[y * dw + x] = true;
+                    }
+                    if (n == 0)
+                    {
+                        r = src[i00].r + src[i01].r + src[i10].r + src[i11].r;
+                        g = src[i00].g + src[i01].g + src[i10].g + src[i11].g;
+                        b = src[i00].b + src[i01].b + src[i10].b + src[i11].b;
+                        n = 4;
+                    }
+                    dst[y * dw + x] = new Color32((byte)(r / n), (byte)(g / n), (byte)(b / n), 255);
+                }
+            tex.SetPixels32(dst, level);
+            src = dst; mask = dmask; sw = dw; sh = dh; level++;
+        }
+    }
+
+    // ============================================================================================
+    // ELEVATION SHADE — the colour brightness shifter
+    //
+    // "At 0 m or sea level the color should stay the same, but every 500 meters up or down the shade
+    // should get brighter or darker so that one can see why certain areas are separated by topography
+    // lines without having to read the altitude. Ascending altitudes get brighter, descending darker.
+    // Deep oceans darker in the deepest spots, the tops of tall terrain brighter."
+    //
+    // Read off the same 500 m band the contours are drawn from, so a line always separates two shades
+    // and the shade always steps at a line: band 0 (0-500 m) is the biome's own colour, each band up is
+    // a step brighter, each band down a step darker. An ocean tile's elevation is its SEABED, so a
+    // trench is darker than a shelf for free. Clamped so a 10 km peak brightens to white rather than
+    // past it and a deep trench stays a colour rather than black.
+    //
+    // Not on a gas giant: no ground, no height, no shade.
+    // ============================================================================================
+    public const float ShadePerBand = 0.05f;
+    public const float ShadeMin = 0.55f, ShadeMax = 1.45f;
+
+    public static float ElevationShade(CelestialBody body, float elevation)
+    {
+        if (body == null || body.type == CelestialBodyType.GasGiant) return 1f;
+        int band = PlanetTerrainGenerator.ContourBand(body, elevation);
+        return Mathf.Clamp(1f + band * ShadePerBand, ShadeMin, ShadeMax);
     }
 
     // ============================================================================================
@@ -234,8 +335,10 @@ public static class SurfaceTextureRenderer
     /// the cell edge, and full black there reads as a heavy grid rather than as a hairline over terrain.
     const float ContourDarken = 0.22f;
 
-    static void PaintContours(CelestialBody body, Color32[] px, int w, int h, int tw, int scale)
+    /// Returns which texels carry a line, for the mip builder.
+    static bool[] PaintContours(CelestialBody body, Color32[] px, int w, int h, int tw, int scale)
     {
+        var lined = new bool[px.Length];
         // One band lookup per CELL rather than per comparison — every interior cell is otherwise read
         // twice (once as itself, once as its west/south neighbour), and the band is a divide and a floor.
         var band = new int[w * h];
@@ -261,7 +364,7 @@ public static class SurfaceTextureRenderer
                     // The lower of the two owns the line, so it lands on one side of the step only.
                     int col = here < east ? ox + scale - 1 : (x + 1 == w ? 0 : ox + scale);
                     if (col < tw)
-                        for (int sy = 0; sy < scale; sy++) Darken(px, (oy + sy) * tw + col);
+                        for (int sy = 0; sy < scale; sy++) Darken(px, lined, (oy + sy) * tw + col);
                 }
 
                 // ---- the northern edge; the poles have no neighbour ----
@@ -271,14 +374,17 @@ public static class SurfaceTextureRenderer
                     if (north != here)
                     {
                         int row = here < north ? oy + scale - 1 : oy + scale;
-                        for (int sx = 0; sx < scale; sx++) Darken(px, row * tw + ox + sx);
+                        for (int sx = 0; sx < scale; sx++) Darken(px, lined, row * tw + ox + sx);
                     }
                 }
             }
+        return lined;
     }
 
-    static void Darken(Color32[] px, int i)
+    static void Darken(Color32[] px, bool[] lined, int i)
     {
+        if (lined[i]) return;   // a corner shared by two edges is darkened once, not squared
+        lined[i] = true;
         var c = px[i];
         px[i] = new Color32((byte)(c.r * ContourDarken), (byte)(c.g * ContourDarken),
                             (byte)(c.b * ContourDarken), 255);
@@ -326,7 +432,7 @@ public static class SurfaceTextureRenderer
                 // place a giant kept the raw tan table — so a blue giant turned tan as the camera pulled
                 // back, which is the sort of inconsistency nobody reports because nobody believes it.
                 Color c = GasGiantPalette.Apply(body, TerrainColorMap.Get(s.terrain), s.terrain);
-                float b = Mathf.Lerp(0.80f, 1.18f, s.shade);
+                float b = Mathf.Lerp(0.80f, 1.18f, s.shade) * ElevationShade(body, s.elevation);
                 c = new Color(c.r * b, c.g * b, c.b * b, 1f);
 
                 // Emphasise coastlines: darken the waterline a touch for clearer continents.

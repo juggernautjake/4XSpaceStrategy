@@ -202,7 +202,10 @@ public static class TerraformVisuals
 
         // Foreground: the specific projects run on THIS world, also scaled by power.
         var d = TerraformClimate.Accumulated(b);
-        p.heat      = Mathf.Clamp(p.heat      + d.heat      * power, 0.30f, 2.20f);
+        // The ceiling is the world's OWN natural heat when that is higher: a furnace world inside the
+        // zone's inner edge runs a heat of 5 or 6 now (InsolationRules), and a fixed 2.2 here would
+        // have cooled it by three hundred degrees the moment anyone so much as surveyed it.
+        p.heat      = Mathf.Clamp(p.heat      + d.heat      * power, 0.30f, Mathf.Max(2.20f, natural.heat));
         p.moisture  = Mathf.Clamp(p.moisture  + d.moisture  * power, 0.20f, 2.00f);
         // The SEA is what water projects move — the land keeps its shape. See TerraformClimate.ClimateDelta.
         p.seaLevel = Mathf.Clamp01(p.SeaLevelOrNeutral + d.seaLevel * power);

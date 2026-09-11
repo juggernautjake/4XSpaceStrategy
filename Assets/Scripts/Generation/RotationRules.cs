@@ -72,6 +72,13 @@ public static class RotationRules
     }
 
     /// +1 prograde (the default), -1 retrograde.
+    ///
+    /// A PLACEHOLDER NOW, not the rule. "As viewed from above, if their orbit around the star is
+    /// prograde, so too should their rotation. Prograde orbit, prograde rotation, and vice versa." A
+    /// world's spin direction is set from its ORBIT direction once the orbit is rolled (see the
+    /// generator), and the retrograde chances above express themselves through the orbit roll instead.
+    /// This still runs first in ApplyWorldPipeline because the pipeline needs some value before the
+    /// orbit exists, and it is what the Dev sandbox draws for a body that never had an orbit rolled.
     public static int RollDirection(bool isMoon)
         => Random.value < (isMoon ? RetrogradeChanceMoon : RetrogradeChancePlanet) ? -1 : 1;
 

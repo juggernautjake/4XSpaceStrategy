@@ -239,7 +239,15 @@ public class OrbitController : MonoBehaviour
         if (parentBody == null) return;
         // orbitSpeed is now an angular speed in deg/sec (Kepler-defaulted, dev-overridable).
         currentAngle += direction * orbitSpeed * Time.deltaTime;
-        if (spinSpeed != 0f) transform.Rotate(0f, spinDirection * spinSpeed * Time.deltaTime, 0f, Space.Self);
+        // NEGATED, so +1 means the same thing for the spin that it means for the orbit.
+        //
+        // "Some planets seem to be rotating the wrong direction." They were — every one of them. The
+        // orbit advances from +X toward +Z as its angle grows, which seen from above is
+        // COUNTER-clockwise; but Unity is left-handed, and a positive rotation about +Y is CLOCKWISE
+        // seen from above. So a world with orbitDirection = rotationDirection = +1 went round one way
+        // and turned the other. One sign, here, where the spin is applied — the data model keeps
+        // +1 = prograde and the sandbox toggle keeps meaning what it says.
+        if (spinSpeed != 0f) transform.Rotate(0f, -spinDirection * spinSpeed * Time.deltaTime, 0f, Space.Self);
         UpdatePosition();
     }
 

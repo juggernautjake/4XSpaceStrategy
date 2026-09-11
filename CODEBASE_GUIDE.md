@@ -124,11 +124,16 @@ ring 3 into the zone and put the Earthlike world third from its sun.
   to a ring, so the Dev orbit slider and terraforming's orbit-moving are unaffected.
 
 ### GasGiantStorms.cs  *(the Great Red Spot)*
-0–3 elliptical storm cells per giant, deterministic from the body's seed, snapped to the centre of a
-band the generator already draws as `Storm`. Replaced `if (elev > 0.78f) return Storm`, which was a
-threshold on fractal noise and therefore produced speckle rather than a spot. Two details do the work:
-the cloud lanes are **deflected** around a spot (`FlowHalo`), and the spot sits in a pale **`Hollow`** —
-without the hollow a dark storm inside a dark belt is invisible, which is what the render showed.
+0–3 storm cells per giant, deterministic from the body's seed, snapped to the centre of a band the
+generator already draws as `Storm`. Replaced `if (elev > 0.78f) return Storm`, which was a threshold
+on fractal noise and therefore produced speckle rather than a spot. A spot is a **leaning lens**, not an
+ellipse: pointed at the ends (`LensPower`), fuller on the equatorward flank (`FlankSqueeze`), tilted
+into the flow (`skew`, up to `SkewMax`). The pale **`Hollow`** collar is full on the flanks and pinches
+to nothing at the tips, and the **`FlowHalo`** deflection reaches `WakeStretch` times further along the
+flow than across it — so the lanes crowd the flanks, stream past the points and close up downstream.
+`Distance` returns the lens metric and hands out `along`, `side` and the plain `ellipse` distance; the
+collar is drawn in the first and the wake in the last, because the lens metric is infinite just past
+a tip and a wake measured in it stopped dead at the tip's longitude (the "hook" the first render showed).
 - **`Spots(b, out spots)` / `Distance` / `Invalidate`**. `tools/gas-giant-check.mjs` draws twelve.
 
 ### GenProfiler.cs  *(which part of generation ate the frame)*
@@ -139,8 +144,27 @@ the loading screen could report the total of but not attribute.
 ### RotationRules.cs  *(rotation, and the magnetic field it drives)*
 A magnetic field is a CONSEQUENCE of spin now, not a coin flip: **`GeneratesField(type, mass, spin)`**
 gates on `MagneticFieldSpin` (12°/s). `Roll` draws from two populations — spun-up and tidally braked —
-weighted by mass, so bigger worlds still usually have fields but you can see why. `RollDirection`
-(prograde default, retrograde ~10%), `RotationPeriodDays`, `Describe`.
+weighted by mass, so bigger worlds still usually have fields but you can see why. `RotationPeriodDays`,
+`Describe`. **Spin direction FOLLOWS the orbit** ("prograde orbit, prograde rotation"): the generator sets
+`rotationDirection = orbitDirection` once the orbit is rolled, for planets, belt rocks, moons (whose
+"prograde" is their host's spin), the guaranteed world and the cradle. `RollDirection` survives only as
+the pipeline's placeholder before an orbit exists. And `OrbitController` now NEGATES the spin it applies:
+the orbit advances counter-clockwise from above, but a positive `Rotate` about +Y in left-handed Unity is
+clockwise, so every world used to turn against its own orbit.
+
+### InsolationRules.cs  *(how hot a world is because of where it orbits)*
+The distance→heat law, **anchored on the habitable zone**. Inside the zone (`StarDatabase.HzInnerRel`
+0.80 .. `HzOuterRel` 1.55 — one pair of constants now, shared by the green rings, `WorldClassifier`'s
+bands, `AtmosphereRules`' inner-orbit cut and this) it is the plain T ∝ d^-½ law, unchanged. Inside the
+inner edge it is a **runaway greenhouse**: the gradient times `RunawayGain` with a floor of `InnerFloorC`
+(120 °C, over every boiling point once the world's greenhouse is added), so ring 3 sits at 120 °C, ring 2
+near 240, ring 1 near 440. Beyond the outer edge it is a **snowball**: `SnowballGain` and a ceiling of
+`OuterCeilingC` (−66 °C, so the warmest tile under the thickest air is still frozen). `BiasHeat`'s old
+0.45..1.85 clamp — the reason a world a ring inside the zone had a 55 °C archipelago — is gone; heat
+now runs ~0.08..6 and `PlanetTemperature.HeatForKelvin` is the inverse it is stored through.
+- **`KelvinAt(rel)` / `KelvinAt(star, distance)`** (pure) and **`RollHeat(star, distance)`** (±5% jitter,
+  guarantee re-imposed). `TerraformVisuals.Compose` caps heat at `max(2.2, natural)` so a furnace world
+  is not cooled by three hundred degrees the moment it is surveyed.
 
 ### GeothermalMap.cs  *(the merged Heat Index + Tectonics field)*
 One 0..1 field per surface point, from two sources, whichever is stronger:
@@ -397,8 +421,16 @@ nothing ticks it, and the save no longer carries it.
 - `BuildGrid, ResizeWindow, SelectTile, ClearGrid`. Colour comes from `SurfaceTileUI`/`TerrainColorMap`.
 
 ### SurfaceTextureRenderer.cs
-- **`Build(body)`** — renders the detailed surface to a point-filtered `Texture2D` by sampling the
-  same noise field densely; tints ore regions. Used by the detailed map AND the 3D globe.
+- **`BuildGrid(body)`** — one texel per cell, from the tiles; the globe, thumbnails and moon panes.
+- **`BuildGridTextured(body[, budget])`** — N×N texels per cell with the biome grain, plus the 500 m
+  **contours** (`PaintContours`, not on a gas giant) and a **mip chain built by hand** (`BuildMips`): a 2×2
+  block holding any contour texel becomes a contour texel, so a line stays one dark pixel at every zoom.
+  The texture used to have no mips, and at fit zoom Point sampling strode over the one-texel lines —
+  that was "the topography lines are not all being rendered when zoomed out".
+- **`ElevationShade(body, elevation)`** — the brightness shifter: ±`ShadePerBand` (5%) per 500 m band
+  off the datum, clamped `ShadeMin`..`ShadeMax`, applied in all three builds. Sea level keeps the biome's
+  own colour; peaks go bright, trenches go dark.
+- `Build(body)` — the legacy sampled render, same shading. Used by nothing on the main paths now.
 
 ### PlanetAppearance.cs
 - **`Apply(body, go)`** — textures the sphere with its surface map, sets material params, adds a
@@ -754,6 +786,24 @@ that is not here — "Clean." has to mean all nine checks ran, or it is a claim 
 **None of this is a type checker.** It will not catch a wrong argument count, a wrong return type, or
 an assignment to a get-only property. It catches the classes that have actually reached `main`, which
 is a different and much smaller claim. Unity is still the real check.
+
+**`terrain-relief-check.mjs`** — how rough is a dead world from one tile to the next, and does a small
+moon read as a small moon?
+
+```
+node tools/terrain-relief-check.mjs         # writes Art/_review/terrain-relief.png
+```
+
+Ports the variation pass and builds dead-world grids at four real masses, measuring the mean height
+step between neighbouring tiles (which IS the contour-line density) and the 5–95% spread, before and
+after the three things `SampleNormalized` now does by grid size: caps the base frequency so a feature is
+never under `MinBasePeriodCells` wide (a 15-cell moon had five three-cell "continents"), caps the
+variation octaves at `MinVariationPeriodCells` (octaves under a cell are static, not terrain), and
+scales relief by cells-per-feature (`ReliefScale`, floor `SmallBodyReliefFloor`). Measured: a tiny moon
+went from a line on 87% of its cell edges and 3.5 km of spread to 33% and 0.9 km; an Earth-mass world is
+essentially unchanged. The zero the metres are read from is `DatumShift`: the waterline when the world
+has a sea, a fixed level when it does not — the old waterline datum sat 0.74 units under a dry moon's
+mid-line, which is why every tile on one read 11,000–17,000 m.
 
 **`terrain-elevation-check.mjs`** — does a biome still secretly mean *"how high"*, and do the contour
 lines read as contours?
