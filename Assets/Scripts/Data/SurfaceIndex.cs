@@ -88,16 +88,15 @@ public static class SurfaceIndex
 
         switch (k)
         {
-            // ---- SOLAR DIES IN THICK AIR -----------------------------------------------------------
+            // ---- SOLAR CAN BE ABSENT ---------------------------------------------------------------
             //
-            // Not "is poor" — is ABSENT. Past the dead line there is no point offering a solar map at
-            // all: the ground under it is uniformly hopeless, and an index whose every answer is "no"
-            // is a survey pass spent to learn nothing, an icon on the bar that does nothing, and a slot
-            // in the running order that makes every other index finish later. SolarViable and
-            // SolarPressureFactor are solved against the same constant, so the map, the build menu's
-            // gate and the readout cannot disagree about where the line falls.
+            // Not "is poor" — is ABSENT. An index whose every answer is "no" is a survey pass spent to
+            // learn nothing, an icon on the bar that does nothing, and a slot in the running order that
+            // makes every other index finish later. Now that Solar covers the whole surface, absent means
+            // no tile anywhere reaches the floor — too far from the star, or under too much air, for even
+            // the highest peak to clear 40%. SolarViable is the one test, shared with the build menu.
             case SurfaceIndexKind.Solar:
-                return b.atmospheres < SolarDeadAtmospheres;
+                return SolarViable(b);
 
             // No plates and no plumes: there is no heat in this crust and no boundary to draw.
             case SurfaceIndexKind.Geothermal:
@@ -191,7 +190,7 @@ public static class SurfaceIndex
     //              no volcanism has a heat ceiling under the floor, so its best 9% is still nothing: the
     //              consolidation concentrates what a world has, it does not invent what it hasn't.
     //
-    // The band runs from ShowFloor (70%) to the ceiling, and everything under the cutoff is compressed
+    // The band runs from the index's Floor (70% for minerals, 40% for the rest) to the ceiling, and everything under the cutoff is compressed
     // below the floor — where it is drawn nowhere, produces nothing, and refuses placement. That is the
     // whole of "doing away with the bottom 69%".
     //
@@ -200,33 +199,40 @@ public static class SurfaceIndex
     // anything. Those are two genuinely different questions and both have to be asked.
     // ============================================================================================
 
-    /// Below this an index YIELDS nothing and refuses to be built on. Also the drawing floor for every
-    /// index except Geothermal — see DrawFloor, which is a different question and now has its own answer.
+    // ============================================================================================
+    // THE FLOOR IS PER INDEX NOW — 40% for most, 70% for minerals
+    //
+    // Every index used to share one floor at 70%, which made all six read the same way: a few bright
+    // patches and nothing else. That is right for MINERALS — a necessary resource that should push the
+    // player outward, toward richer ground and richer worlds — and too blunt for the rest. Hydro,
+    // Solar, Weather, Fertility and Geothermal are gradients, and a 40-60% site is a real, if poor,
+    // option: a plate line's modest heat, a far world's weak sun, the dry edge of a river valley.
+    //
+    // So below the floor an index yields nothing and refuses placement, exactly as before; the floor is
+    // simply lower for everything that is not a mineral seam.
+    // ============================================================================================
+
+    /// The MINERAL floor. It was the universal floor; now it is the strict one.
     public const float ShowFloor = 0.70f;
 
-    // ============================================================================================
-    // DRAWING IS NOT THE SAME QUESTION AS YIELDING
-    //
-    // One number used to answer both, and for five of the six indexes that is right: ground that
-    // produces nothing is ground there is no reason to paint. Geothermal is the exception, and it
-    // became the exception when it absorbed the plate map.
-    //
-    // A CONTINENTAL PLATE MARGIN READS EXACTLY 40 (GeothermalMap.PlateLineBase). That is not a weak
-    // geothermal site — it is a plate boundary, and it is the single most informative line on the map:
-    // it is where the mountains came from, where the rifts are, and which way the crust is moving. The
-    // 70% floor was hiding all of it. The push arrows kept drawing because they are drawn from the
-    // plate LAYOUT rather than from the index, so the map ended up showing arrows shoving against a
-    // boundary that had been rubbed out — the one presentation that is worse than showing neither.
-    //
-    // So Geothermal draws from 40 and still only PRODUCES from 70. Both numbers keep meaning what they
-    // meant: a geothermal plant still needs real heat (SurfaceBuildManager), and an earthquake still
-    // only damages what stands on 70%+ ground (EarthquakeManager) — that promise is the whole reason
-    // the player is allowed to site around the red, and moving it would break it.
+    /// The floor for every other index: the absolute lowest any index reads before it counts as nothing.
+    public const float BaseFloor = 0.40f;
+
+    /// Below this an index YIELDS nothing, is not drawn, and refuses to be built on.
+    public static float Floor(SurfaceIndexKind k) => k == SurfaceIndexKind.Mineral ? ShowFloor : BaseFloor;
+
+    /// A plate margin reads exactly this (GeothermalMap.PlateLineBase). It used to be a drawing floor of
+    /// its own, under the yield floor; with Geothermal's floor at 40 the two are now the same number, and
+    /// a plate line is a real — if low-yield — geothermal site.
     public const float PlateLineFloor = 0.40f;
 
-    /// The lowest value of this index that gets painted on the map at all.
-    public static float DrawFloor(SurfaceIndexKind k)
-        => k == SurfaceIndexKind.Geothermal ? PlateLineFloor : ShowFloor;
+    /// The lowest value of this index that gets painted on the map at all. The same as Floor: a value
+    /// that is drawn is a value that yields.
+    public static float DrawFloor(SurfaceIndexKind k) => Floor(k);
+
+    /// How many 10% bands sit between this index's floor and 100: three for minerals, six for the rest.
+    public static int Steps(SurfaceIndexKind k)
+        => Mathf.Max(1, Mathf.RoundToInt((1f - Floor(k)) / BandStep));
 
     /// The usable band is read in steps of this, so a glance at the map sorts good ground from very good
     /// ground without reading a single number. See Band / Highlight.
@@ -238,6 +244,12 @@ public static class SurfaceIndex
     public static float Raw(CelestialBody b, SurfaceIndexKind kind, int x, int y)
     {
         if (b?.surface == null || x < 0 || y < 0 || x >= b.surface.width || y >= b.surface.height) return 0f;
+
+        // These two are read off the world and the tile alone — no noise sample needed, and a sample is
+        // the expensive part of every other index.
+        if (kind == SurfaceIndexKind.Solar) return Solar(b, x, y);
+        if (kind == SurfaceIndexKind.Water) return Water(b, x, y);
+
         var f = Field(b, x, y);
         var t = b.surface.tiles[x, y];
 
@@ -249,9 +261,7 @@ public static class SurfaceIndex
             case SurfaceIndexKind.Mineral: return Mineral(f, t);
             case SurfaceIndexKind.Geothermal: return Geothermal(b, f, u, v);
             case SurfaceIndexKind.Fertile: return Fertile(b, f);
-            case SurfaceIndexKind.Wind: return Wind(b, f, u, v);
-            case SurfaceIndexKind.Solar: return Solar(b, f, u, v);
-            case SurfaceIndexKind.Water: return Water(b, f, x, y);
+            case SurfaceIndexKind.Wind: return Wind(b, f, x, y);
             default: return 0f;
         }
     }
@@ -272,7 +282,12 @@ public static class SurfaceIndex
     // best plate line would be promoted to 100 and a genuinely volcanic world's vents would be
     // compressed, and the number on the readout would stop meaning the thing every other system
     // computed from it.
-    static bool IsAbsolute(SurfaceIndexKind k) => k == SurfaceIndexKind.Geothermal;
+    //
+    // HYDRO AND SOLAR JOINED IT. Both are now specified the same way — Hydro by distance from the water
+    // (100 on it, 90s beside it, falling to 40 six tiles out), Solar by the star, the air and the height
+    // of the ground — so both are read straight through for the same reason.
+    static bool IsAbsolute(SurfaceIndexKind k)
+        => k == SurfaceIndexKind.Geothermal || k == SurfaceIndexKind.Water || k == SurfaceIndexKind.Solar;
 
     /// What the game actually reads: the raw score, consolidated into this world's usable band.
     public static float Get(CelestialBody b, SurfaceIndexKind kind, int x, int y)
@@ -292,27 +307,37 @@ public static class SurfaceIndex
         // windiest ridge, and reads maybe 28% — because the survey readout has to be able to say "this
         // world tops out at 28%, that is why nothing is highlighted" rather than showing a blank map with
         // no explanation on it.
-        if (fld.ceiling <= ShowFloor)
+        float floor = Floor(kind);
+        if (fld.ceiling <= floor)
             return fld.ceiling * Mathf.InverseLerp(fld.rawMin, fld.rawMax, raw);
 
         if (raw >= fld.cutoff)
-            return Mathf.Lerp(ShowFloor, fld.ceiling, Mathf.InverseLerp(fld.cutoff, fld.rawMax, raw));
+        {
+            // The CURVE decides how the band is filled, which is a separate question from how high it
+            // goes. Above 1 the top of the band is thin — most usable ground sits near the floor and the
+            // 90s are a find; below 1 the band is top-heavy, which is what a Fertile World or a world of
+            // High Quality Minerals is.
+            float q = Mathf.Pow(Mathf.InverseLerp(fld.cutoff, fld.rawMax, raw), fld.curve);
+            return Mathf.Lerp(floor, fld.ceiling, q);
+        }
 
         // Under the cutoff. Compressed below the floor, order preserved, so the readout can still tell
         // you how far off a tile is instead of flatly reporting nothing.
-        return (ShowFloor - 0.01f) * Mathf.InverseLerp(fld.rawMin, fld.cutoff, raw);
+        return (floor - 0.01f) * Mathf.InverseLerp(fld.rawMin, fld.cutoff, raw);
     }
 
-    /// What this tile actually YIELDS, which is zero under the floor. The request in one line: below 70%
-    /// an index provides no resource at all, rather than a small one.
-    public static float Productive(float indexValue) => indexValue < ShowFloor ? 0f : indexValue;
+    /// What this tile actually YIELDS, which is zero under the index's floor — no resource at all,
+    /// rather than a small one.
+    public static float Productive(SurfaceIndexKind k, float indexValue) => indexValue < Floor(k) ? 0f : indexValue;
 
-    /// Which 10% band a value sits in, 0 (the floor) .. 1 (100%). Only meaningful at or above the floor.
-    public static float Band(float v)
+    /// Which 10% band a value sits in, 0 (the floor) .. 1 (the top band). Only meaningful at or above
+    /// the floor.
+    public static float Band(SurfaceIndexKind k, float v)
     {
-        if (v < ShowFloor) return 0f;
-        int steps = Mathf.Max(1, Mathf.RoundToInt((1f - ShowFloor) / BandStep));   // 70..100 in tens = 3
-        int i = Mathf.Clamp(Mathf.FloorToInt((v - ShowFloor) / BandStep), 0, steps - 1);
+        float floor = Floor(k);
+        if (v < floor) return 0f;
+        int steps = Steps(k);
+        int i = Mathf.Clamp(Mathf.FloorToInt((v - floor) / BandStep + 0.0001f), 0, steps - 1);
         return steps > 1 ? i / (float)(steps - 1) : 1f;
     }
 
@@ -328,6 +353,8 @@ public static class SurfaceIndex
         public float rawMin, rawMax;   // this world's own range for this index
         public float cutoff;           // the raw value at which the usable band begins
         public float ceiling;          // how high that band may climb, 0..1
+        public float curve = 1f;       // how the band fills — see BandCurve. Cached with the rest so the
+                                       // four can never describe two different versions of the world
     }
 
     static readonly Dictionary<(CelestialBody, SurfaceIndexKind), IndexBand> bands
@@ -355,7 +382,8 @@ public static class SurfaceIndex
             rawMin = vals[0],
             rawMax = vals[vals.Length - 1],
             cutoff = vals[idx],
-            ceiling = Ceiling(b, k, vals[vals.Length - 1])
+            ceiling = Ceiling(b, k, vals[vals.Length - 1]),
+            curve = BandCurve(b, k)
         };
 
         // A world where the cutoff and the maximum coincide — a plateau, or a mostly-flat field — would
@@ -377,19 +405,30 @@ public static class SurfaceIndex
     // consolidation never asks. Kept so the switch below is total rather than falling through to a
     // default that would silently start meaning something.
     const float GeothermalCoverage = 0.09f;
-    const float FertileCoverage = 0.15f;
+    // Wider than it was, because the floor dropped from 70 to 40: the same coverage would now put a
+    // world's whole farm belt in its 40s. The CURVE (BandCurve) is what keeps the 90s rare.
+    const float FertileCoverage = 0.22f;
+    /// ...and on a Fertile World, a great deal more of it.
+    const float FertileWorldCoverage = 0.45f;
+    /// Vast Mineral Deposits: mineral country over a third of the world instead of an eighth.
+    const float VastMineralCoverage = 0.35f;
     const float WaterCoverage   = 0.15f;
 
     static float Coverage(CelestialBody b, SurfaceIndexKind k)
     {
         switch (k)
         {
-            case SurfaceIndexKind.Mineral: return MineralCoverage;
+            case SurfaceIndexKind.Mineral:
+                return WorldModifiers.Has(b, WorldModifier.VastMineralDeposits) ? VastMineralCoverage : MineralCoverage;
             case SurfaceIndexKind.Geothermal: return GeothermalCoverage;
-            case SurfaceIndexKind.Fertile: return FertileCoverage;
+            case SurfaceIndexKind.Fertile:
+                return WorldModifiers.Has(b, WorldModifier.FertileWorld) ? FertileWorldCoverage : FertileCoverage;
             case SurfaceIndexKind.Water: return WaterCoverage;
-            case SurfaceIndexKind.Solar: return SolarCoverage(b);
-            case SurfaceIndexKind.Wind: return WeatherCoverage(b);
+            case SurfaceIndexKind.Wind:
+                // Extreme Weather: storms over far more of the world.
+                return WorldModifiers.Has(b, WorldModifier.ExtremeWeather)
+                    ? Mathf.Min(0.75f, WeatherCoverage(b) * 1.8f + 0.08f)
+                    : WeatherCoverage(b);
             default: return 0.12f;
         }
     }
@@ -405,21 +444,70 @@ public static class SurfaceIndex
     {
         switch (k)
         {
-            case SurfaceIndexKind.Mineral: return Quality(rawMax, 0.30f, 0.62f);
+            case SurfaceIndexKind.Mineral:
+            {
+                float q = Quality(rawMax, 0.30f, 0.62f);
+                // High Quality Minerals: whatever seams this world has, they are near the top of the scale.
+                // Only where it HAS seams worth the name — the modifier concentrates what is there, it does
+                // not invent mineral country on a world with none.
+                return WorldModifiers.Has(b, WorldModifier.HighQualityMinerals) && q >= ShowFloor * 0.8f
+                    ? Mathf.Max(q, 0.97f) : q;
+            }
             case SurfaceIndexKind.Geothermal: return Quality(rawMax, 0.28f, 0.62f);
-            case SurfaceIndexKind.Fertile: return Quality(rawMax, 0.30f, 0.68f);
+            case SurfaceIndexKind.Fertile:
+            {
+                // A Fertile World reaches 100; anything else is capped by how close its climate is to the
+                // 20-22 °C optimum and whether it has the water to go with it.
+                if (WorldModifiers.Has(b, WorldModifier.FertileWorld)) return 1f;
+                return Mathf.Min(FertileClimateCeiling(b), Quality(rawMax, 0.30f, 0.68f));
+            }
             case SurfaceIndexKind.Water: return Quality(rawMax, 0.30f, 0.70f);
-            // Both of these are capped by the AIR before anything about the ground is considered — an
-            // airless world has no weather whatever its ridges look like, and its panels are unbeatable
-            // whatever its moisture field says.
-            case SurfaceIndexKind.Solar: return Mathf.Min(SolarAirCeiling(b), Quality(rawMax, 0.25f, 0.65f));
-            case SurfaceIndexKind.Wind: return Mathf.Min(WeatherAirCeiling(b), Quality(rawMax, 0.22f, 0.60f));
+            case SurfaceIndexKind.Solar: return 1f;   // absolute — see Solar; never consolidated
+            // Capped by the AIR before anything about the ground is considered — an airless world has no
+            // weather whatever its ridges look like. Extreme Weather lifts the cap on any world that has
+            // air to be violent with.
+            case SurfaceIndexKind.Wind:
+            {
+                float air = WeatherAirCeiling(b);
+                float c = Mathf.Min(air, Quality(rawMax, 0.22f, 0.60f));
+                return air > 0f && WorldModifiers.Has(b, WorldModifier.ExtremeWeather) ? Mathf.Max(c, 0.97f) : c;
+            }
             default: return 0f;
         }
     }
 
     static float Quality(float rawMax, float dead, float good)
         => Mathf.Clamp01(Mathf.InverseLerp(dead, good, rawMax));
+
+    /// How the usable band fills between floor and ceiling — see Get.
+    static float BandCurve(CelestialBody b, SurfaceIndexKind k)
+    {
+        switch (k)
+        {
+            case SurfaceIndexKind.Mineral:
+                return WorldModifiers.Has(b, WorldModifier.HighQualityMinerals) ? 0.55f : 1f;
+            // Ordinary farmland is mostly middling: a plant biome no longer means 90%+. On a Fertile World
+            // the band turns top-heavy, and the 90s are what most of its farmland reads.
+            case SurfaceIndexKind.Fertile:
+                return WorldModifiers.Has(b, WorldModifier.FertileWorld) ? 0.45f : 1.8f;
+            case SurfaceIndexKind.Wind:
+                return WorldModifiers.Has(b, WorldModifier.ExtremeWeather) ? 0.7f : 1f;
+            default: return 1f;
+        }
+    }
+
+    /// How high a world's fertility can go at all, from its climate. The closer its average temperature
+    /// to 20-22 °C the higher the cap; 40% or more surface water adds to it. A world 25 °C off the
+    /// optimum still has farmland — it just never gets past the 50s.
+    static float FertileClimateCeiling(CelestialBody b)
+    {
+        float c = PlanetTemperature.BodyAverageCelsius(b);
+        float off = Mathf.Max(0f, Mathf.Abs(c - 21f) - 1f);
+        float temp = 1f - Mathf.Clamp01(off / 25f);
+        float ceiling = Mathf.Lerp(0.55f, 0.88f, temp);
+        if (WorldModifiers.WaterLevel(b) >= WorldModifiers.FertileWaterMin) ceiling += 0.06f;
+        return Mathf.Clamp01(ceiling);
+    }
 
     // ---- MINERAL: where a mine pays ----
     // Ore comes up where the crust is broken and raised. A real deposit on the tile beats any of it.
@@ -665,63 +753,148 @@ public static class SurfaceIndex
     }
 
     // ============================================================================================
-    // WEATHER: where turbines pay — as HOTSPOTS, sized and counted by the air
+    // WEATHER: where turbines pay — STORM ZONES, with a reason for being where they are
     //
-    // Formerly the Wind Index. Weather is impossible without air, so this is a fact about the whole
-    // planet before it is a fact about any tile — but the old version expressed that as a flat MULTIPLIER
-    // on every tile, which produced the two failures the request is about:
+    // Formerly the Wind Index. The air sets how high it can go and how much of the world it can claim
+    // (WeatherAirCeiling / WeatherCoverage, below), exactly as before. What changed is WHERE the patches
+    // land.
     //
-    //   A THIN-AIRED WORLD went uniformly dim rather than blank. Multiplying a 0.6 tile by a 0.2 severity
-    //   gives 12%, and 12% everywhere is a map that says "a bit windy all over" about a world where a
-    //   turbine would never turn. It should top out under the floor and be visibly not worth surveying.
-    //   A THICK-AIRED WORLD went uniformly bright, for the same reason in reverse — and the whole map
-    //   being viable is the thing that makes siting meaningless.
+    // They used to be blobs of noise: patches of windy country with no cause, which read as random
+    // because they were. Now they are driven by the things that actually make weather:
     //
-    // So the air now sets a CEILING and a COVERAGE instead, and the map comes out as discrete hotspots:
-    // patches of genuinely windy country in a world that is otherwise calm. The thicker the air the more
-    // of them there are and the bigger each one is, which is the request exactly — and a world under
-    // about half an atmosphere never gets a ceiling over the floor, so its weather map is honestly empty.
+    //   THE EQUATOR. A world's rotation pools its air and its heat there; that is where the convection
+    //   is and where the storms are born. Most weather gravitates to the equatorial belt.
+    //   ALTITUDE DIFFERENCE. Air forced up a mountain front, or spilling down off a plateau, is wind.
+    //   TEMPERATURE DIFFERENCE. Land and sea heat at different rates, so a coastline is a permanent
+    //   thermal contrast — the sea breeze, scaled up to a planet.
     //
-    // The terrain terms decide WHERE those patches land, and they changed too. It used to be
-    // `elevation * 0.5` plus a blanket bonus at sea, which put every hotspot on a mountain top or out on
-    // open water — neither of which you can put a wind farm on. Turbines want FLAT, OPEN ground, so
-    // flatness leads now and open water is penalised rather than rewarded: the coverage budget is spent
-    // on land you can actually build on, which is the "I would like some on the land" half of the ask.
+    // The two contrasts are measured per tile, smoothed into STORM ZONES a few tiles across (bigger in
+    // thicker air, bigger again on an Extreme Weather world), and weighted by the equatorial belt. The
+    // terrain terms then decide which ground inside a zone is buildable — flat and open still beats a
+    // sheltered valley.
     // ============================================================================================
-    static float Wind(CelestialBody b, PlanetTerrainGenerator.Sample f, float u, float v)
+    static float Wind(CelestialBody b, PlanetTerrainGenerator.Sample f, int x, int y)
     {
         if (WeatherAirCeiling(b) <= 0f) return 0f;
 
         float flat = Mathf.Clamp01(1f - f.ridge * 1.15f);          // a turbine wants a plain, not a peak
         float open = 1f - Shelter(f.terrain);                      // and nothing upwind of it
-        float thermal = Mathf.Abs(f.temperature - 0.5f) * 0.5f;    // hot/cold extremes stir the air
-        float polar = f.latitude * 0.30f;                          // roaring forties
         float exposure = f.elevation * 0.18f;                      // a little height still helps
 
-        float terrain = Mathf.Clamp01((flat * 0.34f + open * 0.22f + thermal * 0.18f
-                                       + polar * 0.16f + exposure) * 1.22f);
+        float terrain = Mathf.Clamp01((flat * 0.45f + open * 0.35f + exposure) * 1.15f);
 
         // Open water still scores — a coast is genuinely the windiest ground there is — but at well under
         // half, because nothing can be built on it and a hotspot spent out at sea is a hotspot wasted.
         if (f.water) terrain *= 0.45f;
 
-        return Mathf.Clamp01(terrain * (1f - HotspotWeight) + HotspotField(b, u, v, WeatherBlobs(b), 17.3f) * HotspotWeight);
+        var storm = StormFieldFor(b);
+        float s = storm == null ? 0f : storm[y * b.surface.width + x];
+        return Mathf.Clamp01(terrain * (1f - StormWeight) + s * StormWeight);
     }
 
-    /// How much of a tile's raw score comes from the hotspot field rather than from its terrain.
-    ///
-    /// Not zero and not one, and both ends are wrong for a reason. At zero the "hotspots" are just the
-    /// top of a terrain gradient, which on a smooth field is a handful of ragged slivers rather than
-    /// patches. At one they are blobs of noise laid over a world with no regard for what is under them,
-    /// so a wind farm's best site could be a sheltered canyon. Just under half means the patches are
-    /// blob-SHAPED but land on ground that deserves them.
-    const float HotspotWeight = 0.45f;
+    /// How much of a tile's raw score is the storm field rather than the ground under it. Mostly storm:
+    /// the storm decides where the weather IS, the ground only which part of it you can build on.
+    const float StormWeight = 0.65f;
 
-    /// The hotspot field itself: a seamless low-frequency noise whose blob size is set by the caller.
-    /// `blobs` is roughly how many patches fit around the equator, so a small number gives a few big
-    /// regions and a large one a fine scatter.
-    static float HotspotField(CelestialBody b, float u, float v, float blobs, float salt)
-        => PlanetTerrainGenerator.WorldNoise(b, u, v, blobs, salt, 3);
+    static readonly Dictionary<CelestialBody, float[]> stormFields = new Dictionary<CelestialBody, float[]>();
+
+    static float[] StormFieldFor(CelestialBody b)
+    {
+        if (b?.surface == null) return null;
+        if (stormFields.TryGetValue(b, out var f)) return f;
+        f = BuildStormField(b);
+        stormFields[b] = f;
+        return f;
+    }
+
+    /// The storm field, 0..1 per tile. Read off STORED tile data (elevation and wetness), so it costs one
+    /// pass over the grid and no noise sampling at all.
+    static float[] BuildStormField(CelestialBody b)
+    {
+        int w = b.surface.width, h = b.surface.height, n = w * h;
+        var relief = new float[n];
+        var coast = new float[n];
+        float reliefMax = 0f;
+
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                var t = b.surface.tiles[x, y];
+                if (t == null) continue;
+                bool wet = PlanetTerrainGenerator.IsWater(t.type);
+                float diff = 0f;
+                bool shore = false;
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        int ny = y + dy;
+                        if (ny < 0 || ny >= h) continue;                 // latitude does not wrap
+                        int nx = ((x + dx) % w + w) % w;                 // longitude does
+                        var o = b.surface.tiles[nx, ny];
+                        if (o == null) continue;
+                        diff = Mathf.Max(diff, Mathf.Abs(o.elevation - t.elevation));
+                        if (PlanetTerrainGenerator.IsWater(o.type) != wet) shore = true;
+                    }
+                int i = y * w + x;
+                relief[i] = diff;
+                coast[i] = shore ? 1f : 0f;
+                reliefMax = Mathf.Max(reliefMax, diff);
+            }
+
+        // Altitude contrast and land/sea contrast, each on its own 0..1 scale so neither drowns the other.
+        var contrast = new float[n];
+        float inv = reliefMax > 0.0001f ? 1f / reliefMax : 0f;
+        for (int i = 0; i < n; i++) contrast[i] = relief[i] * inv * 0.6f + coast[i] * 0.4f;
+
+        // Smoothed into ZONES. A raw contrast map is a hairline along every coast and ridge; a storm is a
+        // region. Thicker air makes bigger systems, and Extreme Weather bigger still.
+        int radius = Mathf.RoundToInt(Mathf.Lerp(2f, 4f, Mathf.InverseLerp(0.5f, 4f, b.atmospheres)));
+        if (WorldModifiers.Has(b, WorldModifier.ExtremeWeather)) radius += 2;
+        radius = Mathf.Clamp(radius, 1, Mathf.Max(1, h / 6));
+        BoxBlur(contrast, w, h, radius);
+        BoxBlur(contrast, w, h, radius);
+
+        float cmax = 0f;
+        for (int i = 0; i < n; i++) cmax = Mathf.Max(cmax, contrast[i]);
+        float cinv = cmax > 0.0001f ? 1f / cmax : 0f;
+
+        var field = new float[n];
+        for (int y = 0; y < h; y++)
+        {
+            // 0 at the equator, 1 at the poles. The belt is broad — the tropics, not a line.
+            float lat = Mathf.Abs((y + 0.5f) / h - 0.5f) * 2f;
+            float equatorial = Mathf.Pow(1f - lat, 1.5f);
+            for (int x = 0; x < w; x++)
+            {
+                int i = y * w + x;
+                field[i] = equatorial * (0.4f + 0.6f * contrast[i] * cinv);
+            }
+        }
+        return field;
+    }
+
+    /// Separable box blur, in place. Longitude wraps, latitude clamps — the map's own topology.
+    static void BoxBlur(float[] a, int w, int h, int r)
+    {
+        if (r <= 0) return;
+        var tmp = new float[a.Length];
+        float norm = 1f / (2 * r + 1);
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                float sum = 0f;
+                for (int k = -r; k <= r; k++) sum += a[y * w + ((x + k) % w + w) % w];
+                tmp[y * w + x] = sum * norm;
+            }
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                float sum = 0f;
+                for (int k = -r; k <= r; k++) sum += tmp[Mathf.Clamp(y + k, 0, h - 1) * w + x];
+                a[y * w + x] = sum * norm;
+            }
+    }
 
     // ---- What the air does to the weather -------------------------------------------------------
 
@@ -761,11 +934,6 @@ public static class SurfaceIndex
         return Mathf.Lerp(0.14f, 0.42f, Mathf.Clamp01(Mathf.InverseLerp(1f, 6f, a)));
     }
 
-    /// ...and how big each patch is. Fewer blobs around the equator means bigger blobs, so this FALLS as
-    /// the air thickens: "the thicker the atmosphere the larger the hotspots are".
-    static float WeatherBlobs(CelestialBody b)
-        => b == null ? 18f : Mathf.Lerp(18f, 5f, Mathf.Clamp01(Mathf.InverseLerp(TraceAir, 6f, b.atmospheres)));
-
     /// How much weather this world has AT ALL, 0..1 — kept as the one number the readouts quote.
     public static float WeatherSeverity(CelestialBody b) => WeatherAirCeiling(b);
 
@@ -776,7 +944,7 @@ public static class SurfaceIndex
     {
         float s = WeatherAirCeiling(b);
         if (s <= 0f) return "airless — no weather at all";
-        if (s < ShowFloor) return $"too thin to harvest — tops out near {s * 100f:F0}%";
+        if (s < Floor(SurfaceIndexKind.Wind)) return $"too thin to harvest — tops out near {s * 100f:F0}%";
         if (s < 0.85f) return "breezy — workable hotspots";
         if (s < 0.95f) return "stormy";
         return "violent";
@@ -825,250 +993,187 @@ public static class SurfaceIndex
     }
 
     // ============================================================================================
-    // SOLAR: where panels pay — and the poles stop being free
+    // SOLAR: back to the fundamentals — the star, the air, and the height of the ground
     //
-    // Cloudless and high, as before: moisture means cloud, so dry ground is bright ground.
+    // Solar is no longer a map of hotspots. Sunlight falls on the WHOLE surface of a turning world, so
+    // the whole surface carries a Solar Index, and three things decide what it reads:
     //
-    // THE POLAR PREFERENCE NOW DEPENDS ON THE AIR, which is the correction. A panel at the pole of a
-    // world with any axial tilt sees continuous summer daylight for months, and on a world with almost no
-    // atmosphere that is decisive — hours beat angle, and there is nothing in the way. Put an atmosphere
-    // over it and it reverses: polar sunlight arrives at a shallow angle and has to cross an enormous
-    // slant path of air to get to the ground, so the thicker the air the worse the poles are and the
-    // more the equator wins. The preference is therefore LERPED by pressure rather than fixed, which is
-    // the request's "make solar less viable at the poles the thicker the atmosphere".
+    //   1. THE STAR. Distance sets the world's maximum. Up to 100% at the innermost orbit, about 55% at
+    //      the centre of the habitable zone, the mid-40s at its outer edge, and lower still beyond it.
+    //      (The habitable zone here is the liquid-water zone, not any one species' preference.)
+    //   2. THE AIR. Every atmosphere takes 10 points off that maximum, so a 46% world under one
+    //      atmosphere reads 36% at sea level. Airless worlds keep all of it — which is what makes a bare
+    //      rock close to its star a genuine solar prize.
+    //   3. THE GROUND. Every 1,500 m above the datum adds 10 points, every 1,500 m below takes 10 off.
+    //      Mountains and high plateaus are the panel sites; craters and basins are not. Tiles under water
+    //      read at the sea surface (0 m), since a panel there would float rather than sit on the seabed.
     //
-    // Pressure no longer multiplies the tile score. It used to, and that is what produced the behaviour
-    // the request objects to: a thick-aired world's best possible solar tile was capped at a third, so
-    // its map was uniformly dim and panels were simply off the table there. Air now sets the CEILING and
-    // the COVERAGE instead (see below), so a thick-aired world still has genuine 70-100% hotspots — there
-    // are just few of them and they are small, and finding one is the point.
+    // A TIDALLY LOCKED world is the exception to "the whole surface": its substellar hemisphere (the
+    // middle of the map) has the sun forever, and the far hemisphere has none at all.
+    //
+    // Read ABSOLUTELY, like Geothermal and Hydro — the numbers are specified, not relative.
     // ============================================================================================
-    static float Solar(CelestialBody b, PlanetTerrainGenerator.Sample f, float u, float v)
+    static float Solar(CelestialBody b, int x, int y)
     {
-        float air = AirNorm(b);
+        var t = b.surface.tiles[x, y];
+        if (t == null) return 0f;
 
-        // ---- WHERE THE SUN LANDS, AND WHY IT SWAPS ENDS ------------------------------------------
-        //
-        // Thin air: the equator wins, straightforwardly. More light falls per square metre where the
-        // star is overhead, and with nothing in the way that is the whole story.
-        //
-        // Thick air: THE POLES win, and the air itself is the reason. A thick atmosphere is a weather
-        // engine, and a weather engine is driven by the equator — that is where the heat goes in, where
-        // the convection is, and where the permanent cloud sits. The high latitudes are the quiet part
-        // of a stormy world. So on a two-atmosphere world the sunny ground is the polar ground, which
-        // is also what makes such a world worth siting on rather than uniformly bad.
-        //
-        // This ran the other way round on both counts. `latitude` is 0 at the equator, 1 at the poles.
-        float thin = 1f - f.latitude * 0.80f;          // equator best
-        float thick = 0.30f + f.latitude * 0.70f;      // poles best
-        float polar = Mathf.Lerp(thin, thick, air);
-        float clear = Mathf.Clamp01(1f - f.moisture * 1.15f);      // moisture = cloud
-        float altitude = f.elevation * 0.2f;
+        // Proportional, not stepped: 750 m is half a step. Stepping would put a hard 10-point cliff at
+        // every 1,500 m contour; proportional reads the same at the steps and smoothly between them.
+        float metres = PlanetTerrainGenerator.IsWater(t.type) ? 0f : PlanetTerrainGenerator.ElevationMetres(b, t.elevation);
+        float v = SolarSurfaceMax(b) + SolarPerStep * (metres / SolarElevationStep);
 
-        // How much light the planet gets AT ALL. terrainParams.heat is set from its distance to its
-        // star, so a far, cold world's sunniest desert still can't match a close one's.
-        float insolation = Mathf.Clamp01(b.terrainParams.heat / 1.4f);
-
-        float terrain = (polar * 0.45f + clear * 0.4f + altitude) * Mathf.Lerp(0.45f, 1.15f, insolation);
-        if (f.terrain == TerrainType.Storm) terrain *= 0.25f;      // permanent cloud
-        terrain = Mathf.Clamp01(terrain);
-
-        return Mathf.Clamp01(terrain * (1f - HotspotWeight) + HotspotField(b, u, v, SolarBlobs(b), 4.9f) * HotspotWeight);
-    }
-
-    /// A world's air pressure on a 0..1 scale, saturating at the dead line. The one number the solar
-    /// terms, ceiling, coverage and blob size are all read off, so they can never disagree about how
-    /// thick "thick" is.
-    static float AirNorm(CelestialBody b)
-        => b == null ? 0f : Mathf.Clamp01(b.atmospheres / SolarDeadAtmospheres);
-
-    /// The highest the Solar index may read here. Thin air is a genuine advantage — nothing between the
-    /// panel and the star — and thick air costs a little off the top, but never enough to put the ceiling
-    /// under the floor: a thick-aired world's few hotspots are still worth building on, which is the whole
-    /// change. What thick air really costs is COVERAGE.
-    static float SolarAirCeiling(CelestialBody b)
-    {
-        // Air costs a little off the top. Distance costs a great deal — see SolarStarFactor.
-        return Mathf.Clamp01(Mathf.Lerp(1f, 0.86f, AirNorm(b)) * SolarStarFactor(b));
-    }
-
-    /// How much of its star's light this world gets at all, 0..1, as a factor on the solar CEILING.
-    ///
-    /// "Solar Index should also go down in quality the further the celestial body is from its host
-    /// star" — and the honest place for that is the ceiling rather than the per-tile score. Applied per
-    /// tile it would dim a far world's whole map uniformly, which is the exact failure thick air used
-    /// to have: everything faintly bad, nothing to choose between, and no reason to survey. Applied to
-    /// the ceiling, a far world still has a best place and the survey is still worth running — that
-    /// best place is simply worth 55% rather than 100%, and the player reads the difference straight
-    /// off the band.
-    ///
-    /// `terrainParams.heat` is already set from the body's orbital distance, so this needs no new data
-    /// and cannot drift from the temperature the rest of the world is generated at.
-    public static float SolarStarFactor(CelestialBody b)
-    {
-        if (b == null) return 1f;
-        float insolation = Mathf.Clamp01(b.terrainParams.heat / 1.4f);
-        return Mathf.Lerp(0.55f, 1f, insolation);
-    }
-
-    /// How much of a world is sunny enough to matter. Nearly half of an airless rock; a sixth of an
-    /// Earth-like world; a scattered few percent of a thick one.
-    static float SolarCoverage(CelestialBody b)
-    {
-        if (b == null) return 0.30f;
-        float a = b.atmospheres;
-
-        // ---- BELOW ONE ATMOSPHERE, SOLAR IS EVERYWHERE ------------------------------------------
-        //
-        // "Planets with very low atmosphere can be nearly completely covered in solar index." Which is
-        // right, and is what makes an airless rock beside its star a genuine prize rather than a
-        // consolation one: with nothing between the panel and the light there is no reason for one
-        // patch of ground to beat another, so the whole world qualifies.
-        //
-        // 92% rather than 100%, so the map still has SHAPE. A completely uniform overlay is a coloured
-        // rectangle, and the few percent that misses out is what keeps it reading as terrain.
-        if (a < 1f) return Mathf.Lerp(0.92f, 0.30f, Mathf.Clamp01(a));
-
-        // ---- AND ABOVE IT, SOLAR IS A FIND -------------------------------------------------------
-        //
-        // "Atmospheres of around 2 should have clustered/focused spots of good solar index, but should
-        // not be common." Around an eighth of the world at two atmospheres, falling to almost nothing
-        // by the dead line — at which point Present() has stopped offering the index at all.
-        return Mathf.Lerp(0.30f, 0.05f, Mathf.Clamp01(Mathf.InverseLerp(1f, SolarDeadAtmospheres, a)));
-    }
-
-    /// ...and how big each patch is. RISES with pressure — more blobs around the equator means smaller
-    /// blobs — so a thin-aired world's sun comes in a few huge regions and a thick one's in small spots.
-    static float SolarBlobs(CelestialBody b)
-        => b == null ? 9f : Mathf.Lerp(2.5f, 20f, AirNorm(b));
-
-    /// What a world's air pressure does to solar output, as a multiplier on a 1.0 baseline — the number
-    /// the Survey readout quotes so a player can see WHY a thick world's map is nearly empty.
-    ///
-    /// No longer applied per tile (see Solar above): the index's ceiling and coverage carry pressure now,
-    /// and multiplying here as well would charge a thick world for its air twice. Kept because it is
-    /// still the honest headline figure, and because the build menu's dead-line gate is solved against it.
-    ///
-    /// Above Earth-normal, output falls linearly and reaches EXACTLY ZERO at the dead line: 1.5 atm ->
-    /// 75%, 2 -> 50%, 2.5 -> 25%, 3 -> 0. Below Earth pressure it runs the other way, gaining 10 points
-    /// per 0.1 atmosphere under, so a 0.5-atm world runs at 150% and an airless one at 200%.
-    ///
-    /// Returned UNCLAMPED above 1 on purpose. The bonus is real and the caller decides what to do with it.
-    public static float SolarPressureFactor(float atmospheres)
-    {
-        if (atmospheres >= 1f)
-            return Mathf.Max(0f, 1f - (atmospheres - 1f) / (SolarDeadAtmospheres - 1f));
-        return 1f + (1f - atmospheres) * 1.0f;
-    }
-
-    /// Atmospheres at which solar output reaches zero, and so the point past which panels are not
-    /// offered at all. SolarPressureFactor is solved against this, so the two can never drift apart.
-    /// ---- THREE, NOT FIVE ----
-    ///
-    /// "Make Solar Index nonexistent on terrestrial celestial bodies with an atmosphere of 3 and up."
-    /// Moving the line down does three things at once, because everything solar is solved against this
-    /// one constant: panels stop being offered at 3 (SolarViable), the index stops being surveyed at
-    /// all at 3 (Present), and the pressure curve reaches zero at 3 rather than limping on through two
-    /// more atmospheres of near-uselessness.
-    ///
-    /// It also makes thinning an atmosphere a sharper decision. A 3.2-atmosphere world has no solar map
-    /// whatsoever; terraform it to 2.8 and the whole index appears, spots and all.
-    public const float SolarDeadAtmospheres = 3f;
-
-    /// Is solar worth building on this world? False above the dead line — and true again the moment
-    /// terraforming brings the air back down to 4, which is what makes thinning an atmosphere a
-    /// strategic move rather than a cosmetic one.
-    public static bool SolarViable(CelestialBody b) =>
-        b != null && b.atmospheres < SolarDeadAtmospheres;
-
-    // ============================================================================================
-    // WATER: where anything that needs water pays
-    //
-    // THE OLD VERSION SCORED THE WATER ITSELF, which made it useless for the one thing it is for.
-    // It read the 3x3 neighbourhood, so only a tile touching the sea got any credit at all, and the
-    // highest numbers on the map were on open water — where nothing can be built. A Steam Turbine
-    // needs water to raise steam with; it does not need to be standing IN it. The practical effect was
-    // that the whole Electrical category's wettest buildings had to be jammed onto the shoreline in a
-    // single-tile ring, and once that ring was full the world had no more sites.
-    //
-    // SO WATER PROJECTS, exactly as a power plant projects a grid. Every connected body of water throws
-    // an influence outward across the land around it, and the two numbers that matter both scale with
-    // HOW BIG THAT BODY IS:
-    //
-    //   REACH      how far inland it carries. A pond wets its own doorstep; an ocean supplies a
-    //              hinterland. Scaled by the SQUARE ROOT of area, because that is the body's linear
-    //              size — a lake of four times the area is twice as wide, and twice as wide is the
-    //              honest reading of "twice the water". Linear in area would let one sea cover a
-    //              hemisphere.
-    //   STRENGTH   how good the best site near it is. Also root-scaled, and saturating: a pond is a
-    //              poor site however close you stand to it.
-    //
-    // ---- THE BUFFER, and why the shore is not the best place ----
-    //
-    // The request is explicit: leave a gap so a row of turbines does not have to be crammed onto the
-    // waterline. So the shore is VIABLE but deliberately not optimal (ShoreFraction of the peak), the
-    // peak sits one tile further in, and it falls away from there to nothing at the reach. You can
-    // build on the beach; you do slightly better a step back from it, and you can keep building
-    // inland for a long way before it stops being worth it.
-    //
-    // Measured against a rendered map at 160x80 with a plausible spread of bodies: about half the land
-    // has some hydro, a fifth of it clears 50%, and under 5% clears 80% — so the good ground is
-    // findable and finite rather than everywhere or nowhere.
-    // ============================================================================================
-
-    /// The shortest reach any body has, in tiles, and the longest — an ocean does not supply a planet.
-    const float WaterReachMin = 3f, WaterReachMax = 14f;
-
-    /// Tiles of reach per unit of sqrt(area).
-    const float WaterReachPerRoot = 0.8f;
-
-    /// Distance out to which the shoreline discount applies. 1 = only the tiles touching the water.
-    const int WaterBuffer = 1;
-
-    /// What the shore gets, as a fraction of the peak. Under 1 so the best ground is a step inland.
-    const float WaterShoreFraction = 0.72f;
-
-    static float Water(CelestialBody b, PlanetTerrainGenerator.Sample f, int x, int y)
-    {
-        if (f.water) return 0.02f;                                 // you cannot build on it
-
-        var field = WaterFieldFor(b);
-        if (field == null) return 0.02f;
-
-        int i = y * b.surface.width + x;
-        int id = field.nearestBody[i];
-        if (id < 0) return 0.02f;                                  // no water anywhere on this world
-
-        float d = field.distance[i];
-        float reach = ReachOf(field.bodySize[id]);
-        if (d > reach) return 0.02f;
-
-        float peak = StrengthOf(field.bodySize[id]);
-
-        float v;
-        if (d <= WaterBuffer) v = peak * WaterShoreFraction;
-        else
-        {
-            float t = (d - (WaterBuffer + 1)) / Mathf.Max(0.001f, reach - (WaterBuffer + 1));
-            v = peak * (1f - Mathf.Clamp01(t));
-        }
-
-        // RELIEF IS A TIEBREAK NOW, NOT A GATE. It used to be nearly half the score, which is right for
-        // a hydro DAM (you need head to drop the water through) and wrong for everything else that
-        // reads this index — a boiler hall wants water, not a waterfall. Kept as a modest bonus so a
-        // hilly shore still beats a flat marsh, and so the Hydro Plant's own minIndex gate still tends
-        // to land it somewhere with a gradient.
-        float relief = Mathf.Clamp01(f.elevation * 0.7f + f.ridge * 0.5f);
-        v *= Mathf.Lerp(0.85f, 1.15f, relief);
-
+        if (b.tidallyLocked) v *= SolarDaySide(b, x, y);
         return Mathf.Clamp01(v);
     }
 
-    static float ReachOf(int tiles)
-        => Mathf.Min(WaterReachMax, WaterReachMin + Mathf.Sqrt(Mathf.Max(1, tiles)) * WaterReachPerRoot);
+    /// Metres of elevation per step, and what one step is worth.
+    public const float SolarElevationStep = 1500f;
+    public const float SolarPerStep = 0.10f;
 
-    static float StrengthOf(int tiles)
-        => Mathf.Min(1f, 0.35f + Mathf.Sqrt(Mathf.Max(1, tiles)) / 22f);
+    /// What each atmosphere costs the maximum.
+    public const float SolarLossPerAtmosphere = 0.10f;
+
+    // The distance curve's anchors, as multiples of the star's reference distance (PlacementRings'
+    // innermost ring, the habitable zone's centre and its outer edge).
+    const float SolarInnerRel = 0.36f;
+    const float SolarInnerMax = 1.00f;
+    const float SolarHzCentreMax = 0.55f;
+    const float SolarHzOuterMax = 0.46f;
+    /// How fast the maximum keeps falling beyond the habitable zone.
+    const float SolarOuterFalloff = 1.2f;
+
+    /// The maximum Solar Index this world's ORBIT allows, before its air or any terrain — 0..1.
+    public static float SolarRegionMax(CelestialBody b)
+    {
+        if (b == null) return 0f;
+        if (b.hostStar != null && b.hostStar.isBlackHole) return 0f;
+
+        float rel = WorldClassifier.RelOf(b);
+        float hzC = (StarDatabase.HzInnerRel + StarDatabase.HzOuterRel) * 0.5f;
+        float hzO = StarDatabase.HzOuterRel;
+
+        if (rel <= SolarInnerRel) return SolarInnerMax;
+        if (rel <= hzC)
+        {
+            // Logarithmic in distance, so the fall is even per ring rather than all at the inner end.
+            float t = Mathf.InverseLerp(Mathf.Log(SolarInnerRel), Mathf.Log(hzC), Mathf.Log(rel));
+            return Mathf.Lerp(SolarInnerMax, SolarHzCentreMax, t);
+        }
+        if (rel <= hzO) return Mathf.Lerp(SolarHzCentreMax, SolarHzOuterMax, Mathf.InverseLerp(hzC, hzO, rel));
+        return SolarHzOuterMax * Mathf.Pow(hzO / rel, SolarOuterFalloff);
+    }
+
+    /// What the atmosphere takes off the maximum: 10 points per atmosphere.
+    public static float SolarAirLoss(CelestialBody b)
+        => b == null ? 0f : Mathf.Max(0f, b.atmospheres) * SolarLossPerAtmosphere;
+
+    /// The Solar Index of flat ground at the datum on this world: the orbit's maximum less the air.
+    public static float SolarSurfaceMax(CelestialBody b)
+        => Mathf.Max(0f, SolarRegionMax(b) - SolarAirLoss(b));
+
+    /// 0..1 how much sun a tile of a TIDALLY LOCKED world gets: full across the day hemisphere, centred
+    /// on the middle of the map (the face OrbitController keeps turned to the star), fading over the last
+    /// few degrees to the terminator, and nothing at all on the night side.
+    public static float SolarDaySide(CelestialBody b, int x, int y)
+    {
+        float u = (x + 0.5f) / Mathf.Max(1, b.surface.width);
+        float v = (y + 0.5f) / Mathf.Max(1, b.surface.height);
+        float lon = (u - 0.5f) * 2f * Mathf.PI;
+        float lat = (v - 0.5f) * Mathf.PI;
+        float cosZ = Mathf.Cos(lat) * Mathf.Cos(lon);
+        return Mathf.Clamp01(cosZ * 4f);
+    }
+
+    /// Is solar worth anything ANYWHERE on this world — does even its best ground clear the floor? False
+    /// means panels are not offered and the index is not surveyed. Re-asked live, so thinning the air
+    /// or moving the orbit brings it back.
+    ///
+    /// Answered from the world's HIGHEST POINT rather than from the sorted per-tile stats: this is asked by
+    /// Present on every survey tick, and the stats are a full scan-and-sort that terraforming throws away
+    /// every few seconds. The highest ground is the best solar ground by construction, so the answer is
+    /// the same — and it stays live while an orbit migration or an atmosphere project is still running.
+    /// (On a tidally locked world the peak may be on the night side; it then answers "yes" for a world
+    /// whose lit half might fall just short, which only means the survey reads a map that is mostly dark.)
+    public static bool SolarViable(CelestialBody b)
+    {
+        if (b?.surface == null) return false;
+        float best = SolarSurfaceMax(b) + SolarPerStep * (HighestMetres(b) / SolarElevationStep);
+        return best >= Floor(SurfaceIndexKind.Solar);
+    }
+
+    static readonly Dictionary<CelestialBody, (float seed, float metres)> highest
+        = new Dictionary<CelestialBody, (float, float)>();
+
+    /// The world's highest standing ground in metres, water reading as its surface (0 m). Cached against the
+    /// terrain seed, and dropped by InvalidateStats with everything else that depends on the surface.
+    static float HighestMetres(CelestialBody b)
+    {
+        if (highest.TryGetValue(b, out var c) && Mathf.Approximately(c.seed, b.terrainSeed)) return c.metres;
+        float best = float.MinValue;
+        for (int y = 0; y < b.surface.height; y++)
+            for (int x = 0; x < b.surface.width; x++)
+            {
+                var t = b.surface.tiles[x, y];
+                if (t == null) continue;
+                float m = PlanetTerrainGenerator.IsWater(t.type) ? 0f : PlanetTerrainGenerator.ElevationMetres(b, t.elevation);
+                if (m > best) best = m;
+            }
+        if (best == float.MinValue) best = 0f;
+        highest[b] = (b.terrainSeed, best);
+        return best;
+    }
+
+    // ============================================================================================
+    // WATER (HYDRO): the water itself, and the land it reaches
+    //
+    // Water tiles read 100%. The index used to EXCLUDE them — it was written for buildings that need
+    // water beside them, like the Steam Turbine — which left no room for anything that could one day
+    // stand ON the water. Nothing may be built on water yet (that is still SurfaceBuildManager's rule,
+    // and a technology to lift it is for later); the index just stops pretending the water is dry.
+    //
+    // From the shore it radiates SIX tiles inland and falls off steeply at the end:
+    //
+    //     tile 1   94-98      tile 4   60-79
+    //     tile 2   90-93      tile 5   50-59
+    //     tile 3   80-89      tile 6   40-49
+    //
+    // Where a tile sits inside its range depends on how big the body of water is — a sea supplies its
+    // shore better than a pond — with a little per-tile variation so a coastline is not one flat colour.
+    // Read ABSOLUTELY: these numbers are the specification.
+    // ============================================================================================
+
+    /// How far inland the Hydro Index reaches, in tiles.
+    public const int HydroReach = 6;
+
+    /// Each ring's range, nearest first.
+    static readonly Vector2[] HydroRings =
+    {
+        new Vector2(0.94f, 0.98f), new Vector2(0.90f, 0.93f), new Vector2(0.80f, 0.89f),
+        new Vector2(0.60f, 0.79f), new Vector2(0.50f, 0.59f), new Vector2(0.40f, 0.49f),
+    };
+
+    static float Water(CelestialBody b, int x, int y)
+    {
+        if (IsWaterAt(b, x, y)) return 1f;
+
+        var field = WaterFieldFor(b);
+        if (field == null) return 0f;
+
+        int i = y * b.surface.width + x;
+        int id = field.nearestBody[i];
+        if (id < 0) return 0f;                                     // no water anywhere on this world
+
+        // Chamfer distance rounded to whole tiles, so a diagonal neighbour (1.41) is ring 1 like an
+        // orthogonal one — "grids away" the way a player counts them.
+        int ring = Mathf.Max(1, Mathf.RoundToInt(field.distance[i]));
+        if (ring > HydroReach) return 0f;
+
+        var range = HydroRings[ring - 1];
+        float size = Mathf.Clamp01(Mathf.Sqrt(field.bodySize[id]) / 15f);
+        float q = size * 0.8f + Survey.Hash01(b, x, y) * 0.2f;
+        return Mathf.Lerp(range.x, range.y, q);
+    }
 
     // ============================================================================================
     // THE WATER DISTANCE FIELD
@@ -1273,6 +1378,10 @@ public static class SurfaceIndex
         if (b == null) return;
         foreach (var k in All) { statsCache.Remove((b, k)); bands.Remove((b, k)); }
         waterFields.Remove(b);
+        // The storm zones are built from which tiles are wet and how high they stand — both things a
+        // terraform changes.
+        stormFields.Remove(b);
+        highest.Remove(b);
         // ...and whether this world has any water on it at all, which decides whether the Hydro Index is
         // OFFERED (see Present). Terraforming water onto a dry world has to make the index appear, and
         // it appears the moment this entry goes.
@@ -1293,6 +1402,8 @@ public static class SurfaceIndex
     {
         statsCache.Clear();
         waterFields.Clear();
+        stormFields.Clear();
+        highest.Clear();
         waterPresence.Clear();
         bands.Clear();
         GeothermalMap.InvalidateAll();
@@ -1366,11 +1477,9 @@ public static class SurfaceIndex
         if (b?.surface == null || k == SurfaceIndexKind.None) return false;
         if (v < DrawFloor(k)) return false;
 
-        // Below the PRODUCTIVE floor, Band returns 0 — so a plate margin paints at the dimmest end of
-        // the ramp and the bright bands stay exactly where they were specified: 70+, 80+, 90+. The line
-        // is legible without competing with the heat that actually matters, which is the correct
-        // relationship between a boundary and an anomaly.
-        t = Band(v);
+        // Each 10% step above the index's own floor is its own band, so a plate margin at 40 paints at
+        // the dimmest end of the ramp and the volcanic 90s stay the brightest thing on the map.
+        t = Band(k, v);
         return true;
     }
 
@@ -1416,10 +1525,10 @@ public static class SurfaceIndex
             // caption. The player needs to know what the colours mean and where to build; the numbers
             // are on the legend beside it and the reasoning is in GeothermalMap.
             case SurfaceIndexKind.Geothermal: return "Heat in the crust, and the plate movement that makes it. Faint lines are plate boundaries; the bright ground is where the heat actually is, and the hottest of it is volcanic. Geothermal plants go on the bright ground.";
-            case SurfaceIndexKind.Fertile: return "Warm AND wet AND flat — farmland needs all three at once, not any one of them. Needs a LIVING world above all: no biosphere, no soil, and the index reads nothing.";
-            case SurfaceIndexKind.Wind: return "Needs AIR, and enough of it. Under about two-thirds of an atmosphere a world never reaches a workable figure anywhere. Above that it comes as HOTSPOTS — flat, open, exposed country — and the thicker the air the more of them there are and the larger each one gets.";
-            case SurfaceIndexKind.Solar: return "Dry, high ground, and long days. On a thin-aired world the poles win outright and the sun is good over huge stretches; thicken the air and the poles become the worst ground on the planet and the good sites shrink to a scattered few. A world far from its star is dim everywhere.";
-            case SurfaceIndexKind.Water: return "How much water is within reach. Every lake and sea supplies the land AROUND it — the bigger the body, the further inland it carries and the better the best sites near it. The shore itself is good; one step back from it is better.";
+            case SurfaceIndexKind.Fertile: return "Warm AND wet AND flat — farmland needs all three at once. Needs a LIVING world above all. How high it can go depends on the climate: closest to 20-22 °C with plenty of water is best, and only a Fertile World has farmland in the 90s to spare.";
+            case SurfaceIndexKind.Wind: return "Needs AIR — the thicker it is, the higher this can go. The weather gathers in STORM ZONES: mostly in the equatorial belt, and strongest where the ground changes height sharply or where land meets sea. Flat, open ground inside a zone is where turbines go.";
+            case SurfaceIndexKind.Solar: return "Covers the whole surface. The star sets the maximum — near 100% close in, about 55% mid habitable zone, the 40s and below beyond it. Each atmosphere takes 10 points off, and every 1,500 m of height adds 10 (or takes 10 off below the datum), so peaks are the panel sites.";
+            case SurfaceIndexKind.Water: return "The water itself reads 100%. The land beside it reads in the 90s, falling to the 80s three tiles inland, 60-79 at four, and dropping away to nothing six tiles out. Bigger bodies of water supply their shores better.";
             default: return "";
         }
     }

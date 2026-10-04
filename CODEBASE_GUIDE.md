@@ -548,13 +548,42 @@ they cost nothing to save and survive a reload untouched (the same guarantee ter
   hot and moving", because two systems describing the same ground could and did disagree — a red fault
   line could run across ground the Heat Index called cold. The field lives in `GeothermalMap`; selecting
   this index also draws the plate lines and the per-plate push arrows over it.
-- **It is the one index read ABSOLUTELY** (`IsAbsolute`), bypassing the per-world percentile
-  consolidation every other index goes through. Its numbers are specified — 40 on a plate line, 70
-  radiated, 97+ a volcano — and four systems compute from them, so remapping them to a distribution
-  would make the readout stop meaning what the terrain, the quakes and the temperature model used.
+- **Per-index floors** (`Floor(k)`): **Mineral 70%, everything else 40%**. Under the floor an index is
+  not drawn, yields nothing (`Productive(k, v)`) and refuses placement. Bands are 10% steps from the
+  floor (`Steps(k)`: 3 for minerals, 6 for the rest). `ShowFloor` is now the MINERAL floor only;
+  `EarthquakeManager` keeps its own 70% constant.
+- **Three indexes are read ABSOLUTELY** (`IsAbsolute`), bypassing the per-world percentile
+  consolidation: **Geothermal** (40 on a plate line, 70 radiated, 97+ a volcano — four systems compute
+  from these), **Hydro** (water tiles 100; land rings 1-6 at 94-98 / 90-93 / 80-89 / 60-79 / 50-59 /
+  40-49) and **Solar** (whole surface: orbit maximum from `SolarRegionMax` — ~100 at ring 1, ~55 at HZ
+  centre, mid-40s at the HZ outer edge — minus 10 per atmosphere, ±10 per 1,500 m of elevation; a
+  tidally locked world's night hemisphere reads 0, `SolarDaySide`). `SolarViable` = does any tile
+  reach the floor; it gates both `Present` and the Solar Array.
+- **Weather** is consolidated, but its patches are **storm zones** (`BuildStormField`, cached per world):
+  equatorial weighting × (elevation contrast + land/sea contrast), box-blurred into zones.
+- **Fertility**'s ceiling comes from climate (`FertileClimateCeiling`: closeness to 20-22 °C, +6 with
+  ≥40% water) and its band is bottom-heavy (`BandCurve` 1.8), so 90s are rare except on a Fertile World.
+- **World modifiers bend the consolidation** — coverage, ceiling and `BandCurve` (see WorldModifiers.cs).
 - **`Unlocked(b, kind)`** — Mineral needs a survey (you see seams from orbit); the rest fill in as a
   science ship reads the world. That's the reason to go back.
 - Ramps: brown (mineral), orange→red (geothermal), dark→vibrant green (fertile), blue→white (weather).
+
+### WorldModifiers.cs + WorldModifierBadges.cs  *(this world has something interesting)*
+- `WorldModifier` — TidallyLocked · HighQualityMinerals · VastMineralDeposits · ExtremeWeather ·
+  FertileWorld · ContinentalPlates. Several can sit on one world.
+- **`Has(b, m)`** is the only way to ask. TidallyLocked reads `b.tidallyLocked`, ContinentalPlates
+  reads `b.hasTectonics` (derived, never stored); the rest are bits in `b.worldModifierFlags`, and
+  FertileWorld additionally requires its climate to still hold (`MeetsFertileClimate`).
+- **Tidal lock is rolled WITH ROTATION** in `SolarSystemGenerator.ApplyWorldPipeline` (spin 0 → no
+  dynamo → no field), planets only, likelier close in. `OrbitController.FaceParent` keeps the map's
+  centre meridian (the vertex with UV nearest 0.5,0.5) toward what it orbits. Spin Up breaks the lock.
+- The rest are rolled in **`GalaxyGenerator.Finish`** (`WorldModifiers.Roll`) once every surface exists.
+- **`WorldModifierBadges`** — self-updating row of 22px framed icons, border = the index colour the
+  modifier bends. Nothing before a survey, "?" at level 1, the real icon + description at level 2.
+  Shown across the top of the Inspector Overview globe and under the Planet View map's bottom-right
+  corner, level with the tabs.
+- Art: `tools/make-modifier-icons.mjs` draws every badge **and the Fertility index's apple tree**
+  (`Index_Fertile.png`) from character grids, plus `Art/_review/modifier-icons.png`.
 
 ### SurfaceBuilding.cs + SurfaceBuildManager.cs
 - `SurfaceBuildingType` / `SurfaceBuildingInfo` — footprint `shape`, driving `index`, cost, output.

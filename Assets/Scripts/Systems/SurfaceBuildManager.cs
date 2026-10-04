@@ -162,8 +162,9 @@ public static class SurfaceBuildManager
         // would be a lie the player could check.
         if (t == SurfaceBuildingType.SolarArray && !SurfaceIndex.SolarViable(b) && !GameMode.DevMode)
         {
-            why = $"the sky is too thick — at {b.atmospheres:0.#} atmospheres no sunlight reaches the ground. " +
-                  $"Thin it below {SurfaceIndex.SolarDeadAtmospheres:0.#} and panels can be built here again";
+            why = $"no ground on this world reaches {SurfaceIndex.Floor(SurfaceIndexKind.Solar) * 100f:F0}% Solar — " +
+                  $"too far from its star, or under too much air ({b.atmospheres:0.#} atmospheres, " +
+                  $"−{SurfaceIndex.SolarLossPerAtmosphere * 100f:F0} points each). Thinning the air brings panels back";
             return false;
         }
 
@@ -285,7 +286,7 @@ public static class SurfaceBuildManager
             if (here < info.minIndex)
             {
                 float best = SurfaceIndex.Best(b, info.index);
-                why = best >= SurfaceIndex.ShowFloor
+                why = best >= SurfaceIndex.Floor(info.index)
                     ? $"{SurfaceIndex.Name(info.index)} only {here * 100f:F0}% here. Try the highlighted sites."
                     : $"{SurfaceIndex.Name(info.index)} tops out at {best * 100f:F0}% on this world — " +
                       $"nowhere on it will support one. Look for a world that highlights this index.";
@@ -352,7 +353,7 @@ public static class SurfaceBuildManager
         var cells = SurfaceBuildingDatabase.Footprint(t, x, y, rotation);
         if (cells.Count == 0) return 0f;
         float sum = 0f;
-        foreach (var c in cells) sum += SurfaceIndex.Productive(SurfaceIndex.Get(b, info.index, c.x, c.y));
+        foreach (var c in cells) sum += SurfaceIndex.Productive(info.index, SurfaceIndex.Get(b, info.index, c.x, c.y));
         return Mathf.Clamp01(sum / cells.Count);
     }
 
@@ -508,7 +509,7 @@ public static class SurfaceBuildManager
         if (info.index != SurfaceIndexKind.None)
         {
             float sum = 0f;
-            foreach (var c in cells) sum += SurfaceIndex.Productive(SurfaceIndex.Get(b, info.index, c.x, c.y));
+            foreach (var c in cells) sum += SurfaceIndex.Productive(info.index, SurfaceIndex.Get(b, info.index, c.x, c.y));
             eff = Mathf.Clamp01(cells.Count > 0 ? sum / cells.Count : 0f);
         }
 
@@ -681,7 +682,7 @@ public static class SurfaceBuildManager
         if (info.index != SurfaceIndexKind.None)
         {
             float sum = 0f;
-            foreach (var c in cells) sum += SurfaceIndex.Productive(SurfaceIndex.Get(b, info.index, c.x, c.y));
+            foreach (var c in cells) sum += SurfaceIndex.Productive(info.index, SurfaceIndex.Get(b, info.index, c.x, c.y));
             newEff = Mathf.Clamp01(sum / cells.Count);
         }
 
@@ -1470,7 +1471,7 @@ public static class SurfaceBuildManager
                 if (info.index != SurfaceIndexKind.None)
                 {
                     float sum = 0f;
-                    foreach (var c in piece) sum += SurfaceIndex.Productive(SurfaceIndex.Get(b, info.index, c.x, c.y));
+                    foreach (var c in piece) sum += SurfaceIndex.Productive(info.index, SurfaceIndex.Get(b, info.index, c.x, c.y));
                     eff = Mathf.Clamp01(sum / piece.Count);
                 }
 

@@ -94,7 +94,9 @@ public class EarthquakeManager : MonoBehaviour
     /// Ground at or above this on the Geothermal Index is what the Survey overlay highlights, what a
     /// geothermal plant may be built on — and what a quake can damage. One number, three meanings, and
     /// they have to be the same number or the map stops being a promise.
-    const float DangerousGround = SurfaceIndex.ShowFloor;
+    // 70%, written out: it USED to be the shared index floor, and Geothermal's floor has since dropped
+    // to 40 so a plate line can be harvested. The quake promise stays where it was.
+    const float DangerousGround = 0.70f;
 
     /// When each world was last checked, in days. Per-body rather than one global timer so a world
     /// discovered late does not inherit a century of accumulated risk on its first tick.

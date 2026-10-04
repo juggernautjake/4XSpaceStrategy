@@ -132,6 +132,13 @@ public static class GalaxyGenerator
             foreach (var b in sys.AllBodies())
                 b.naturalOrbitRadius = b.orbitRadius;
 
+        // WORLD MODIFIERS, once every surface exists — Fertile World judges the finished climate, and the
+        // home world has been forced by now so it is judged as what it actually is. Inside the shared
+        // generation stream, like every roll here.
+        foreach (var sys in galaxy.systems)
+            foreach (var b in sys.AllBodies())
+                WorldModifiers.Roll(b);
+
         // A very occasional world nobody has found yet.
         SeedUndiscoveredWorlds(galaxy);
 
@@ -321,6 +328,9 @@ public static class GalaxyGenerator
                                      RotationRules.Roll(planet.mass, isMoon: false));
         planet.rotationDirection = planet.orbitDirection == 0 ? 1 : planet.orbitDirection;   // turns the way it orbits
         planet.hasMagneticField = true;
+        // The cradle was picked from worlds that already had their tidal-lock roll. Spun up above, so it
+        // is not locked — a homeworld with half its surface in permanent night is not the promised start.
+        planet.tidallyLocked = false;
         planet.hasTectonics = TectonicsRules.Roll(planet.type, planet.mass);
 
         // The full ceiling, taken as a definition rather than rolled: one atmosphere per unit of mass,

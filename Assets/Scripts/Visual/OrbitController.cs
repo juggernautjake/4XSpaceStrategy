@@ -52,6 +52,7 @@ public class OrbitController : MonoBehaviour
     // Preferred setup: pull every orbital parameter from the data model.
     public void SetupFromData(Transform parent, CelestialBody data)
     {
+        lockData = data;
         parentBody = parent;
         orbitRadius = data.orbitRadius;
         orbitSpeed = data.orbitSpeed;
@@ -249,6 +250,72 @@ public class OrbitController : MonoBehaviour
         // +1 = prograde and the sandbox toggle keeps meaning what it says.
         if (spinSpeed != 0f) transform.Rotate(0f, -spinDirection * spinSpeed * Time.deltaTime, 0f, Space.Self);
         UpdatePosition();
+        // Read from the data every frame rather than cached, so a Spin Up terraform that breaks the lock
+        // lets the world start turning again without the visual having to be rebuilt.
+        if (lockData != null && lockData.tidallyLocked) FaceParent();
+    }
+
+    // ============================================================================================
+    // TIDAL LOCK — the same face toward the star, always
+    //
+    // A locked world has no spin; instead its orientation is SET each frame so the middle of its
+    // surface map — the hemisphere SurfaceIndex.SolarDaySide treats as permanent day — points at what it
+    // orbits (the star, or the barycentre of a multiple system). Which point of the sphere that is
+    // depends on the mesh's UV layout, so it is read off the mesh rather than assumed: the vertex whose
+    // UV is nearest the centre of the texture.
+    // ============================================================================================
+    CelestialBody lockData;
+    Vector3 substellarLocal;
+    bool substellarKnown;
+
+    void FaceParent()
+    {
+        if (parentBody == null) return;
+        Vector3 to = parentBody.position - transform.position;
+        to.y = 0f;
+        if (to.sqrMagnitude < 1e-6f) return;
+
+        if (!substellarKnown) FindSubstellar();
+        Vector3 s = substellarLocal;
+        s.y = 0f;
+        if (s.sqrMagnitude < 1e-6f) s = Vector3.forward;
+
+        transform.rotation = Quaternion.LookRotation(to.normalized, Vector3.up)
+                           * Quaternion.Inverse(Quaternion.LookRotation(s.normalized, Vector3.up));
+    }
+
+    void FindSubstellar()
+    {
+        substellarKnown = true;
+        substellarLocal = Vector3.forward;
+
+        var mf = GetComponent<MeshFilter>();
+        if (mf == null) mf = GetComponentInChildren<MeshFilter>();
+        if (mf == null || mf.sharedMesh == null) return;
+
+        try
+        {
+            var mesh = mf.sharedMesh;
+            var verts = mesh.vertices;
+            var uvs = mesh.uv;
+            if (verts == null || uvs == null || uvs.Length != verts.Length || verts.Length == 0) return;
+
+            int best = 0;
+            float bestD = float.MaxValue;
+            for (int i = 0; i < uvs.Length; i++)
+            {
+                float d = (uvs[i] - new Vector2(0.5f, 0.5f)).sqrMagnitude;
+                if (d < bestD) { bestD = d; best = i; }
+            }
+            // Into THIS transform's space, in case the mesh sits on a child with its own rotation.
+            Vector3 world = mf.transform.TransformDirection(verts[best]);
+            substellarLocal = transform.InverseTransformDirection(world);
+        }
+        catch (System.Exception)
+        {
+            // A mesh without Read/Write enabled cannot be inspected at runtime. Forward is a guess, but a
+            // locked world facing a fixed wrong way is still locked — better than throwing every frame.
+        }
     }
 
     public void SetSpin(float v) { spinSpeed = v; }

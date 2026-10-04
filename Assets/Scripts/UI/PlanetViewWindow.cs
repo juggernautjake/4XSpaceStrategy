@@ -109,6 +109,8 @@ public class PlanetViewWindow : MonoBehaviour
     GameObject root;
     TMP_Text titleText;
     RectTransform tabStrip, sidePanel, gridHolder;
+    // The world-modifier badges, under the map's bottom-right corner, level with the tabs on the left.
+    WorldModifierBadges modifierBadges;
     RawImage mapImage, overlayImage;
     RectTransform mapRT, pieceLayer, ghostLayer;
 
@@ -453,6 +455,16 @@ public class PlanetViewWindow : MonoBehaviour
         var th = tabStrip.gameObject.AddComponent<HorizontalLayoutGroup>();
         th.spacing = 4; th.childControlWidth = true; th.childControlHeight = true; th.childForceExpandWidth = false;
         th.childAlignment = TextAnchor.MiddleLeft;   // tabs read left-to-right from the map's left edge
+
+        // WORLD MODIFIERS — anchored under the map's bottom-RIGHT corner, on the same line as the tabs that
+        // hang off its bottom-left. Its own object rather than a child of the tab strip, because the strip
+        // is torn down and rebuilt on every Rebuild and these keep themselves current (see
+        // WorldModifierBadges); Rebuild only has to tell them which world.
+        modifierBadges = WorldModifierBadges.Attach(content, null, 22f);
+        var mrt = modifierBadges.GetComponent<RectTransform>();
+        mrt.anchorMin = new Vector2(MapFraction, 0); mrt.anchorMax = new Vector2(MapFraction, 0);
+        mrt.pivot = new Vector2(1f, 0.5f);
+        mrt.anchoredPosition = new Vector2(-PanelGap, TabStripBottom + TabStripHeight * 0.5f);
 
         // The VIEWPORT: a fixed window onto the surface, anchored to the LEFT and capped at 3/4 of the
         // window width (MapFraction). It never changes size — zooming scales the map INSIDE it, which is
@@ -1707,10 +1719,15 @@ public class PlanetViewWindow : MonoBehaviour
                         // Same for Solar, where pressure sets a hard ceiling on the best tile.
                         if (activeIndex == SurfaceIndexKind.Solar)
                         {
-                            float f = SurfaceIndex.SolarPressureFactor(body.atmospheres);
-                            string hex = ColorUtility.ToHtmlStringRGB(f >= 1f ? UITheme.Good : f > 0f ? UITheme.Accent : UITheme.Bad);
-                            sur.Append($"  <color=#9FB4C8>·</color> <color=#{hex}><b>{f * 100f:F0}% panel output</b></color> " +
-                                       $"<size=10><color=#9FB4C8>at {body.atmospheres:0.#} atmospheres</color></size>");
+                            // The sum, laid out: what the orbit allows, what the air takes, what flat ground
+                            // at the datum is left with. Height then moves each tile from there.
+                            float region = SurfaceIndex.SolarRegionMax(body);
+                            float air = SurfaceIndex.SolarAirLoss(body);
+                            float flat = SurfaceIndex.SolarSurfaceMax(body);
+                            string hex = ColorUtility.ToHtmlStringRGB(flat >= SurfaceIndex.Floor(SurfaceIndexKind.Solar) ? UITheme.Good : flat > 0f ? UITheme.Accent : UITheme.Bad);
+                            sur.Append($"  <color=#9FB4C8>·</color> <color=#{hex}><b>{flat * 100f:F0}% at the datum</b></color> " +
+                                       $"<size=10><color=#9FB4C8>(orbit {region * 100f:F0}% − air {air * 100f:F0}%; ±10 per 1,500 m" +
+                                       $"{(body.tidallyLocked ? "; night side dark" : "")})</color></size>");
                         }
                     }
 
@@ -1992,6 +2009,7 @@ public class PlanetViewWindow : MonoBehaviour
         for (int i = tabStrip.childCount - 1; i >= 0; i--) Destroy(tabStrip.GetChild(i).gameObject);
 
         BuildTabStrip();
+        if (modifierBadges != null) modifierBadges.SetBody(body);
         switch (tab)
         {
             case Tab.Overview: BuildOverviewPanel(); break;
@@ -4144,11 +4162,11 @@ public class PlanetViewWindow : MonoBehaviour
         // out of the heat field, so it genuinely did have a threshold and the old wording named it;
         // now it is drawn from the plate map and has none, and a number beside it would re-teach the
         // exact thing that was wrong with it.
-        Note($"<color=#9FB4C8>Nothing under <b>{SurfaceIndex.ShowFloor * 100f:F0}%</b> yields anything or can be " +
-             $"built on — a world's resources sit in a few patches rather than spread thinly over all of it. " +
+        Note($"<color=#9FB4C8>Nothing under <b>{SurfaceIndex.BaseFloor * 100f:F0}%</b> yields anything or can be " +
+             $"built on — <b>{SurfaceIndex.ShowFloor * 100f:F0}%</b> for minerals, which are scarcer by design. " +
              $"Every <b>{SurfaceIndex.BandStep * 100f:F0}%</b> above that is a brighter step with its own outline, " +
-             $"so the best ground is the innermost, brightest ring. The Geothermal Index also paints its warm " +
-             $"ground from <b>{SurfaceIndex.PlateLineFloor * 100f:F0}%</b>, and draws the plate boundaries " +
+             $"so the best ground is the innermost, brightest ring. A plate line reads " +
+             $"<b>{SurfaceIndex.PlateLineFloor * 100f:F0}%</b> Geothermal — usable, if poor — and the index draws the plate boundaries " +
              $"themselves as an unbroken red line wherever they run — hot or cold, land or sea floor. The line " +
              $"marks where the crust is MOVING, not where it is hot. Zoom in near the cursor for the exact " +
              $"numbers.</color>");
@@ -4193,7 +4211,7 @@ public class PlanetViewWindow : MonoBehaviour
             //
             // Each cell carries its band's own outline down its right-hand edge, which is what the map
             // does at the boundary between two bands. Read left to right it is 70s, 80s, 90s, 100.
-            int steps = Mathf.Max(1, Mathf.RoundToInt((1f - SurfaceIndex.ShowFloor) / SurfaceIndex.BandStep));
+            int steps = SurfaceIndex.Steps(k);
             var strip = UIFactory.NewUI(card, "Ramp"); UIFactory.AddLayout(strip, 14);
             var srt = strip.GetComponent<RectTransform>();
             for (int i = 0; i < steps; i++)
@@ -4211,12 +4229,9 @@ public class PlanetViewWindow : MonoBehaviour
                 lrt.anchorMin = new Vector2(0.86f, 0f); lrt.anchorMax = Vector2.one;
                 lrt.offsetMin = Vector2.zero; lrt.offsetMax = Vector2.zero;
 
-                // The FIRST swatch of the Geothermal ramp is labelled 40, not 70, and that is not a
-                // fudge — it is what the map draws. Geothermal paints from 40 (a plate margin) and
-                // `Band` returns 0 for everything under 70, so this one cell genuinely covers 40 through
-                // 79. Labelling it 70 would point at a colour and name a value that colour does not
-                // start at, which is the one thing a legend must never do.
-                float lo = i == 0 ? SurfaceIndex.DrawFloor(k) : SurfaceIndex.ShowFloor + i * SurfaceIndex.BandStep;
+                // Labelled from the index's OWN floor — 70 for minerals, 40 for the rest — so each cell
+                // names the value its colour actually starts at.
+                float lo = SurfaceIndex.Floor(k) + i * SurfaceIndex.BandStep;
                 var lab = UIFactory.Text(qrt, $"{lo * 100f:F0}",
                                          9, new Color(0f, 0f, 0f, 0.75f), TextAlignmentOptions.Center);
                 lab.raycastTarget = false;
@@ -4746,7 +4761,7 @@ public class PlanetViewWindow : MonoBehaviour
         var fill = new Color32[w * h];
         var edgeOf = new Color32[w * h];
         var step = new int[w * h];
-        int steps = Mathf.Max(1, Mathf.RoundToInt((1f - SurfaceIndex.ShowFloor) / SurfaceIndex.BandStep));
+        int steps = SurfaceIndex.Steps(kind);
         for (int i = 0; i < step.Length; i++) step[i] = -1;
 
         // ============================================================================================
@@ -4762,7 +4777,9 @@ public class PlanetViewWindow : MonoBehaviour
         // A tile the front has not got to yet stays at the previous pass's fidelity, and during the
         // very first pass that means it is not drawn at all.
         var reveal = Survey.RevealOf(body, kind);
-        int maxBand = reveal.complete ? steps - 1 : Mathf.Min(reveal.pass, steps - 1);
+        int maxBand = reveal.complete ? steps - 1 : Mathf.Min(Survey.ResolvedBand(reveal.pass, steps), steps - 1);
+        // ...and what the PREVIOUS pass left behind, for cells the front has not reached yet.
+        int prevBand = reveal.complete ? steps - 1 : Survey.ResolvedBand(reveal.pass - 1, steps);
 
         // The sweep head, same as the level-1 blackout has. Without it a level-2 pass is a picture that
         // quietly fills in, and the player cannot tell whether anything is happening or where — which is
@@ -4784,7 +4801,7 @@ public class PlanetViewWindow : MonoBehaviour
                 {
                     // Has the front reached this cell during the pass currently being painted?
                     bool reached = Survey.Reached(body, x, y, reveal.frac);
-                    int resolved = reached ? maxBand : maxBand - 1;
+                    int resolved = reached ? maxBand : prevBand;
                     if (resolved < 0) continue;                 // first pass, not yet reached: nothing here
                     band = Mathf.Min(band, resolved);
                     t = steps > 1 ? band / (float)(steps - 1) : 1f;
@@ -4946,7 +4963,9 @@ public class PlanetViewWindow : MonoBehaviour
                 if (!reveal.complete)
                 {
                     bool reached = Survey.Reached(body, x, y, reveal.frac);
-                    if ((reached ? maxBand : maxBand - 1) < 0) continue;
+                    // Unreached ground has only what the PREVIOUS pass resolved — and before the first
+                    // pass finishes, that is nothing.
+                    if (!reached && reveal.pass <= 0) continue;
                 }
 
                 for (int sy = 0; sy < sub; sy++)

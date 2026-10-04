@@ -33,8 +33,14 @@ using UnityEngine;
 // ============================================================================================
 public static class Survey
 {
-    /// Bands in the shown range: 70s, 80s, 90s. Each is one PASS of a level-2 index survey.
-    public static int Bands => Mathf.Max(1, Mathf.RoundToInt((1f - SurfaceIndex.ShowFloor) / SurfaceIndex.BandStep));
+    /// PASSES per index in a level-2 survey. Three, fixed. It used to be derived from the one shared 70%
+    /// floor (70s, 80s, 90s); now most indexes run from 40 in six bands, and each pass resolves a share
+    /// of them — see ResolvedBand — so the survey takes as long as it always did.
+    public static int Bands => 3;
+
+    /// The highest band (0-based, of `steps`) that is resolved once pass `pass` is complete. -1 before
+    /// the first. With three bands this is just the pass; with six, each pass resolves two.
+    public static int ResolvedBand(int pass, int steps) => (pass + 1) * steps / Bands - 1;
 
     /// Total level-2 passes on a world that uses every index. The per-world figure is
     /// `PresentCount(b) * Bands`; this is the ceiling, kept for readouts that describe the system

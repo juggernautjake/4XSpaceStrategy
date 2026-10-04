@@ -325,6 +325,14 @@ public class CelestialBody
     // three exist; the note had aged into a falsehood.)
     public bool hasTectonics = false;
 
+    // TIDALLY LOCKED: one face always toward the star, no axial rotation (spinSpeed 0, so no dynamo).
+    // Rolled with rotation in the world pipeline — see WorldModifiers.RollTidalLock.
+    public bool tidallyLocked = false;
+
+    // The ROLLED world modifiers, as bits of WorldModifier. Read through WorldModifiers.Has, never
+    // directly: two of the modifiers are derived from other fields and are not stored here at all.
+    public int worldModifierFlags = 0;
+
     [System.NonSerialized] public StarData hostStar;          // the star this body belongs to
     [System.NonSerialized] public StarSystemData system;      // the system this body belongs to
     [System.NonSerialized] public List<Unit> units = new List<Unit>();  // units currently here

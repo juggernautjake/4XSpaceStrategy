@@ -320,6 +320,8 @@ public class BodyDTO
     // still READ on load to migrate saves written before `atmospheres` existed.
     public float atmosphereThickness;
     public bool hasTectonics;       // active plate tectonics — see TectonicsRules
+    public bool tidallyLocked;      // see WorldModifiers
+    public int worldModifierFlags;  // rolled WorldModifier bits
     public float terraformability;
     public List<int> terraformProjects = new List<int>();   // completed TerraformProjectType ids
     public List<PlacedBuilding> placedBuildings = new List<PlacedBuilding>();   // surface-grid structures

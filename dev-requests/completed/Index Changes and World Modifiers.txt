@@ -1,0 +1,78 @@
+Index Changes
+
+-Hydro Index Change-
+I want to change the way the Hydro index Highlights areas. Currently the highest value Hydro Index grids are surrounding the bodies of water themselves, but do not include the bodies of water. Originally this was to be able to place buildings that require water to function, such as a Steam Turbine. But this Method excludes the possibility of eventually having buildings that can be placed directly over water tiles. This would likely be unlocked through a technology that is not yet implemented.
+So what I want to do, is have all the areas directly over water grids provide 100% water, and then the grids that border the water source will fall off in percentage with a drastic drop off in percent by the last two grids away. I want the Hydro Index to basically radiate up to 6 grids in distance away from the main water grids. The closest grids to the actual water sources should be 90-98 range and then by maybe the 3rd grid out from the source water grid lets make it range 80-89 and for the 4th grid away we will have in the 60-79 range.
+
+-General Index Adjustment-
+lets not lock all Index types with the lowest range of 70 if that is currently the case.
+some cases like with Hydro, and with Solar and Wind (which I will get to) should be more dynamic I think.
+Minerals should be more restricted still though as it is a necessary resource that should make the player want to expand, or to exploit mineral rich planets.
+Lets have the absolute lowest range for any Index be 40%, except for specified indexes such as minerals.
+This way, we can also make tectonic plate lines generate a Geothermal Index that could be exploited, but would not be very high yield. Essentially one COULD use it, but it may be more beneficial to find better spots. Not to mention, planets with Tectonic plates are uncommon, so they should allow for the player to exploit the geothermal energy production even if it's not greatly efficient because it will be easier to access.
+
+-Solar Index Change-
+I think we should go back to the fundamentals with Solar Index. What I mean by that is that I think the entire surface of a planet should be covered in Solar Index highlight, and we make the solar index have a higher overall potential based on the atmosphere thickness and the distance to the host star.
+
+We can also add Tidally locked worlds and have one half of the surface be high solar index, and the other side have nothing. These worlds will have no axial rotation and have the same side of the planet asset face the barycenter of the solar system.
+If a celestial body is beyond the Habitable zone (liquid water, not a specific species' preference) The maximum Solar Index should be limited to the mid 40% range, and have a lower maximum range further out from the stars habitable zone.
+
+Celestial bodies that are closer to the host star will start out with up to 100% Solar Index at a maximum in the closest position to the sun, and by the center of the solar systems habitable zone the maximum should be around the 50-60% range.
+Atmospheres of celestial bodies will lower the actual Solar Index on their surfaces below the maximum. Thicker Atmospheres will block out most if not all sunlight.
+
+Celestial bodies with no atmosphere will be able to use the full extent of their regions Maximum Solar Index. Celestial bodies with no atmosphere and that are in close proximity to their host star may be able to have extremely high solar index ranges.
+
+For every 1 atmosphere a celestial body has we will lower the maximum solar index by 10%.
+For example, a planet within the Habitable zone that has a maximum solar index range of 46% due to it's distance from the sun and has 1 atmosphere, will have it's surface Solar Index maximum reduced by 10%. therefore put it's default solar index on it's surface will be 36%.
+
+I also want for the solar index to be influenced by grid elevation on any given world surface (terrestrial worlds).
+For every 1500m in elevation I want the Solar Index to either increase by 10% if positive elevation, or decrease by 10% if negative elevation.
+This method should favor mountains and high points for Solar Panels, and should make lower elevation areas such as craters etc not preferable for Solar Panels.
+
+To recap, I would like celestial bodies to have a Solar Index that by default will cover the planet. The Solar Index max amount will be governed by the distance to it's star/habitable zone of the star, and the atmosphere amount of the celestial body. And then I want elevation to further tweak the solar Index across the surface.
+
+-Weather Index-
+Celestial bodies with higher atmospheres will have higher maximum Weather Index values.
+I think having hotspots of weather index is good, but it feels too random and I think there needs to be a reason why weather might occur in certain areas of a planets surface vs other areas.
+I like the idea of having most weather gravitating to the equatorial section of a planet since a planets own rotation would naturally pool more of its atmosphere there. I think there should be maybe a temperature difference influence or altitude difference on world surfaces that could cause the weather index hotspots. Essentially storm zones.
+
+-Fertility Index-
+I don't think it should be as common as it is to have extremely high fertility index on grids just because they have plant type grids.
+I think we can still have fertile hotspots, and some planets will have a higher overall fertility based on temperature and how much water the planet has. The closer a planets Temperature is to 20-22 Celsius the higher the fertility maximum can go. And if the planet has at least a 40% or above water level we can have increased Fertility Values.
+So for a World Modifier of a Fertile World the world must meet the criteria of being around 20-22 Celsius (give or take 2-3 degrees) and have around a  50% Water Level give or take up to 10%
+We can set the lower range of fertility index down to 40.
+
+-World Modifiers-
+I think adding world modifiers will help tell the player "Hey this world has something interesting! You might want to take this world!"
+They would have to have a percent chance to be generated in each galaxy so that they will be uncommon and players may want to seek them out.
+
+Lets put in the Overview of these worlds an Icon that shows what Modifier the world has. Put the Icon inside a small square box that lives inside of the Planet Sphere view within the Overview page of a celestial body once it is selected. Give the Icon a different color boundary than black so that it doesn't blend in with the Planet Sphere display, Maybe color code the box boundary to the Index that it corresponds to, so that the player gets a hint as to what kind of world modifier it could be. If a celestial body has multiple World Modifiers, just line them up across the top of the Planet Sphere view box.
+
+These Icons should only appear once the world has received a level 1 survey, but only show up as a blank Icon with a Question Mark. Once a level 2 survey is completed the Icon should display what the World Modifier is. After a level 2 survey the player will be able to see the Indexes also which are influenced by world modifiers.
+After a level 1 survey that shows the Modifier Icon with a question mark, have the icon tell the player that there is something unique about the world on a mouse-anchored window.
+After a level 2 survey that shows what World Modifier the world has, when the player hovers their mouse over the world modifier icon
+
+Eventually More modifiers will be added for each Index, so Having the Question Mark Stage and the fully unveiled stage of the Icon use color coded borders will be nice to have and be visually Identifiable.
+
+Lets also put the World Modifier Icons in the Planet View window at the bottom of the window below the Surface Map Window anchored below the bottom right corner.
+They should be level with the Overview, Build, Survey tabs that are anchored below the bottom left of the Surface Map Window.
+
+Use the same style 16x16 pixel art for the Art of the Icons
+
+
+- Tidally locked planets should be more uncommon to occur but will be one of the first official Planet Modifiers that I would like to include.
+
+- I also want to include Mineral Rich worlds that will have either higher High Quality Minerals (Higher Mineral Index values) or Vast Mineral Deposits which will just be planets that have their surfaces widely covered in Mineral Index.
+- I want it to be possible for multiple World Modifiers to be present on the same world.
+For example both Higher Quality Minerals and Vast Mineral Deposits to be on one planet essentially creating a very valuable world to exploit.
+
+- Extreme Weather : would have crazy high amounts of Weather Index hotspots or larger hotspots, or both.
+
+- Fertile World : A world with a Biosphere that meets the criteria of being around 20-22 Celsius (give or take 2 degrees) and have around a 50% Water Level give or take up to 10% (within 40%-60% water level with 50% being default)
+The world would have an abundance of plant related grids and the Fertility Index of these grids will be higher in value and in quantity.
+These are the worlds that should have an abundance of grids in the 90-100%
+
+- Continental Plates : I want to make this into a world modifier with their own Icons. They are uncommon enough and it would help players to identify this feature about a planet without having to search through the Geothermal Index.
+
+(Follow-up, same session:)
+Change the Icon of Fertility Index to a 16x16 pixel art Apple Tree. The yellow head of Grain is not as easy to understand and does not have the green colors representing the Fertility Index

@@ -38,7 +38,8 @@ const OUT = path.join(PROJ, 'Assets', 'Resources', 'SpaceAssets', 'IndexIcons');
 const MAP = {
   Minerals: 'Mineral',
   Geothermal: 'Geothermal',
-  Fertility: 'Fertile',
+  // Fertility is NOT copied: its grain icon was replaced by an apple tree drawn in
+  // make-modifier-icons.mjs, and copying it here would quietly put the grain back.
   Weather: 'Wind',
   Solar: 'Solar',
 };

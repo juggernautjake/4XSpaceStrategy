@@ -92,7 +92,19 @@ public partial class InspectorWindow
         // interest) go in their own card below, because eight stat rows — two of which wrap — will not
         // fit in 156px and a HorizontalLayoutGroup answers that by crushing them.
         var card = Card(topRow.transform);
-        EmbeddedGlobe.Build(topRow.transform, b, GlobeSize, GlobeSize);
+        var globe = EmbeddedGlobe.Build(topRow.transform, b, GlobeSize, GlobeSize);
+
+        // WORLD MODIFIERS, across the top of the sphere: a "?" after a level-1 survey, the real icon after
+        // a level-2. Inside the globe's own box so they read as facts about THIS world, framed in a colour
+        // that stands off the black backing.
+        if (globe != null)
+        {
+            var badges = WorldModifierBadges.Attach(globe.transform, b, 22f);
+            var brt = badges.GetComponent<RectTransform>();
+            brt.anchorMin = new Vector2(0f, 1f); brt.anchorMax = new Vector2(0f, 1f);
+            brt.pivot = new Vector2(0f, 1f);
+            brt.anchoredPosition = new Vector2(4f, -4f);
+        }
 
         // ---- WHAT YOU MAY KNOW, AND WHEN ----
         //

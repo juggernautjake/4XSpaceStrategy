@@ -699,6 +699,7 @@ public class SolarSystemGenerator : MonoBehaviour
                                    RotationRules.Roll(best.mass, isMoon: false));
         best.rotationDirection = best.orbitDirection == 0 ? 1 : best.orbitDirection;   // spin follows orbit
         best.hasMagneticField = true;
+        best.tidallyLocked = false;                            // spun up above, so it cannot be locked
         best.type = CelestialBodyType.RockyPlanet;             // provisional, for the tectonics/air rolls
         best.hasTectonics = TectonicsRules.Roll(best.type, best.mass);
 
@@ -780,6 +781,11 @@ public class SolarSystemGenerator : MonoBehaviour
         // happens, and is stored apart from the rate so that turning backwards never costs a world its
         // magnetosphere.
         body.spinSpeed = RotationRules.Roll(body.mass, isMoon);
+        // TIDAL LOCK — a world modifier, rolled HERE because it is a fact about rotation: a locked world
+        // does not turn, so it runs no dynamo, and the field line below then correctly denies it one.
+        // Close-in worlds lock far more often. See WorldModifiers.RollTidalLock.
+        body.tidallyLocked = WorldModifiers.RollTidalLock(body.type, rel, isMoon);
+        if (body.tidallyLocked) body.spinSpeed = 0f;
         // PROVISIONAL. The orbit has not been rolled yet at this point, and the direction is set to
         // match it once it has (see the planet, moon and belt branches of GenerateSystemStepped).
         body.rotationDirection = RotationRules.RollDirection(isMoon);

@@ -367,6 +367,9 @@ public class TerraformManager : MonoBehaviour
             // ceiling is lost. Slowing a planet's day down is a serious thing to do to it.
             case TerraformProjectType.SpinUp:
                 b.spinSpeed = Mathf.Max(b.spinSpeed, RotationRules.MagneticFieldSpin + 4f);
+                // A world that turns is no longer tidally locked: the night side gets its sun back, so the
+                // Solar Index has to be re-read.
+                if (b.tidallyLocked) { b.tidallyLocked = false; SurfaceIndex.InvalidateStats(b); }
                 RefreshSpin(b);
                 ApplyRotationConsequences(b);
                 break;
