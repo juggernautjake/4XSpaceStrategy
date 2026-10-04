@@ -206,7 +206,7 @@ public static class SurfaceTextureRenderer
                        : PaintContours(body, px, w, h, tw, scale);
 
         tex.SetPixels32(px, 0);
-        BuildMips(tex, px, contour, tw, th);
+        BuildMips(tex, px, contour, tw, th, scale);
         tex.Apply(false);
         return tex;
     }
@@ -236,13 +236,36 @@ public static class SurfaceTextureRenderer
     //
     // Point filtering stays: magnified, the map still reads as hard-edged cells; it simply picks the
     // nearest LEVEL as well as the nearest texel when it shrinks.
+    //
+    // ---- AND THEN THE LINES LET GO --------------------------------------------------------------
+    //
+    // "Once we scroll out to a certain point the lines should kind of go away... some of the lines look
+    // thicker than others."
+    //
+    // The line-wins rule was applied on EVERY level, and it stops making sense once a cell is only a
+    // texel or two across. At the level where a cell is one texel, any cell touching a contour became a
+    // whole dark cell — so lines grew as fat as the cells, and where contours run close together (any
+    // mountain front) they merged into dark smears. Point sampling then turned a one-texel line into one
+    // OR two screen pixels depending on where it fell, which is the uneven thickness.
+    //
+    // So the rule only holds while a cell is still at least ContourMinCellTexels across at that level.
+    // Past it, the levels are plain box averages: the line texels from the last lined level are averaged
+    // in, so the contours FADE — faint at the next level out, all but gone a level after that — rather
+    // than vanishing in one step or thickening into a grid.
     // ============================================================================================
-    static void BuildMips(Texture2D tex, Color32[] level0, bool[] contour0, int tw, int th)
+
+    /// The smallest a cell may be, in texels at a mip level, for that level still to carry solid lines.
+    const int ContourMinCellTexels = 4;
+
+    static void BuildMips(Texture2D tex, Color32[] level0, bool[] contour0, int tw, int th, int scale)
     {
         Color32[] src = level0; bool[] mask = contour0;
         int sw = tw, sh = th, level = 1;
         while (sw > 1 || sh > 1)
         {
+            // Lines let go at this level? Then they stay let go for every smaller one.
+            if ((scale >> level) < ContourMinCellTexels) mask = null;
+
             int dw = Mathf.Max(1, sw >> 1), dh = Mathf.Max(1, sh >> 1);
             var dst = new Color32[dw * dh];
             bool[] dmask = mask != null ? new bool[dw * dh] : null;

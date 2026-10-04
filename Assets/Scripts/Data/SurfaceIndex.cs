@@ -450,8 +450,13 @@ public static class SurfaceIndex
                 // High Quality Minerals: whatever seams this world has, they are near the top of the scale.
                 // Only where it HAS seams worth the name — the modifier concentrates what is there, it does
                 // not invent mineral country on a world with none.
-                return WorldModifiers.Has(b, WorldModifier.HighQualityMinerals) && q >= ShowFloor * 0.8f
-                    ? Mathf.Max(q, 0.97f) : q;
+                // Vast Mineral Deposits is a promise that the world is WIDELY mineable, so its band must
+                // clear the floor — a badge over a world with no usable seams would be a lie. FIRST, so a
+                // world carrying both modifiers then gets High Quality's lift on top: the prize world.
+                if (WorldModifiers.Has(b, WorldModifier.VastMineralDeposits)) q = Mathf.Max(q, 0.82f);
+                if (WorldModifiers.Has(b, WorldModifier.HighQualityMinerals) && q >= ShowFloor * 0.8f)
+                    q = Mathf.Max(q, 0.97f);
+                return q;
             }
             case SurfaceIndexKind.Geothermal: return Quality(rawMax, 0.28f, 0.62f);
             case SurfaceIndexKind.Fertile:
@@ -489,7 +494,7 @@ public static class SurfaceIndex
             // Ordinary farmland is mostly middling: a plant biome no longer means 90%+. On a Fertile World
             // the band turns top-heavy, and the 90s are what most of its farmland reads.
             case SurfaceIndexKind.Fertile:
-                return WorldModifiers.Has(b, WorldModifier.FertileWorld) ? 0.45f : 1.8f;
+                return WorldModifiers.Has(b, WorldModifier.FertileWorld) ? 0.25f : 1.8f;   // ~half its farmland 90+ vs ~10% (tools/index-rules-check.mjs)
             case SurfaceIndexKind.Wind:
                 return WorldModifiers.Has(b, WorldModifier.ExtremeWeather) ? 0.7f : 1f;
             default: return 1f;
