@@ -76,7 +76,16 @@ Enum `OreType` (None + 14 ores from Ferralite → Xenocryst).
 ### Habitability.cs  *(species-aware)*
 - **`GetZone(star, species, out inner, out outer)`** — the species' shifted/scaled Goldilocks band.
 - **`InZone(star, species, distance)`** — is a body physically inside that band.
-- **`Rate(star, species, type, distance)`** — 0..100 score (positional falloff × species type affinity).
+- **`Rate(star, species, body)`** — 0..100 from the world AS IT IS (2026-10-04): average °C against the
+  species' `IdealCelsius` (smooth falloff, width from tolerance), air (`AtmosphereSuitability`), liquid
+  water (if `NeedsWater`), a biosphere (if `NeedsBiosphere`), gravity, and body-type affinity as a modest
+  weight. It used to be orbital position × affinity, which let a 500 °C airless world outrate a living one.
+  The `(star, species, type, distance)` overload is the old positional what-if, kept for `IsHabitable`.
+- **`PlacementZone`** — overlap of the species' band and the star's physical band, for placing homeworlds
+  and the guaranteed habitable world so they always sit inside the green ring.
+- **The drawn green band is the STAR'S liquid-water band** (`star.hzInner/hzOuter`, `StarDatabase.ApplyZone`),
+  not a species' band. Multi-star systems take it from their HOTTEST sun (`StarDatabase.Recombine`), and
+  star physics are saved (`StarPhysicsDTO`) so a reload no longer re-rolls the star and moves the zone.
 - `Label(rating, inZone)` — "Habitable/Marginal/Hostile/Uninhabitable".
 - **`ScoreColor(rating)` / `ScoreColorHex(rating)`** — red→yellow→green gradient for the score number.
 
@@ -124,17 +133,18 @@ ring 3 into the zone and put the Earthlike world third from its sun.
   to a ring, so the Dev orbit slider and terraforming's orbit-moving are unaffected.
 
 ### GasGiantStorms.cs  *(the Great Red Spot)*
-0–3 storm cells per giant, deterministic from the body's seed, snapped to the centre of a band the
-generator already draws as `Storm`. Replaced `if (elev > 0.78f) return Storm`, which was a threshold
-on fractal noise and therefore produced speckle rather than a spot. A spot is a **leaning lens**, not an
-ellipse: pointed at the ends (`LensPower`), fuller on the equatorward flank (`FlankSqueeze`), tilted
-into the flow (`skew`, up to `SkewMax`). The pale **`Hollow`** collar is full on the flanks and pinches
-to nothing at the tips, and the **`FlowHalo`** deflection reaches `WakeStretch` times further along the
-flow than across it — so the lanes crowd the flanks, stream past the points and close up downstream.
-`Distance` returns the lens metric and hands out `along`, `side` and the plain `ellipse` distance; the
-collar is drawn in the first and the wake in the last, because the lens metric is infinite just past
-a tip and a wake measured in it stopped dead at the tip's longitude (the "hook" the first render showed).
-- **`Spots(b, out spots)` / `Distance` / `Invalidate`**. `tools/gas-giant-check.mjs` draws twelve.
+0–3 storm cells per giant, deterministic from the body's seed, snapped to the centre of a `Storm` belt
+(only belts actually on the disc, offset by the band-edge jitter's mean so the spot is centred in the
+belt as drawn). **A storm is a swelling of its belt, not a shape cut into it** (2026-10-04, replacing a
+pointed lens in a pale collar that read as a football with a clean slice round it). `Swell(spot, u, v)`
+returns how far to move the latitude the band test reads: inside the oval the belt's half-height is
+stretched to the storm's, and the first `FlowReach` × swell of ground outside is eased back so the pale
+zones and next belts bow around it. The storm's edge is the belt's own edge, so it is as ragged as every
+band edge (`MoistJitter`), and the belt flows into it through rounded shoulders. Great-Red-Spot
+proportions (aspect 1.3–1.7), a slight lean (`SkewMax`), radius clamped so the oval never crosses the
+equator or a pole.
+- **`Spots(b, out spots)` / `Swell` / `BeltHalfHeight` / `Invalidate`**. `tools/gas-giant-check.mjs` draws
+  twelve and asserts every storm's centre is storm and every storm out-swells its belt.
 
 ### GenProfiler.cs  *(which part of generation ate the frame)*
 `Watch(label, iterator)` times every unyielded span in a generation coroutine and logs any over 50 ms;

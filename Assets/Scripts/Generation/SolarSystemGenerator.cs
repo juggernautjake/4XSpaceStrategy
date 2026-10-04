@@ -98,6 +98,12 @@ public class SolarSystemGenerator : MonoBehaviour
 
         var fillRing = new bool[PlacementRings.Count];
         ChooseFilledRings(fillRing, habitableRing);
+        // A DIM CLUSTER HAS NO INNER SYSTEM. When two or three dim suns spread wider than the room before
+        // their zone (the zone now comes from the hottest sun alone), PlacementRings squeezes the inner
+        // rings into the zone itself. Filling them would put ordinary worlds closer in than the habitable
+        // one; leaving them empty keeps the habitable world first, which is what such a system really is.
+        for (int r = 0; r < PlacementRings.InnerRings && r < fillRing.Length; r++)
+            if (ringInZone[r] && r != habitableRing) fillRing[r] = false;
 
         // AT MOST ONE INCLINED WORLD PER SYSTEM. See RollInclination.
         bool inclinedAlready = false;
@@ -593,7 +599,7 @@ public class SolarSystemGenerator : MonoBehaviour
     {
         // yield break, not return — this is an iterator block now, and a bare return is not legal in one.
         if (system.Count == 0 || currentStar == null || !currentStar.hasHabitableZone) yield break;
-        if (!Habitability.GetZone(currentStar, SpeciesManager.Current, out float inner, out float outer)) yield break;
+        if (!Habitability.PlacementZone(currentStar, SpeciesManager.Current, out float inner, out float outer)) yield break;
 
         foreach (var b in system)
             if (b.distanceFromStar >= inner && b.distanceFromStar <= outer &&

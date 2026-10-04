@@ -112,7 +112,8 @@ public partial class InspectorWindow
         Stat(stats, "Class", () => s.isBlackHole ? "Black hole" : multi ? StarDatabase.SystemClass(s) : $"{s.type}-type");
         Stat(stats, "Stars in system", () => s.starCount == 1 ? "1 (single)" : s.starCount == 2 ? "2 (binary)" : $"{s.starCount} (ternary)");
         if (!multi) Stat(stats, "Surface temperature", () => $"{s.temperatureK:F0} K");   // per-sun for a cluster (listed below)
-        Stat(stats, multi ? "Combined luminosity" : "Luminosity", () => $"{s.luminosity:F2}× our sun");
+        // For a cluster this is the HOTTEST sun's — the one the habitable zone is measured from.
+        Stat(stats, multi ? "Luminosity (hottest sun)" : "Luminosity", () => $"{s.luminosity:F2}× our sun");
         Stat(stats, multi ? "Combined mass" : "Mass", () => $"{s.mass:F2} solar masses");
         Stat(stats, "Habitable zone", () => s.hasHabitableZone ? $"{s.hzInner:F1} – {s.hzOuter:F1}" : "<color=#FF7A6E>none</color>");
         // Said in words as well as shown on the map. "A-type, 20x luminosity" tells an astronomer
@@ -478,35 +479,13 @@ public partial class InspectorWindow
 
     static void RecombineInPlace(StarData combined, List<StarData> stars)
     {
-        if (combined == null || stars == null || stars.Count <= 1) return;
-        float lum = 0f, mass = 0f, scale = 0f;
-        Color col = Color.black;
-        StarData bright = stars[0];
-        foreach (var s in stars)
-        {
-            if (s == null) continue;
-            lum += s.luminosity; mass += s.mass;
-            col += s.color * Mathf.Max(0.1f, s.luminosity);
-            scale = Mathf.Max(scale, s.visualScale);
-            if (s.luminosity > bright.luminosity) bright = s;
-        }
-        combined.luminosity = lum;
-        combined.mass = mass;
-        combined.temperatureK = bright.temperatureK;
-        combined.type = bright.type;
-        combined.visualScale = scale;
-        combined.color = col / Mathf.Max(0.1f, lum);
-        combined.lightIntensity = Mathf.Clamp(0.6f + Mathf.Sqrt(lum) * 0.25f, 0.6f, 3.5f);
-        combined.density = StarDatabase.DensityOf(combined.mass, combined.visualScale);
-        combined.clusterRadius = StarCluster.Layout(stars).reach;
-        // The SAME compressed law generation uses (StarDatabase.ReferenceDistance). This is the Dev star
-        // editor recomputing a cluster after an edit, and it was carrying its own copy of the raw flux
-        // law — so editing a star's luminosity would fling its habitable zone out to where generation
-        // never puts one, and the ring would jump the moment you touched the slider.
-        float reach = StarDatabase.ReferenceDistance(combined);
-        combined.hzInner = 0.80f * reach;
-        combined.hzOuter = 1.55f * reach;
-        combined.hasHabitableZone = true;
+        if (combined == null || stars == null || stars.Count == 0) return;
+        // A single star IS the combined star — but an edit to its luminosity still moves its zone, which
+        // this used to skip, leaving the ring where the old luminosity put it.
+        if (stars.Count == 1) StarDatabase.ApplyZone(combined);
+        else StarDatabase.Recombine(combined, stars);
+        // The drawn band follows the edit immediately.
+        if (SystemContext.Zone != null) SystemContext.Zone.Refresh();
     }
 
     // Re-space the suns of a bound cluster after a size/mass edit so nothing clips and the heavier sun rides
@@ -601,7 +580,7 @@ public partial class InspectorWindow
         }
         if (!s.hasHabitableZone) parts.Add("It has no stable habitable zone at all — anything here must be terraformed or built from scratch.");
         else if (s.hzInner < 6f) parts.Add("Its habitable band sits very close in, so worlds in it tend to be tidally locked and need their rotation fixed.");
-        if (s.starCount > 1) parts.Add($"It is not alone: {s.starCount} stars orbit each other here, and their combined light is what its worlds actually feel.");
+        if (s.starCount > 1) parts.Add($"It is not alone: {s.starCount} stars orbit each other here, and its habitable zone is set by the hottest of them.");
         return string.Join(" ", parts);
     }
 

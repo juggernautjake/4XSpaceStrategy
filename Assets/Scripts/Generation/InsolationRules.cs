@@ -87,6 +87,27 @@ public static class InsolationRules
     public static float KelvinAt(StarData star, float distance)
         => KelvinAt(Mathf.Max(1f, distance) / Mathf.Max(0.5f, StarDatabase.ReferenceDistance(star)));
 
+    /// Shift a world's starlight after its ORBIT changes, from `oldDistance` to where it is now.
+    ///
+    /// The habitability rating reads the world's climate, and the climate is set from the orbit only at
+    /// generation — so moving a world used to leave it exactly as warm as it was, and the most expensive
+    /// project in the game changed nothing a colonist would feel.
+    ///
+    /// RELATIVE, NOT RESET. A world's heat is very often not the bare orbit law: a homeworld's is solved
+    /// for its species' ideal climate, a desert's or a tundra's is pushed by AmplifyBiome, a remodelled
+    /// world's is its new type's, and every world carries its generation jitter. So this applies only the
+    /// DIFFERENCE the move makes — the law at the new distance minus the law at the old one — to both the
+    /// natural and the current heat. No move, no change; a cradle nudged and nudged back is the cradle it was.
+    public static void ApplyOrbitalHeat(CelestialBody b, StarData star, float oldDistance)
+    {
+        if (b == null || star == null || star.isBlackHole) return;
+        if (Mathf.Abs(b.distanceFromStar - oldDistance) < 0.0001f) return;
+        float delta = PlanetTemperature.HeatForKelvin(KelvinAt(star, b.distanceFromStar))
+                    - PlanetTemperature.HeatForKelvin(KelvinAt(star, oldDistance));
+        b.naturalParams.heat = Mathf.Max(0.01f, b.naturalParams.heat + delta);
+        b.terrainParams.heat = Mathf.Max(0.01f, b.terrainParams.heat + delta);
+    }
+
     /// The heat parameter a body at this distance is born with — the law above, jittered, with the
     /// regime's guarantee re-imposed after the jitter. Draws from UnityEngine.Random like the rest of
     /// generation, so it belongs in the generation stream and nowhere else.

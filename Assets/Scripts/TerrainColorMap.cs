@@ -21,6 +21,8 @@ public static class TerrainColorMap
             case TerrainType.Island:        return new Color(0.34f, 0.72f, 0.52f);
             case TerrainType.Crater:        return new Color(0.42f, 0.42f, 0.46f);
             case TerrainType.Barren:        return new Color(0.62f, 0.58f, 0.52f);
+            // Lighter and cooler than Barren's rock, so dust and bare rock read apart on a grey world.
+            case TerrainType.Regolith:      return new Color(0.76f, 0.75f, 0.73f);
 
             // Temperate / life-bearing
             case TerrainType.Grassland:     return new Color(0.52f, 0.76f, 0.34f);
@@ -88,6 +90,7 @@ public static class TerrainColorMap
             case TerrainType.MetallicCrust: return "Metal-rich surface plating.";
             case TerrainType.GeyserField:   return "Hydrothermal vents and steam.";
             case TerrainType.Barren:        return "Bare, lifeless ground.";
+            case TerrainType.Regolith:      return "Fine grey dust over airless rock.";
             default:                        return type.ToString();
         }
     }

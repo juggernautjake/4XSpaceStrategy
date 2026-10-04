@@ -68,8 +68,49 @@ public static class PlanetTemperature
         if (x < 0 || y < 0 || x >= b.surface.width || y >= b.surface.height) return CelsiusAt(b, y);
 
         float altDelta = b.surface.tiles[x, y].elevation - 0.5f;
-        return Mathf.Clamp(CelsiusAt(b, y) - altDelta * PlanetTerrainGenerator.AltitudeLapseC,
+        float tidal = TidalOffsetC(b, (x + 0.5f) / b.surface.width, (y + 0.5f) / b.surface.height);
+        return Mathf.Clamp(CelsiusAt(b, y) - altDelta * PlanetTerrainGenerator.AltitudeLapseC + tidal,
                            MinCelsius, MaxCelsius);
+    }
+
+    // ============================================================================================
+    // TIDALLY LOCKED: A HOT FACE AND A FROZEN ONE
+    //
+    // "Tidally locked worlds should have their sunny side be hot and the opposite side of the world much
+    // colder than normal, since it never receives sunlight to warm it."
+    //
+    // The face toward the star is the middle of the surface map (u = 0.5) — the same point
+    // SurfaceIndex.SolarDaySide lights and OrbitController keeps turned to the star — so the hottest
+    // ground, the brightest solar ground and the visible lit face are one place.
+    //
+    // HOW HARD THE CONTRAST BITES DEPENDS ON THE AIR. With nothing to carry heat round to the dark side,
+    // an airless locked world is a furnace on one face and a deep freeze on the other; a thick atmosphere
+    // moves heat across the terminator and evens the two out. Between them is the terminator ring, close
+    // to the world's ordinary temperature — the band where a locked world is most livable.
+    //
+    // An OFFSET on the world's normal figure, applied per tile by both the terrain generator (so biomes
+    // freeze and bake to match) and the readout above (so the number under the cursor agrees with them).
+    // BodyAverageCelsius does not carry it: a world's overall climate class is still its average.
+    // ============================================================================================
+    public const float TidalDayAirlessC = 110f, TidalDayThickC = 35f;
+    public const float TidalNightAirlessC = 170f, TidalNightThickC = 55f;
+    /// Atmospheres at which heat transport is as good as it gets.
+    const float TidalFullTransportAtmospheres = 3f;
+
+    /// Degrees to add at surface point (u, v), 0..1 each. Zero unless the world is tidally locked.
+    public static float TidalOffsetC(CelestialBody b, float u, float v)
+    {
+        if (b == null || !b.tidallyLocked) return 0f;
+        float air = Mathf.Clamp01(b.atmospheres / TidalFullTransportAtmospheres);
+        float day = Mathf.Lerp(TidalDayAirlessC, TidalDayThickC, air);
+        float night = Mathf.Lerp(TidalNightAirlessC, TidalNightThickC, air);
+
+        float lon = (u - 0.5f) * 2f * Mathf.PI;
+        float lat = (v - 0.5f) * Mathf.PI;
+        float cosZ = Mathf.Cos(lat) * Mathf.Cos(lon);       // 1 under the star, -1 at the far point
+        // The day side warms with the sun's height; the night side drops to its full cold within a short
+        // way past the terminator, because once the sun is gone it is simply gone.
+        return cosZ >= 0f ? day * Mathf.Sqrt(cosZ) : -night * Mathf.Min(1f, -cosZ * 3f);
     }
 
     // The body's overall average — no latitude swing, just the climate its heat and type describe.

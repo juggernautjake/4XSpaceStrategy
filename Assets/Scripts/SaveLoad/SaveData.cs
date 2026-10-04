@@ -199,11 +199,23 @@ public class TerraformJobDTO
 }
 
 [System.Serializable]
+public class StarPhysicsDTO
+{
+    public string name;
+    public float temperatureK, luminosity, mass, density, visualScale, lightIntensity;
+    public float r, g, b;
+}
+
+[System.Serializable]
 public class SystemDTO
 {
     public string name;
     public float px, py, pz;                 // galaxy position
     public List<int> starTypes = new List<int>();
+    /// Each sun's ROLLED physics, aligned with starTypes. Without it every load re-rolled the star from
+    /// its class — a new luminosity, so a new habitable zone under planets that had not moved. Empty in an
+    /// older save, which then re-rolls as it always did.
+    public List<StarPhysicsDTO> starPhysics = new List<StarPhysicsDTO>();
     public bool isBlackHole;
     public int ownerId = -1;                 // -1 == unclaimed
     public bool isHome;

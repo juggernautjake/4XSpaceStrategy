@@ -115,6 +115,15 @@ public static class GameStateSerializer
             hideReason = Persist(sys.hideReason)
         };
         foreach (var s in sys.stars) sd.starTypes.Add((int)s.type);
+        // Aligned with starTypes, like the concealment list below — a null sun still gets an entry.
+        foreach (var s in sys.stars)
+            sd.starPhysics.Add(s == null ? new StarPhysicsDTO() : new StarPhysicsDTO
+            {
+                name = s.name,
+                temperatureK = s.temperatureK, luminosity = s.luminosity, mass = s.mass, density = s.density,
+                visualScale = s.visualScale, lightIntensity = s.lightIntensity,
+                r = s.color.r, g = s.color.g, b = s.color.b
+            });
         // Null-guarded, and it has to stay aligned with starTypes above — the loader zips the two by
         // index, so a skipped entry would shift every later sun's concealment onto its neighbour.
         foreach (var s in sys.stars) sd.starHideReasons.Add(s != null ? Persist(s.hideReason) : 0);
@@ -326,6 +335,21 @@ public static class GameStateSerializer
             else
             {
                 foreach (var t in sd.starTypes) sys.stars.Add(StarDatabase.Get((StarType)t));
+                // The SAME star that was saved, not a fresh roll of its class: restore the physics and
+                // re-derive the zone from them. Only when the list lines up — an older save has none, and
+                // keeps the re-roll it always had.
+                if (sd.starPhysics != null && sd.starPhysics.Count == sys.stars.Count)
+                    for (int si = 0; si < sys.stars.Count; si++)
+                    {
+                        var p = sd.starPhysics[si];
+                        if (p == null || p.luminosity <= 0f) continue;   // a blank entry: keep the roll
+                        var st = sys.stars[si];
+                        st.temperatureK = p.temperatureK; st.luminosity = p.luminosity; st.mass = p.mass;
+                        st.density = p.density; st.visualScale = p.visualScale; st.lightIntensity = p.lightIntensity;
+                        st.color = new Color(p.r, p.g, p.b);
+                        if (!string.IsNullOrEmpty(p.name)) st.name = p.name;
+                        StarDatabase.ApplyZone(st);
+                    }
                 if (sys.stars.Count == 0) sys.stars.Add(StarDatabase.Get(StarType.G));
                 sys.combinedStar = StarDatabase.Combine(sys.stars);
             }

@@ -349,14 +349,37 @@ public static class StarDatabase
         // seeded with a world, but it makes every OTHER planet a near-miss, and it made the zone ring a
         // thin line on screen. A band you can see, and that two neighbouring planets can both sit in, is
         // worth more than a precise one.
+        ApplyZone(s);
+        return s;
+    }
+
+    // ============================================================================================
+    // THE HABITABLE ZONE IS A FACT ABOUT THE STAR
+    //
+    // "The habitable zone needs to be the range where it is warm enough for ice to be water, and not so
+    // cold that all water is ice. Somehow this zone keeps changing. It should be consistent based on the
+    // star itself; with multiple stars, use the hottest one."
+    //
+    // One place now sets it, from the star's own luminosity through the same law the temperature model
+    // (InsolationRules) is anchored on: inside HzInnerRel a world runs away into a hothouse, past
+    // HzOuterRel it snowballs, and between them is where water can be liquid. Nothing else moves it —
+    // not the species (the drawn band is this one; a species' preference is a separate readout), and not
+    // a reload (the star's rolled physics are saved now, so a loaded star is the same star).
+    // ============================================================================================
+
+    /// Set a star's zone edges from its own luminosity. O and B giants, and black holes, have none.
+    public static void ApplyZone(StarData s)
+    {
+        if (s == null) return;
         float reach = ReferenceDistance(s);
         s.hzInner = HzInnerRel * reach;
         s.hzOuter = HzOuterRel * reach;
-
-        // Blue giants (O/B) are too hot and short-lived to hold a stable Goldilocks zone.
-        s.hasHabitableZone = (type != StarType.O && type != StarType.B);
-        return s;
+        s.hasHabitableZone = !s.isBlackHole && s.type != StarType.O && s.type != StarType.B;
     }
+
+    /// Is this distance from the star inside its liquid-water zone?
+    public static bool InZone(StarData s, float distance)
+        => s != null && s.hasHabitableZone && distance >= s.hzInner && distance <= s.hzOuter;
 
     // Approximate visible colour of a star from its surface temperature (blackbody-ish): cool stars
     // are orange-red, Sun-like are warm white, hot stars are blue-white.
@@ -406,43 +429,58 @@ public static class StarDatabase
     {
         if (stars == null || stars.Count == 0) return Get(StarType.G);
         if (stars.Count == 1) return stars[0];
+        var c = new StarData();
+        Recombine(c, stars);
+        return c;
+    }
 
-        float lum = 0f, mass = 0f;
+    /// The hottest member of a cluster — the one its habitable zone is measured from.
+    public static StarData Hottest(List<StarData> stars)
+    {
+        StarData hot = null;
+        if (stars == null) return null;
+        foreach (var s in stars)
+            if (s != null && (hot == null || s.temperatureK > hot.temperatureK)) hot = s;
+        return hot;
+    }
+
+    /// Fill `c` from a cluster's suns. Shared by generation (Combine) and the Dev star editor, which
+    /// used to carry its own copy of this and drifted from it.
+    ///
+    /// LIGHT ADDS; THE ZONE DOES NOT. The scene light and colour still sum every sun, because more suns
+    /// really are brighter. But the CLIMATE reference — the luminosity the habitable zone, the planet
+    /// spacing and the temperature law are all measured from — is the HOTTEST sun's, as asked. Summing it
+    /// is what threw a binary's zone further out than either star alone would put it, and an O or B
+    /// companion now correctly leaves the system with no zone at all.
+    public static void Recombine(StarData c, List<StarData> stars)
+    {
+        if (c == null || stars == null || stars.Count == 0) return;
+
+        float lum = 0f, mass = 0f, scale = 0f;
         Color col = Color.black;
-        float scale = 0f;
-        StarData bright = stars[0];
         foreach (var s in stars)
         {
+            if (s == null) continue;
             lum += s.luminosity;
             mass += s.mass;
             col += s.color * Mathf.Max(0.1f, s.luminosity);
             scale = Mathf.Max(scale, s.visualScale);
-            if (s.luminosity > bright.luminosity) bright = s;
         }
+        var hot = Hottest(stars);
+        if (hot == null) return;
 
-        var c = new StarData
-        {
-            type = bright.type,
-            starCount = stars.Count,
-            luminosity = lum,
-            mass = mass,
-            temperatureK = bright.temperatureK,
-            visualScale = scale,
-            color = col / Mathf.Max(0.1f, lum),
-            lightIntensity = Mathf.Clamp(0.6f + Mathf.Sqrt(lum) * 0.25f, 0.6f, 3.5f),
-            hasHabitableZone = true
-        };
+        c.type = hot.type;
+        c.starCount = stars.Count;
+        c.luminosity = hot.luminosity;          // the climate reference — see above
+        c.mass = mass;
+        c.temperatureK = hot.temperatureK;
+        c.visualScale = scale;
+        c.color = col / Mathf.Max(0.1f, lum);
+        c.lightIntensity = Mathf.Clamp(0.6f + Mathf.Sqrt(lum) * 0.25f, 0.6f, 3.5f);
         c.density = DensityOf(c.mass, c.visualScale);
         // How far the bound suns physically spread from the barycenter, so orbit spacing clears the whole
         // cluster. Same layout the renderer uses (StarCluster), so clearance and visuals never disagree.
-        c.clusterRadius = StarCluster.Layout(stars).reach;
-        // Through the same compressed law as a single star, so a binary's zone sits where its planets
-        // are for the same reason a single sun's does. It matters more here, not less: combined
-        // luminosity ADDS, so a pair of bright suns used to throw the zone even further out than either
-        // would alone — the worst case of the off-screen problem, in the systems most worth visiting.
-        float reach = ReferenceDistance(c);
-        c.hzInner = HzInnerRel * reach;
-        c.hzOuter = HzOuterRel * reach;
-        return c;
+        c.clusterRadius = stars.Count > 1 ? StarCluster.Layout(stars).reach : 0f;
+        ApplyZone(c);
     }
 }

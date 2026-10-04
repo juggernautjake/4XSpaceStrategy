@@ -116,6 +116,8 @@ public static class TileCatalog
         // --- Rock / airless ---
         E(TerrainType.Barren, "Rock", "Lifeless bare rock.",
             "Any", "Any", "None", "Barren worlds, moons, asteroids"),
+        E(TerrainType.Regolith, "Rock", "Fine grey dust blanketing smooth airless ground.",
+            "Any", "Any", "None", "Moons, asteroids"),
         E(TerrainType.Crater, "Rock", "An impact crater on airless ground.",
             "Low", "Any", "None", "Moons, asteroids"),
         E(TerrainType.MetallicCrust, "Rock", "Exposed metal-rich crust.",

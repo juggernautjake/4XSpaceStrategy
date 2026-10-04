@@ -25,7 +25,7 @@ public class HabitableZoneVisualizer : MonoBehaviour
         Rebuild(false);
     }
 
-    // Rebuild the band for the CURRENT species' shifted zone, preserving visibility.
+    // Rebuild the band, preserving visibility.
     public void Refresh() => Rebuild(visible);
 
     // Point the zone at a different system (e.g. when the player clicks another star).
@@ -38,7 +38,11 @@ public class HabitableZoneVisualizer : MonoBehaviour
     {
         ClearRings();
         if (star == null || !star.hasHabitableZone) return;
-        if (!Habitability.GetZone(star, SpeciesManager.Current, out float inner, out float outer)) return;
+        // THE STAR'S OWN LIQUID-WATER BAND, not the current species' preference. It used to draw
+        // Habitability.GetZone — shifted and scaled per species — so switching species moved the green
+        // band, and no species' band was the place water is actually liquid. A species' preference is
+        // still reported in the readouts; the ring on the map is a fact about the star.
+        float inner = star.hzInner, outer = star.hzOuter;
 
         for (int i = 0; i < BandRings; i++)
         {
@@ -87,7 +91,9 @@ public class HabitableZoneVisualizer : MonoBehaviour
             {
                 if (b.visualObject == null) continue;
                 var oc = b.visualObject.GetComponent<OrbitController>();
-                if (oc != null) oc.SetHabitableHighlight(visible && b.isHabitable);
+                // Ringed when it orbits inside the band drawn — the same physical band, so a ring is never
+                // drawn round a world sitting outside the green.
+                if (oc != null) oc.SetHabitableHighlight(visible && StarDatabase.InZone(star, b.distanceFromStar));
             }
         }
     }

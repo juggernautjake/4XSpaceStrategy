@@ -369,9 +369,20 @@ public class TerraformManager : MonoBehaviour
                 b.spinSpeed = Mathf.Max(b.spinSpeed, RotationRules.MagneticFieldSpin + 4f);
                 // A world that turns is no longer tidally locked: the night side gets its sun back, so the
                 // Solar Index has to be re-read.
-                if (b.tidallyLocked) { b.tidallyLocked = false; SurfaceIndex.InvalidateStats(b); }
+                bool wasLocked = b.tidallyLocked;
+                b.tidallyLocked = false;
                 RefreshSpin(b);
                 ApplyRotationConsequences(b);
+                // ...and the frozen far side and baked near side even out, so the ground itself is redrawn.
+                // Not through RebuildAfterGeologyChange: that rescores habitability, which would throw away
+                // the terraforming progress the colony has been building toward its ceiling.
+                if (wasLocked)
+                {
+                    b.surface = PlanetTerrainGenerator.GenerateSurface(b);
+                    SurfaceIndex.InvalidateStats(b);
+                    OreGenerator.Populate(b);
+                    if (b.visualObject != null) PlanetAppearance.Apply(b, b.visualObject);
+                }
                 break;
             case TerraformProjectType.SpinDown:
                 b.spinSpeed = Mathf.Min(b.spinSpeed, 20f);
@@ -628,11 +639,15 @@ public class TerraformManager : MonoBehaviour
     static void SetOrbitRadiusLive(CelestialBody b, float r)
     {
         if (b == null) return;
+        float was = b.distanceFromStar;
         b.orbitRadius = r;
         b.distanceFromStar = r;
+        if (b.parentBody == null) InsolationRules.ApplyOrbitalHeat(b, b.hostStar, was);
         if (b.moons != null)
             foreach (var m in b.moons) if (m != null) m.distanceFromStar = r;
-        RescoreOrbit(b);
+        // Not settled: the heat and rating follow every frame, but the ground is only redrawn once the
+        // world arrives (MigrateTo) — regenerating a surface sixty times a second would stall the game.
+        RescoreOrbit(b, settled: false);
     }
 
     static void MigrateTo(CelestialBody b, float desiredRadius)
@@ -651,8 +666,10 @@ public class TerraformManager : MonoBehaviour
             return;
         }
 
+        float was = b.distanceFromStar;
         b.orbitRadius = final;
         b.distanceFromStar = final;
+        if (b.parentBody == null) InsolationRules.ApplyOrbitalHeat(b, b.hostStar, was);
         if (b.moons != null)
             foreach (var m in b.moons) if (m != null) m.distanceFromStar = final;
 
@@ -702,7 +719,7 @@ public class TerraformManager : MonoBehaviour
 
     // Moving a world changes how much starlight it gets, so its natural habitability and its
     // terraformability both have to be recomputed for the current species.
-    static void RescoreOrbit(CelestialBody b)
+    static void RescoreOrbit(CelestialBody b, bool settled = true)
     {
         var oc = b.visualObject != null ? b.visualObject.GetComponent<OrbitController>() : null;
         if (oc != null) { oc.SetRadius(b.orbitRadius); oc.ForceRingRedraw(); }
@@ -710,6 +727,16 @@ public class TerraformManager : MonoBehaviour
         var star = b.hostStar;
         var s = SpeciesManager.Current;
         if (star == null || s == null) return;
+        // The new orbit's starlight, then the ground redrawn for it — a world moved inward really does
+        // thaw, and one moved out really does freeze. Before this the rating below read the old climate.
+        // (The starlight itself is shifted by the callers that move the world — they know where it was.)
+        if (b.parentBody == null && settled)
+        {
+            b.surface = PlanetTerrainGenerator.GenerateSurface(b);
+            SurfaceIndex.InvalidateStats(b);
+            OreGenerator.Populate(b);
+            if (b.visualObject != null) PlanetAppearance.Apply(b, b.visualObject);
+        }
         if (!b.habitabilityLocked)
         {
             b.habitability = Habitability.Rate(star, s, b);

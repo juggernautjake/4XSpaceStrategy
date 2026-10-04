@@ -4136,6 +4136,12 @@ public class PlanetViewWindow : MonoBehaviour
         // against the old one's statistics.
         SurfaceIndex.InvalidateStats(body);
 
+        // ...and the habitability rating, which reads the same climate, air, water and life the sliders just
+        // moved. It used to be left alone here, so a world warmed, watered and seeded in the sandbox kept the
+        // rating it had as a frozen rock. The home world's difficulty-set rating stays locked.
+        if (!body.habitabilityLocked && body.hostStar != null && SpeciesManager.Current != null)
+            body.habitability = Habitability.Rate(body.hostStar, SpeciesManager.Current, body);
+
         RefreshMapTexture();                                   // this window's map
         PlanetAppearance.RefreshTexture(body, body.visualObject);   // and the globe in space
     }

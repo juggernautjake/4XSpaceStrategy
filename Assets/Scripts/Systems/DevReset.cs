@@ -21,8 +21,11 @@ public static class DevReset
 
         if (b.parentBody == null)
         {
-            // A planet: its orbit radius IS its distance from the star.
+            // A planet: its orbit radius IS its distance from the star — and its starlight goes back with it,
+            // or a world dragged out and reset would keep the dragged orbit's climate.
+            float was = b.distanceFromStar;
             b.distanceFromStar = b.naturalOrbitRadius;
+            InsolationRules.ApplyOrbitalHeat(b, star, was);
             if (star != null) b.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(star, b.orbitRadius);
             // Moons ride their planet's solar distance — keep them in step, and rescore them too since
             // their habitability follows that distance (a planet reset from the orbit editor moves them).

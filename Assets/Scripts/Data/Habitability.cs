@@ -6,6 +6,21 @@ using UnityEngine;
 // shifted zone. Hostile worlds still score low but remain valuable for their ores and anomalies.
 public static class Habitability
 {
+    /// Where a world placed FOR this species should orbit: the overlap of the species' preferred band and
+    /// the star's own liquid-water band. The map draws the star's band, so a homeworld or a guaranteed
+    /// habitable world placed by the species band alone could land outside the green — which is the
+    /// first thing a player would notice. Falls back to the star's band if the two do not overlap.
+    public static bool PlacementZone(StarData star, Species species, out float inner, out float outer)
+    {
+        inner = outer = 0f;
+        if (star == null || !star.hasHabitableZone) return false;
+        if (!GetZone(star, species, out float si, out float so)) { inner = star.hzInner; outer = star.hzOuter; return true; }
+        inner = Mathf.Max(si, star.hzInner);
+        outer = Mathf.Min(so, star.hzOuter);
+        if (inner > outer) { inner = star.hzInner; outer = star.hzOuter; }
+        return true;
+    }
+
     // The species' preferred orbital band, derived by shifting/scaling the star's base zone.
     public static bool GetZone(StarData star, Species species, out float inner, out float outer)
     {
@@ -60,8 +75,11 @@ public static class Habitability
 
     // "Habitable" = in the species' orbital band AND a body type the species can actually live on. This
     // is what the green habitable ring means, so it no longer flags worlds a species couldn't settle.
+    ///
+    /// Inside the STAR'S band — the green band the map draws — not the species' own, so the "Habitable"
+    /// label and the green ring round a world can never disagree.
     public static bool IsHabitable(StarData star, Species species, CelestialBodyType type, float distanceFromStar)
-        => InZone(star, species, distanceFromStar) && species != null && species.Affinity(type) >= HabitableAffinity;
+        => StarDatabase.InZone(star, distanceFromStar) && species != null && species.Affinity(type) >= HabitableAffinity;
 
     // 0..100 for the given species.
     public static float Rate(StarData star, Species species, CelestialBodyType type, float distanceFromStar)
@@ -87,30 +105,97 @@ public static class Habitability
         return Mathf.Clamp(positional * species.Affinity(type), 0f, 100f);
     }
 
-    /// The same rating, with the world's AIR PRESSURE taken into account.
-    ///
-    /// A body-aware overload rather than a new parameter on the one above, because several callers
-    /// (the orbit sandbox, which is asking "what if this world were HERE") legitimately have a distance
-    /// but no world to read atmosphere off.
-    ///
-    /// Applied as a multiplier on the finished score, and floored rather than allowed to reach zero: a
-    /// world with the wrong pressure is a bad world, not a nonexistent one — you can still put a domed
-    /// city on it, which is exactly what the spec says happens past 4 atmospheres for Terrans. Driving
-    /// it to 0 would also hide worlds from the AI's target list entirely, which is a bigger change than
-    /// this is meant to be.
+    // ============================================================================================
+    // THE RATING IS THE WORLD AS IT IS, NOT WHERE IT ORBITS
+    //
+    // "A nearly 500 °C planet with no atmosphere has a higher habitability rating (13%) than a Terran
+    // rocky world at around 40 °C with tons of biosphere and a full atmosphere (6%)."
+    //
+    // That was this function. It scored POSITION — how near the centre of the species' orbital band a
+    // world sat — times a per-type preference, and the only physical fact it consulted was air pressure.
+    // Temperature, water and life were never read. So a volcanic furnace parked mid-band outscored a
+    // living world whose orbit and climate disagreed (the sandbox, an orbit migration, a re-rolled star),
+    // and nothing on screen could explain why.
+    //
+    // It now scores what a colonist would actually stand in:
+    //
+    //   TEMPERATURE   how close the world's average °C is to this species' ideal, on a smooth falloff
+    //                 whose width is the species' tolerance — and wider for species whose ideal is far
+    //                 from temperate, since a furnace-dweller's comfort is not measured in single degrees.
+    //   AIR           the species' own breathable band (AtmosphereSuitability), as before.
+    //   WATER         liquid water, for species that need it (TerraformDiagnosis.NeedsWater).
+    //   LIFE          a living biosphere, for species that farm one (TerraformDiagnosis.NeedsBiosphere).
+    //   GRAVITY       too light to hold a body comfortably, or crushing.
+    //   KIND          the species' preference for this type of world — kept, but as a modest weight
+    //                 rather than the multiplier that decided everything.
+    //
+    // Multiplied, because each is a real veto: a perfect climate under no air is not a home. Floored per
+    // term rather than zeroed, so a hard world is a bad world (domes, suits) rather than a nonexistent one
+    // — the AI's target list and the colony objectives still see it.
+    // ============================================================================================
     public static float Rate(StarData star, Species species, CelestialBody b)
     {
-        if (b == null) return 0f;
-        float baseScore = Rate(star, species, b.type, b.distanceFromStar);
-        if (species == null) return baseScore;
+        if (b == null || species == null) return 0f;
 
-        // Gas giants have no surface to stand on, so surface pressure is not the relevant objection —
-        // NoSurface already handles them, and scoring them on air as well would double-count it.
-        if (b.type == CelestialBodyType.GasGiant) return baseScore;
+        // No surface to stand on: a gas giant is a place for stations, not colonists.
+        if (b.type == CelestialBodyType.GasGiant) return GasGiantRating;
+        // No starlight. A black hole's worlds carry ordinary-looking climate numbers (the reference
+        // distance floors to a dim dwarf's), but nothing there is lit or warmed by anything.
+        var host = star != null ? star : b.hostStar;
+        if (host != null && host.isBlackHole) return GasGiantRating;
 
-        float fit = species.AtmosphereSuitability(b.atmospheres);
-        return baseScore * Mathf.Lerp(0.35f, 1f, fit);
+        float c = PlanetTemperature.BodyAverageCelsius(b);
+        float ideal = IdealCelsius(species);
+        float off = Mathf.Abs(c - ideal) / TemperatureWidth(species, ideal);
+        float temp = Mathf.Exp(-0.7f * off * off);
+
+        float air = Mathf.Lerp(0.25f, 1f, species.AtmosphereSuitability(b.atmospheres));
+
+        // WATER AND LIFE ONLY FOR LIQUID-WATER LIFE. A Cryithn's ideal is -54 °C and a Pyrothian's 360 °C;
+        // neither world can hold liquid water or a biosphere, so asking those species for them would cap
+        // their best possible home at a third of the scale. The test is the species' own cradle: if it is
+        // not a living world, they are not that kind of life.
+        bool waterLife = GalaxyGenerator.CradleWantsLife(species);
+        float water = 1f;
+        if (waterLife && TerraformDiagnosis.NeedsWater(species) && !BiosphereRules.HasLiquidWater(b)) water = 0.45f;
+
+        float life = 1f;
+        if (waterLife && TerraformDiagnosis.NeedsBiosphere(species) && !b.biosphereActive) life = 0.65f;
+
+        // GRAVITY AGAINST THE SPECIES' OWN HOME. Pyrothians come from a 3.5-Earth world; their cradle
+        // must not read as crushing to them because it would crush a Terran.
+        float home = Mathf.Max(0.2f, species.cradleMass);
+        float gravity = 1f;
+        if (b.mass < home * LightFraction)
+            gravity = Mathf.Lerp(0.55f, 1f, Mathf.Clamp01(b.mass / (home * LightFraction)));
+        else if (b.mass > home * HeavyFraction)
+            gravity = Mathf.Lerp(1f, 0.7f, Mathf.Clamp01((b.mass - home * HeavyFraction) / (home * 1.5f)));
+
+        float kind = Mathf.Lerp(0.6f, 1f, Mathf.Clamp01(species.Affinity(b.type)));
+
+        return Mathf.Clamp(100f * temp * air * water * life * gravity * kind, 0f, 100f);
     }
+
+    /// A gas giant's rating: never zero (it can host orbital habitats), never a colony target.
+    const float GasGiantRating = 2f;
+
+    /// Gravity starts to cost a colony below this fraction of its species' home mass, and above this one.
+    const float LightFraction = 0.6f, HeavyFraction = 1.8f;
+
+    /// The temperature this species is most at home in, in °C. Life-bearing species share the cradle's
+    /// own target (so a terraformed world and a homeworld agree on "ideal"); the furnace- and ice-world
+    /// species map their preference across a far wider range, because they are not liquid-water life.
+    public static float IdealCelsius(Species species)
+    {
+        if (species == null) return 20f;
+        if (GalaxyGenerator.CradleWantsLife(species)) return GalaxyGenerator.CradleTargetCelsius(species);
+        return Mathf.Lerp(-150f, 450f, Mathf.Clamp01(species.idealTemp));
+    }
+
+    /// How many °C off its ideal a species can be before the rating falls hard. Tolerance widens it, and
+    /// so does an ideal far from temperate.
+    static float TemperatureWidth(Species species, float ideal)
+        => 15f * Mathf.Clamp(species.tolerance, 0.6f, 1.6f) + Mathf.Abs(ideal - 20f) * 0.25f;
 
     // How feasible it is to TERRAFORM a body to livability for a species (0..100), separate from its
     // current habitability. A world can be uninhabitable now yet very terraformable: what matters is

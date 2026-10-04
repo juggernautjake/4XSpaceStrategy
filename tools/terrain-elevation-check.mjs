@@ -64,7 +64,15 @@ const SHORE = 0.36;
 // assumed: if SeaShift(0.5) stops being 0 these numbers all move and the test must be told.
 const SEA = 0;
 
-const mountainHeight = sea => SHORE + sea + ALPINE;
+// PlanetTerrainGenerator.SeaShift, ported, so the water-level probe below can reach dry worlds.
+const seaShift = w => {
+  w = Math.min(1, Math.max(0, w));
+  if (w < 0.08) return -1.1 + ((0.08 - 0.5) - -1.1) * (w / 0.08);
+  if (w > 0.92) return (0.92 - 0.5) + (1.6 - (0.92 - 0.5)) * ((w - 0.92) / 0.08);
+  return w - 0.5;
+};
+// MountainHeight: measured from the DATUM (max with the 0.40 dry datum), not the waterline.
+const mountainHeight = sea => SHORE + Math.max(sea, seaShift(0.40)) + ALPINE;
 const metres = (h, sea) => (h - (SHORE + sea)) * MPU;
 const contourBand = (h, sea) => Math.floor(metres(h, sea) / INTERVAL);
 
@@ -108,6 +116,7 @@ function airless(elev, sea, temp, ridge) {
   if (ridge > 0.72) return 'CrystalField';
   if (ridge > 0.55) return 'MetallicCrust';
   if (elev < 0.4 + sea) return temp < 0.22 ? 'Ice' : 'CrackedGround';
+  if (ridge < 0.30) return 'Regolith';
   return 'Barren';
 }
 
@@ -332,5 +341,26 @@ check(seamDrawn > 0 && seamTexels > 0,
   `contours cross the longitude seam rather than stopping at it (${seamDrawn} rows)`);
 check(drawn.size / (TW * TH) < 0.15,
   `the contours are a hairline over the terrain, not a mesh (${(100 * drawn.size / (TW * TH)).toFixed(1)}%)`);
+
+// ---- PROBE: dry worlds are not mountain ranges -------------------------------------------------
+//
+// "Stop covering planets with Mountain grid types." The alpine ceiling used to add the SEA shift, and a
+// dry world's sea is parked under its deepest basin — so the ceiling sank under the ground and every
+// tile of an airless moon or a dry inner world was Mountains. Ground on such a body sits at 0.5 +/- a few
+// hundredths (terrain-relief-check measures it); none of that may be mountain at any water level.
+for (const w of [0.0, 0.02, 0.05, 0.08, 0.15, 0.30]) {
+  const sea = seaShift(w);
+  let mtn = 0, n = 0;
+  for (let h = 0.40; h <= 0.62; h += 0.005)
+    for (const r of [0.1, 0.3, 0.5]) {
+      n++;
+      if (airless(h, sea, 0.5, r) === 'Mountains' || barren(h, sea, 0.5, r) === 'Mountains') mtn++;
+    }
+  check(mtn === 0, `water ${w.toFixed(2)}: ordinary dry ground is not mountain (${mtn}/${n})`);
+}
+check(airless(1.0, seaShift(0), 0.5, 0.1) === 'Mountains',
+  'a genuine peak on a dry world is still mountain');
+check(airless(0.5, seaShift(0), 0.5, 0.1) === 'Regolith' && airless(0.5, seaShift(0), 0.5, 0.45) === 'Barren',
+  'smooth airless ground is regolith, broken ground is bare rock');
 
 process.exit(bad ? 1 : 0);

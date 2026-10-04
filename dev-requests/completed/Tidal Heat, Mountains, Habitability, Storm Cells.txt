@@ -1,0 +1,12 @@
+Tidally Locked worlds should have their sunny side be hot and the opposite side of the world should be much colder than normal since it never receives sunlight to warm it.
+Stop Covering planets with Mountain Grid types. Mountains should indicate a drastic rise in elevation compared to surrounding terrain grids. It should not make up 100% of the surface of a world or moon or asteroid.
+Some Worlds are almost all Mountain but have some salt flats or some other small biome, It's fine if we want to have a gray Rocky Barren tile type or maybe even have a lighter gray Regolith dusty barren tile type but please stop putting mountains everywhere.
+
+Habitability seems to be broken, where a nearly 500 C planet with no atmosphere has a higher habitability rating of 13% than a terran rocky world with a moderate temperature of around 40 C and tons of biosphere AND has a full atmosphere only having 6%.
+The habitable zone needs to be in the range where planets can be hot enough for ice to exist as water and if it is too cold that all water becomes ice, that is outside of the habitable zone.
+somehow this zone keeps changing. It should be pretty consistent based on the Star itself. if there are multiple stars use the hottest one for a reference.
+
+Raptok — 12:00 AM
+Gas Giant 'Storm Cells'  need to look like they are just wider, more rounded section of the Storm belt that it generates in. the edges of the storm cell look pinched off on either side and the top and bottom curve of the storm cell looks far too clean of a curve. it looks like the top and bottom edges were supposed to be rougher but that there was a very smooth slice taken out of them and it has a very stretched football shape. Look at Images of Jupiter's Red Spot if you need reference images for what storm cells should look like.
+Current Gas Giant storm cells
+[screenshot attached in the Claude Code session: a pointed lens-shaped storm inside a thin, smooth pale ring]

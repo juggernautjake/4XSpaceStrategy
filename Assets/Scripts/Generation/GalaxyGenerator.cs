@@ -51,9 +51,9 @@ public static class GalaxyGenerator
     // Almost always a single sun; occasionally a binary, rarely a trinary — same low rate shape as an
     // ordinary system's cluster roll (RollStarSystem/RollClusterStarType), but every home sun stays a
     // pleasant G or K. That restriction is what keeps the difficulty's habitability guarantee (below,
-    // ForceHomeWorld) holding for 2 or 3 suns exactly as it does for 1: StarDatabase.Combine's summed
-    // luminosity for up to three G/K stars (max ~3x a single G) never approaches the O/B range where
-    // hasHabitableZone would be a lie, so the cradle never needs to be capped back down to binary.
+    // ForceHomeWorld) holding for 2 or 3 suns exactly as it does for 1: StarDatabase.Combine takes the
+    // zone from the HOTTEST sun, and a G or K primary always has one, so the cradle never needs to be
+    // capped back down to binary.
     //
     // THE PRIMARY IS G FOR TERRANS, ALWAYS. "Terran Home Star should be a G type, same as our Sol in
     // real life" — and that is the same reasoning as the mass-1 cradle a few dozen lines down. The
@@ -266,7 +266,8 @@ public static class GalaxyGenerator
         LinkBodies(home);
 
         if (home.bodies.Count == 0) home.bodies.Add(new CelestialBody(CelestialBodyType.RockyPlanet));
-        Habitability.GetZone(home.combinedStar, species, out float inner, out float outer);
+        // The overlap of the species' band and the star's drawn one — see Habitability.PlacementZone.
+        Habitability.PlacementZone(home.combinedStar, species, out float inner, out float outer);
         float center = (inner + outer) * 0.5f;
 
         // Promote the planet ALREADY nearest the habitable zone, and convert it where it stands.

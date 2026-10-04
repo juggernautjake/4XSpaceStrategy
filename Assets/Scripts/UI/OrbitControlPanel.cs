@@ -180,9 +180,14 @@ public class OrbitControlPanel : MonoBehaviour
         {
             var star = GameManager.Instance != null ? GameManager.Instance.CurrentStar : null;
             var species = SpeciesManager.Current;
+            float was = current.distanceFromStar;
             current.distanceFromStar = v;
-            current.isHabitable = Habitability.InZone(star, species, v);
-            current.habitability = Habitability.Rate(star, species, current.type, v);
+            // A world moved is a world warmed or cooled: shift its starlight by what the move changed.
+            InsolationRules.ApplyOrbitalHeat(current, star, was);
+            current.isHabitable = Habitability.IsHabitable(star, species, current.type, v);
+            // The world as it is, not a what-if at this distance — and a locked rating (the home world's
+            // difficulty setting) stays locked, which the old distance-only call ignored.
+            if (!current.habitabilityLocked) current.habitability = Habitability.Rate(star, species, current);
             if (SystemContext.Zone != null && SystemContext.Zone.IsVisible)
                 SystemContext.Zone.SetVisible(true); // refresh green highlights
         }

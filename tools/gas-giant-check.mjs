@@ -37,13 +37,10 @@ function num(src, re, what) {
 }
 
 const MAX_SPOTS = num(STORMS, 'MaxSpots = ([0-9]+)', 'MaxSpots');
-const FLOW_HALO = num(STORMS, 'FlowHalo = ([0-9.]+)f', 'FlowHalo');
 const BANDS     = num(STORMS, 'BandCycles = ([0-9.]+)f', 'BandCycles');
-const HOLLOW    = num(STORMS, 'Hollow = ([0-9.]+)f', 'Hollow');
-const LENS      = num(STORMS, 'LensPower = ([0-9.]+)f', 'LensPower');
-const SQUEEZE   = num(STORMS, 'FlankSqueeze = ([0-9.]+)f', 'FlankSqueeze');
 const SKEW_MAX  = num(STORMS, 'SkewMax = ([0-9.]+)f', 'SkewMax');
-const WAKE      = num(STORMS, 'WakeStretch = ([0-9.]+)f', 'WakeStretch');
+const REACH     = num(STORMS, 'FlowReach = ([0-9.]+)f', 'FlowReach');
+const MOIST_JITTER = num(STORMS, 'MoistJitter = ([0-9.]+)f', 'MoistJitter');
 // Spot size is quoted as a MULTIPLE OF BAND HEIGHT now, not in absolute surface units.
 const RV_BAND   = (() => {
   const m = /bandHeight \* Mathf\.Lerp\(([\d.]+)f, ([\d.]+)f, Next\(\)\)/.exec(STORMS);
@@ -51,12 +48,6 @@ const RV_BAND   = (() => {
   return [parseFloat(m[1]), parseFloat(m[2])];
 })();
 const RV_LO = RV_BAND[0], RV_HI = RV_BAND[1];
-const MOIST_JITTER = (() => {
-  const g = fs.readFileSync(path.join(PROJ, 'Assets/Scripts/Generation/PlanetTerrainGenerator.cs'), 'utf8');
-  const m = /moist \* ([\d.]+)f\) \* GasGiantStorms\.BandCycles/.exec(g);
-  if (!m) { console.error('FAIL  could not read the gas giant moisture jitter'); process.exit(1); }
-  return parseFloat(m[1]);
-})();
 const ASPECT = (() => {
   const m = /float aspect = Mathf\.Lerp\(([\d.]+)f, ([\d.]+)f, Next\(\)\)/.exec(STORMS);
   if (!m) { console.error('FAIL  could not read the spot aspect range'); process.exit(1); }
@@ -99,6 +90,7 @@ function variantOf(r) {
 }
 
 // ---- GasGiantStorms.Build, ported ---------------------------------------------------------------
+const HB = 0.25 / BANDS * 0.5;   // GasGiantStorms.BeltHalfHeight
 function spotsFor(id, seed) {
   let n = ((id * 73856093) ^ Math.round(seed * 131)) >>> 0;
   const next = () => {
@@ -111,50 +103,59 @@ function spotsFor(id, seed) {
   const roll = next();
   const count = roll < 0.15 ? 0 : roll < 0.55 ? 1 : roll < 0.85 ? 2 : 3;
   const spots = [];
+  const belts = Math.floor(BANDS - 0.75) + 1;
   for (let i = 0; i < count && i < MAX_SPOTS; i++) {
-    const band = Math.floor(next() * BANDS);
-    const lat = Math.min(1, Math.max(0, (band + 0.75) / BANDS));
+    const band = Math.min(belts - 1, Math.floor(next() * belts));
+    const lat = Math.min(1, Math.max(0, (band + 0.75) / BANDS - 0.5 * MOIST_JITTER));
     const north = next() < 0.5;
-    const v = north ? 0.5 + lat * 0.5 : 0.5 - lat * 0.5;
-    const rv = RV_MIN + (RV_MAX - RV_MIN) * next();
+    let v = north ? 0.5 + lat * 0.5 : 0.5 - lat * 0.5;
+    let rv = RV_MIN + (RV_MAX - RV_MIN) * next();
     const aspect = ASPECT_LO + (ASPECT_HI - ASPECT_LO) * next();
-    // Field order matches the C# object initialiser: u, v, rv, skew, ru — the RNG stream is shared.
-    const u = next(), vv = Math.min(0.94, Math.max(0.06, v));
+    // Draw order matches the C#: u, then skew — the RNG stream is shared.
+    const u = next();
     const skew = (next() * 2 - 1) * SKEW_MAX;
-    spots.push({ u, v: vv, rv, skew, ru: Math.min(rv * aspect, RU_CAP) });
+    v = Math.min(0.94, Math.max(0.06, v));
+    rv = Math.min(rv, Math.abs(v - 0.5) - HB * 0.5, v - 0.03, 0.97 - v);
+    rv = Math.max(rv, HB * 1.3);
+    // No two storms in one place: an overlapping newcomer moves to the far side of the world.
+    const ru = Math.min(rv * aspect, RU_CAP);
+    const overlaps = uu => spots.some(o => {
+      let gap = Math.abs(uu - o.u); if (gap > 0.5) gap = 1 - gap;
+      return Math.abs(v - o.v) < rv + o.rv && gap < ru + o.ru;
+    });
+    let su = u;
+    for (let attempt = 0; attempt < 3 && overlaps(su); attempt++) su = (su + 1 / 3) % 1;
+    spots.push({ u: su, v, rv, skew, ru: Math.min(rv * aspect, RU_CAP) });
   }
   return spots;
 }
 
-// GasGiantStorms.Distance, ported: a leaning lens with a squeezed poleward flank.
-const dist = (s, u, v) => {
+// GasGiantStorms.Swell, ported: how far to move the sampled latitude so the belt swells into the storm.
+function swell(s, u, v) {
   let du = u - s.u;
   if (du > 0.5) du -= 1; else if (du < -0.5) du += 1;
   const a = du / Math.max(1e-4, s.ru);
-  let c = (v - s.v) / Math.max(1e-4, s.rv) - a * s.skew;
-  const side = c < 0 ? -1 : 1;
-  const poleward = s.v >= 0.5 ? c > 0 : c < 0;
-  if (poleward) c /= SQUEEZE;
-  const aa = Math.abs(a), ac = Math.abs(c);
-  const r = Math.sqrt(a * a + c * c);
-  const along = r > 1e-4 ? aa / r : 0;
-  const profile = Math.pow(Math.max(0, 1 - aa * aa), LENS);
-  return { d: Math.max(r, profile > 1e-4 ? ac / profile : (ac > 1e-4 ? 99 : r)), along, side, ell: r };
-};
+  if (a <= -1 || a >= 1) return 0;
+  const hO = s.rv * Math.sqrt(1 - a * a);
+  const extra = hO - HB;
+  if (extra <= 0) return 0;
+  const centre = s.v + s.skew * s.rv * a;
+  const dv = v - centre, adv = Math.abs(dv), side = dv < 0 ? -1 : 1;
+  let target;
+  if (adv <= hO) { const q = adv / hO; target = HB * q * q; }
+  else {
+    const reach = extra * REACH;
+    if (adv >= hO + reach) return 0;
+    const t = 1 - (adv - hO) / reach;
+    target = adv - extra * t * t * (3 - 2 * t);
+  }
+  return centre + side * target - v;
+}
 
 // ---- PlanetTerrainGenerator.GasGiant, ported ----------------------------------------------------
 function classify(spots, u, v, moist) {
   let bend = 0;
-  for (const s of spots) {
-    const { d, along, side, ell } = dist(s, u, v);
-    if (d <= 1) return 'Storm';
-    const hollow = HOLLOW * (1 - 0.65 * along * along);
-    if (d <= 1 + hollow) return 'GasClouds';
-    const halo = FLOW_HALO * (1 + (WAKE - 1) * along * along);
-    if (ell >= 1 + halo) continue;
-    const t = Math.min(1, Math.max(0, 1 - (ell - 1) / halo));
-    bend += side * t * t * s.rv * 1.35 * (1 - 0.5 * along * along);
-  }
+  for (const s of spots) bend += swell(s, u, v);
   const lat = Math.abs((v + bend) - 0.5) * 2;
   const band = ((lat + moist * MOIST_JITTER) * BANDS) % 1;
   return band < 0.5 ? 'GasClouds' : 'Storm';
@@ -232,7 +233,7 @@ fs.mkdirSync(path.dirname(OUT), { recursive: true });
 await sharp(img, { raw: { width: W, height: H, channels: 3 } }).png().toFile(OUT);
 
 // ---- the report ----------------------------------------------------------------------------------
-console.log(`bands ${BANDS}  halo ${FLOW_HALO}  spot rv ${RV_MIN}..${RV_MAX}  max ${MAX_SPOTS}`);
+console.log(`bands ${BANDS}  flow reach ${REACH}  spot rv ${RV_MIN}..${RV_MAX}  max ${MAX_SPOTS}`);
 console.log('\npanels (left to right, top to bottom):');
 idx = 0;
 for (const p of picked.slice(0, COLS * ROWS)) {
@@ -255,6 +256,26 @@ console.log('variants:  ' + Object.entries(vcount).map(([k, c]) => `${k} ${(100 
 
 let bad = 0;
 const check = (ok, msg) => { console.log(`${ok ? 'ok   ' : 'FAIL '} ${msg}`); if (!ok) bad++; };
+let centreStorm = 0, centres = 0, tall = 0;
+for (let i = 0; i < 2000; i++) {
+  for (const s of spotsFor(i, (i * 91.7) % 10000)) {
+    centres++;
+    if (classify([s], s.u, s.v, 0.5) === 'Storm') centreStorm++;
+    if (s.rv > HB * 1.2) tall++;
+  }
+}
+check(centreStorm === centres, `every storm's centre is storm (${centreStorm}/${centres})`);
+check(tall === centres, `every storm swells taller than its belt (${tall}/${centres})`);
+// Solid hearts: across the whole moisture range, the inner half of every storm reads as storm.
+let holes = 0, probes = 0;
+for (let i = 0; i < 400; i++)
+  for (const s of spotsFor(i, (i * 91.7) % 10000))
+    for (const m of [0.3, 0.4, 0.5, 0.6, 0.7])   // the noise's working range; at 0 or 1 even a plain belt vanishes
+      for (const f of [-0.5, -0.25, 0, 0.25, 0.5]) {
+        probes++;
+        if (classify([s], s.u, s.v + s.skew * 0 + f * s.rv, m) !== 'Storm') holes++;
+      }
+check(holes === 0, `no pale holes in a storm's heart across the moisture field's range (${holes}/${probes})`);
 const violet = 100 * (vcount.Violet || 0) / N;
 check(violet <= 2.0, `violet giants are much rarer than before (${violet.toFixed(1)}%, was 5%)`);
 check(counts[0] / N > 0.08 && counts[0] / N < 0.25, `some giants have no great spot (${(100 * counts[0] / N).toFixed(0)}%)`);

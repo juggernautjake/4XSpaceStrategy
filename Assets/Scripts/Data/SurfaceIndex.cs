@@ -554,6 +554,7 @@ public static class SurfaceIndex
             // Hot springs deposit their load at the surface: sulphur, cinnabar, metal salts.
             case TerrainType.GeyserField: case TerrainType.CrackedGround: return 0.4f;
             case TerrainType.Barren: case TerrainType.Wasteland: return 0.35f;
+            case TerrainType.Regolith: return 0.28f;            // loose dust over the rock
             case TerrainType.AshWaste: return 0.3f;
             case TerrainType.Island: return 0.25f;              // volcanic in origin
 
@@ -748,6 +749,7 @@ public static class SurfaceIndex
             case TerrainType.Desert: case TerrainType.Dunes: case TerrainType.SaltFlat: return 0.05f;
             case TerrainType.Crater: case TerrainType.CrackedGround: return 0.05f;
             case TerrainType.Badlands: case TerrainType.Wasteland: case TerrainType.Barren: return 0.04f;
+            case TerrainType.Regolith: return 0.03f;
             case TerrainType.LavaRock: case TerrainType.ObsidianFlat: return 0.02f;
             case TerrainType.CrystalField: case TerrainType.MetallicCrust: return 0.02f;
             case TerrainType.Ice: case TerrainType.Glacier: return 0.01f;
@@ -984,7 +986,8 @@ public static class SurfaceIndex
             case TerrainType.Savanna: case TerrainType.Steppe: return 0.15f;
             case TerrainType.AshWaste: case TerrainType.MagmaField: return 0.15f;
             case TerrainType.Desert: case TerrainType.Dunes: case TerrainType.SaltFlat:
-            case TerrainType.Badlands: case TerrainType.Wasteland: case TerrainType.Barren: return 0.1f;
+            case TerrainType.Badlands: case TerrainType.Wasteland: case TerrainType.Barren:
+            case TerrainType.Regolith: return 0.1f;
             case TerrainType.Tundra: case TerrainType.Snow: case TerrainType.Glacier:
             case TerrainType.Ice: case TerrainType.ObsidianFlat: return 0.1f;
 

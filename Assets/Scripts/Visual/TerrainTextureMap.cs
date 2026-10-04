@@ -73,6 +73,9 @@ public static class TerrainTextureMap
             case TerrainType.Desert:        return "desert";
             case TerrainType.Ocean:         return "ocean";
             case TerrainType.Barren:        return "barren";
+            // The desert grain is a fine, even speckle — dust, which is what regolith is. Reused rather
+            // than new art, because biome art needs Read/Write import settings a fresh file would not have.
+            case TerrainType.Regolith:      return "desert";
             case TerrainType.Grassland:     return "grass";
             case TerrainType.Jungle:        return "jungle";
             case TerrainType.Swamp:         return "swamp";

@@ -19,6 +19,7 @@ public static class OreGenerator
             case TerrainType.ObsidianFlat:  return 0.15f;
             case TerrainType.LavaRock:      return 0.15f;
             case TerrainType.Crater:        return 0.14f;
+            case TerrainType.Regolith:      return 0.04f;  // dust over rock: a little, near the surface
             case TerrainType.Badlands:      return 0.12f;
             case TerrainType.Highlands:     return 0.10f;
             case TerrainType.Glacier:       return 0.09f;

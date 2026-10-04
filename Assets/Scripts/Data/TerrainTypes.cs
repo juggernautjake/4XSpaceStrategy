@@ -53,5 +53,9 @@ public enum TerrainType
     CrystalField,
     MetallicCrust,
     GasClouds,
-    Storm
+    Storm,
+
+    // --- Appended, never inserted: saves store terrain as its number ---
+    // Fine grey dust over smooth airless ground.
+    Regolith
 }

@@ -874,8 +874,24 @@ public static class PlanetTerrainGenerator
         const float LatWeight = 0.75f;
         const float NoiseWeight = 0.45f;
         float band = ((1f - lat) * LatWeight + heatNoise * NoiseWeight) / (LatWeight + NoiseWeight);
+        // A tidally locked world's hot face and frozen face (PlanetTemperature.TidalOffsetC), applied to
+        // the classifier's temperature here and to the °C figure below, so the biomes and the readout
+        // agree. Zero on every world that turns.
+        float tidalC = PlanetTemperature.TidalOffsetC(body, u, v);
+        // THE NIGHT SIDE ONLY FREEZES IF IT GETS COLD. On a furnace world a 170 °C drop still leaves the
+        // night at 130 °C, and pulling the classifier's temperature to zero there drew snow on ground the
+        // readout calls boiling. So the cooling is scaled by how cold the night actually ends up (from the
+        // world's own starlight temperature): full by -40 °C, nothing while it stays above 40 °C.
+        if (tidalC < 0f)
+        {
+            float worldC = 288.15f * Mathf.Sqrt(Mathf.Max(0.01f, p.heat)) - 273.15f;
+            tidalC *= Mathf.Clamp01((40f - (worldC + tidalC)) / 80f);
+        }
         // Symmetric in altitude, matching the °C reading below — high ground colder, low ground warmer.
-        band = Mathf.Clamp01(band - altDelta * 0.55f);
+        band = Mathf.Clamp01(band - altDelta * 0.55f + tidalC * TidalBandPerC);
+        // The °C figure takes the FULL offset: the scaling above is about which biome a warm night is,
+        // not about how warm it is.
+        float tidalFullC = PlanetTemperature.TidalOffsetC(body, u, v);
 
         // heat > 1 -> exponent < 1 -> curve bends up (warmer); heat < 1 -> exponent > 1 -> cooler.
         float heatExp = Mathf.Clamp(1f / Mathf.Max(0.05f, p.heat), 0.2f, 5f);
@@ -940,7 +956,8 @@ public static class PlanetTerrainGenerator
         // plus the standard ±15°C equator→pole swing and a small local-weather wobble from the heat noise.
         float baseC = PlanetTemperature.BaseCelsius(p.heat, body.atmosphereThickness, classifyType,
                                                     GeothermalMap.WorldIntensity(body));
-        float tileC = baseC + Mathf.Lerp(15f, -15f, lat) + (heatNoise - 0.5f) * 12f - altDelta * AltitudeLapseC;
+        float tileC = baseC + Mathf.Lerp(15f, -15f, lat) + (heatNoise - 0.5f) * 12f - altDelta * AltitudeLapseC
+                    + tidalFullC;
 
         // THE LIQUID-WATER WINDOW IS THIS WORLD'S OWN, and it depends on its air: at one atmosphere water
         // runs 1°C to 100°C, at four it runs 0°C to 144°C (BiosphereRules). Passing both ends in rather
@@ -1169,8 +1186,28 @@ public static class PlanetTerrainGenerator
     /// How far above the waterline ground stops being any kind of ground and is simply mountain.
     public const float AlpineAbove = 0.52f;
 
+    /// How far the classifier's 0..1 temperature moves per °C of tidal offset. The whole equator-to-pole
+    /// swing is ±15 °C in the readout but most of the 0..1 range here, so this is deliberately gentler
+    /// than that ratio: 160 °C of night cold is a full step from temperate to frozen, not past it.
+    const float TidalBandPerC = 1f / 160f;
+
     /// That height in raw landHeight units, for a classifier holding this world's sea shift.
-    static float MountainHeight(float sea) => 0.36f + sea + AlpineAbove;
+    ///
+    /// MEASURED FROM THE DATUM, NOT THE WATERLINE. "Stop covering planets with Mountain grid types...
+    /// some worlds are almost all mountain but have some salt flats." That was this line. It added the
+    /// SEA shift, and on a dry world the sea is deliberately parked far below the deepest basin
+    /// (SeaShiftDry, so "no water" really means none) — which dragged the alpine ceiling down with it, to
+    /// UNDER the ground. At a water level near zero the ceiling sat at -0.22 against ground around 0.5,
+    /// so every tile on an airless moon, an asteroid or a dry inner world was "alpine" and only the
+    /// basins the earlier tests caught (salt flats, craters) survived. The elevation READOUT was moved
+    /// onto DatumShift for exactly this reason long ago; the classifier never was, so the map drew
+    /// mountains over ground the hover panel was calling plains.
+    ///
+    /// Max with the dry datum is DatumShift itself (SeaShift only rises with water), so a world with a
+    /// real sea is unchanged and a dry one measures its peaks from where its zero metres actually is.
+    /// It also fixes the ground UNDER water and ice, which is classified with SeaShiftDry and so came out
+    /// as mountain on every world — the "Ocean over Mountains" readout.
+    static float MountainHeight(float sea) => 0.36f + Mathf.Max(sea, SeaShift(DryDatumWaterLevel)) + AlpineAbove;
 
     /// The band for a body's tile, from its own water level. The form nearly every caller wants.
     public static string ElevationBand(CelestialBody b, float landHeight)
@@ -1540,43 +1577,11 @@ public static class PlanetTerrainGenerator
     {
         int n = GasGiantStorms.Spots(body, out var spots);
 
+        // THE BELT SWELLS INTO EACH STORM. A storm is not drawn as a shape here: the latitude the band test
+        // reads is bent so the belt itself widens into a rounded oval and the lanes around it bow out of
+        // its way. See GasGiantStorms.Swell — and the old pointed-lens-in-a-pale-collar it replaced.
         float bend = 0f;
-        for (int i = 0; i < n; i++)
-        {
-            float d = GasGiantStorms.Distance(spots[i], u, v, out float along, out float side,
-                                              out float ell);
-
-            // Inside the storm. No band test at all — a great spot is one body of weather, not a
-            // striped one. The outline is a leaning lens now, not an ellipse — see GasGiantStorms.
-            if (d <= 1f) return TerrainType.Storm;
-
-            // THE PALE HOLLOW. A collar of cloud punched out of the belt around the storm.
-            //
-            // Without it a spot was a dark ellipse in the middle of a dark band and could not be seen
-            // at all — which is what the contact sheet showed, and what no amount of reading this
-            // function would have revealed. Jupiter has exactly this: the Great Red Spot sits in a
-            // bright hollow in the South Equatorial Belt.
-            //
-            // FULL ON THE FLANKS, PINCHED AT THE TIPS. A collar of even width is the outline of a
-            // sticker. The pale cloud is the belt being pushed aside, and it is pushed aside where the
-            // storm is broad, not where it comes to a point — so the hollow is Hollow wide across the
-            // storm and a third of that at its ends, where the belt runs straight back in.
-            float hollow = GasGiantStorms.Hollow * (1f - 0.65f * along * along);
-            if (d <= 1f + hollow) return TerrainType.GasClouds;
-
-            // THE WAKE. The deflection reaches WakeStretch times further along the flow than across it,
-            // so the lanes bow round the flanks and only close up again a spot's length past the tips.
-            // Measured in the ELLIPSE metric, not the lens one, so the wake carries on past the tips.
-            float halo = GasGiantStorms.FlowHalo * (1f + (GasGiantStorms.WakeStretch - 1f) * along * along);
-            if (ell >= 1f + halo) continue;
-
-            // Push the sampling latitude AWAY from the spot's outline, hardest at the storm's edge and
-            // fading to nothing at the halo's rim. Squared so the falloff is smooth where it meets
-            // undisturbed deck — a linear one leaves a visible ring. Eased off toward the tips, where
-            // the lanes are rejoining rather than being parted.
-            float t = Mathf.Clamp01(1f - (ell - 1f) / halo);
-            bend += side * t * t * spots[i].rv * 1.35f * (1f - 0.5f * along * along);
-        }
+        for (int i = 0; i < n; i++) bend += GasGiantStorms.Swell(spots[i], u, v);
 
         // Latitude is derived HERE rather than taken as an argument, because `bend` has to move it and
         // the caller's `lat` was computed before any of this ran. Same formula as the caller's:
@@ -1587,7 +1592,7 @@ public static class PlanetTerrainGenerator
         // value it did not waver the edges, it PINCHED them shut, and the contact sheet came back with
         // lens-shaped 'eyes' scattered across worlds that have no storms at all — phantom spots, which
         // is worse than no texture, because it made the real ones stop reading as special.
-        float band = Mathf.Repeat((lat + moist * 0.15f) * GasGiantStorms.BandCycles, 1f);
+        float band = Mathf.Repeat((lat + moist * GasGiantStorms.MoistJitter) * GasGiantStorms.BandCycles, 1f);
         return band < 0.5f ? TerrainType.GasClouds : TerrainType.Storm;
     }
 
@@ -1816,8 +1821,17 @@ public static class PlanetTerrainGenerator
         // AtmosphereRules.ApplyWaterLoss deliberately spares frozen water for exactly this reason), so the
         // frozen band still moves with the world's water: more water, more ice in the low ground.
         if (elev < 0.4f + sea) return temp < 0.22f ? TerrainType.Ice : TerrainType.CrackedGround;
+        // REGOLITH on the smooth ground, bare rock where it is broken. With the mountain ceiling measured
+        // from the datum, most of an airless body now reaches this line — and one flat grey from pole to
+        // pole would be the mountain problem in a different colour. Airless ground that has not been
+        // shattered is buried in its own pulverised dust (the Moon's maria, an asteroid's surface), and
+        // the rock shows through where the crust is broken.
+        if (ridge < RegolithRidge) return TerrainType.Regolith;
         return TerrainType.Barren;
     }
+
+    /// Below this roughness an airless body's ground is dust rather than rock.
+    const float RegolithRidge = 0.30f;
 
     static TerrainType Terran(float elev, float sea, float moist, float temp, float ridge)
     {

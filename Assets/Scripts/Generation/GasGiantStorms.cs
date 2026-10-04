@@ -44,62 +44,55 @@ using UnityEngine;
 // ============================================================================================
 public static class GasGiantStorms
 {
-    /// A great spot: an ellipse on the (u, v) surface, wider than it is tall because the band it sits
-    /// in is.
+    /// A great spot: an oval on the (u, v) surface, wider than it is tall because the band it sits in is.
     public struct Spot
     {
         public float u, v;     // centre, in 0..1 surface coordinates
         public float ru, rv;   // radii, same units
-        /// How far the lens leans: its leading tip is shifted one way in latitude and its trailing tip
-        /// the other, by this fraction of rv per ru. Signed, so spots lean either way.
+        /// A slight lean: the centre line drifts by this fraction of rv per ru across the storm.
         public float skew;
     }
 
-    // ---- THE SHAPE OF A STORM ---------------------------------------------------------------------
+    // ---- THE SHAPE OF A STORM: THE BELT SWELLS --------------------------------------------------
     //
-    // "The top storm cell is more along the lines of how I want the storm cells to look in shape. The
-    // bands of storm should look as though they flow with it and around it."
+    // "Storm cells need to look like they are just wider, more rounded sections of the storm belt they
+    // generate in. The edges look pinched off on either side, the top and bottom curve is far too clean,
+    // as if a very smooth slice was taken out of them, and it has a very stretched football shape."
     //
-    // An ellipse cut into a band, with a ring of pale cloud round it, is a sticker: the band stops at
-    // the ring and starts again on the other side. A real spot is a LENS. It is pointed at the ends,
-    // because the jets on either side of it are shearing it into the flow; it is fuller on one flank
-    // than the other, because the two jets are not the same strength; and it leans, because the
-    // leading end is dragged ahead of the trailing one. Three numbers state that:
+    // All three complaints had one cause: the storm was a SHAPE CUT INTO the belt. A pointed lens
+    // (pinched tips, football outline) inside a ruled pale collar (the clean slice) is a sticker, however
+    // well it is drawn.
     //
-    //   LensPower     the outline is |c| <= (1 - a^2)^LensPower in the spot's own normalised
-    //                 coordinates. 0.5 would be the old ellipse; higher pulls the ends to points.
-    //   FlankSqueeze  the poleward flank is this fraction as tall as the equatorward one, so the spot
-    //                 sits against one edge of its belt rather than in the middle of it.
-    //   SkewMax       the most a spot may lean, per spot, either way.
+    // So a storm is no longer a shape at all. It is a DISTORTION OF THE BELT. Across a storm's width the
+    // latitude the band test reads is remapped so the belt's own half-height grows from its normal value
+    // to the storm's: everything inside the oval samples the belt, and the ground just outside it is
+    // pushed back onto the belt's edge and the pale zone beyond. Three things follow for free:
     //
-    // And the collar and the halo follow the lens: the pale hollow is full width on the flanks and
-    // pinches to nothing at the tips, and the deflection reaches further along the flow than across it
-    // — so the lanes crowd against the storm's flanks, stream past its points, and close up again a
-    // spot's length downstream. That is the "flows with it and around it".
-    public const float LensPower = 0.85f;
-    public const float FlankSqueeze = 0.70f;
-    public const float SkewMax = 0.30f;
-    /// How much further along the flow than across it the halo reaches, as a multiplier on FlowHalo.
-    public const float WakeStretch = 1.6f;
+    //   * The storm's edge IS the belt's edge, so it carries the same ragged moisture jitter every band
+    //     edge has — no clean curve anywhere.
+    //   * Where the oval is no taller than the belt there is no distortion, so the belt flows into the
+    //     storm through rounded shoulders rather than pinching to a point.
+    //   * The pale zones and the next belts bow around the swelling and close up again past it, which is
+    //     the "flows around it" the original request asked for.
+    //
+    // Proportioned like the Great Red Spot: about one and a half times as wide as it is tall.
+    public const float SkewMax = 0.10f;
+
+    /// How far beyond the storm's edge the lanes are still bowed, as a multiple of how much the storm
+    /// swells past the belt. Larger is a gentler, wider flow-around.
+    public const float FlowReach = 1.6f;
+
+    /// The band-edge jitter: the band test reads (lat + moisture * MoistJitter). PlanetTerrainGenerator
+    /// uses this same constant, and spots are snapped to where the jitter puts the belt on average.
+    public const float MoistJitter = 0.15f;
+
+    /// Half the height of a dark belt, in v (0..1 surface) units. A belt is half a band cycle tall in
+    /// latitude, and latitude is twice v.
+    public static float BeltHalfHeight => 0.25f / BandCycles * 0.5f;
 
     /// Three is the ceiling. Jupiter has one famous spot and a handful of white ovals; a giant covered
     /// in great spots has no great spot.
     public const int MaxSpots = 3;
-
-    /// How far outside a spot the cloud lanes are still bent, as a fraction of its own radius. The
-    /// bands do not stop dead at the edge of a storm — they crowd against it and stream past.
-    public const float FlowHalo = 0.55f;
-
-    /// The pale collar a great spot sits in, as a fraction of its own radius beyond the edge.
-    ///
-    /// ADDED AFTER LOOKING AT THE RENDER (tools/gas-giant-check.mjs). A spot is made of Storm tiles and
-    /// it is snapped into the middle of a Storm band — so on the first pass it was a dark ellipse inside
-    /// a dark belt, i.e. invisible. Twelve panels of contact sheet, and the ones with three spots were
-    /// indistinguishable from the ones with none.
-    ///
-    /// The fix is the thing Jupiter actually has: the Great Red Spot sits in a pale HOLLOW punched out
-    /// of the belt around it. One ring of cloud, and the storm reads instantly.
-    public const float Hollow = 0.30f;
 
     /// How many bands of cloud a gas giant is divided into. Must match the multiplier in
     /// PlanetTerrainGenerator.GasGiant — spots are snapped to THESE band centres, and if the two
@@ -169,8 +162,14 @@ public static class GasGiantStorms
             //
             // `lat` runs 0 at the equator to 1 at the pole and the surface is mirrored about the
             // equator, so the last step is choosing a hemisphere.
-            int band = Mathf.FloorToInt(Next() * BandCycles);
-            float lat = Mathf.Clamp01((band + 0.75f) / BandCycles);
+            //
+            // ONLY BELTS THAT ARE ON THE DISC. At 3.5 cycles a fourth "belt" would centre past the pole,
+            // and the old clamp parked those spots at the pole itself. And snapped to where the belt
+            // ACTUALLY is: the band test adds moisture * MoistJitter to latitude, which on average moves
+            // every belt equatorward by half that — enough, before, to sit spots on their belt's edge.
+            int belts = Mathf.FloorToInt(BandCycles - 0.75f) + 1;
+            int band = Mathf.Min(belts - 1, Mathf.FloorToInt(Next() * belts));
+            float lat = Mathf.Clamp01((band + 0.75f) / BandCycles - 0.5f * MoistJitter);
             bool north = Next() < 0.5f;
             float v = north ? 0.5f + lat * 0.5f : 0.5f - lat * 0.5f;
 
@@ -188,14 +187,32 @@ public static class GasGiantStorms
             // which is the proportion the Great Red Spot has against the South Equatorial Belt.
             float bandHeight = 1f / (2f * BandCycles);
             float rv = bandHeight * Mathf.Lerp(0.45f, 0.85f, Next());
-            float aspect = Mathf.Lerp(1.4f, 2.2f, Next());   // always wider than tall: the band is
+            float aspect = Mathf.Lerp(1.3f, 1.7f, Next());   // Great Red Spot proportions, not a football
+
+            float su = Next();
+            float sskew = (Next() * 2f - 1f) * SkewMax;
+            v = Mathf.Clamp(v, 0.06f, 0.94f);   // never so close to a pole that it wraps over it
+            // Never so tall that it reaches across the equator (latitude is mirrored there, so the far
+            // half would fold back on itself) or off a pole — and always taller than the belt, or there
+            // is no storm to see.
+            float hb = BeltHalfHeight;
+            rv = Mathf.Min(rv, Mathf.Abs(v - 0.5f) - hb * 0.5f, v - 0.03f, 0.97f - v);
+            rv = Mathf.Max(rv, hb * 1.3f);
+
+            // NO TWO STORMS IN ONE PLACE. Two spots in the same belt whose ovals overlap would stack their
+            // pulls and fold the bands into slivers. Move the newcomer round to the far side of the world —
+            // the draws are already made, so the stream every later spot reads is unchanged.
+            // Up to three tries a third of the way round each time, re-checking every earlier spot, so a
+            // newcomer moved off one storm cannot land on another.
+            for (int attempt = 0; attempt < 3 && Overlaps(i, su, v, rv, Mathf.Min(rv * aspect, 0.18f)); attempt++)
+                su = Mathf.Repeat(su + 1f / 3f, 1f);
 
             cachedSpots[i] = new Spot
             {
-                u = Next(),
-                v = Mathf.Clamp(v, 0.06f, 0.94f),   // never so close to a pole that it wraps over it
+                u = su,
+                v = v,
                 rv = rv,
-                skew = (Next() * 2f - 1f) * SkewMax,
+                skew = sskew,
                 // CAPPED. rv * aspect at the top of both ranges was 0.53 — a spot slightly WIDER than the
                 // whole world, which the contact sheet duly drew as a band-coloured stripe with a pale
                 // outline. The real Great Red Spot spans about an ninth of Jupiter's circumference; 0.15
@@ -205,49 +222,58 @@ public static class GasGiantStorms
         }
     }
 
-    /// How far a point is from a spot's centre, in units of that spot's own outline: below 1 is inside
-    /// the storm, 1 is exactly on its edge. `along` is the fraction of that distance that is ALONG the
-    /// flow (0 on the flanks, 1 at the tips), which is what shapes the collar and the halo; `side` is
-    /// which flank of the LEANING outline the point is on (+1 above it, -1 below), which is the
-    /// direction the lanes are pushed. Read off the skewed frame rather than off raw latitude, or the
-    /// push changes sign across the tips of a leaning spot and leaves a hooked sliver of pale cloud
-    /// trailing from each end. `ellipse` is the plain elliptical distance in the same frame, which is
-    /// what the WAKE is measured in: the lens metric goes to infinity just past the tips (the outline
-    /// has no height there), and a wake measured in it would stop dead at the tip's longitude.
+    /// Would a storm at (u, v) with these radii overlap any of the first `count` spots already built?
+    static bool Overlaps(int count, float u, float v, float rv, float ru)
+    {
+        for (int j = 0; j < count; j++)
+        {
+            var o = cachedSpots[j];
+            float gap = Mathf.Abs(u - o.u); if (gap > 0.5f) gap = 1f - gap;
+            if (Mathf.Abs(v - o.v) < rv + o.rv && gap < ru + o.ru) return true;
+        }
+        return false;
+    }
+
+    /// How far to move the latitude the band test reads at (u, v) so the belt swells into this storm:
+    /// the returned value is ADDED to v. Zero away from the storm and wherever the storm is no taller than
+    /// its belt.
     ///
-    /// LONGITUDE WRAPS and latitude does not — the same asymmetry every other surface pass uses. A spot
-    /// near u = 0 has to reach round to u = 1 or it would be cut in half by the date line.
-    public static float Distance(in Spot s, float u, float v, out float along, out float side,
-                                 out float ellipse)
+    /// Inside the oval, |dv| in [0, storm half-height] is squeezed onto [0, belt half-height] — the whole
+    /// interior reads as belt. Outside it, the first FlowReach * (swell) of ground is pulled back by up to
+    /// the swell, smoothly easing to nothing — the pale zone and the next lanes bow around the storm. The
+    /// two halves meet exactly at the oval's edge, so the map is continuous and the edge is wherever the
+    /// band's own jitter puts it.
+    ///
+    /// LONGITUDE WRAPS and latitude does not — the same asymmetry every other surface pass uses.
+    public static float Swell(in Spot s, float u, float v)
     {
         float du = u - s.u;
         if (du > 0.5f) du -= 1f; else if (du < -0.5f) du += 1f;
-        float dv = v - s.v;
-
-        // Lean: shift the latitude by how far along the storm we are, so the tips sit at different
-        // latitudes and the outline is a leaning lens rather than an upright one.
         float a = du / Mathf.Max(0.0001f, s.ru);
-        float c = dv / Mathf.Max(0.0001f, s.rv) - a * s.skew;
+        if (a <= -1f || a >= 1f) return 0f;
 
-        side = c < 0f ? -1f : 1f;
+        float hb = BeltHalfHeight;
+        float hO = s.rv * Mathf.Sqrt(1f - a * a);          // the oval's half-height at this longitude
+        float extra = hO - hb;
+        if (extra <= 0f) return 0f;                         // the belt already covers it: no swelling
 
-        // The squeezed flank: the poleward side is FlankSqueeze as tall as the equatorward side.
-        bool poleward = (s.v >= 0.5f) ? c > 0f : c < 0f;
-        if (poleward) c /= FlankSqueeze;
+        float centre = s.v + s.skew * s.rv * a;
+        float dv = v - centre;
+        float adv = Mathf.Abs(dv);
+        float side = dv < 0f ? -1f : 1f;
 
-        float aa = Mathf.Abs(a), ac = Mathf.Abs(c);
-        float r = Mathf.Sqrt(a * a + c * c);
-        ellipse = r;
-        along = r > 0.0001f ? aa / r : 0f;
-
-        // The lens is the ellipse narrowed by the profile, which reaches zero at the tips — so past
-        // them everything off the axis is far away, and the collar drawn from this metric pinches to
-        // a point exactly as the outline does. (The old "outside the ellipse" branch handed back the
-        // ellipse distance there instead, and drew a pale crescent standing off each tip.)
-        float profile = Mathf.Pow(Mathf.Max(0f, 1f - aa * aa), LensPower);
-        return Mathf.Max(r, profile > 0.0001f ? ac / profile : (ac > 0.0001f ? 99f : r));
+        float target;
+        // Squared, not linear: the storm's middle maps to the belt's CENTRE, far from either edge, so the
+        // band-edge jitter can rough up the rim but cannot punch pale holes in the heart of the storm.
+        // Still exactly hb at the rim, so the inside and outside meet without a seam.
+        if (adv <= hO) { float q = adv / hO; target = hb * q * q; }
+        else
+        {
+            float reach = extra * FlowReach;
+            if (adv >= hO + reach) return 0f;
+            float t = 1f - (adv - hO) / reach;
+            target = adv - extra * t * t * (3f - 2f * t);   // smoothstep: no visible ring where it ends
+        }
+        return centre + side * target - v;
     }
-
-    /// The ellipse form, for callers that only need "roughly how near".
-    public static float Distance(in Spot s, float u, float v) => Distance(s, u, v, out _, out _, out _);
 }
