@@ -568,4 +568,6 @@ public class OrderDTO
     public int targetId = -1;        // target body (-1 = a point in space)
     public bool isPoint;
     public float px, py, pz;
+    /// ShipOrder.dock — an older save loads false, i.e. the old hold-position behaviour.
+    public bool dock;
 }

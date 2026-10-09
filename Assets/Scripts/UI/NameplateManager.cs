@@ -98,7 +98,11 @@ public class NameplateManager : MonoBehaviour
                 if (sys == null) continue;
                 if (sys.pivot != null && SystemPresence.Known(sys)) wantSystems.Add(sys);
                 foreach (var b in sys.AllBodies())
-                    if (b != null && b.visualObject != null && b.Surveyed) wantBodies.Add(b);
+                    // A REAL survey, not CelestialBody.Surveyed — that is true of everything in Dev Mode, and
+                    // a plate over every rock in the galaxy would bury the ones that mean something.
+                    if (b != null && b.visualObject != null &&
+                        (b.explorationProgress >= 1f || b.owner == FactionManager.Player))
+                        wantBodies.Add(b);
             }
 
         deadBodies.Clear();

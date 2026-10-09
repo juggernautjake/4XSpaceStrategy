@@ -52,7 +52,15 @@ public class HabitableZoneVisualizer : MonoBehaviour
     // Point the zone at a different system (e.g. when the player clicks another star).
     public void Retarget(StarData starData, Transform starT, List<CelestialBody> systemBodies)
     {
-        Build(starData, starT, systemBodies);
+        // The SAME star again (clicking the sun you are already looking at) keeps the band as it is —
+        // it used to switch it off, which hid the species zone mid-way through choosing a homeworld.
+        bool same = starData == star;
+        bool keep = same && visible;
+        // speciesMode is left alone: the opening switches it off itself once a world is chosen.
+        star = starData;
+        starTransform = starT;
+        bodies = systemBodies;
+        Rebuild(keep);
     }
 
     void Rebuild(bool keepVisible)

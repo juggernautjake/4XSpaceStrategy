@@ -2110,6 +2110,12 @@ public class PlanetViewWindow : MonoBehaviour
             // The reason lives on the tab itself, so it's there when you go looking for it rather than
             // only in a status line you have to already be reading.
             if (!open && why != null) UIFactory.Tooltip(btn.gameObject, $"{t} — {why}");
+
+            // The opening's "!" on the Build tab itself while the player is elsewhere, so the trail of
+            // markers starts at the first thing they have to click.
+            if (t == Tab.Build && !active && open &&
+                (HomeworldOnboarding.TargetOn(body).HasValue || HomeworldOnboarding.AwaitingCapitol(body)))
+                AlertMarker.Attach(btn.transform as RectTransform);
         }
     }
 
@@ -4482,6 +4488,8 @@ public class PlanetViewWindow : MonoBehaviour
     // is where an ore's uses are unlocked. Gated on the survey state, since orbit can't read the seams.
     void BuildSurveyOres()
     {
+        // Ores are switched off (OreGenerator.Enabled); a section that can only ever say "none" is noise.
+        if (!OreGenerator.Enabled) return;
         var b = body;
 
         Header("MINERAL SURVEY");

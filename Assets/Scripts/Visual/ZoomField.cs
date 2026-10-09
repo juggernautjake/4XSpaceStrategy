@@ -106,7 +106,12 @@ public class ZoomFieldRenderer : MonoBehaviour
     {
         if (!ZoomFieldRules.IsHost(b) || b.visualObject == null) return;
         ShowFor(b, 8f);
-        CameraController.Instance?.FocusAndZoom(b.visualObject.transform, b.surfaceSize, true);
+        // Framed on the whole FIELD, not just the moon reach FocusAndZoom would pick, so its rim is on
+        // screen: the camera is lifted to the height that frames the field radius after the focus.
+        var cam = CameraController.Instance;
+        if (cam == null) return;
+        cam.FocusAndZoom(b.visualObject.transform, b.surfaceSize, true);
+        cam.FrameRadius(ZoomFieldRules.Radius(b) * 1.1f);
     }
 
     class Field { public GameObject go; public MeshRenderer mr; public Material mat; public LineRenderer rim; public int grid = -1; }

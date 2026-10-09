@@ -121,6 +121,18 @@ Checked first against the code; none of these were already built.
   - A step advances as soon as the job is queued.
 - [x] Saving is refused until the capitol is placed.
 
+### 5. Follow-ups (my own calls, asked for as "improve what synergises")
+- [x] A ship you send with "move here" to a point inside a planet's orbital field, with nothing else queued, docks there and rides along with the planet. Before, it held a fixed point that the planet orbited away from.
+  - The right-click menu now reads "move into <planet>'s orbit" for those points.
+  - Moves the AI gives your squadrons (patrol, escort, intercept, rally) keep their exact points.
+- [x] The home-moon perks (`cradleMoon`) move to the moons around the world you actually choose. For a moon capital, that is its planet's other moons.
+- [x] Clicking the star you are already looking at no longer switches the habitable-zone band off. This used to hide the species zone while you were choosing.
+- [x] The flashing "!" also sits on the Surface View's main Build tab whenever you are on another tab.
+- [x] Queuing a station frames the whole orbital field, not just the moons (`CameraController.FrameRadius`).
+- [x] Nameplates require a real survey even in Dev Mode, so Dev Mode doesn't plate every rock in the galaxy.
+- [x] The ore sections (the Survey tab's Mineral Survey and the Inspector's Ores tab) are hidden while ores are off.
+- [x] The Geothermal Plant's description now talks about pressure, matching the index.
+
 ## Closing note
 
 **Not compiled. Unity isn't installed on this machine, so please build before playing.**
@@ -154,4 +166,9 @@ The third review covered the new-game flow. It found no compile errors and these
 1. **The new-game flow end to end.** It is the largest change. In particular, check that the held capitol shows its ghost on the map and can be placed.
 2. **Plate edges on a new galaxy.** Old saves keep their saved plate layouts and terrain, so the fix only shows on newly generated worlds.
 3. **Sizes.** The inner system with bigger stars. Ring-1 worlds may be pushed slightly outward around large stars.
-4. **Parked ships** appear in a planet's Orbit list only while the planet is near their park point. Docked ships always ride along.
+4. **Ships parked in open space** (by AI moves, or before this change) appear in a planet's Orbit list only while the planet is near them. Ships moved into an orbit with "move here" dock, and always ride along.
+
+A fourth review covered the follow-ups and found no compile errors. It found these problems, all fixed:
+- Docking fired on AI patrol and escort moves. It now applies only to the player's own "move here".
+- Switching stars could drop the species zone mode.
+- The terraform guarantee didn't follow the home-moon flag to the new home moons.

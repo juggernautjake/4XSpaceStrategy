@@ -39,7 +39,8 @@ public partial class InspectorWindow
             () => target.body != null && target.body.Surveyed,
             () => "Survey this world first — its climate is read off the surface map."));
 
-        tabs.Add(new InspectorTab("Ores", BuildBodyOres, () => target.body != null && target.body.Surveyed));
+        // Hidden while ores are switched off (OreGenerator.Enabled) — it could only ever be empty.
+        tabs.Add(new InspectorTab("Ores", BuildBodyOres, () => OreGenerator.Enabled && target.body != null && target.body.Surveyed));
         // SOCIETY NEEDS A SOCIETY. Visible on any world you hold — it is plainly about that world — but
         // dead until somebody lives there. Owning a bare rock used to open a tab that reported a
         // population of nobody and then explained, at length and with a factor breakdown, how satisfied

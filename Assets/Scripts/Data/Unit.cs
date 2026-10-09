@@ -15,6 +15,10 @@ public class ShipOrder
     public CelestialBody target;   // null when moving to a point in empty space
     public Vector3 point;
     public bool isPoint;
+    /// The PLAYER said "move here": if the point is inside a planet's orbital field, the ship takes up
+    /// orbit there on arrival (UnitManager.Travel). AI-issued moves — patrol legs, escorts, intercept
+    /// standoffs, rally — leave this false and keep their exact points.
+    public bool dock;
 
     public string Describe()
     {

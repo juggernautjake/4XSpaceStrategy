@@ -744,7 +744,11 @@ public class UnitManager : MonoBehaviour
         => Issue(group, () => new ShipOrder { kind = OrderKind.Move, target = target }, queue);
 
     public void IssueMovePoint(List<Unit> group, Vector3 pt, bool queue)
-        => Issue(group, () => new ShipOrder { kind = OrderKind.Move, isPoint = true, point = pt }, queue);
+        => IssueMovePoint(group, pt, queue, false);
+
+    /// `dock` — see ShipOrder.dock. Only the player's own "move here" passes true.
+    public void IssueMovePoint(List<Unit> group, Vector3 pt, bool queue, bool dock)
+        => Issue(group, () => new ShipOrder { kind = OrderKind.Move, isPoint = true, point = pt, dock = dock }, queue);
 
     public void IssueAction(List<Unit> group, OrderKind kind, CelestialBody target, bool queue)
         => Issue(group, () => new ShipOrder { kind = kind, target = target }, queue);
@@ -984,12 +988,33 @@ public class UnitManager : MonoBehaviour
 
         if (dest == null)
         {
+            u.status = UnitStatus.Idle;
+            bool dockHere = false;
+            if (u.orders.Count > 0 && u.orders[0].isPoint) { dockHere = u.orders[0].dock; u.orders.RemoveAt(0); }
+
+            // A point INSIDE A PLANET'S ORBITAL FIELD is that planet's orbit (ZoomField.cs): the ship
+            // takes up station there and rides along with it, rather than holding a fixed point the
+            // planet orbits away from. Only for the player's own "move here" (ShipOrder.dock) with
+            // nothing else queued — AI patrol legs, escorts and standoffs keep their exact points, and a
+            // waypoint on a longer route is a point in space.
+            var host = dockHere && u.orders.Count == 0 && u.owner == FactionManager.Player
+                ? ZoomFieldRules.HostAt(u.travelTo) : null;
+            if (host != null)
+            {
+                u.location = host;
+                u.inSpace = false;
+                if (host.units == null) host.units = new List<Unit>();
+                if (!host.units.Contains(u)) host.units.Add(u);
+                NotificationManager.Instance?.Push($"{u.name} is in orbit of {host.name}",
+                    $"{u.Info.name} · holding station in {host.name}'s orbital field.", FlyTo(host), NotifKind.Info);
+                OnUnitsChanged?.Invoke();
+                return true;
+            }
+
             // Reached a point in empty space — hold position.
             u.location = null;
             u.inSpace = true;
             u.parkPosition = u.travelTo;
-            u.status = UnitStatus.Idle;
-            if (u.orders.Count > 0 && u.orders[0].isPoint) u.orders.RemoveAt(0);
             NotificationManager.Instance?.Push($"{u.name} reached its destination", "Holding position in space.", null, NotifKind.Info);
             return true;
         }
@@ -1428,7 +1453,7 @@ public class UnitManager : MonoBehaviour
             if (u.location == null) { var p = UnitPos(u); d.inSpace = true; d.px = p.x; d.py = p.y; d.pz = p.z; }
             foreach (var s in u.samples) d.samples.Add(s);
             foreach (var o in u.orders)
-                d.orders.Add(new OrderDTO { kind = (int)o.kind, targetId = o.target != null ? o.target.id : -1, isPoint = o.isPoint, px = o.point.x, py = o.point.y, pz = o.point.z });
+                d.orders.Add(new OrderDTO { kind = (int)o.kind, targetId = o.target != null ? o.target.id : -1, isPoint = o.isPoint, px = o.point.x, py = o.point.y, pz = o.point.z, dock = o.dock });
             list.Add(d);
         }
         return list;
@@ -1554,7 +1579,7 @@ public class UnitManager : MonoBehaviour
                     {
                         CelestialBody tgt = null;
                         if (od.targetId >= 0 && byId != null) byId.TryGetValue(od.targetId, out tgt);
-                        u.orders.Add(new ShipOrder { kind = (OrderKind)od.kind, target = tgt, isPoint = od.isPoint, point = new Vector3(od.px, od.py, od.pz) });
+                        u.orders.Add(new ShipOrder { kind = (OrderKind)od.kind, target = tgt, isPoint = od.isPoint, point = new Vector3(od.px, od.py, od.pz), dock = od.dock });
                     }
 
                 units.Add(u);

@@ -1220,6 +1220,13 @@ public class CameraController : MonoBehaviour
         return p + f * t;
     }
 
+    /// Ease the zoom to frame a circle of this radius around whatever is in view (or followed).
+    public void FrameRadius(float radius)
+    {
+        if (radius <= 0f) return;
+        targetHeight = Mathf.Clamp(HeightToFrame(radius), ZoomFloor(), ZoomCeiling());
+    }
+
     /// One notch of zoom, for UI buttons. Positive pulls out, negative pushes in — the same proportional
     /// step the wheel uses, and clamped by the same floor and ceiling, so a button press and a wheel click
     /// are the same action.

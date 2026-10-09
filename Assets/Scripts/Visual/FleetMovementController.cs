@@ -381,7 +381,12 @@ public class FleetMovementController : MonoBehaviour
             bool reach = mgr == null || mgr.CanReach(group, pt, out _);
             var opts = new List<ContextMenu.Option>();
             if (reach)
-                opts.Add(new ContextMenu.Option($"{verb}: move here (deep space)", () => mgr?.IssueMovePoint(group, pt, queue)));
+            {
+                // Inside a planet's orbital field the point IS that planet's orbit, and the menu says so.
+                var orbitOf = ZoomFieldRules.HostAt(pt);
+                string where = orbitOf != null ? $"move into {orbitOf.name}'s orbit" : "move here (deep space)";
+                opts.Add(new ContextMenu.Option($"{verb}: {where}", () => mgr?.IssueMovePoint(group, pt, queue, true)));
+            }
             else
                 opts.Add(new ContextMenu.Option("Out of range — deep space",
                     () => NotificationManager.Instance?.Push("Out of range",

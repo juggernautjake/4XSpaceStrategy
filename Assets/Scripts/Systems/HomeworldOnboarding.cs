@@ -130,6 +130,21 @@ public static class HomeworldOnboarding
         b.deepProgress = 1f;
         b.researchLevel = CelestialBody.MaxResearchLevel;
 
+        // THE HOME MOONS ARE THE CHOSEN WORLD'S. `cradleMoon` (claimable at tech 1, guaranteed
+        // terraformable) was stamped on the cradle's moons at generation; it belongs to whatever the
+        // player actually founds on. A moon capital's neighbourhood is its planet's other moons.
+        var hood = b.parentBody != null ? b.parentBody : b;
+        if (b.system != null)
+            foreach (var o in b.system.AllBodies())
+            {
+                if (o == null) continue;
+                o.cradleMoon = o.parentBody == hood && o != b;
+                // ...and the guarantee that rides with the flag, re-applied for the new home moons the
+                // way GalaxyGenerator.Recompute applied it at generation.
+                if (o.cradleMoon)
+                    o.terraformability = Mathf.Max(o.terraformability, UnitManager.ColonizeMinHabitability + 20f);
+            }
+
         World = b;
         Step = OnboardingStep.PlaceCapitol;
 

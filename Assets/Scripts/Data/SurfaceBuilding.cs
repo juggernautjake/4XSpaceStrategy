@@ -379,7 +379,7 @@ public static class SurfaceBuildingDatabase
 
         // O-tetromino — a compact 2x2 plant.
         _all[(int)SurfaceBuildingType.GeothermalPlant] = new SurfaceBuildingInfo(SurfaceBuildingType.GeothermalPlant, SurfaceBuildingCategory.Electrical, "Geothermal Plant",
-            "Taps the heat under the crust. Sited on a volcano, a geyser field or an active fault margin it is the best power in the game; sited on cold rock it is a waste of metal. Check the Geothermal Index.",
+            "Taps the pressure under the crust. On a vent, a hotspot or an active plate line it is the best power in the game; on quiet rock it is a waste of metal. Check the Geothermal Index.",
             S(0, 0, 1, 0, 0, 1, 1, 1), SurfaceIndexKind.Geothermal, 90, 40, 20f, new Color(1.00f, 0.45f, 0.15f))
         { energyPerSec = 2.6f };
 
