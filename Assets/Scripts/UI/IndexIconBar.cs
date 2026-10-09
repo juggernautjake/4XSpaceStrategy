@@ -305,14 +305,36 @@ public class IndexIconBar : MonoBehaviour
     static Texture2D IconFor(SurfaceIndexKind k)
         => Resources.Load<Texture2D>($"SpaceAssets/IndexIcons/Index_{k}");
 
+    // ONE SENTENCE ON WHY TO BUILD THERE (2026-10-09), not how the generator picked the ground. The
+    // on/off state is no longer quoted: the frame already shows it, and the text was set once per rebuild
+    // so it went stale the moment the button was clicked. Survey progress only appears while it matters.
     string TipFor(SurfaceIndexKind k)
     {
-        string state = IndexToggles.IsOn(body, k) ? "Showing" : "Hidden";
         var r = Survey.RevealOf(body, k);
-        string prog = r.complete ? "fully surveyed"
-                    : $"survey in progress — pass {r.pass + 1} of {Survey.Bands}";
-        return $"<b>{SurfaceIndex.Name(k)}</b> — {state}\n{SurfaceIndex.Describe(k)}\n" +
-               $"<color=#8FA3B5>{prog}</color>\n\nClick to toggle. Several can be up at once.";
+        string prog = r.complete ? ""
+                    : $"\n<color=#8FA3B5>Survey pass {r.pass + 1} of {Survey.Bands}</color>";
+        return $"<b>{SurfaceIndex.Name(k)}</b>\n{SurfaceIndex.Why(k)}{prog}";
+    }
+
+    // ---- Hover mask ------------------------------------------------------------------------------
+
+    static readonly List<IndexIconBar> live = new List<IndexIconBar>();
+    void Awake() { live.Add(this); }
+    void OnDestroy() { live.Remove(this); }
+
+    /// Is the pointer over any visible index bar? The Planet View's tile hover asks this so the cell
+    /// under a button is not read out behind the button's own tooltip.
+    public static bool PointerOverAny(Vector2 screen)
+    {
+        for (int i = 0; i < live.Count; i++)
+        {
+            var b = live[i];
+            if (b == null || b.bar == null || !b.bar.gameObject.activeInHierarchy) continue;
+            var canvas = b.bar.GetComponentInParent<Canvas>();
+            Camera cam = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
+            if (RectTransformUtility.RectangleContainsScreenPoint(b.bar, screen, cam)) return true;
+        }
+        return false;
     }
 }
 

@@ -38,7 +38,9 @@ public static class OrbitSafety
     // but air. Enough to keep orbit rings visibly separate, small enough that a whole system fits on
     // screen at once — which is the thing that had stopped being true.
     public const float LaneGap = 3.2f;          // air between one planet's band and the next
-    public const float StarClearance = 4.5f;    // air between the star and the innermost planet's band
+    // 4.5 -> 3.5 when stars grew 1.5x (2026-10-09), so a G-type's ring-1 world still fits inside its
+    // placement ring instead of being shoved outward toward the habitable zone.
+    public const float StarClearance = 3.5f;    // air between the star and the innermost planet's band
 
     /// Rendered diameter of a body, exactly as SystemVisualizer scales it.
     public static float Scale(CelestialBody b)

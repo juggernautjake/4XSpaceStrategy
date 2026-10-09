@@ -442,7 +442,19 @@ public class CameraController : MonoBehaviour
             // position against the previous frame's bearing, and the body slides off centre for as long
             // as you keep rotating.
             KeepCameraAngle();
-            PlaceAtConstantDistance(followTarget.position);
+            if (lockBlend < 1f)
+            {
+                // Gliding onto a fresh zoom lock: the camera's offset from the follow pose, captured on
+                // the first frame, shrinks to nothing along a smoothstep. Measured from the pose rather
+                // than eased in world space, so it rides along with a moving planet and lands exactly.
+                Vector3 want = followTarget.position - transform.forward * SlantRange;
+                if (lockBlend <= 0f) lockOffset = transform.position - want;
+                lockBlend = Mathf.Min(1f, lockBlend + Time.unscaledDeltaTime * 2.5f);
+                float s = lockBlend * lockBlend * (3f - 2f * lockBlend);
+                transform.position = want + lockOffset * (1f - s);
+                ClearAnchor();
+            }
+            else PlaceAtConstantDistance(followTarget.position);
         }
     }
 
@@ -509,6 +521,9 @@ public class CameraController : MonoBehaviour
         // the framing height from the body's current reach and eased there, so the view jumped even though
         // nothing about the subject had changed. Re-centring is always wanted; re-zooming almost never is.
         bool reFocus = following && followTarget == target && target != null;
+        // An explicit focus is the player's own follow, not a zoom lock; zooming out must not drop it.
+        autoLocked = false;
+        lockBlend = 1f;
 
         // Rebase the zoom if this call is what STOPS the follow (ViewPlanet does exactly that, with
         // follow:false on the body already being followed). `targetHeight` is body-relative while
@@ -770,6 +785,8 @@ public class CameraController : MonoBehaviour
     public void ClearFocus()
     {
         if (following) EndFollowRebase();
+        autoLocked = false;
+        lockBlend = 1f;
         following = false;
         followTarget = null;
         followUnit = null;   // or the next LateUpdate would re-acquire the ship we just released
@@ -835,6 +852,16 @@ public class CameraController : MonoBehaviour
             Debug.Log($"[Zoom] scroll={scroll:F3} x{factor:F2}  {targetHeight:F1} -> want {want:F1} -> got {got:F1}  [{why}]");
         }
 
+        // ZOOM LOCK (2026-10-09). Zooming IN over a planet's zoom field, or close onto a ship that is not
+        // docked, starts following it; zooming back OUT past the lock height lets it go again. Only a lock
+        // this made is released this way — a follow the player asked for with F stays until they pan.
+        if (scroll > 0f && !following && TryAutoLock(got)) return;   // BeginAutoLock set the zoom
+        if (scroll < 0f && autoLocked && following && got > autoLockHeight * AutoReleaseFactor)
+        {
+            autoLocked = false;
+            ClearFocus();
+        }
+
         // Solve the cursor anchor ONCE, here, for the height we're heading to — rather than nudging the
         // camera sideways a little every frame on the way there. See SmoothHeightMovement.
         if (!following && ZoomToCursor && CursorGround(out Vector3 g, out float kx, out float kz))
@@ -846,6 +873,78 @@ public class CameraController : MonoBehaviour
         }
 
         targetHeight = got;
+    }
+
+    // ---- Zoom lock ---------------------------------------------------------------------------------
+
+    /// A planet locks once the zoom is within this many field radii of it.
+    const float LockHeightPerFieldRadius = 2.5f;
+    /// A loose ship locks at or below this height, if the cursor is within ShipPickPx of it.
+    const float ShipLockHeight = 25f;
+    const float ShipPickPx = 40f;
+    /// Zooming out past lock height × this releases an automatic lock.
+    const float AutoReleaseFactor = 1.6f;
+
+    bool autoLocked;
+    float autoLockHeight;
+    /// 0 → 1 over the first moments of a lock, so the camera glides onto its subject rather than
+    /// snapping the planet to the middle of the screen.
+    float lockBlend = 1f;
+    Vector3 lockOffset;
+
+    bool TryAutoLock(float newHeight)
+    {
+        if (cam == null) cam = GetComponent<Camera>();
+        if (cam == null) return false;
+
+        // A loose ship under the cursor first: it is the smaller, more deliberate target.
+        if (newHeight <= ShipLockHeight && UnitManager.Instance != null)
+        {
+            Unit pick = null; float best = ShipPickPx * ShipPickPx;
+            Vector2 mouse = Input.mousePosition;
+            foreach (var u in UnitManager.Instance.Units)
+            {
+                if (u == null || u.location != null) continue;            // docked ships ride their planet
+                // Only the player's own, visible ships: a lock onto a cloaked or fogged hull would
+                // point the camera at something the player is not supposed to know is there.
+                if (u.owner != FactionManager.Player || u.hideReason != HideReason.None) continue;
+                var t = UnitVisuals.TransformOf(u);
+                if (t == null || !t.gameObject.activeInHierarchy) continue;
+                Vector3 s = cam.WorldToScreenPoint(t.position);
+                if (s.z <= 0f) continue;
+                float d = ((Vector2)s - mouse).sqrMagnitude;
+                if (d < best) { best = d; pick = u; }
+            }
+            if (pick != null)
+            {
+                BeginAutoLock(UnitVisuals.TransformOf(pick), pick, newHeight, ShipLockHeight);
+                return true;
+            }
+        }
+
+        if (!CursorGround(out Vector3 ground, out _, out _)) return false;
+        var host = ZoomFieldRules.HostAt(ground);
+        if (host == null || host.visualObject == null) return false;
+        float lockAt = ZoomFieldRules.Radius(host) * LockHeightPerFieldRadius;
+        if (newHeight > lockAt) return false;
+        BeginAutoLock(host.visualObject.transform, null, newHeight, lockAt);
+        return true;
+    }
+
+    void BeginAutoLock(Transform t, Unit unit, float newHeight, float lockAt)
+    {
+        if (t == null) return;
+        ClearAnchor();
+        // The zoom is measured from the subject while following; start it at the camera's current height
+        // above the subject so the lock itself does not zoom, then let the wheel's step ease in.
+        smoothHeight = Mathf.Max(minHeight, transform.position.y - t.position.y);
+        followTarget = t;
+        followUnit = unit;
+        following = true;
+        autoLocked = true;
+        autoLockHeight = lockAt;
+        lockBlend = 0f;
+        targetHeight = Mathf.Max(newHeight, ZoomFloor());
     }
 
     // Where the zoom is heading in X/Z, so the point under the cursor lands under the cursor.

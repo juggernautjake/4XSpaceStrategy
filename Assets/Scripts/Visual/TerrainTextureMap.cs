@@ -103,6 +103,8 @@ public static class TerrainTextureMap
             // bold motif at this scale does not read as material — it reads as a symbol stamped once
             // per cell and repeated across a continent, which is what the map looked like before.
             case TerrainType.Volcano:       return "Volcano";
+            // The cone's own grain, tinted icy by its colour; new art would need its own import settings.
+            case TerrainType.CryoVolcano:   return "Volcano";
             case TerrainType.LavaRock:      return "LavaRock";
             case TerrainType.Island:        return "Island";
             case TerrainType.Hills:         return "Hills";

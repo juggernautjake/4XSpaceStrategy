@@ -12,7 +12,8 @@ public class TimeController : MonoBehaviour
     {
         // Space toggles pause, except while the menu is open (there it's the UI submit key).
         bool menuOpen = EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen;
-        if (!menuOpen && Input.GetKeyDown(KeyCode.Space))
+        // ...and not while typing: a space in a world's name is a letter, not a pause.
+        if (!menuOpen && !UIFactory.IsTypingInField() && Input.GetKeyDown(KeyCode.Space))
             TimeControl.TogglePause();
     }
 }

@@ -62,6 +62,15 @@ public class SaveLoadMenu : MonoBehaviour
 
     void DoSave()
     {
+        // The opening owns nothing until the capitol is down, and the loader treats the first player
+        // world in the home system as the capital — so there is nothing yet that a save could restore.
+        if (HomeworldOnboarding.BlocksSaving)
+        {
+            status.text = "Choose your homeworld and place its capitol before saving.";
+            SimpleAudio.Instance?.PlayNotify(NotifKind.Danger);
+            return;
+        }
+
         string name = string.IsNullOrWhiteSpace(nameInput.text) ? DefaultName() : nameInput.text.Trim();
 
         // If a save with this name already exists, confirm before overwriting it.

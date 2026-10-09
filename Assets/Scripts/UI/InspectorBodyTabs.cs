@@ -127,6 +127,12 @@ public partial class InspectorWindow
         // holds the ground, whether anyone is living on it — none of these are readable from a
         // silhouette, and showing them the moment a scout crosses the system boundary would make the
         // level-1 survey a formality rather than the thing that buys the world's numbers.
+        // MASS just before the air (2026-10-09): the number players reach for most, and the one that
+        // decides grid size, gravity and how much air a world can hold. Visible on sight, like Type —
+        // a world's size is a telescope observation.
+        Stat(card, "Mass", () => seen
+            ? $"{MassRules.Format(b.mass)} <size=10><color=#9FB4C8>Earths</color></size>"
+            : "<color=#7E8B9C>Unknown</color>");
         Stat(card, "Atmospheres", () => b.Surveyed
             ? $"{b.atmospheres:0.#} <size=10><color=#9FB4C8>({AtmosphereRules.Describe(b)})</color></size>"
             : "<color=#7E8B9C>Not surveyed</color>");
@@ -701,6 +707,13 @@ public partial class InspectorWindow
         var stations = new List<Unit>();
         if (b.units != null)
             foreach (var u in b.units) (u.Info.isStation ? stations : ships).Add(u);
+        // Parked in the planet's orbital field counts as in orbit (ZoomField.cs).
+        if (ZoomFieldRules.IsHost(b))
+        {
+            var parked = new List<Unit>();
+            ZoomFieldRules.ParkedIn(b, parked);
+            foreach (var u in parked) (u.Info.isStation ? stations : ships).Add(u);
+        }
 
         Header(p, "STATIONS");
         if (stations.Count == 0) Note(p, "No stations deployed here.");

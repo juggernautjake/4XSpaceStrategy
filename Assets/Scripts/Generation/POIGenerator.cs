@@ -64,7 +64,9 @@ public static class POIGenerator
         bool solid = body.type != CelestialBodyType.GasGiant;
 
         // --- Special resources: promote real high-tier ore deposits into named sites ---
-        if (solid && body.surface != null)
+        // Off while ores are (OreGenerator.Enabled): there are no seams to promote, and a named-ore site
+        // on a world with no ore would be a promise the ground can't keep.
+        if (solid && body.surface != null && OreGenerator.Enabled)
         {
             var seenOre = new HashSet<OreType>();
             for (int attempt = 0; attempt < 500 && seenOre.Count < 3; attempt++)
@@ -119,7 +121,9 @@ public static class POIGenerator
         // --- Ancient ruins ---
         if (solid)
         {
-            int ruins = Random.value < 0.7f ? Random.Range(0, 3) : 0;
+            // Rarer since 2026-10-09 ("points of interest should be mostly anomalies"): about one world
+            // in four has a ruin, where it used to be about one in two.
+            int ruins = Random.value < 0.25f ? 1 : 0;
             for (int i = 0; i < ruins; i++)
             {
                 if (!TryFindLand(body, out float u, out float v)) break;
@@ -144,7 +148,8 @@ public static class POIGenerator
         }
 
         // --- Mystery anomalies (start unexplored; must be researched) ---
-        int mysteries = solid ? Random.Range(1, 4) : Random.Range(0, 2);
+        // Two to four on a solid world (was one to three), so anomalies are most of what a world holds.
+        int mysteries = solid ? Random.Range(2, 5) : Random.Range(0, 2);
         for (int i = 0; i < mysteries; i++)
         {
             float u, v;
@@ -163,7 +168,8 @@ public static class POIGenerator
                 researchDuration = m.dur * Random.Range(0.8f, 1.3f),
                 researchPointCost = Mathf.RoundToInt(m.dur * 2.2f),
                 researchReward = Mathf.RoundToInt(m.dur * 4f) + 20,
-                relatedOre = m.ore
+                // No named-ore reward while ores are switched off.
+                relatedOre = OreGenerator.Enabled ? m.ore : OreType.None
             });
         }
     }

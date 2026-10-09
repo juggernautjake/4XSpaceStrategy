@@ -213,7 +213,15 @@ public partial class InspectorWindow
                        $"<color=#9FB4C8>{GameCalendar.Duration(info.buildTime * TechEffects.BuildTimeMult)}</color>";
             });
 
-            var btn = UIFactory.Button(card, "", () => { UnitManager.Instance?.QueueBuild(t); lastSig = null; }, 24);
+            // Queued AT this world, so the hull rolls out into this planet's orbital field.
+            var yardBody = target.body;
+            bool station = info.isStation;
+            var btn = UIFactory.Button(card, "", () =>
+            {
+                if (UnitManager.Instance != null && UnitManager.Instance.QueueBuild(t, yardBody) && station)
+                    ZoomFieldRenderer.FocusForConstruction(yardBody);   // show where it will live
+                lastSig = null;
+            }, 24);
             live.Button(btn, () =>
             {
                 bool can = um.CanBuildShip(t, out string why);

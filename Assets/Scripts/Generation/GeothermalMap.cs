@@ -82,6 +82,11 @@ public static class GeothermalMap
     /// it IF it happened to clear a threshold near the top of the field's range".
     public const float VolcanoIndex = 0.95f;
 
+    /// On a FROZEN world, at and above this the ground is a cryovolcano (PlanetTerrainGenerator). A little
+    /// under the volcano line — "the lower to mid 90's" — because an ice shell vents at less pressure
+    /// than rock does.
+    public const float CryoVolcanoIndex = 0.93f;
+
     // ---- Hotspots ---------------------------------------------------------------------------------
 
     // ============================================================================================
@@ -254,9 +259,127 @@ public static class GeothermalMap
 
         float raw = PlanetTerrainGenerator.WorldNoise(b, u, v, HotspotBlobs(b), HotspotSalt, 3);
         float t = Mathf.InverseLerp(cut, HotspotTop, raw);
-        if (t <= 0f) return 0f;
+        float field = t <= 0f ? 0f : Mathf.Clamp01(Mathf.Pow(t, HotspotFocus) * ceiling);
 
-        return Mathf.Clamp01(Mathf.Pow(t, HotspotFocus) * ceiling);
+        // ...and the PLUMES, whichever is stronger. See Plumes.
+        return Mathf.Max(field, PlumeAt(b, u, v, ceiling));
+    }
+
+    // ============================================================================================
+    // PLUMES — a guaranteed handful of real hotspots (2026-10-09)
+    //
+    // The thresholded noise above decides on its own how many patches clear the cut, and on a quiet
+    // world that was one or two specks of two-to-thirty tiles: "too many planets that do have Geothermal
+    // only have maybe one or two spots". So a world that rolled any hotspot activity at all now also gets
+    // PlumeCountMin..Max seeded plumes, each a round region sized to the world's own grid, with a noisy
+    // rim so it does not read as a stamped circle. The noise field still adds its smaller patches.
+    //
+    // A plume's profile keeps the index's banding: its rim reads ~62% of the plume's strength and its
+    // centre the full strength, so a strong plume nests 70s, 80s and 90s; the lowest-pressure rim fades
+    // out just beyond. The LARGE plumes (radius over VentRadiusTiles) have a VentChance of a vent at their
+    // centre — the highest ground, since the terrain lifts by hotspot² — read at 97%, over the volcano line
+    // on any world and over the cryovolcano line on a frozen one.
+    // ============================================================================================
+    const int PlumeCountMin = 4, PlumeCountMax = 8;
+    const float PlumeRadiusRadMin = 0.10f, PlumeRadiusRadMax = 0.20f;
+    const float PlumeMinRadiusTiles = 2f;
+    const float VentRadiusTiles = 3.5f, VentChance = 0.6f, VentCore = 0.22f, VentValue = 0.97f;
+    const float PlumeRim = 0.62f, PlumeFade = 0.3f;
+    /// A world this quiet keeps its plumes as warm ground; only busier ones get vents.
+    const float VentMinIntensity = 0.35f;
+    /// The most a plume reads away from a vent core — just under CryoVolcanoIndex.
+    const float NonVentCap = 0.92f;
+
+    struct Plume { public Vector3 at; public float radius; public float strength; public bool vent; public float cosReach; }
+    struct PlumeSet { public float seed; public CelestialBodyType type; public Plume[] plumes; }
+    static readonly Dictionary<CelestialBody, PlumeSet> plumeCache = new Dictionary<CelestialBody, PlumeSet>();
+
+    static Plume[] Plumes(CelestialBody b)
+    {
+        if (plumeCache.TryGetValue(b, out var c) && Mathf.Approximately(c.seed, b.terrainSeed) && c.type == b.type)
+            return c.plumes;
+
+        float intensity = HotspotIntensity(b);
+        Plume[] list;
+        if (intensity <= 0.001f) list = new Plume[0];
+        else
+        {
+            // Grid height in tiles, from the same source every map uses, so a plume's size in TILES is
+            // what the request's "depending on the grid size" means: bigger worlds, bigger spots.
+            int h = Mathf.Max(5, MapMetrics.SurfH(b));
+            float tileRad = Mathf.PI / h;
+            float s0 = b.terrainSeed * 1.913f + b.id * 7.31f;
+
+            int n = Mathf.RoundToInt(Mathf.Lerp(PlumeCountMin, PlumeCountMax, intensity * 0.7f + Hash01(s0 + 1f) * 0.3f));
+            if (h < 30) n = Mathf.Min(n, 3);          // a 30x15 moon has no room for eight
+            list = new Plume[n];
+            for (int i = 0; i < n; i++)
+            {
+                float k = s0 + i * 13.37f;
+                // Uniform on the sphere, kept below ~58° latitude, past which the 2:1 map stretches a
+                // round plume into a smear.
+                float z = Mathf.Lerp(-0.85f, 0.85f, Hash01(k + 2f));
+                float lon = Hash01(k + 3f) * Mathf.PI * 2f;
+                float r = Mathf.Sqrt(1f - z * z);
+                var at = new Vector3(r * Mathf.Cos(lon), z, r * Mathf.Sin(lon));
+
+                float rad = Mathf.Lerp(PlumeRadiusRadMin, PlumeRadiusRadMax, Hash01(k + 4f));
+                rad = Mathf.Max(rad, PlumeMinRadiusTiles * tileRad);
+                float strength = Mathf.Lerp(0.88f, 1f, Hash01(k + 5f));
+                bool vent = intensity >= VentMinIntensity && rad / tileRad >= VentRadiusTiles && Hash01(k + 6f) < VentChance;
+                // Widest the wobbled rim plus its fade can reach, as a cosine, for a cheap reject.
+                float reach = Mathf.Min(Mathf.PI, rad * 1.25f * (1f + PlumeFade));
+                list[i] = new Plume { at = at, radius = rad, strength = strength, vent = vent, cosReach = Mathf.Cos(reach) };
+            }
+        }
+        plumeCache[b] = new PlumeSet { seed = b.terrainSeed, type = b.type, plumes = list };
+        return list;
+    }
+
+    static float PlumeAt(CelestialBody b, float u, float v, float ceiling)
+    {
+        var plumes = Plumes(b);
+        if (plumes.Length == 0) return 0f;
+
+        float lon = Mathf.Repeat(u, 1f) * Mathf.PI * 2f;
+        float lat = (Mathf.Clamp01(v) - 0.5f) * Mathf.PI;
+        float cl = Mathf.Cos(lat);
+        var p = new Vector3(cl * Mathf.Cos(lon), Mathf.Sin(lat), cl * Mathf.Sin(lon));
+
+        // One wobble per point, shared by every plume: the rim breathes in and out by ±25%. Sampled only
+        // once some plume is in reach (cosReach already allows for the widest wobble), so the majority
+        // of a world's tiles, which are nowhere near a plume, never pay for the noise.
+        float wobble = -1f;
+
+        float best = 0f;
+        for (int i = 0; i < plumes.Length; i++)
+        {
+            var pl = plumes[i];
+            float dot = Vector3.Dot(p, pl.at);
+            if (dot < pl.cosReach) continue;
+            if (wobble < 0f)
+                wobble = 0.75f + 0.5f * PlanetTerrainGenerator.WorldNoise(b, u, v, 9f, HotspotSalt + 17.3f, 2);
+            float ang = Mathf.Acos(Mathf.Clamp(dot, -1f, 1f));
+            float d = ang / (pl.radius * wobble);
+            if (d >= 1f + PlumeFade) continue;
+
+            // Capped under both vent lines: only a plume that rolled a VENT may grow a volcano or a
+            // cryovolcano, at its centre. Without the cap every strong plume on a busy world crossed
+            // 95% across a quarter of its radius and the vent roll decided nothing.
+            float top = Mathf.Min(pl.strength * ceiling, NonVentCap);
+            float val;
+            if (d < 1f)
+            {
+                float s = 1f - d; s = s * s * (3f - 2f * s);
+                val = top * Mathf.Lerp(PlumeRim, 1f, s);
+                // The vent is measured against the plume's TRUE radius, not the wobbled rim, so it stays
+                // a small round core at the very centre.
+                if (pl.vent && ang < pl.radius * VentCore) val = Mathf.Max(val, VentValue);
+            }
+            else val = top * PlumeRim * (1f - (d - 1f) / PlumeFade);
+            if (val > best) best = val;
+        }
+        return Mathf.Clamp01(best);
     }
 
     /// How volcanic this world is, 0 (no plumes at all) .. 1 (covered in them). Deterministic from the
@@ -382,12 +505,14 @@ public static class GeothermalMap
         if (b == null) return;
         intensity.Remove(b);
         motion.Remove(b);
+        plumeCache.Remove(b);
     }
 
     public static void InvalidateAll()
     {
         intensity.Clear();
         motion.Clear();
+        plumeCache.Clear();
     }
 
     static float Hash01(float seed)

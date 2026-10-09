@@ -100,6 +100,8 @@ public static class TileCatalog
         // --- Volcanic / hostile ---
         E(TerrainType.Volcano, "Volcanic", "An active volcanic cone. Scattered along fault belts on active worlds.",
             "Peaks over convergent faults", "Furnace-hot at the vent", "—", "Volcanic worlds; active Rocky worlds"),
+        E(TerrainType.CryoVolcano, "Volcanic", "An ice volcano venting water and volatiles from under the crust.",
+            "Peaks of strong hotspots", "Frozen — needs no heat", "—", "Frozen worlds with geothermal hotspots"),
         E(TerrainType.MagmaField, "Volcanic", "Open fields of molten rock.",
             "Low to mid", "Extreme heat", "—", "Volcanic worlds"),
         E(TerrainType.LavaRock, "Volcanic", "Cooled, jagged volcanic rock.",

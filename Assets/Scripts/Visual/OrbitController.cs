@@ -69,6 +69,17 @@ public class OrbitController : MonoBehaviour
         UpdatePosition();
     }
 
+    /// Attach (or retune) the minimum-on-screen-width holder on a ring. Shared with the habitable-zone
+    /// band, which had the same hairline problem at range.
+    public static void HoldScreenWidth(LineRenderer lr, float baseWidth, float minScreenFraction)
+    {
+        if (lr == null) return;
+        var hold = lr.GetComponent<MinScreenWidthLine>();
+        if (hold == null) hold = lr.gameObject.AddComponent<MinScreenWidthLine>();
+        hold.baseWidth = baseWidth;
+        hold.minScreenFraction = minScreenFraction;
+    }
+
     void BuildRing()
     {
         if (orbitRing == null)
@@ -83,6 +94,9 @@ public class OrbitController : MonoBehaviour
             orbitRing.receiveShadows = false;
         }
         orbitRing.startWidth = orbitRing.endWidth = lineWidth;
+        // A minimum ON-SCREEN width: zoomed out, the authored world width fell under a pixel and the
+        // ring rendered as a broken, gappy line (2026-10-09). Close up the authored width still wins.
+        HoldScreenWidth(orbitRing, lineWidth, 0.0016f);
         ApplyRingColor();
         DrawEllipse(orbitRing, orbitRadius, SemiMinor(orbitRadius, eccentricity));
         ApplyRingEnabled();
@@ -425,6 +439,7 @@ public class OrbitController : MonoBehaviour
                 habitableRing.startColor = habitableRing.endColor = green;
                 float r = Mathf.Max(1.2f, transform.lossyScale.x * 1.4f);
                 habitableRing.startWidth = habitableRing.endWidth = 0.12f;
+                HoldScreenWidth(habitableRing, 0.12f, 0.0018f);
                 DrawEllipse(habitableRing, r, r);
             }
             ApplyRingEnabled();
@@ -458,6 +473,7 @@ public class OrbitController : MonoBehaviour
                 ownerRing.material = new Material(Shader.Find("Sprites/Default"));
                 ownerRing.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 ownerRing.startWidth = ownerRing.endWidth = 0.14f;
+                HoldScreenWidth(ownerRing, 0.14f, 0.0018f);
                 DrawEllipse(ownerRing, r, r);
             }
             ownerRing.startColor = ownerRing.endColor = c;

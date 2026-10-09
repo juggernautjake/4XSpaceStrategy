@@ -55,6 +55,8 @@ public static class GameBootstrap
         var canvas = UIFactory.CreateCanvas("RuntimeUICanvas", 100);
 
         Safe("ObjectLabelManager", () => ObjectLabelManager.Create(canvas.transform));
+        Safe("NameplateManager", () => NameplateManager.Create());        // names over surveyed worlds and discovered systems
+        Safe("ZoomFieldRenderer", () => ZoomFieldRenderer.Create());      // each planet's orbital / camera-lock field
         Safe("ContextMenu", () => ContextMenu.Create(canvas.transform));
         Safe("NotificationManager", () => NotificationManager.Create(canvas.transform));
 
@@ -81,6 +83,7 @@ public static class GameBootstrap
         Safe("FleetRosterPanel", () => FleetRosterPanel.Create(canvas.transform));   // fleet > squadron > ship, with condition bars
         Safe("FleetCommandBar", () => FleetCommandBar.Create(canvas.transform));    // formation, protocol, patrol, rally, roster
         Safe("NamePrompt", () => NamePrompt.Create(canvas.transform));         // naming a squadron or a fleet
+        Safe("HomeworldOnboardingUI", () => HomeworldOnboardingUI.Create(canvas.transform));   // the new-game opening: choose, name, found
         // "Around Homeworld" (AssociatedObjectsWindow) retired at Raptok's request: its moon-hopping list
         // is superseded by the Planet View's moon tabs. Not instantiated, so it never subscribes to
         // selection and never appears. The class is left in the tree as dead code for now.

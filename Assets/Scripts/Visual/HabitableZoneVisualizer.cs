@@ -17,6 +17,27 @@ public class HabitableZoneVisualizer : MonoBehaviour
     public bool IsVisible => visible;
     public bool HasZone => star != null && star.hasHabitableZone;
 
+    /// Draw the CURRENT SPECIES' band instead of the star's liquid-water band (2026-10-09). On only while a
+    /// new game's starting world is being chosen — "bring the player to the starting solar system with
+    /// the species specific habitable zone turned on" — because that is the one moment the question is
+    /// "where could MY people live". Everywhere else the band stays a fact about the star.
+    bool speciesMode;
+    public bool SpeciesMode => speciesMode;
+
+    public void SetSpeciesMode(bool on)
+    {
+        if (speciesMode == on) return;
+        speciesMode = on;
+        Rebuild(visible);
+    }
+
+    bool InBand(CelestialBody b)
+    {
+        if (speciesMode && SpeciesManager.Current != null)
+            return Habitability.InZone(star, SpeciesManager.Current, b.distanceFromStar);
+        return StarDatabase.InZone(star, b.distanceFromStar);
+    }
+
     public void Build(StarData starData, Transform starT, List<CelestialBody> systemBodies)
     {
         star = starData;
@@ -43,6 +64,9 @@ public class HabitableZoneVisualizer : MonoBehaviour
         // band, and no species' band was the place water is actually liquid. A species' preference is
         // still reported in the readouts; the ring on the map is a fact about the star.
         float inner = star.hzInner, outer = star.hzOuter;
+        if (speciesMode && SpeciesManager.Current != null &&
+            Habitability.GetZone(star, SpeciesManager.Current, out float sIn, out float sOut))
+        { inner = sIn; outer = sOut; }
 
         for (int i = 0; i < BandRings; i++)
         {
@@ -70,6 +94,9 @@ public class HabitableZoneVisualizer : MonoBehaviour
         Color green = new Color(0.2f, 1f, 0.35f, alpha);
         lr.startColor = lr.endColor = green;
         lr.startWidth = lr.endWidth = width;
+        // Held at a minimum on-screen width, like the orbit rings, so the band doesn't break up into a
+        // gappy hairline when zoomed out.
+        OrbitController.HoldScreenWidth(lr, width, width >= 0.1f ? 0.0018f : 0.0012f);
         for (int i = 0; i < Segments; i++)
         {
             float a = i * Mathf.PI * 2f / Segments;
@@ -93,7 +120,7 @@ public class HabitableZoneVisualizer : MonoBehaviour
                 var oc = b.visualObject.GetComponent<OrbitController>();
                 // Ringed when it orbits inside the band drawn — the same physical band, so a ring is never
                 // drawn round a world sitting outside the green.
-                if (oc != null) oc.SetHabitableHighlight(visible && StarDatabase.InZone(star, b.distanceFromStar));
+                if (oc != null) oc.SetHabitableHighlight(visible && InBand(b));
             }
         }
     }

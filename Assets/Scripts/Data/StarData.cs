@@ -81,7 +81,9 @@ public static class StarDatabase
     //
     // 6 -> 12 alongside the star scale doubling, so that sentence stays true and every density readout in
     // the Dev editor keeps meaning what it meant.
-    public const float RefScale = 12f;
+    //
+    // 12 -> 18 with the 1.5x star scale (2026-10-09), for the same reason.
+    public const float RefScale = 18f;
 
     // The three ways of reading the mass/radius/density triangle. density = mass / (radius/RefScale)^3, so
     // any two give the third. The Dev star sliders use these to keep themselves consistent: change the size
@@ -203,10 +205,14 @@ public static class StarDatabase
 
         // Radius of the halo is starRadius * scale, and starRadius is visualScale * 0.5. Keeping
         // (scale - 1) * starRadius under 4.0 leaves the halo comfortably short of the innermost orbit.
+        //
+        // Read from OrbitSafety.StarClearance now rather than a copy of it: the clearance dropped to 3.5
+        // when stars grew 1.5x (2026-10-09), and the old 4.0 here would have put the halo over ring 1.
+        // The floor came down from 1.25 too — on a radius-15 star that floor alone was 3.75 units of halo.
         float starRadius = Mathf.Max(0.5f, s.visualScale * 0.5f);
-        float ceiling = 1f + 4.0f / starRadius;
+        float ceiling = 1f + (OrbitSafety.StarClearance - 0.5f) / starRadius;
 
-        return Mathf.Clamp(Mathf.Min(want, ceiling), 1.25f, 2.60f);
+        return Mathf.Clamp(Mathf.Min(want, ceiling), 1.1f, 2.60f);
     }
 
     /// How strongly the corona reads.
@@ -233,9 +239,10 @@ public static class StarDatabase
         // span 2.9 (smallest M) to 20.4 (largest O), and adjacent classes overlap, so these name what is
         // on screen rather than pretending to name the spectral class. A small G honestly is a small
         // star, and saying so is better than promoting it to "average" to protect a tidy mapping.
-        string size = s.visualScale >= 12f ? "a giant"
-                    : s.visualScale >= 8f  ? "a large star"
-                    : s.visualScale >= 4.5f ? "an average-sized star"
+        // (x1.5 with the star render scale, 2026-10-09.)
+        string size = s.visualScale >= 18f ? "a giant"
+                    : s.visualScale >= 12f ? "a large star"
+                    : s.visualScale >= 6.75f ? "an average-sized star"
                     : "a small star";
 
         string glare = s.luminosity >= 500f  ? "blazing"
@@ -332,7 +339,11 @@ public static class StarDatabase
         // .StarRadius reads visualScale, so clearance grows with it; StarDatabase.CoronaScale is a
         // multiple of it, so the halo tracks; and DensityOf is recomputed from it on the next line.
         float lumFactor = Mathf.Pow(Mathf.Max(0.001f, s.luminosity / Mathf.Max(0.0001f, baseLum)), 0.12f);
-        s.visualScale = baseScale * 4f * lumFactor * Random.Range(0.85f, 1.18f);
+        //
+        // x6 since 2026-10-09 (was x4): stars render 1.5x larger so they are easier to see, alongside
+        // the bigger worlds in MassRules. RefScale and the size-word thresholds moved with it, and
+        // OrbitSafety.StarClearance came down a unit so ring 1 still clears a G-type's surface.
+        s.visualScale = baseScale * 6f * lumFactor * Random.Range(0.85f, 1.18f);
 
         // Density is the relationship between the two independent rolls above (~1 typical, varying either
         // side). Kept in sync with mass/visualScale here and by the Dev editor.

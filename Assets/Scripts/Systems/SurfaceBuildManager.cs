@@ -130,8 +130,11 @@ public static class SurfaceBuildManager
         // from the build menu. While a landing is genuinely pending on THIS world, that one placement of
         // that one class is exactly what the game is asking the player for. See ColonyLanding.
         bool landing = ColonyLanding.AwaitingOn(b) && t == SurfaceBuildingType.ColonyShipBase;
+        // The same exception for the new game's capitol: placing it is what settles the starting world
+        // (HomeworldOnboarding), and it is never offered from the build menu.
+        bool founding = Founding(b, t);
 
-        if (!b.settled && !landing && !GameMode.DevMode)
+        if (!b.settled && !landing && !founding && !GameMode.DevMode)
         {
             why = b.habitability >= Colony.FoundThreshold
                 ? "nobody lives here yet — settle it with a colony ship"
@@ -168,7 +171,7 @@ public static class SurfaceBuildManager
             return false;
         }
 
-        if (t == SurfaceBuildingType.PlanetCapitol)
+        if (t == SurfaceBuildingType.PlanetCapitol && !founding)
         { why = "upgrade this world's Colony Ship Base into a capitol instead"; return false; }
         if (t == SurfaceBuildingType.ColonyShipBase && !landing && !GameMode.DevMode)
         { why = "a colony ship becomes this when it settles a world"; return false; }
@@ -179,6 +182,11 @@ public static class SurfaceBuildManager
 
         return true;
     }
+
+    /// Is this the new game's founding capitol, on the world being founded? Free, and allowed on a world
+    /// nobody lives on yet. See HomeworldOnboarding.
+    static bool Founding(CelestialBody b, SurfaceBuildingType t)
+        => t == SurfaceBuildingType.PlanetCapitol && HomeworldOnboarding.AwaitingCapitol(b);
 
     public static bool CanPlace(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation, out string why)
         => CanPlace(b, t, x, y, rotation, out why, false);
@@ -204,12 +212,13 @@ public static class SurfaceBuildManager
         // carry the same gates, so both need it; a landing legal in one and refused by the other would
         // show the player a placeable ghost that the click then silently declines to place.
         bool landing = ColonyLanding.AwaitingOn(b) && t == SurfaceBuildingType.ColonyShipBase;
+        bool founding = Founding(b, t);
 
         // SETTLED, not merely owned. Infrastructure needs people to build and run it, and a claim is a
         // flag on a rock — the home world's moons are yours from turn one and have nobody on them.
         // Checking ownership alone let you cover an airless moon in farms and factories staffed by
         // nobody, which is the same hole that gave those moons free cities.
-        if (!b.settled && !landing && !GameMode.DevMode)
+        if (!b.settled && !landing && !founding && !GameMode.DevMode)
         {
             why = b.habitability >= Colony.FoundThreshold
                 ? "nobody lives here yet — settle it with a colony ship"
@@ -234,7 +243,7 @@ public static class SurfaceBuildManager
 
         // A Planet Capitol isn't built from scratch: it's what a Colony Ship Base becomes. Placing one
         // directly would leave the grounded ship sitting next to it with nothing to do.
-        if (t == SurfaceBuildingType.PlanetCapitol)
+        if (t == SurfaceBuildingType.PlanetCapitol && !founding)
         { why = "upgrade this world's Colony Ship Base into a capitol instead"; return false; }
         if (t == SurfaceBuildingType.ColonyShipBase && !landing && !GameMode.DevMode)
         { why = "a colony ship becomes this when it settles a world"; return false; }
@@ -295,7 +304,7 @@ public static class SurfaceBuildManager
         }
 
         int m = ColonyManager.DiscCost(info.costMetal), e = ColonyManager.DiscCost(info.costEnergy);
-        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = $"need {m} metal, {e} energy"; return false; }
+        if (!GameMode.DevMode && !founding && !PlayerEconomy.CanAfford(m, e)) { why = $"need {m} metal, {e} energy"; return false; }
         return true;
     }
 
@@ -364,7 +373,8 @@ public static class SurfaceBuildManager
         var info = SurfaceBuildingDatabase.Get(t);
 
         int m = ColonyManager.DiscCost(info.costMetal), e = ColonyManager.DiscCost(info.costEnergy);
-        if (!GameMode.DevMode && !PlayerEconomy.Spend(m, e)) return false;
+        // The founding capitol is free — it is the civilisation's seat, not a purchase.
+        if (!GameMode.DevMode && !Founding(b, t) && !PlayerEconomy.Spend(m, e)) return false;
 
         if (b.placedBuildings == null) b.placedBuildings = new List<PlacedBuilding>();
         float eff = EfficiencyAt(b, t, x, y, rotation);

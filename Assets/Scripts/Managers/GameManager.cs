@@ -109,7 +109,19 @@ public class GameManager : MonoBehaviour
             // The world must be running. The sequence starts the clock itself, but not if it never ran.
             if (TimeControl.IsPaused) TimeControl.Set(1f);
             generating = false;
+            // ...and the opening must start, or a throw mid-intro leaves a game with no world and no way
+            // to get one. BeginNewGame is the body's last line; this only fires if that was never reached.
+            if (HomeworldOnboarding.Step == OnboardingStep.None && Galaxy != null && Galaxy.Home != null
+                && FindOwnedHome() == null)
+                HomeworldOnboarding.BeginNewGame(Galaxy.Home);
         }
+    }
+
+    CelestialBody FindOwnedHome()
+    {
+        if (Galaxy == null || Galaxy.Home == null) return null;
+        foreach (var b in Galaxy.Home.AllBodies()) if (b.owner == FactionManager.Player) return b;
+        return null;
     }
 
     System.Collections.IEnumerator GenerateGalaxyBody(int systemCount, System.Action onDone)
@@ -135,6 +147,9 @@ public class GameManager : MonoBehaviour
         AncientLore.Reset();
         AncientClues.Reset();
         GameCalendar.Reset();   // a new game starts on Year 0001, Month 01, Day 01
+        // ...and whatever opening the last galaxy was in the middle of. The generator sets a fresh cradle.
+        HomeworldOnboarding.Reset();
+        HomeworldOnboarding.Cradle = null;
 
         // Every derived-per-world cache is keyed on a CelestialBody REFERENCE, so a galaxy that is being
         // replaced would otherwise keep every one of its worlds alive in a static dictionary for the rest
@@ -310,7 +325,8 @@ public class GameManager : MonoBehaviour
             screen?.SwitchToLiveView();
             GenesisSequence.Instance.FrameHomeStar(Galaxy.Home);
 
-            string homeCaption = $"{homePlanet.name} — your homeworld";
+            // The home SYSTEM: no world is the player's yet — they choose one when the intro ends.
+            string homeCaption = $"{Galaxy.Home.name} — your home system";
             screen?.Report(0.62f, homeCaption);
 
             // The bar is walked across the remaining span by the sequence's own clock, so what the
@@ -360,6 +376,9 @@ public class GameManager : MonoBehaviour
 
         // (The reveal backstop and the `generating` reset both live in GenerateGalaxyRoutine's finally —
         // see the note there for why they cannot live here.)
+
+        // THE OPENING: frame the home system with the species' zone on and ask for a starting world.
+        HomeworldOnboarding.BeginNewGame(Galaxy.Home);
         onDone?.Invoke();
     }
 
@@ -423,6 +442,8 @@ public class GameManager : MonoBehaviour
         EarthquakeManager.ResetAll();   // ...and the quake clock, which is keyed on bodies too
         CombatManager.ResetAll();       // ...and every ship's firing state, plus whatever is in the air
         IndexToggles.ResetAll();        // ...and which index overlays were up, which is keyed on bodies
+        HomeworldOnboarding.Reset();
+        HomeworldOnboarding.Cradle = null;
         Galaxy = GalaxyGenerator.Generate(solarSystemGenerator, systemCount, SpeciesManager.Current);
         FocusedSystem = Galaxy.Home;
 
@@ -438,13 +459,19 @@ public class GameManager : MonoBehaviour
         // Seed the rival civilisations: give each non-player faction a race + personality and a homeworld,
         // from which it grows and expands on its own. After Visualize() so the seeded worlds' visuals exist.
         FactionAI.NewGame(Galaxy);
+        HomeworldOnboarding.BeginNewGame(Galaxy.Home);
     }
 
     CelestialBody FindHomePlanet()
     {
         var home = Galaxy != null ? Galaxy.Home : null;
         if (home == null) return null;
+        foreach (var b in home.AllBodies()) if (b.owner == FactionManager.Player && b.birthrightClaim) return b;
         foreach (var b in home.bodies) if (b.owner == FactionManager.Player) return b;
+        // A new game owns nothing yet (HomeworldOnboarding): the cradle stands in until the player has
+        // chosen — the intro films it, and the starting fleet waits in its orbit.
+        var cradle = HomeworldOnboarding.Cradle;
+        if (cradle != null && cradle.system == home) return cradle;
         return home.bodies.Count > 0 ? home.bodies[0] : null;
     }
 
@@ -452,6 +479,9 @@ public class GameManager : MonoBehaviour
     {
         Galaxy = g;
         FocusedSystem = g.Home;
+        // A loaded game is past its opening (saving is refused until the capitol is down).
+        HomeworldOnboarding.Reset();
+        HomeworldOnboarding.Cradle = null;
 
         // The bodies moved, so the body-to-system index this galaxy's fog of war reads is about the
         // galaxy that just went away.

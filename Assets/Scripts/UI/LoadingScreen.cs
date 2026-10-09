@@ -443,7 +443,8 @@ public class LoadingScreen : MonoBehaviour
 
         welcomeLabel.text = string.IsNullOrWhiteSpace(homeName)
             ? "Your universe awaits..."
-            : $"Welcome to your homeworld, <color=#FFD24D>{homeName}</color>";
+            // No world is the player's yet — they choose one once the intro hands over (HomeworldOnboarding).
+            : "Choose your homeworld";
         welcomeLabel.gameObject.SetActive(true);
         StartCoroutine(FadeTitles());
     }

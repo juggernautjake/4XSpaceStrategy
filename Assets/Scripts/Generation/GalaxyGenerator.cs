@@ -403,7 +403,9 @@ public static class GalaxyGenerator
             var moon = new CelestialBody(CelestialBodyType.Moon)
             {
                 id = nextId++,
-                name = $"Homeworld-{(char)('a' + m)}"
+                // Named off the world itself — the cradle is no longer necessarily the player's home, and a
+                // literal "Homeworld-a" orbiting a planet the player passed over would be a lie.
+                name = $"{planet.name}-{(char)('a' + m)}"
             };
             // Out of the cradle's own moon allowance (half its mass for a terrestrial world), spent down
             // as each moon is made — so three home moons share one budget rather than each taking a full
@@ -456,55 +458,35 @@ public static class GalaxyGenerator
             moonR += 0.6f + Random.Range(1.6f, 2.6f);   // clear both moons' discs, not just "some gap"
         }
 
-        planet.owner = FactionManager.Player;
-        planet.birthrightClaim = true;
-        // The ONLY world that starts settled — and now the only one that starts OWNED. Its moons are
-        // surveyed and reachable but unclaimed: you go and take them, which is the first thing the game
-        // gives the player to do.
-        planet.settled = true;
-        // The capital is an established world, not a landing site: about a million people, adjusted for
-        // how the species breeds and how long it lives (see Population.HomeStart).
-        planet.cities = 1;
-        planet.population = Population.HomeStart(species);
-        if (!planet.buildings.Contains((int)BuildingType.City)) planet.buildings.Add((int)BuildingType.City);
-        planet.shipyardLevel = 1;          // the capital always has a working (level-1) shipyard
-        planet.researchCenterLevel = 1;    // ...and its founding laboratory, so research can start at all
-        planet.explorationProgress = 1f;   // home world is fully known from the start
-        // ...and fully STUDIED. "Fully known" has to mean every overlay, or the capital opens missing
-        // the Heat, Fertile, Wind, Solar and Water surveys it has always had — on the one world the
-        // player has lived on since before the game began.
-        planet.researchLevel = CelestialBody.MaxResearchLevel;
-        // ...and its capitol, which is a real structure on the surface grid rather than an abstraction.
-        // It carries the colony's founding reactor, so this is also what lights the home world's power
-        // grid — without it the capital would open with every mine and factory unpowered. Every OTHER
-        // settled world gets its seat from the colony ship that grounded itself there; this one was
-        // simply declared settled, so it has to be given one. (See SurfaceBuildManager.EnsureColonySeat.)
-        SurfaceBuildManager.EnsureColonySeat(planet);
-        // ...and real buildings for the yard and the laboratory it was just declared to have. Both used
-        // to be numbers with nothing on the map: the Production tab said "Shipyard: Level 1" and there
-        // was no shipyard to look at, select, site or lose. See EnsureFoundingFacilities.
-        SurfaceBuildManager.EnsureFoundingFacilities(planet);
-
-        // ...and a working power station beside all of it, wired back to the capitol if it did not land
-        // within the capitol's own reach. A capital that opens as one building running on its built-in
-        // reactor is a colony rather than a city, and it leaves the grid — the mechanic that decides the
-        // shape of everything the player builds afterwards — as something they meet later by reading a
-        // tab instead of something they wake up owning a worked example of. See FoundStartingCity.
+        // ============================================================================================
+        // NOTHING IS CLAIMED AND NOTHING IS BUILT (2026-10-09)
         //
-        // NEW GAMES ONLY. The load path repairs a capital that is MISSING a seat or a declared facility,
-        // because those are invariants; a starting plant is not an invariant, it is an opening position,
-        // and handing one to an old save would be a gift rather than a repair.
-        SurfaceBuildManager.FoundStartingCity(planet);
+        // This used to make the cradle the player's capital outright: owned, settled, a million people, a
+        // capitol, a shipyard, a laboratory and a power station already standing. A new game now opens in
+        // the home system with no claimed world at all, and the player CHOOSES their starting world —
+        // this one or any other planet or moon in the system (HomeworldOnboarding). The cradle is the
+        // GUARANTEE: the one world built to suit the chosen species, at 85% or better.
+        //
+        // Surveyed, because the home system is catalogued (SystemPresence.Known) and the player has to be
+        // able to see what they are choosing between. Ownership, the capitol and everything after it
+        // happen when the player makes their choice.
+        planet.visited = true;
+        planet.explorationProgress = 1f;
 
-        // Extra starting resources by difficulty.
+        // Extra starting resources by difficulty — the cradle's deposits, worth having if it is chosen.
         var keys = new List<ResourceType>(planet.resources.resources.Keys);
         foreach (var k in keys) planet.resources.resources[k] *= GameConfig.HomeResourceBonus;
 
-        // Difficulty sets the home world's habitability (Easy=100, Medium=90-99, Hard=80-89), locked
-        // so it isn't recomputed away.
+        // AT LEAST 85% FOR THIS SPECIES. The cradle is built from the species' own climate, air and mass,
+        // so its real rating usually clears this unaided; the difficulty figure and the 85 floor are the
+        // backstop for the cases that miss, locked so a re-rate on load or a species switch doesn't take
+        // the guarantee away.
+        float real = Habitability.Rate(home.combinedStar, species, planet);
         planet.isHabitable = true;
-        planet.habitability = GameConfig.HomeHabitability();
+        planet.habitability = Mathf.Max(real, Mathf.Max(HomeworldOnboarding.CradleMinHabitability,
+                                                         GameConfig.HomeHabitability()));
         planet.habitabilityLocked = true;
+        HomeworldOnboarding.Cradle = planet;
 
         // ForceHomeWorld resizes the home world and rebuilds its moon system AFTER the system was laid
         // out, so its band is a different shape than the layout reserved for it. Re-enforce, or a big

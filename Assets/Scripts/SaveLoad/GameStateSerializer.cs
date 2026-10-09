@@ -206,6 +206,8 @@ public static class GameStateSerializer
             naturalOrbitRadius = b.naturalOrbitRadius,
             orbitDirection = b.orbitDirection, inclination = b.inclination, eccentricity = b.eccentricity,
             verticalOffset = b.verticalOffset, spinSpeed = b.spinSpeed, showRing = b.showRing,
+            zoomFieldScale = b.zoomFieldScale, zoomFieldColorSet = b.zoomFieldColorSet, zoomFieldGrid = b.zoomFieldGrid,
+            zfR = b.zoomFieldColor.r, zfG = b.zoomFieldColor.g, zfB = b.zoomFieldColor.b, zfA = b.zoomFieldColor.a,
             rotationDirection = b.rotationDirection == 0 ? 1 : b.rotationDirection, beltId = b.beltId,
             distanceFromStar = b.distanceFromStar, habitability = b.habitability, isHabitable = b.isHabitable,
             buildings = new List<int>(b.buildings),
@@ -417,6 +419,13 @@ public static class GameStateSerializer
         EmpireTech.SetLevel(game.research != null ? game.research.empireLevel : 1);
         TechManager.Import(game.research?.tech);
 
+        // Body render sizes are derived from mass, so a save from before the 2x/1.5x size change comes
+        // back with bigger worlds on its old orbits. Re-spaced ONLY where the bands now actually overlap:
+        // a system that still fits keeps every orbit, moon speed and Dev edit exactly as saved.
+        foreach (var sys in galaxy.systems)
+            if (sys != null && !OrbitSafety.Validate(sys.bodies, out _))
+                OrbitSafety.EnforceSystem(sys.bodies, sys.combinedStar);
+
         GameManager.Instance.LoadGalaxy(galaxy);
         SpeciesManager.Select(game.speciesIndex);
 
@@ -444,7 +453,12 @@ public static class GameStateSerializer
         var homeSys = galaxy.Home;
         if (homeSys != null)
         {
-            foreach (var b in homeSys.bodies) if (b.owner == FactionManager.Player) { home = b; break; }
+            // The capital first, wherever it is — moons included, since the opening lets the player found
+            // on one (HomeworldOnboarding) and `bodies` holds planets only.
+            foreach (var b in homeSys.AllBodies())
+                if (b.owner == FactionManager.Player && b.birthrightClaim) { home = b; break; }
+            if (home == null)
+                foreach (var b in homeSys.bodies) if (b.owner == FactionManager.Player) { home = b; break; }
             if (home == null && homeSys.bodies.Count > 0) home = homeSys.bodies[0];
         }
 
@@ -510,6 +524,9 @@ public static class GameStateSerializer
             orbitDirection = dto.orbitDirection == 0 ? 1 : dto.orbitDirection,
             inclination = dto.inclination, eccentricity = dto.eccentricity,
             verticalOffset = dto.verticalOffset, spinSpeed = dto.spinSpeed, showRing = dto.showRing,
+            zoomFieldScale = dto.zoomFieldScale > 0f ? dto.zoomFieldScale : 1f,
+            zoomFieldColorSet = dto.zoomFieldColorSet, zoomFieldGrid = dto.zoomFieldGrid,
+            zoomFieldColor = dto.zoomFieldColorSet ? new Color(dto.zfR, dto.zfG, dto.zfB, dto.zfA) : ZoomFieldRules.DefaultColor,
             // 0 means "written before rotation had a direction", and every such world was prograde.
             rotationDirection = dto.rotationDirection == 0 ? 1 : dto.rotationDirection, beltId = dto.beltId,
             distanceFromStar = dto.distanceFromStar, habitability = dto.habitability,
@@ -757,7 +774,8 @@ public static class GameStateSerializer
         // already says it has. The tier itself is untouched — see EnsureFoundingFacilities.
         SurfaceBuildManager.EnsureFoundingFacilities(b);
 
-        if (b.surface != null)
+        // Ores are switched off for now (OreGenerator.Enabled); a save's ore cells are ignored.
+        if (b.surface != null && OreGenerator.Enabled)
             foreach (var o in dto.ores)
                 if (o.x >= 0 && o.x < b.surface.width && o.y >= 0 && o.y < b.surface.height)
                 {

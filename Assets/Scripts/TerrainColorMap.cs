@@ -23,6 +23,7 @@ public static class TerrainColorMap
             case TerrainType.Barren:        return new Color(0.62f, 0.58f, 0.52f);
             // Lighter and cooler than Barren's rock, so dust and bare rock read apart on a grey world.
             case TerrainType.Regolith:      return new Color(0.76f, 0.75f, 0.73f);
+            case TerrainType.CryoVolcano:   return new Color(0.45f, 0.85f, 0.95f);
 
             // Temperate / life-bearing
             case TerrainType.Grassland:     return new Color(0.52f, 0.76f, 0.34f);
@@ -91,6 +92,7 @@ public static class TerrainColorMap
             case TerrainType.GeyserField:   return "Hydrothermal vents and steam.";
             case TerrainType.Barren:        return "Bare, lifeless ground.";
             case TerrainType.Regolith:      return "Fine grey dust over airless rock.";
+            case TerrainType.CryoVolcano:   return "Ice volcano venting water and volatiles under pressure.";
             default:                        return type.ToString();
         }
     }

@@ -26,6 +26,10 @@ public class BuildOrder
     /// An order is a decision made at a moment, and it keeps the decision that was made.
     public int squadron;
 
+    /// The world whose shipyard laid this hull down, by body id, or -1 for "the best yard". The ship rolls
+    /// out docked there — in that planet's orbital field — and waits for orders (2026-10-09).
+    public int yardBodyId = -1;
+
     // Set by the scheduler each tick; the UI reads it rather than recomputing the allocation.
     public BuildState state = BuildState.WaitingForPower;
     public bool Active => state == BuildState.Building;
@@ -125,6 +129,27 @@ public class UnitManager : MonoBehaviour
         OnUnitsChanged?.Invoke();
     }
 
+    /// Re-home the empire: the player chose their starting world (HomeworldOnboarding), so the starting
+    /// fleet, which waited at the cradle, moves into that world's orbit.
+    public void SetHomePlanet(CelestialBody b, bool moveUnits)
+    {
+        if (b == null) return;
+        var old = HomePlanet;
+        HomePlanet = b;
+        if (moveUnits && old != null && old != b)
+            foreach (var u in units)
+            {
+                if (u == null || u.owner != FactionManager.Player || u.location != old) continue;
+                if (old.units != null) old.units.Remove(u);
+                u.location = b;
+                if (b.units == null) b.units = new List<Unit>();
+                b.units.Add(u);
+            }
+        OnUnitsChanged?.Invoke();
+    }
+
+    public void RefreshOwnerRingOf(CelestialBody b) { if (b != null) RefreshOwnerRing(b); }
+
     public Unit CreateUnit(UnitType type, Faction owner, CelestialBody at)
     {
         var u = new Unit { id = nextId++, type = type, owner = owner, location = at };
@@ -209,7 +234,11 @@ public class UnitManager : MonoBehaviour
         OnBuildChanged?.Invoke();
     }
 
-    public bool QueueBuild(UnitType type)
+    public bool QueueBuild(UnitType type) => QueueBuild(type, null);
+
+    /// Queue a hull at a particular world's shipyard. `at` null (or not a yard of the player's) means
+    /// "wherever the best yard is when it finishes", which is what the empire-wide catalogue does.
+    public bool QueueBuild(UnitType type, CelestialBody at)
     {
         var info = UnitDatabase.Get(type);
         if (!CanBuildShip(type, out _)) return false;
@@ -225,7 +254,8 @@ public class UnitManager : MonoBehaviour
             duration = info.buildTime * TechEffects.BuildTimeMult / speed,
             metalPaid = GameMode.DevMode ? 0 : cm,
             energyPaid = GameMode.DevMode ? 0 : ce,
-            squadron = ReinforceSquadron
+            squadron = ReinforceSquadron,
+            yardBodyId = at != null && at.owner == FactionManager.Player && at.shipyardLevel > 0 ? at.id : -1
         });
         Schedule();
         OnBuildChanged?.Invoke();
@@ -311,6 +341,20 @@ public class UnitManager : MonoBehaviour
         return best != null ? best : HomePlanet;
     }
 
+    /// Where a finished hull rolls out: the yard that queued it while that world is still a working
+    /// yard of the player's, otherwise the best yard.
+    CelestialBody YardFor(BuildOrder o)
+    {
+        if (o != null && o.yardBodyId >= 0)
+            foreach (var b in SystemContext.AllBodies())
+                if (b != null && b.id == o.yardBodyId)
+                {
+                    if (b.owner == FactionManager.Player && b.shipyardLevel > 0) return b;
+                    break;
+                }
+        return BestShipyardBody();
+    }
+
     // The first ship actually under construction (for compact readouts), or null.
     public BuildOrder CurrentBuild
     {
@@ -334,7 +378,7 @@ public class UnitManager : MonoBehaviour
             if (o.elapsed < o.duration) continue;
 
             buildQueue.RemoveAt(i);
-            var yard = BestShipyardBody();
+            var yard = YardFor(o);
             var built = CreateUnit(o.type, FactionManager.Player, yard);
 
             // Called before the notification is composed rather than inside it: Reinforce MOVES the
@@ -1400,7 +1444,7 @@ public class UnitManager : MonoBehaviour
             {
                 type = (int)o.type, elapsed = o.elapsed, duration = o.duration,
                 paused = o.paused, metalPaid = o.metalPaid, energyPaid = o.energyPaid,
-                squadron = o.squadron
+                squadron = o.squadron, yardBodyId = o.yardBodyId, hasYard = o.yardBodyId >= 0
             });
         return list;
     }
@@ -1419,7 +1463,7 @@ public class UnitManager : MonoBehaviour
                 {
                     id = nextOrderId++, type = (UnitType)d.type, elapsed = d.elapsed, duration = d.duration,
                     paused = d.paused, metalPaid = d.metalPaid, energyPaid = d.energyPaid,
-                    squadron = d.squadron
+                    squadron = d.squadron, yardBodyId = d.hasYard ? d.yardBodyId : -1
                 });
         Schedule();
         OnBuildChanged?.Invoke();
@@ -1432,7 +1476,12 @@ public class UnitManager : MonoBehaviour
         units.Clear();
         nextId = 1;
         HomePlanet = homePlanet;
-        if (homePlanet != null)
+        // Only for saves from BEFORE the surface grid, whose capital carried its yard and lab as bare
+        // numbers. A capital founded through the opening (HomeworldOnboarding) builds its own yard and
+        // laboratory, and the tiers follow what stands on the ground (SyncFacilityTiers) — forcing level
+        // 1 here would hand it a yard it never built.
+        bool preGrid = homePlanet != null && (homePlanet.placedBuildings == null || homePlanet.placedBuildings.Count == 0);
+        if (homePlanet != null && homePlanet.owner == FactionManager.Player && preGrid)
         {
             homePlanet.shipyardLevel = Mathf.Max(1, homePlanet.shipyardLevel);
             homePlanet.researchCenterLevel = Mathf.Max(1, homePlanet.researchCenterLevel);   // pre-tier saves

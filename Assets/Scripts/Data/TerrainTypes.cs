@@ -57,5 +57,7 @@ public enum TerrainType
 
     // --- Appended, never inserted: saves store terrain as its number ---
     // Fine grey dust over smooth airless ground.
-    Regolith
+    Regolith,
+    // A frozen world's vent: water and volatiles under pressure, not lava (2026-10-09).
+    CryoVolcano
 }

@@ -79,9 +79,22 @@ public static class OreGenerator
     // a higher tier, everywhere on the planet rather than concentrated at boundaries specifically.
     const float TectonicAffinityMul = 1.35f, TectonicTierMul = 1.25f;
 
+    /// ORES ARE SWITCHED OFF for now (2026-10-09). A per-tile random roll scattered seams with no regard
+    /// for the ground around them, and since an ore tile jumps straight into the Mineral band, every
+    /// world's Mineral Index came out speckled. The Mineral Index still reads the crust itself. Flip this
+    /// back on once ores are seeded as coherent deposits. With it off, Populate CLEARS any ore a tile
+    /// carries and the save loader drops saved ones, so old saves lose their speckle too.
+    public const bool Enabled = false;
+
     public static void Populate(CelestialBody body)
     {
         if (body.surface == null) return;
+        if (!Enabled)
+        {
+            foreach (var t in body.surface.tiles)
+                if (t != null) { t.ore = OreType.None; t.oreRichness = 0f; }
+            return;
+        }
         var pool = PoolFor(body.type);
         if (pool.Count == 0) return;
 

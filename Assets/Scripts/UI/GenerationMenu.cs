@@ -57,7 +57,7 @@ public class GenerationMenu : MonoBehaviour
         UIFactory.Label(col, "DIFFICULTY", UITheme.SmallSize, UITheme.Accent, 16);
         UIFactory.Button(col, "Easy  (home 100%, more resources, fast research)", () => { selectedDifficulty = Difficulty.Easy; UpdateSummary(); }, 28);
         UIFactory.Button(col, "Medium  (home 90-99%)", () => { selectedDifficulty = Difficulty.Medium; UpdateSummary(); }, 28);
-        UIFactory.Button(col, "Hard  (home 80-89%, scarce, slow research)", () => { selectedDifficulty = Difficulty.Hard; UpdateSummary(); }, 28);
+        UIFactory.Button(col, "Hard  (best world 85-89%, scarce, slow research)", () => { selectedDifficulty = Difficulty.Hard; UpdateSummary(); }, 28);
 
         UIFactory.Label(col, "GALAXY", UITheme.SmallSize, UITheme.Accent, 16);
         systemsS = UIFactory.LabeledSlider(col, "Number of systems", 1f, 12f, 5f, _ => UpdateSummary(), "F0");

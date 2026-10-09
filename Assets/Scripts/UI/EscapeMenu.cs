@@ -94,6 +94,7 @@ public class EscapeMenu : MonoBehaviour
         // ...and never while a prompt is using Escape to mean "abandon what I was typing". A dialog
         // that dismisses itself AND pauses the game is answering one keypress twice.
         if (NamePrompt.SwallowsEscape) return;
+        if (HomeworldOnboardingUI.SwallowsEscape) return;
         if (Input.GetKeyDown(KeyCode.Escape) && (IsOpen || GameRunning)) Toggle();
     }
 

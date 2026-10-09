@@ -104,6 +104,8 @@ public class PlanetGridVisualizer : MonoBehaviour
         if (PlanetUI.Selected == null) return;
         if (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen) return;
         if (UIFactory.IsTypingInField()) return;
+        // The Planet View owns A/D and the arrows for scrolling its map; don't move a hidden cursor too.
+        if (PlanetViewWindow.Instance != null && PlanetViewWindow.Instance.IsOpen) return;
 
         int dx = 0, dy = 0;
         if (Input.GetKeyDown(KeyCode.A) || Input.GetKeyDown(KeyCode.LeftArrow)) dx = -1;

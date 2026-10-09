@@ -218,8 +218,15 @@ public static class SurfaceIndex
     /// The floor for every other index: the absolute lowest any index reads before it counts as nothing.
     public const float BaseFloor = 0.40f;
 
+    /// The SOLAR floor, lower than the rest (2026-10-09) so a thick-aired world, which loses ten points of
+    /// sunlight per atmosphere, can still sometimes run a solar array.
+    public const float SolarFloor = 0.20f;
+
     /// Below this an index YIELDS nothing, is not drawn, and refuses to be built on.
-    public static float Floor(SurfaceIndexKind k) => k == SurfaceIndexKind.Mineral ? ShowFloor : BaseFloor;
+    public static float Floor(SurfaceIndexKind k)
+        => k == SurfaceIndexKind.Mineral ? ShowFloor
+         : k == SurfaceIndexKind.Solar ? SolarFloor
+         : BaseFloor;
 
     /// A plate margin reads exactly this (GeothermalMap.PlateLineBase). It used to be a drawing floor of
     /// its own, under the yield floor; with Geothermal's floor at 40 the two are now the same number, and
@@ -427,7 +434,7 @@ public static class SurfaceIndex
             case SurfaceIndexKind.Wind:
                 // Extreme Weather: storms over far more of the world.
                 return WorldModifiers.Has(b, WorldModifier.ExtremeWeather)
-                    ? Mathf.Min(0.75f, WeatherCoverage(b) * 1.8f + 0.08f)
+                    ? Mathf.Min(0.85f, WeatherCoverage(b) * 1.4f + 0.08f)
                     : WeatherCoverage(b);
             default: return 0.12f;
         }
@@ -549,6 +556,7 @@ public static class SurfaceIndex
             // borates, lithium — and it read as barren dirt purely because nobody had listed it.
             case TerrainType.SaltFlat: return 0.5f;
             case TerrainType.Volcano: return 0.5f;
+            case TerrainType.CryoVolcano: return 0.4f;
             case TerrainType.Hills: return 0.45f;
             case TerrainType.MagmaField: return 0.45f;
             // Hot springs deposit their load at the surface: sulphur, cinnabar, metal salts.
@@ -652,6 +660,7 @@ public static class SurfaceIndex
         switch (t)
         {
             case TerrainType.Volcano: return 1.0f;
+            case TerrainType.CryoVolcano: return 0.95f;     // pressure, not heat — still a vent
             case TerrainType.MagmaField: return 0.95f;
             case TerrainType.GeyserField: return 0.92f;
             case TerrainType.LavaRock: return 0.72f;
@@ -753,7 +762,7 @@ public static class SurfaceIndex
             case TerrainType.LavaRock: case TerrainType.ObsidianFlat: return 0.02f;
             case TerrainType.CrystalField: case TerrainType.MetallicCrust: return 0.02f;
             case TerrainType.Ice: case TerrainType.Glacier: return 0.01f;
-            case TerrainType.Volcano: case TerrainType.MagmaField: return 0.01f;
+            case TerrainType.Volcano: case TerrainType.MagmaField: case TerrainType.CryoVolcano: return 0.01f;
             case TerrainType.GasClouds: case TerrainType.Storm: return 0f;
         }
         return 0.08f;
@@ -867,11 +876,13 @@ public static class SurfaceIndex
         float cinv = cmax > 0.0001f ? 1f / cmax : 0f;
 
         var field = new float[n];
+        float eqExp = EquatorialExponent(b);
         for (int y = 0; y < h; y++)
         {
-            // 0 at the equator, 1 at the poles. The belt is broad — the tropics, not a line.
+            // 0 at the equator, 1 at the poles. The belt is broad — the tropics, not a line — and broader
+            // still under thick air.
             float lat = Mathf.Abs((y + 0.5f) / h - 0.5f) * 2f;
-            float equatorial = Mathf.Pow(1f - lat, 1.5f);
+            float equatorial = Mathf.Pow(1f - lat, eqExp);
             for (int x = 0; x < w; x++)
             {
                 int i = y * w + x;
@@ -933,13 +944,24 @@ public static class SurfaceIndex
     /// How much of a world is windy enough to matter. Climbs hard with pressure and saturates around six
     /// atmospheres, past which more air does not make the storms meaningfully worse — it is already as
     /// bad as a turbine can survive.
+    ///
+    /// RAISED 2026-10-09: a 2.8-atmosphere world drew its weather belt over about a fifth of the surface,
+    /// and the request asked for about three fifths at that pressure. The curve now reaches 0.60 at three
+    /// atmospheres (2.8 reads ~0.56) and tops out at 0.72; an Earth-normal world is ~0.18.
     static float WeatherCoverage(CelestialBody b)
     {
         if (b == null) return 0f;
         float a = b.atmospheres;
-        if (a < 1f) return Mathf.Lerp(0.02f, 0.14f, Mathf.InverseLerp(TraceAir, 1f, a));
-        return Mathf.Lerp(0.14f, 0.42f, Mathf.Clamp01(Mathf.InverseLerp(1f, 6f, a)));
+        if (a < 1f) return Mathf.Lerp(0.02f, 0.18f, Mathf.InverseLerp(TraceAir, 1f, a));
+        if (a < 3f) return Mathf.Lerp(0.18f, 0.60f, Mathf.InverseLerp(1f, 3f, a));
+        return Mathf.Lerp(0.60f, 0.72f, Mathf.Clamp01(Mathf.InverseLerp(3f, 6f, a)));
     }
+
+    /// How sharply the storm belt is pinned to the equator. Thin air keeps weather in the tropics; thick
+    /// air spreads it toward the poles, so a wide coverage is a wide BELT rather than the same narrow
+    /// belt with scattered patches bolted on.
+    static float EquatorialExponent(CelestialBody b)
+        => Mathf.Lerp(1.5f, 0.6f, Mathf.Clamp01(Mathf.InverseLerp(1f, 4f, b != null ? b.atmospheres : 0f)));
 
     /// How much weather this world has AT ALL, 0..1 — kept as the one number the readouts quote.
     public static float WeatherSeverity(CelestialBody b) => WeatherAirCeiling(b);
@@ -981,7 +1003,8 @@ public static class SurfaceIndex
             // ---- open ----
             case TerrainType.Island: return 0.25f;
             case TerrainType.Beach: return 0.2f;
-            case TerrainType.MetallicCrust: case TerrainType.LavaRock: case TerrainType.Volcano: return 0.2f;
+            case TerrainType.MetallicCrust: case TerrainType.LavaRock: case TerrainType.Volcano:
+            case TerrainType.CryoVolcano: return 0.2f;
             case TerrainType.Plains: case TerrainType.Grassland:
             case TerrainType.Savanna: case TerrainType.Steppe: return 0.15f;
             case TerrainType.AshWaste: case TerrainType.MagmaField: return 0.15f;
@@ -1527,16 +1550,31 @@ public static class SurfaceIndex
     {
         switch (k)
         {
-            case SurfaceIndexKind.Mineral: return "Broken, raised crust — mountains, canyons and exposed seams, which is why the richest ground follows the plate margins. Concentrated into a few districts rather than spread over the whole crust.";
-            // SHORT ON PURPOSE. This one had grown into a paragraph explaining the whole mechanism —
-            // every threshold, both sources, and what each does — which is reference material, not a
-            // caption. The player needs to know what the colours mean and where to build; the numbers
-            // are on the legend beside it and the reasoning is in GeothermalMap.
-            case SurfaceIndexKind.Geothermal: return "Heat in the crust, and the plate movement that makes it. Faint lines are plate boundaries; the bright ground is where the heat actually is, and the hottest of it is volcanic. Geothermal plants go on the bright ground.";
-            case SurfaceIndexKind.Fertile: return "Warm AND wet AND flat — farmland needs all three at once. Needs a LIVING world above all. How high it can go depends on the climate: closest to 20-22 °C with plenty of water is best, and only a Fertile World has farmland in the 90s to spare.";
-            case SurfaceIndexKind.Wind: return "Needs AIR — the thicker it is, the higher this can go. The weather gathers in STORM ZONES: mostly in the equatorial belt, and strongest where the ground changes height sharply or where land meets sea. Flat, open ground inside a zone is where turbines go.";
-            case SurfaceIndexKind.Solar: return "Covers the whole surface. The star sets the maximum — near 100% close in, about 55% mid habitable zone, the 40s and below beyond it. Each atmosphere takes 10 points off, and every 1,500 m of height adds 10 (or takes 10 off below the datum), so peaks are the panel sites.";
-            case SurfaceIndexKind.Water: return "The water itself reads 100%. The land beside it reads in the 90s, falling to the 80s three tiles inland, 60-79 at four, and dropping away to nothing six tiles out. Bigger bodies of water supply their shores better.";
+            // ONE OR TWO SENTENCES, ALL SIX (2026-10-09). These were paragraphs explaining how the
+            // generator chose each tile, and players don't read paragraphs: the colours on the map are
+            // the explanation, and the reasoning lives in the code that computes them.
+            case SurfaceIndexKind.Mineral: return "Rich mineral ground. Brighter means better mining.";
+            case SurfaceIndexKind.Geothermal: return "Subsurface pressure: plate lines, hotspots and vents. Brighter ground powers geothermal plants better.";
+            case SurfaceIndexKind.Fertile: return "Farmland. Brighter ground grows more food.";
+            case SurfaceIndexKind.Wind: return "Storm zones. Brighter ground turns wind farms faster.";
+            case SurfaceIndexKind.Solar: return "Sunlight reaching the ground. Brighter, higher ground suits solar arrays.";
+            case SurfaceIndexKind.Water: return "Water and the land beside it. Brighter ground suits hydro plants and steam turbines.";
+            default: return "";
+        }
+    }
+
+    /// The hover text for the index toggle icons on the map: why the highlighted ground is worth
+    /// building on, not how the generator chose it. One sentence.
+    public static string Why(SurfaceIndexKind k)
+    {
+        switch (k)
+        {
+            case SurfaceIndexKind.Mineral: return "Build mines here: the brightest ground holds the most ore.";
+            case SurfaceIndexKind.Geothermal: return "Build geothermal plants here: the brightest ground has the most pressure to tap. Quakes hit the hottest ground.";
+            case SurfaceIndexKind.Fertile: return "Build farmland here: the brightest ground grows the most food.";
+            case SurfaceIndexKind.Wind: return "Build wind farms here: the brightest ground has the strongest winds.";
+            case SurfaceIndexKind.Solar: return "Build solar arrays here: the brightest ground gets the most sunlight.";
+            case SurfaceIndexKind.Water: return "Build hydro plants and steam turbines here: the brightest ground has the most water to hand.";
             default: return "";
         }
     }

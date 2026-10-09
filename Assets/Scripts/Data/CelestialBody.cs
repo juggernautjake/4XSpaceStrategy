@@ -97,6 +97,18 @@ public class CelestialBody
 
     public bool showRing = true;
 
+    // ---- The planet's zoom field (ZoomField.cs) ----
+    /// Multiplier on the derived radius, from the Dev window. 1 = a little past the outermost moon.
+    public float zoomFieldScale = 1f;
+    /// Dev-chosen tint (alpha included); only used once `zoomFieldColorSet`, so a save that predates it
+    /// keeps the default rather than loading as transparent black.
+    public Color zoomFieldColor = new Color(0.85f, 0.87f, 0.90f, 0.5f);
+    public bool zoomFieldColorSet;
+    /// Index into ZoomFieldRules.GridNames.
+    public int zoomFieldGrid;
+    /// The Orbit tab's "show orbital field" toggle. A view setting, not saved.
+    [System.NonSerialized] public bool showZoomField;
+
     // --- Habitability (relative to this body's host star) ---
     public float distanceFromStar = 0f; // absolute distance from the star, in orbit units
     public float habitability = 0f;     // 0..100

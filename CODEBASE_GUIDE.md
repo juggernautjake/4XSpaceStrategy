@@ -181,7 +181,11 @@ One 0..1 field per surface point, from two sources, whichever is stronger:
 - **FAULTS** — a plate margin reads 40%, up to 100% head-on, radiating up to 3 tiles and never under
   70% inside that band (all four figures measured and recorded in the file).
 - **HOTSPOTS** — focused mantle plumes: a small 90%+ core, an 80%+ ring, a 70%+ skirt, and a vent at
-  97%+ IS a volcano. Present with or without plates, so a plate-less world can be covered in volcanoes.
+  95%+ IS a volcano. Present with or without plates, so a plate-less world can be covered in volcanoes.
+- **PLUMES** (2026-10-09) — every world with hotspot activity also gets 4–8 seeded round plumes sized to
+  its grid, capped at 92% except a rolled VENT core (97%) at the centre of the larger ones. On a frozen
+  world a vent reading `CryoVolcanoIndex` (93%) becomes `TerrainType.CryoVolcano` instead of a volcano.
+  The index is described to the player as subsurface PRESSURE, not ambient heat.
 - **`At / HotspotAt / FaultActivity / WorldIntensity / Active / Label`**, `Invalidate`.
 - Read by FOUR systems, which is the point: the survey overlay, the terrain generator's elevation, the
   earthquakes, and `PlanetTemperature`'s internal-heat term. They cannot disagree.
@@ -223,6 +227,8 @@ One 0..1 field per surface point, from two sources, whichever is stronger:
 - **`GenerateResources(body)`** — bulk Metal/Energy/Water per body type (now covers every type).
 
 ### OreGenerator.cs
+- **`Enabled = false` since 2026-10-09**: ores are switched off (they speckled the Mineral Index).
+  `Populate` clears tiles instead, the loader ignores saved ore cells, and POIs carry no named ore.
 - **`Populate(body)`** — seeds mineral-rich tiles; ore choice depends on planet type; higher tiers
   are gated so exotics stay rare.
 - `TerrainAffinity, PoolFor, TierAcceptance, WeightedPick`.
@@ -257,6 +263,16 @@ WASD pan + mouse-wheel height, fixed 55° pitch, ignores input over UI.
 ---
 
 ## Systems (`Assets/Scripts/Systems/`)
+
+### HomeworldOnboarding.cs  *(the new-game opening, 2026-10-09)*
+A new game owns nothing. `GalaxyGenerator.ForceHomeWorld` still builds the species' CRADLE (≥85%, locked)
+but no longer claims, settles or builds on it. **`BeginNewGame(home)`** → `ChooseWorld` (home system framed,
+species zone on via `HabitableZoneVisualizer.SetSpeciesMode`) → **`Claim(b, name)`** (owned, level-2 survey,
+economy + starting fleet re-homed with `UnitManager.SetHomePlanet`) → `PlaceCapitol` (the capitol is placeable
+and free only here — `SurfaceBuildManager.Founding`) → **`CapitolPlaced`** settles it → Farm → Combustion →
+Mine → 2 Habitat Blocks (`Tick` advances when the job is built or queued). Runtime-only; `BlocksSaving` gates
+`SaveLoadMenu` until the capitol is down. UI in `HomeworldOnboardingUI.cs` (banner, "Are you sure?", naming
+window) and `AlertMarker` (the flashing "!" on the Build category tab and structure card).
 
 ### GameCalendar.cs  *(one second of game time is one in-game DAY)*
 30-day months, 12-month years, the game opens on **Year 0001, Month 01, Day 01**.
@@ -418,6 +434,18 @@ nothing ticks it, and the save no longer carries it.
   and moons (data-driven orbits + `PlanetAppearance`), builds the habitable-zone visualizer, and
   registers `SystemContext`. Overload accepts `StarType`.
 
+### ZoomField.cs  *(a planet's own space, 2026-10-09)*
+`ZoomFieldRules` — every planet (not moons, not belt rocks) has a flat disc a bit wider than its outermost
+moon's orbit (`Radius`). It is the camera's zoom-lock zone (`CameraController.TryAutoLock`, which also
+locks onto the player's undocked ships), the planet's orbit (`ParkedIn` adds parked ships to the Orbit
+tabs), and where new hulls wait (`BuildOrder.yardBodyId` / `UnitManager.YardFor`). `ZoomFieldRenderer`
+draws it (circle + grid, 50% alpha) in Dev Mode, from the Orbit tab toggle, or for 8 s after a station is
+queued (`FocusForConstruction`). Per-planet colour / grid / size are Dev sliders in `OrbitControlPanel`, saved.
+
+### NameplateManager.cs  *(UI)*
+Bordered name plates over every surveyed body and every discovered system (anchored to `sys.pivot`, the
+barycentre), with the player's crest or a rival's colour swatch on the left. Screen-space, no raycasts.
+
 ### HabitableZoneVisualizer.cs
 - **`Build(star, starT, bodies)`** — build the green band for the current species' zone.
 - **`Refresh()`** — rebuild after a species change.
@@ -558,7 +586,7 @@ they cost nothing to save and survive a reload untouched (the same guarantee ter
   hot and moving", because two systems describing the same ground could and did disagree — a red fault
   line could run across ground the Heat Index called cold. The field lives in `GeothermalMap`; selecting
   this index also draws the plate lines and the per-plate push arrows over it.
-- **Per-index floors** (`Floor(k)`): **Mineral 70%, everything else 40%**. Under the floor an index is
+- **Per-index floors** (`Floor(k)`): **Mineral 70%, Solar 20% (since 2026-10-09), everything else 40%**. Under the floor an index is
   not drawn, yields nothing (`Productive(k, v)`) and refuses placement. Bands are 10% steps from the
   floor (`Steps(k)`: 3 for minerals, 6 for the rest). `ShowFloor` is now the MINERAL floor only;
   `EarthquakeManager` keeps its own 70% constant.

@@ -18,6 +18,16 @@ public class OrbitControlPanel : MonoBehaviour
     bool suppress;
 
     Slider sizeS, radiusS, speedS, spinS, phaseS, incS, eccS, vertS;
+    Slider zfScaleS, zfR, zfG, zfB, zfA, zfGrid;
+
+    void ApplyField(System.Action<CelestialBody> edit)
+    {
+        if (suppress || current == null || !ZoomFieldRules.IsHost(current)) return;
+        edit(current);
+    }
+
+    void ApplyFieldColor()
+        => ApplyField(b => { b.zoomFieldColor = new Color(zfR.value, zfG.value, zfB.value, zfA.value); b.zoomFieldColorSet = true; });
     Toggle dirT, ringT, rotationT;
     TMP_Text rotationNote;
 
@@ -74,6 +84,19 @@ public class OrbitControlPanel : MonoBehaviour
 
         UIFactory.Button(col, "Realistic Speed (recompute)", RecomputeRealistic);
         UIFactory.Button(col, "Reset orbit (to original)", ResetToNaturalOrbit);
+
+        // ---- ZOOM FIELD (planets only; see ZoomField.cs) ----
+        // Always drawn while Dev Mode is on. Size multiplies the derived radius (a little past the
+        // outermost moon); colour includes its transparency; the grid is the infill pattern.
+        UIFactory.Label(col, "ZOOM FIELD (planets only)", UITheme.SmallSize, UITheme.Accent, 18);
+        zfScaleS = UIFactory.LabeledSlider(col, "Field size (x derived)", 0.5f, 3f, 1f, v => ApplyField(b => b.zoomFieldScale = v), "F2");
+        zfR = UIFactory.LabeledSlider(col, "Field red", 0f, 1f, ZoomFieldRules.DefaultColor.r, v => ApplyFieldColor(), "F2");
+        zfG = UIFactory.LabeledSlider(col, "Field green", 0f, 1f, ZoomFieldRules.DefaultColor.g, v => ApplyFieldColor(), "F2");
+        zfB = UIFactory.LabeledSlider(col, "Field blue", 0f, 1f, ZoomFieldRules.DefaultColor.b, v => ApplyFieldColor(), "F2");
+        zfA = UIFactory.LabeledSlider(col, "Field opacity", 0f, 1f, ZoomFieldRules.DefaultColor.a, v => ApplyFieldColor(), "F2");
+        zfGrid = UIFactory.LabeledSlider(col, "Grid: 0 Square · 1 Fine · 2 Polar · 3 None", 0f, ZoomFieldRules.GridNames.Length - 1, 0f,
+            v => ApplyField(b => b.zoomFieldGrid = Mathf.RoundToInt(v)), "F0");
+        zfGrid.wholeNumbers = true;
 
         PlanetUI.OnBodySelected += ShowFor;
         PlanetUI.OnClosed += Hide;
@@ -259,6 +282,10 @@ public class OrbitControlPanel : MonoBehaviour
         rotationT.isOn = body.rotationDirection >= 0;
         dirT.isOn = body.orbitDirection >= 0;
         ringT.isOn = body.showRing;
+        var fc = ZoomFieldRules.ColorOf(body);
+        zfScaleS.value = body.zoomFieldScale > 0f ? body.zoomFieldScale : 1f;
+        zfR.value = fc.r; zfG.value = fc.g; zfB.value = fc.b; zfA.value = fc.a;
+        zfGrid.value = body.zoomFieldGrid;
         suppress = false;
 
         RefreshRotationNote();

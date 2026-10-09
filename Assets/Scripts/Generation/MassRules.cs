@@ -267,8 +267,12 @@ public static class MassRules
     ///
     /// Moons use a smaller coefficient than planets, so a moon reads as a satellite rather than a twin
     /// even when its mass is a large fraction of its host's.
-    public const float PlanetDiameterPerCubeRootMass = 0.62f;
-    public const float MoonDiameterPerCubeRootMass = 0.44f;
+    ///
+    /// DOUBLED 2026-10-09 (0.62 / 0.44 -> 1.24 / 0.88): "this may be a space game but it is also just a
+    /// game, I want things to be somewhat easier to see". Terrestrial worlds, moons and asteroids render
+    /// at twice their old diameter; GasGiantDiameterScale drops to 1.5 with it so giants come out 1.5x.
+    public const float PlanetDiameterPerCubeRootMass = 1.24f;
+    public const float MoonDiameterPerCubeRootMass = 0.88f;
 
     const float OneThird = 1f / 3f;
 
@@ -283,7 +287,10 @@ public static class MassRules
     ///
     /// OrbitSafety.Scale reads VisualDiameter, so the orbital band a giant reserves grows with it and
     /// the ring-skipping in SolarSystemGenerator sees the new size for free.
-    public const float GasGiantDiameterScale = 2f;
+    ///
+    /// 1.5 since the planet coefficient doubled (2026-10-09): 2 x 1.5 = 3, which is the old factor of 2
+    /// times the requested 1.5 — giants grow by half while rocky worlds double.
+    public const float GasGiantDiameterScale = 1.5f;
 
     public static float VisualDiameter(float mass, bool isMoon)
     {

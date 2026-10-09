@@ -61,6 +61,15 @@ public class PlanetClick : MonoBehaviour
         }
         ui.Show(data);
 
+        // CHOOSING A STARTING WORLD: the click is the choice. The inspector still opens behind the
+        // confirmation so the player can read the world they are about to commit to; no double-click
+        // into the surface view, which would skip the naming step.
+        if (HomeworldOnboarding.Choosing)
+        {
+            HomeworldOnboardingUI.Instance?.Pick(data);
+            return;
+        }
+
         // A second click on the same world within the window OPENS the full Planetary Viewer; a lone
         // click leaves it selected with the compact panel showing, so clicking a world no longer throws
         // the whole full-screen view over the map.

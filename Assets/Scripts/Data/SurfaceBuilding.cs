@@ -722,14 +722,16 @@ public static class SurfaceBuildingDatabase
         //
         // These are the resource generators, and they are the reason the mechanic exists: a farm that
         // is not feeding the colony gets more tiles painted onto its edge, and stays ONE farm.
-        Drawn(SurfaceBuildingType.Farm, BuildDrawMode.Free, 4);
+        // 3 since 2026-10-09: the opening tutorial asks for "a farm of at least 3 grids".
+        Drawn(SurfaceBuildingType.Farm, BuildDrawMode.Free, 3);
         Drawn(SurfaceBuildingType.Mine, BuildDrawMode.Free, 3);
         Drawn(SurfaceBuildingType.Factory, BuildDrawMode.Free, 5);
         Drawn(SurfaceBuildingType.Refinery, BuildDrawMode.Free, 4);
 
         Drawn(SurfaceBuildingType.Capacitor, BuildDrawMode.Free, 2);
         Drawn(SurfaceBuildingType.PowerDistribution, BuildDrawMode.Free, 3);
-        Drawn(SurfaceBuildingType.CombustionPlant, BuildDrawMode.Free, 3);
+        // 2 since 2026-10-09: the opening tutorial asks for "a combustion plant of at least 2-3 grids".
+        Drawn(SurfaceBuildingType.CombustionPlant, BuildDrawMode.Free, 2);
         Drawn(SurfaceBuildingType.HydroPlant, BuildDrawMode.Free, 4);
         Drawn(SurfaceBuildingType.WindFarm, BuildDrawMode.Free, 2);
         Drawn(SurfaceBuildingType.SteamTurbine, BuildDrawMode.Free, 2);

@@ -93,6 +93,8 @@ public class PlanetViewWindow : MonoBehaviour
                 // landing REQUIRES is greyed out with "nobody lives here to build anything", which is
                 // true and completely unhelpful.
                 if (ColonyLanding.AwaitingOn(body)) return true;
+                // ...and the new game's capitol, for the same reason (HomeworldOnboarding).
+                if (HomeworldOnboarding.AwaitingCapitol(body)) return true;
 
                 if (!body.settled)
                 {
@@ -312,6 +314,7 @@ public class PlanetViewWindow : MonoBehaviour
         return scratchKinds.Count > 0 ? scratchKinds[scratchKinds.Count - 1] : SurfaceIndexKind.None;
     }
     readonly List<SurfaceIndexKind> scratchKinds = new List<SurfaceIndexKind>();
+    readonly List<Unit> scratchParked = new List<Unit>();
     // The Power grid is now a Survey overlay rather than its own tab: this flag is the "showing the power
     // grid" option. NOT exclusive with the index ramps any more — the grid has its own layer above the
     // buildings while an index ramp sits below them, so both can be read at once.
@@ -780,6 +783,13 @@ public class PlanetViewWindow : MonoBehaviour
             selected = SurfaceBuildingType.ColonyShipBase;
             rotation = 0;
         }
+        // The new game's founding capitol opens in hand the same way — it is not in the build menu.
+        else if (HomeworldOnboarding.AwaitingCapitol(b))
+        {
+            tab = Tab.Build;
+            selected = SurfaceBuildingType.PlanetCapitol;
+            rotation = 0;
+        }
         // Open showing the WHOLE world, centred — the zoom of the last planet you looked at means
         // nothing on this one.
         tilePx = 0f;            // ApplyMapSize resolves this to the fit-everything zoom
@@ -997,8 +1007,17 @@ public class PlanetViewWindow : MonoBehaviour
     /// the game is paused — the Planet View is a place you use while paused.
     void TickScrollHold()
     {
-        if (Mathf.Approximately(scrollHoldDir, 0f)) return;
-        ScrollActive(scrollHoldDir * ScrollHoldSpeed * Time.unscaledDeltaTime);
+        // A/D and the arrow keys scroll the same way the held "<" / ">" buttons do. Skipped while a text
+        // field has focus, or renaming a world would scroll the map under the cursor.
+        float dir = scrollHoldDir;
+        bool modal = (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen) || NamePrompt.IsOpen;
+        if (Mathf.Approximately(dir, 0f) && !modal && !UIFactory.IsTypingInField())
+        {
+            if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) dir -= 1f;
+            if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) dir += 1f;
+        }
+        if (Mathf.Approximately(dir, 0f)) return;
+        ScrollActive(dir * ScrollHoldSpeed * Time.unscaledDeltaTime);
     }
 
     void ZoomButton(RectTransform bar, string label, System.Action onClick)
@@ -1294,6 +1313,8 @@ public class PlanetViewWindow : MonoBehaviour
         // the heading — so entering or leaving it has to rebuild the side panel. Without this the tray
         // would still be telling you to click a structure to pick it up while the map was in demolition.
         sb.Append(BuildDemolition.IsFor(body) ? 1 : 0).Append('|');
+        // The opening's current step moves the "!" markers on the Build tab.
+        sb.Append((int)HomeworldOnboarding.Step).Append(body.settled ? 1 : 0).Append('|');
         scratchKinds.Clear();
         IndexToggles.Active(body, scratchKinds);
         for (int i = 0; i < scratchKinds.Count; i++) sb.Append((int)scratchKinds[i]).Append(',');
@@ -1314,6 +1335,13 @@ public class PlanetViewWindow : MonoBehaviour
         sb.Append(body.shipyardLevel).Append('|').Append(body.researchCenterLevel).Append('|').Append(body.cities).Append('|');
         sb.Append(body.owner != null ? body.owner.id : -1).Append('|');
         sb.Append(body.units != null ? body.units.Count : 0).Append('|');
+        // Ships parked in the orbital field are listed on the Orbit tab too, so their count is structure.
+        if (tab == Tab.Orbit && ZoomFieldRules.IsHost(body))
+        {
+            scratchParked.Clear();
+            ZoomFieldRules.ParkedIn(body, scratchParked);
+            sb.Append(scratchParked.Count).Append('|');
+        }
 
         // Species and terraform projects reshape the Survey tab's Climate/Terraform sections (habitability
         // re-scores, the fault list changes) and the Overview's claim/settle road — all structural, and
@@ -1371,6 +1399,16 @@ public class PlanetViewWindow : MonoBehaviour
         if (body == null) { root.SetActive(false); return; }
 
         TickScrollHold();
+
+        // The founding capitol stays in hand until it is down: switching category drops whatever is held,
+        // and without this the one structure the opening needs could not be picked up again.
+        if (HomeworldOnboarding.AwaitingCapitol(body) && tab == Tab.Build && !selected.HasValue
+            && !BuildDemolition.IsFor(body))
+        {
+            selected = SurfaceBuildingType.PlanetCapitol;
+            rotation = 0;
+            lastSig = null;
+        }
 
         // Once per frame rather than at each of the half-dozen places the map's texture, overlay or size
         // can change. Those are scattered (RefreshMapTexture, the overlay refreshes, ApplyMapSize, the
@@ -2479,6 +2517,14 @@ public class PlanetViewWindow : MonoBehaviour
             Note(card, isMoon
                 ? "Hide the blue ring this moon traces around its planet."
                 : "Hide the blue orbit ring for this world and all of its moons at once.");
+
+            // The planet's orbital field (ZoomField.cs): the space its ships, stations and moons live
+            // in. Always drawn in Dev Mode; this shows it in normal play too.
+            if (ZoomFieldRules.IsHost(body))
+            {
+                UIFactory.Toggle(card, "Show orbital field", body.showZoomField, on => body.showZoomField = on);
+                Note(card, "Everything inside this circle is in this world's orbit.");
+            }
         }
 
         Header("SHIPYARD");
@@ -2533,6 +2579,14 @@ public class PlanetViewWindow : MonoBehaviour
         var stations = new List<Unit>();
         if (body.units != null)
             foreach (var u in body.units) (u.Info.isStation ? stations : ships).Add(u);
+        // ...and anything parked in open space inside this planet's orbital field, which is in its orbit
+        // as much as a docked ship is.
+        if (ZoomFieldRules.IsHost(body))
+        {
+            scratchParked.Clear();
+            ZoomFieldRules.ParkedIn(body, scratchParked);
+            foreach (var u in scratchParked) (u.Info.isStation ? stations : ships).Add(u);
+        }
 
         Header("STATIONS & CONSTRUCTS");
         if (stations.Count == 0) Note("No stations deployed here.");
@@ -2990,6 +3044,12 @@ public class PlanetViewWindow : MonoBehaviour
             lbl.color = active ? LabelOn(tint) : tint;
         }
 
+        // The opening's "look here" marker, on the tab holding the structure it is asking for.
+        var want = HomeworldOnboarding.TargetOn(body);
+        if (want.HasValue && SurfaceBuildingDatabase.Get(want.Value) != null &&
+            SurfaceBuildingDatabase.Get(want.Value).category == cat)
+            AlertMarker.Attach(btn.transform as RectTransform);
+
         int n = TrayCount(cat);
         UIFactory.Tooltip(btn.gameObject,
             $"{SurfaceBuildingCategoryStyle.Name(cat)} — {SurfaceBuildingCategoryStyle.Blurb(cat)}\n" +
@@ -3026,6 +3086,9 @@ public class PlanetViewWindow : MonoBehaviour
             var nm = UIFactory.Text(titleRow.transform, $"<b>{info.name}</b>" + (isSel ? "  <color=#4DFF6E>(held)</color>" : ""),
                 UITheme.SmallSize, info.color, TextAlignmentOptions.Left);
             var nle = nm.gameObject.AddComponent<LayoutElement>(); nle.flexibleWidth = 1;
+            // ...and on the structure's own card.
+            var want = HomeworldOnboarding.TargetOn(body);
+            if (want.HasValue && want.Value == t) AlertMarker.Attach(titleRow.transform as RectTransform);
 
             Note(card, info.description);
 
@@ -4159,23 +4222,9 @@ public class PlanetViewWindow : MonoBehaviour
         if (body.Surveyed || GameMode.DevMode) BuildSitesPanel();
 
         Header("INDEX OVERLAYS");
-        Note("Each overlay paints the grid with where a kind of building actually belongs. Survey a world to read its minerals; a deep survey by a research ship unlocks the rest.");
-        // The blanket claim used to be "nothing under 70% is drawn". That is no longer true of the
-        // Geothermal Index, which paints its warm ground from 40 — so the sentence is split into the
-        // two statements it was always making, and only the YIELD one is universal.
-        //
-        // The plate line is described SEPARATELY from any percentage on purpose. It used to be drawn
-        // out of the heat field, so it genuinely did have a threshold and the old wording named it;
-        // now it is drawn from the plate map and has none, and a number beside it would re-teach the
-        // exact thing that was wrong with it.
-        Note($"<color=#9FB4C8>Nothing under <b>{SurfaceIndex.BaseFloor * 100f:F0}%</b> yields anything or can be " +
-             $"built on — <b>{SurfaceIndex.ShowFloor * 100f:F0}%</b> for minerals, which are scarcer by design. " +
-             $"Every <b>{SurfaceIndex.BandStep * 100f:F0}%</b> above that is a brighter step with its own outline, " +
-             $"so the best ground is the innermost, brightest ring. A plate line reads " +
-             $"<b>{SurfaceIndex.PlateLineFloor * 100f:F0}%</b> Geothermal — usable, if poor — and the index draws the plate boundaries " +
-             $"themselves as an unbroken red line wherever they run — hot or cold, land or sea floor. The line " +
-             $"marks where the crust is MOVING, not where it is hot. Zoom in near the cursor for the exact " +
-             $"numbers.</color>");
+        // SHOW, DON'T TELL (2026-10-09). This was two paragraphs on floors, bands and plate lines; the
+        // legend strips below already show every band's colour and starting value, so one line is enough.
+        Note("<color=#9FB4C8>Each overlay lights up where a building belongs. Brighter is better.</color>");
 
         AddIndexToggle(SurfaceIndexKind.None, "None (plain terrain)");
         // PRESENT, not All. An index this world has nothing for — hydrology on a dry rock, farmland on a
@@ -4199,8 +4248,7 @@ public class PlanetViewWindow : MonoBehaviour
         // under the tile's name and temperature — see AppendIndexReadout. It was always a readout about
         // wherever the pointer is, and putting it in a side panel meant reading it cost a look away from
         // the tile and a look back, by which time the number was no longer about anywhere in particular.
-        Note("<color=#9FB4C8>Point at the map and the tile's own figures appear beside the cursor, " +
-             "under its name and temperature. Zoom in and the numbers appear on the tiles around it too.</color>");
+        Note("<color=#9FB4C8>Point at a tile to see its numbers.</color>");
     }
 
     void AddIndexToggle(SurfaceIndexKind k, string labelOverride)
@@ -4256,10 +4304,8 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 string hex = ColorUtility.ToHtmlStringRGB(SurfaceIndex.Outline(SurfaceIndexKind.Geothermal));
                 Note(card, TectonicsMap.Active(body)
-                    ? $"<color=#{hex}><b>Continental plates.</b> The faint lines are plate boundaries; " +
-                      $"where two drive together the ground is hottest and the quakes are worst.</color>"
-                    : $"<color=#{hex}><b>No plates.</b> Whatever heat this world has comes from hotspots " +
-                      $"venting straight up through the crust.</color>");
+                    ? $"<color=#{hex}><b>Continental plates.</b> Faint lines are plate boundaries.</color>"
+                    : $"<color=#{hex}><b>No plates.</b> Pressure comes from hotspots only.</color>");
             }
         }
 
@@ -5747,6 +5793,8 @@ public class PlanetViewWindow : MonoBehaviour
         // afterwards would always say no and the ship would never be consumed.
         bool wasLanding = ColonyLanding.AwaitingOn(body)
                        && pendingType.Value == SurfaceBuildingType.ColonyShipBase;
+        bool wasFounding = HomeworldOnboarding.AwaitingCapitol(body)
+                        && pendingType.Value == SurfaceBuildingType.PlanetCapitol;
 
         if (SurfaceBuildManager.CanPlace(body, pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation, out _) &&
             SurfaceBuildManager.Place(body, pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation))
@@ -5761,6 +5809,11 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 ColonyLanding.Complete();
                 selected = null;          // stop holding the piece; the landing is over
+            }
+            if (wasFounding)
+            {
+                selected = null;
+                HomeworldOnboarding.CapitolPlaced(body);
             }
         }
         else SimpleAudio.Instance?.PlayTick();
@@ -5811,8 +5864,11 @@ public class PlanetViewWindow : MonoBehaviour
         string hex = ColorUtility.ToHtmlStringRGB(Vivid(info.color));
         // "•" and not "■": the Geometric Shapes block isn't in the LiberationSans atlas, so a square
         // renders as a tofu box. This is the same swatch glyph the rest of the UI settled on.
+        // The founding capitol costs nothing (SurfaceBuildManager.Founding), so it says so.
+        bool free = pendingType.Value == SurfaceBuildingType.PlanetCapitol && HomeworldOnboarding.AwaitingCapitol(body);
+        string price = free ? "free" : $"{m} metal · {e} energy";
         confirmText.text = $"<color=#{hex}>•</color> Build <b>{info.name}</b> here?\n" +
-                           $"<size=10><color=#9FB4C8>{m} metal · {e} energy · ({pendingCell.x},{pendingCell.y})</color></size>";
+                           $"<size=10><color=#9FB4C8>{price} · ({pendingCell.x},{pendingCell.y})</color></size>";
 
         // Follow the cell. Anchored in the MAP's normalised space so it tracks through zoom and pan
         // rather than being pinned to a screen position the map has since slid out from under.
@@ -7346,6 +7402,15 @@ public class PlanetViewWindow : MonoBehaviour
             return;
         }
 
+        // The index toggle icons float over the top-right of every map and show their own tooltip. The
+        // tile behind them must not be read out (or clicked through to) while the cursor is on one.
+        if (IndexIconBar.PointerOverAny(Input.mousePosition))
+        {
+            ClearHostHover();
+            MapHoverPanel.Instance.Hide();
+            return;
+        }
+
         // Over an open MOON map's frame? Show that moon's tile info in the floating tooltip — the same
         // biome / ore / temperature readout the main map gives, so a moon's surface is as inspectable as
         // the planet's. Each moon has its own framed pane now, so this just tests each frame in turn.
@@ -7406,6 +7471,7 @@ public class PlanetViewWindow : MonoBehaviour
     {
         var p = Input.mousePosition;
         if (zoomBar != null && RectTransformUtility.RectangleContainsScreenPoint(zoomBar, p, null)) return true;
+        if (IndexIconBar.PointerOverAny(p)) return true;
         if (confirmPanel != null && confirmPanel.gameObject.activeInHierarchy &&
             RectTransformUtility.RectangleContainsScreenPoint(confirmPanel, p, null)) return true;
         // Placement Mode's Confirm/Cancel panel sits ON the map, directly under the shape it is asking

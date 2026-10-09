@@ -502,6 +502,7 @@ public static class PlanetTerrainGenerator
         switch (t)
         {
             case TerrainType.Volcano:
+            case TerrainType.CryoVolcano:
             case TerrainType.GeyserField:
             case TerrainType.CrystalField:
                 return true;
@@ -737,7 +738,8 @@ public static class PlanetTerrainGenerator
         {
             // CONTINENT OR OCEAN FLOOR. A per-plate property, so the boundary between a continent and an
             // ocean basin is a plate margin — which is exactly where a real continental shelf is.
-            geologyLift += TectonicsMap.CrustAt(body, tec) * ContinentalRelief;
+            // Eased across the margin unless the plates collide there — see CrustAtSmoothed.
+            geologyLift += TectonicsMap.CrustAtSmoothed(body, tec) * ContinentalRelief;
 
             // A convergent margin (convergence > 0) lifts the crust; a divergent one drops it. `belt`,
             // NOT `boundary`: the red line the Survey overlay draws is a one-to-three tile annotation,
@@ -973,6 +975,20 @@ public static class PlanetTerrainGenerator
         // is asked. Resolved once here, where the other per-world figures are already being resolved.
         float internalC = PlanetTemperature.InternalCelsius(body);
         t = ClimateCoherence(t, tileC, freezeC, boilC, baseC, internalC);
+
+        // ============================================================================================
+        // CRYOVOLCANOES — a frozen world's vents (2026-10-09)
+        //
+        // The Geothermal Index is subsurface PRESSURE, and pressure under an ice shell vents water and
+        // volatiles, not lava. So on a frozen world (an ice planet, or any world whose average sits under
+        // its own freezing point) a plume reaching CryoVolcanoIndex is a cryovolcano instead of a
+        // volcano. It reads the pressure field only — never temperature — which is the request's
+        // "a new Volcano type that does not rely on heat". Applied AFTER climate coherence so nothing
+        // there can turn it back into ice or magma.
+        bool frozenWorld = classifyType == CelestialBodyType.IcePlanet || baseC < freezeC;
+        if (frozenWorld && geothermal >= GeothermalMap.CryoVolcanoIndex &&
+            classifyType != CelestialBodyType.GasGiant && !IsWater(t))
+            t = TerrainType.CryoVolcano;
 
         // ============================================================================================
         // WHAT IS UNDERNEATH — water and ice as MODIFIERS rather than as the biome

@@ -296,7 +296,11 @@ public static class TectonicsMap
     // Six was chosen against rendered maps. It roughly doubles Sample's per-call cost against the old
     // one-site-per-plate version, which is acceptable because the warp arithmetic either side of the
     // scan is comparable work and was always the bulk of it.
-    const int CellsPerPlate = 6;
+    //
+    // FOUR since 2026-10-09 ("some continent plates are far too jagged, make them a little more
+    // rounded"). Fewer cells is fewer corners on a plate's rim; the warp and the edge wander still keep
+    // the margin off a ruled arc.
+    const int CellsPerPlate = 4;
 
     /// Rounds of weight fitting in the cells-to-plates partition, and how hard a round pushes a plate
     /// that is off its target size. The step decays to zero across the rounds, so the last few settle
@@ -348,9 +352,12 @@ public static class TectonicsMap
     // Two octaves, amplitudes in TILES. 1.2 at wavelength ~2h/6 tiles for the wander, 0.5 at ~2h/14 for
     // the crinkle on top of it. Both chosen against rendered maps: enough that no margin reads as an arc
     // any more, little enough that the line stays connected at tile resolution.
+    //
+    // The crinkle octave was cut 0.5 -> 0.2 tiles on 2026-10-09 with the rounder plates: at tile scale it
+    // read as a saw-tooth rim rather than as a coastline.
     const int EdgeTerms = 2;
     static readonly float[] EdgeFreq = { 6f, 14f };
-    static readonly float[] EdgeTiles = { 1.2f, 0.5f };
+    static readonly float[] EdgeTiles = { 1.2f, 0.2f };
 
     static readonly Dictionary<int, Layout> cache = new Dictionary<int, Layout>();
     static readonly Dictionary<CelestialBody, TileMap> tileCache = new Dictionary<CelestialBody, TileMap>();
@@ -806,6 +813,39 @@ public static class TectonicsMap
         return l == null ? 0f : PlateCrust(l, hit.owner);
     }
 
+    /// How far either side of a margin the crust step is eased out over, in tiles.
+    public const float ShelfTiles = 5f;
+
+    /// The crust height with the step at the margin EASED rather than cut, except where the plates are
+    /// driving into each other. A continental plate meeting an oceanic one used to change height in one
+    /// tile — a 3 km cliff tracing every wiggle of the ownership line, which is how a player could tell a
+    /// world had plates "at a glance, just by looking at the grids" (2026-10-09). Away from a collision
+    /// there is no reason for that cliff: the two crusts meet at their mean on the line itself (so both
+    /// sides agree and the surface is continuous) and recover their own heights over ShelfTiles — a
+    /// continental shelf. Convergent margins keep the full step, because one plate riding over the other
+    /// IS the relief the request wants kept there; the rift trough and the collision uplift live in the
+    /// belt term and are untouched by this.
+    public static float CrustAtSmoothed(CelestialBody b, in Hit hit)
+    {
+        if (hit.owner < 0) return 0f;
+        var l = Get(b);
+        if (l == null) return 0f;
+        float own = PlateCrust(l, hit.owner);
+        if (hit.plateB < 0 || hit.distanceTiles >= ShelfTiles) return own;
+
+        int other = hit.owner == hit.plateA ? hit.plateB : hit.plateA;
+        float neighbour = PlateCrust(l, other);
+
+        float k = Mathf.Clamp01(hit.distanceTiles / ShelfTiles);
+        k = k * k * (3f - 2f * k);
+        float eased = Mathf.Lerp((own + neighbour) * 0.5f, own, k);
+
+        // Full smoothing on a rift or a transform margin, none on a hard collision. The ramp means a
+        // gently converging margin is partly eased rather than flipping between the two looks.
+        float keepStep = Mathf.Clamp01(hit.convergence * 3f);
+        return Mathf.Lerp(eased, own, keepStep);
+    }
+
     /// A stable 0..1 from a float. Same sin-based construction AtmosphereRules uses for its
     /// seed-derived values, so "deterministic variation from a seed" means one thing in this codebase.
     static float Hash01(float seed)
@@ -940,7 +980,17 @@ public static class TectonicsMap
         // origin with normal m. The angular distance from a point to that circle is asin(q·m) — exact,
         // closed form, no approximation, and (unlike the difference-of-distances this used to use) an
         // actual distance, so a band of constant width really is a band of constant width.
-        Vector3 m = (A - B).normalized;
+        // ORIENTED BY PLATE ID, not by which side of the fault the point is on. A is the NEAREST cell, so
+        // A - B always points toward the point's own side and q·m came out non-negative everywhere — the
+        // "signed" distance was really a distance measured from whichever side you stood on. The roughness
+        // offset below is one field shared by both sides, so adding it to that folded distance did not
+        // slide the boundary: wherever the offset went negative, BOTH sides flipped owner, and a strip up
+        // to ~1.7 tiles wide of each plate was handed to its neighbour. The crust step then dropped that
+        // strip 2-4 km — the "edges cut off and moved a grid or two" lines (2026-10-09). Measuring from the
+        // lower-numbered plate's cell makes the sign mean the same thing on both sides, so the offset moves
+        // ownership and distance together and nothing is swapped.
+        bool aIsLow = plateA < hit.plateB;
+        Vector3 m = aIsLow ? (A - B).normalized : (B - A).normalized;
 
         // SIGNED, and it stays signed until the roughness has been added. `abs` here would fold the two
         // sides of the fault together, and an offset added after that fold would DILATE the band (making
@@ -989,7 +1039,9 @@ public static class TectonicsMap
         // ownership boundary the SAME LINE: the margin's wander moves both together, so the plate map can
         // never disagree with the red line drawn on it.
         float adjusted = (signed / stretch + offset) / Mathf.Max(0.45f, Mathf.Abs(1f + slope));
-        hit.owner = adjusted >= 0f ? plateA : hit.plateB;
+        // Positive is the lower-numbered plate's side (see the orientation of m above).
+        int lowPlate = aIsLow ? plateA : hit.plateB, highPlate = aIsLow ? hit.plateB : plateA;
+        hit.owner = adjusted >= 0f ? lowPlate : highPlate;
 
         float angReal = Mathf.Abs(adjusted);
 
@@ -1032,11 +1084,18 @@ public static class TectonicsMap
         // actually is), but the motion comes from the two PLATES those cells belong to — a cell has no
         // motion of its own, and giving it one would make a single continent's interior shear against
         // itself along every internal cell edge.
-        Vector3 nrm = B - A * Vector3.Dot(A, B);
+        //
+        // MEASURED AT THE FAULT'S MIDPOINT, from the lower-numbered plate toward the higher (2026-10-09).
+        // It used to be the tangent at the NEAREST cell, so the value changed when the nearest cell
+        // switched sides — half a tile from the line, inside the shelf CrustAtSmoothed eases over, where
+        // a jump in convergence becomes a jump in height. Same pair, same frame, both sides now.
+        Vector3 L = aIsLow ? A : B, H = aIsLow ? B : A;
+        Vector3 mid = (L + H).normalized;
+        Vector3 nrm = (H - L) - mid * Vector3.Dot(H - L, mid);
         if (nrm.sqrMagnitude > 1e-6f)
         {
             nrm.Normalize();
-            Vector3 vrel = l.plates[hit.plateA].motion - l.plates[hit.plateB].motion;
+            Vector3 vrel = l.plates[lowPlate].motion - l.plates[highPlate].motion;
             float across = Vector3.Dot(vrel, nrm);
             hit.convergence = Mathf.Clamp(across * 0.5f, -1f, 1f);
 
@@ -1045,7 +1104,7 @@ public static class TectonicsMap
             // radial component (which is not motion on the surface at all) never leaks into it. Same
             // 0.5 scaling as convergence so the two are on one scale and can be compared directly.
             Vector3 along = vrel - nrm * across;
-            along -= A * Vector3.Dot(along, A);
+            along -= mid * Vector3.Dot(along, mid);
             hit.shear = Mathf.Clamp01(along.magnitude * 0.5f);
         }
         return hit;

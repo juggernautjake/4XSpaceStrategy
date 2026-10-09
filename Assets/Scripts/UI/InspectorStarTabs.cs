@@ -347,7 +347,8 @@ public partial class InspectorWindow
         // the old 20/6 caps clamped it — opening the editor showed a wrong (pinned) value that would have
         // shrunk the star the moment you touched it. These cover every class with headroom to push further.
         var card = Card(p);
-        starSizeS    = UIFactory.LabeledSlider(card, "Size (render scale)", 1f, 30f, Mathf.Clamp(s.visualScale, 1f, 30f), ApplyStarSize, "F1");
+        // 45, not 30: stars render 1.5x larger since 2026-10-09 and the biggest O-types now pass 30.
+        starSizeS    = UIFactory.LabeledSlider(card, "Size (render scale)", 1f, 45f, Mathf.Clamp(s.visualScale, 1f, 45f), ApplyStarSize, "F1");
         starMassS    = UIFactory.LabeledSlider(card, "Mass (solar)", 0.1f, 50f, Mathf.Clamp(s.mass, 0.1f, 50f), ApplyStarMass, "F2");
         starDensityS = UIFactory.LabeledSlider(card, "Density", 0.05f, 10f, Mathf.Clamp(s.density, 0.05f, 10f), ApplyStarDensity, "F2");
 

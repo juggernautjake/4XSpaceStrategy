@@ -121,6 +121,11 @@ public class BuildOrderDTO
     /// The squadron this hull joins on rollout, or 0. An older save has no field for it and loads as
     /// 0, which is exactly the behaviour it had: the ship reports to the yard and waits.
     public int squadron;
+
+    /// The world that queued this hull (BuildOrder.yardBodyId). `hasYard` because an older save loads
+    /// this as 0, which is a real body id; without the flag every old order would roll out at body 0.
+    public int yardBodyId;
+    public bool hasYard;
 }
 
 // One technology under study (see ResearchOrder). Order in the list is the capacity-allocation order.
@@ -314,6 +319,12 @@ public class BodyDTO
     public int beltId;
 
     public bool showRing;
+
+    // The planet's zoom field Dev settings. An older save loads scale 0 (read as 1) and colourSet false.
+    public float zoomFieldScale;
+    public float zfR, zfG, zfB, zfA;
+    public bool zoomFieldColorSet;
+    public int zoomFieldGrid;
 
     public float distanceFromStar, habitability;
     public bool isHabitable;
