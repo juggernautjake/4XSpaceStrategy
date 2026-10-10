@@ -191,6 +191,13 @@ Checked first against the code; none of these were already built.
   - Everything about terraforming (habitability ceiling, toggle, fault list, projects console) moved there from Survey.
   - The capitol prompt sits on the second row.
 
+### 10. Sixth batch (same day)
+- [x] Moons are back to their original size (diameter coefficient 0.44); rocky planets and asteroids stay at 2×.
+- [x] **Index toggles:**
+  - A world offers an index only if some of its ground actually clears that index's floor (`IndexIconBar.Has`). Previously, airless moons showed Weather in Dev Mode, and moons with no mineral ground showed Mineral.
+  - Only worlds whose maps are open count toward the bar. A moon opened on its own from the solar system shows only its own indexes.
+- [x] WASD/arrow panning keeps slowing as the camera zooms in (floor 0.06× instead of 1× below height 20), so a tap in a gravity well no longer overshoots the planet.
+
 ## Closing note
 
 **Not compiled. Unity isn't installed on this machine, so please build before playing.**
