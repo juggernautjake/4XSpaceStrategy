@@ -438,10 +438,13 @@ public static class SurfaceBuildingDatabase
 
         // Big square — needs real space cleared for it.
         _all[(int)SurfaceBuildingType.Spaceport] = new SurfaceBuildingInfo(SurfaceBuildingType.Spaceport, SurfaceBuildingCategory.Military, "Spaceport",
-            "Ground-to-orbit traffic. Big, flat and hungry for space — plan the city around it.",
-            S(0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1, 0, 2, 1, 2, 2, 2), SurfaceIndexKind.None, 180, 140, 32f,
+            "Ground-to-orbit traffic. Draws 1.5 power from the grid — keep it in reach of a plant.",
+            // 2x2 since 2026-10-09 (was 3x3), and a CONSUMER only: it used to generate 0.4 energy while
+            // drawing 1.5, which made it a power plant and a load at once. It draws (see Draw below) and
+            // generates nothing.
+            S(0, 0, 1, 0, 0, 1, 1, 1), SurfaceIndexKind.None, 180, 140, 32f,
             new Color(0.85f, 0.85f, 0.90f))
-        { metalPerSec = 0.4f, energyPerSec = 0.4f };
+        { metalPerSec = 0.4f };
 
         // ================= INDUSTRY =================
         // Storage is what lets you SAVE for something. Without depots your stockpile tops out and any
@@ -645,7 +648,7 @@ public static class SurfaceBuildingDatabase
         // grid whether you planned one or not — and that grid is usually the one you end up hanging
         // your industry off.
         Project(SurfaceBuildingType.City, 1.5f);
-        Project(SurfaceBuildingType.Spaceport, 1.5f);
+        // The Spaceport no longer projects: it is a consumer, not a supply (2026-10-09).
 
         // ---- CONSUMERS: industry, and farmland ----
         //
@@ -758,7 +761,7 @@ public static class SurfaceBuildingDatabase
         Drawn(SurfaceBuildingType.StorageDepot, BuildDrawMode.Rectangle, 4);
 
         // ---- Fixed: the authored footprint, and no drawing at all ----
-        Drawn(SurfaceBuildingType.Spaceport, BuildDrawMode.Fixed, 9);        // 3x3
+        Drawn(SurfaceBuildingType.Spaceport, BuildDrawMode.Fixed, 4);        // 2x2 (was 3x3)
         Drawn(SurfaceBuildingType.SurfaceShipyard, BuildDrawMode.Fixed, 9);  // 3x3
         Drawn(SurfaceBuildingType.PlanetCapitol, BuildDrawMode.Fixed, 4);    // 2x2
         Drawn(SurfaceBuildingType.ColonyShipBase, BuildDrawMode.Fixed, 4);   // 2x2

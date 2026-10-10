@@ -152,6 +152,17 @@ Checked first against the code; none of these were already built.
   - Only these options can be chosen (`HomeworldOnboarding.Options`).
   - The start menu labels say so.
 
+### 7. Third batch (same day)
+- [x] While a building is held, the cursor window shows only that building's own index (value, efficiency, percentile), not the tile's other indexes. This covers drawn and fixed-footprint buildings alike.
+- [x] After naming the world, the Surface Map opens on Build > Civil. The Planet Capitol is in that list with a flashing "!", instead of already being in hand.
+  - It is listed only while the world is waiting for one, so it can be placed once and then leaves the list.
+  - A bordered prompt beside the tabs under the map reads "Choose where to place your Capital".
+- [x] Every ghost building (snapped to the grid or loose on the cursor) has a black border along its outer edge.
+- [x] The Spaceport is now 2×2 instead of 3×3. It draws 1.5 power and no longer generates any or lights ground; its metal output is unchanged.
+  - Spaceports already in old saves take the new footprint.
+- [x] W/S and Up/Down pan the Surface View map north and south (alongside A/D). This works on moon panes too, and is ignored while typing or with a dialog open.
+- [x] Two pre-existing minus signs that rendered as boxes in TMP are now plain hyphens (`check-ui-glyphs` clean).
+
 ## Closing note
 
 **Not compiled. Unity isn't installed on this machine, so please build before playing.**

@@ -167,7 +167,7 @@ public static class SurfaceBuildManager
         {
             why = $"no ground on this world reaches {SurfaceIndex.Floor(SurfaceIndexKind.Solar) * 100f:F0}% Solar — " +
                   $"too far from its star, or under too much air ({b.atmospheres:0.#} atmospheres, " +
-                  $"−{SurfaceIndex.SolarLossPerAtmosphere * 100f:F0} points each). Thinning the air brings panels back";
+                  $"-{SurfaceIndex.SolarLossPerAtmosphere * 100f:F0} points each). Thinning the air brings panels back";
             return false;
         }
 

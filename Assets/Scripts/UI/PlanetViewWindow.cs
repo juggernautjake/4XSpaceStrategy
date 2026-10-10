@@ -783,12 +783,12 @@ public class PlanetViewWindow : MonoBehaviour
             selected = SurfaceBuildingType.ColonyShipBase;
             rotation = 0;
         }
-        // The new game's founding capitol opens in hand the same way — it is not in the build menu.
+        // The new game's founding capitol does NOT open in hand (2026-10-09): the Build tab opens on the
+        // Civil category, where the capitol waits with its "!" marker, and the player picks it up.
         else if (HomeworldOnboarding.AwaitingCapitol(b))
         {
             tab = Tab.Build;
-            selected = SurfaceBuildingType.PlanetCapitol;
-            rotation = 0;
+            buildCategory = SurfaceBuildingCategory.Civil;
         }
         // Open showing the WHOLE world, centred — the zoom of the last planet you looked at means
         // nothing on this one.
@@ -1010,14 +1010,44 @@ public class PlanetViewWindow : MonoBehaviour
         // A/D and the arrow keys scroll the same way the held "<" / ">" buttons do. Skipped while a text
         // field has focus, or renaming a world would scroll the map under the cursor.
         float dir = scrollHoldDir;
-        bool modal = (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen) || NamePrompt.IsOpen;
-        if (Mathf.Approximately(dir, 0f) && !modal && !UIFactory.IsTypingInField())
+        bool modal = (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen) || NamePrompt.IsOpen
+                     || HomeworldOnboardingUI.DialogOpen;
+        bool keys = !modal && !UIFactory.IsTypingInField();
+        if (Mathf.Approximately(dir, 0f) && keys)
         {
             if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) dir -= 1f;
             if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) dir += 1f;
         }
-        if (Mathf.Approximately(dir, 0f)) return;
-        ScrollActive(dir * ScrollHoldSpeed * Time.unscaledDeltaTime);
+        if (!Mathf.Approximately(dir, 0f)) ScrollActive(dir * ScrollHoldSpeed * Time.unscaledDeltaTime);
+
+        // W/S and Up/Down pan north and south (2026-10-09). Latitude clamps rather than wraps, so this
+        // only moves when the map is zoomed in past the viewport's height.
+        if (keys)
+        {
+            float dy = 0f;
+            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) dy += 1f;
+            if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) dy -= 1f;
+            if (!Mathf.Approximately(dy, 0f)) ScrollActiveY(dy * ScrollHoldSpeed * Time.unscaledDeltaTime);
+        }
+    }
+
+    /// The vertical twin of ScrollActive. `dy` positive looks further NORTH, which slides the map down.
+    void ScrollActiveY(float dy)
+    {
+        var m = activePane;
+        if (m != null && m != body && moonFrame.TryGetValue(m, out var fr) && fr != null
+            && moonImg.TryGetValue(m, out var img) && img != null)
+        {
+            Vector2 pan = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
+            pan.y -= dy;
+            ClampPanePan(fr.rect, img.rectTransform, ref pan);
+            moonPan[m] = pan;
+            SyncMoonMirrors(img, fr.rect);
+            return;
+        }
+        if (body == null || body.surface == null) return;
+        mapPan.y -= dy;
+        ClampPan();
     }
 
     void ZoomButton(RectTransform bar, string label, System.Action onClick)
@@ -1400,16 +1430,6 @@ public class PlanetViewWindow : MonoBehaviour
 
         TickScrollHold();
 
-        // The founding capitol stays in hand until it is down: switching category drops whatever is held,
-        // and without this the one structure the opening needs could not be picked up again.
-        if (HomeworldOnboarding.AwaitingCapitol(body) && tab == Tab.Build && !selected.HasValue
-            && !BuildDemolition.IsFor(body))
-        {
-            selected = SurfaceBuildingType.PlanetCapitol;
-            rotation = 0;
-            lastSig = null;
-        }
-
         // Once per frame rather than at each of the half-dozen places the map's texture, overlay or size
         // can change. Those are scattered (RefreshMapTexture, the overlay refreshes, ApplyMapSize, the
         // piece rebuild), and a mirror that misses one shows a stale copy of the world beside the real
@@ -1764,7 +1784,7 @@ public class PlanetViewWindow : MonoBehaviour
                             float flat = SurfaceIndex.SolarSurfaceMax(body);
                             string hex = ColorUtility.ToHtmlStringRGB(flat >= SurfaceIndex.Floor(SurfaceIndexKind.Solar) ? UITheme.Good : flat > 0f ? UITheme.Accent : UITheme.Bad);
                             sur.Append($"  <color=#9FB4C8>·</color> <color=#{hex}><b>{flat * 100f:F0}% at the datum</b></color> " +
-                                       $"<size=10><color=#9FB4C8>(orbit {region * 100f:F0}% − air {air * 100f:F0}%; ±10 per 1,500 m" +
+                                       $"<size=10><color=#9FB4C8>(orbit {region * 100f:F0}% - air {air * 100f:F0}%; ±10 per 1,500 m" +
                                        $"{(body.tidallyLocked ? "; night side dark" : "")})</color></size>");
                         }
                     }
@@ -1917,13 +1937,33 @@ public class PlanetViewWindow : MonoBehaviour
     // the numbers below it and losing it would make Placement Mode strictly less informative than idly
     // hovering.
     // ============================================================================================
+    /// The cursor window while a FIXED-footprint structure (capitol, spaceport, shipyard) is held: the
+    /// tile, and only the index that structure is sited by — the same rule as PlacementHoverText.
+    string HeldHoverText(int x, int y)
+    {
+        var info = SurfaceBuildingDatabase.Get(selected.Value);
+        var sb = new System.Text.StringBuilder();
+        sb.Append(TileHoverText(body, x, y, info.index, placing: true));
+        AppendHeldIndex(sb, info, x, y);
+        return sb.ToString();
+    }
+
     string PlacementHoverText(int x, int y)
     {
         var info = SurfaceBuildingDatabase.Get(selected.Value);
         var sb = new System.Text.StringBuilder();
 
-        sb.Append(TileHoverText(body, x, y, info.index));
+        // `placing`: no list of the OTHER indexes (2026-10-09). A farm's cursor window used to quote
+        // the tile's Solar, Weather and Hydro too; only the index this building runs on is a reason to
+        // put it here, and it gets its own line below.
+        sb.Append(TileHoverText(body, x, y, info.index, placing: true));
+        AppendHeldIndex(sb, info, x, y);
+        return AppendPlacementTail(sb, x, y);
+    }
 
+    /// The held structure's own index at this tile: its value, efficiency label and percentile.
+    void AppendHeldIndex(System.Text.StringBuilder sb, SurfaceBuildingInfo info, int x, int y)
+    {
         // ---- This tile, for this building ----
         if (info.index != SurfaceIndexKind.None)
         {
@@ -1940,7 +1980,10 @@ public class PlanetViewWindow : MonoBehaviour
                 sb.Append($"\n<color=#C9A94D>{SurfaceIndex.Name(info.index)} not surveyed — " +
                           $"{SurfaceIndex.LockReason(body, info.index)}</color>");
         }
+    }
 
+    string AppendPlacementTail(System.Text.StringBuilder sb, int x, int y)
+    {
         // ---- What it would produce, sited here ----
         // Quoted for a SINGLE tile of this class, because that is the honest answer to "what does this
         // tile give me": the drawn building's total is the sum over its cells and is on the Confirm
@@ -2116,6 +2159,23 @@ public class PlanetViewWindow : MonoBehaviour
             if (t == Tab.Build && !active && open &&
                 (HomeworldOnboarding.TargetOn(body).HasValue || HomeworldOnboarding.AwaitingCapitol(body)))
                 AlertMarker.Attach(btn.transform as RectTransform);
+        }
+
+        // THE CAPITOL PROMPT, beside the tabs under the map (2026-10-09): the one instruction that matters
+        // on the first visit to the new homeworld, where the eye already is rather than in a banner.
+        if (HomeworldOnboarding.AwaitingCapitol(body))
+        {
+            var box = UIFactory.Panel(tabStrip, "CapitolPrompt", new Color(0.10f, 0.08f, 0.02f, 0.92f));
+            box.raycastTarget = false;
+            var ol = box.gameObject.AddComponent<Outline>();
+            ol.effectColor = new Color(1f, 0.85f, 0.2f, 0.9f);
+            ol.effectDistance = new Vector2(1.2f, -1.2f);
+            var ble = box.gameObject.AddComponent<LayoutElement>();
+            ble.preferredWidth = 360f; ble.minWidth = 220f; ble.flexibleWidth = 0f;
+            var txt = UIFactory.Text(box.transform, "Choose where to place your <b>Capital</b> — Build > Civil > Planet Capitol",
+                                     UITheme.SmallSize, new Color(1f, 0.9f, 0.55f), TextAlignmentOptions.Center);
+            txt.raycastTarget = false;
+            UIFactory.Stretch(txt.rectTransform, 6, 6, 2, 2);
         }
     }
 
@@ -2971,7 +3031,10 @@ public class PlanetViewWindow : MonoBehaviour
     static bool PlaceableFromTray(SurfaceBuildingInfo info)
     {
         if (info == null) return false;
-        if (info.type == SurfaceBuildingType.PlanetCapitol) return false;
+        // The capitol is in the tray (Civil) ONLY while the new game's world is waiting for one, and so
+        // only ever once: placing it ends the wait and it leaves the list (HomeworldOnboarding).
+        if (info.type == SurfaceBuildingType.PlanetCapitol)
+            return Instance != null && HomeworldOnboarding.AwaitingCapitol(Instance.body);
         if (info.type == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode) return false;
         if (CityGrowth.IsSettlement(info.type) && !GameMode.DevMode) return false;
         return true;
@@ -3116,7 +3179,10 @@ public class PlanetViewWindow : MonoBehaviour
                 if (PowerGrid.Projects(info)) pw.Append($" · <color=#4DC8FF>lights {info.powerRange:0.#}</color>");
                 if (info.powerStorage > 0f) pw.Append($" · <color=#4DC8FF>banks {info.powerStorage:0}</color>");
 
-                return $"<color=#{hex}>{m} metal · {e} energy</color> · {info.Cells} tiles · {idx}{pw}";
+                string price = t == SurfaceBuildingType.PlanetCapitol && HomeworldOnboarding.AwaitingCapitol(body)
+                    ? "<color=#4DFF6E>free</color>"
+                    : $"<color=#{hex}>{m} metal · {e} energy</color>";
+                return $"{price} · {info.Cells} tiles · {idx}{pw}";
             });
 
             var btn = UIFactory.Button(card, "", () =>
@@ -3147,6 +3213,11 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 bool held = selected.HasValue && selected.Value == t;
                 if (held) return (true, "Put down");
+                // The founding capitol is free (SurfaceBuildManager.Founding), so the price gate below
+                // must not grey it out — on Hard the starting stock can be under its list price, and
+                // this card is the only way to place it.
+                if (t == SurfaceBuildingType.PlanetCapitol && HomeworldOnboarding.AwaitingCapitol(body))
+                    return (true, "Select");
 
                 // Tech before money: "Needs Fusion Power" is the real answer, and quoting a price for
                 // something you couldn't build at any price would send the player off to bank metal for
@@ -6071,8 +6142,9 @@ public class PlanetViewWindow : MonoBehaviour
         if (pendingType.HasValue)
         {
             var pc = Vivid(SurfaceBuildingDatabase.Get(pendingType.Value).color);
-            foreach (var cell in SurfaceBuildingDatabase.Footprint(pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation))
-                AddCellQuad(ghostLayer, cell.x, cell.y, pc);
+            var pending = SurfaceBuildingDatabase.Footprint(pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation);
+            foreach (var cell in pending) AddCellQuad(ghostLayer, cell.x, cell.y, pc);
+            OutlineGhost(pending);
             return;
         }
 
@@ -6081,8 +6153,9 @@ public class PlanetViewWindow : MonoBehaviour
         // paler thing while you were choosing where to put it than it did once it landed. You should be
         // deciding with the real colour in front of you.
         //
-        // It's still distinguishable from a placed structure, just not by hue: a ghost has no black
-        // outline, and a placed one does.
+        // Every ghost is traced with a black border round its outer edge (OutlineGhost) so it reads
+        // against bright terrain; the validity tint and the cursor brush are what set it apart from a
+        // placed structure.
 
         // ---- PLACEMENT MODE: the footprint being drawn ----
         //
@@ -6095,6 +6168,7 @@ public class PlanetViewWindow : MonoBehaviour
         {
             var pc = Vivid(info.color);
             foreach (var cell in BuildPlacement.Cells) AddCellQuad(ghostLayer, cell.x, cell.y, pc);
+            OutlineGhost(BuildPlacement.Cells);
 
             // The brush still rides the cursor, so it is clear the shape is still being drawn — but only
             // over ground the next tile could actually go on.
@@ -6110,6 +6184,7 @@ public class PlanetViewWindow : MonoBehaviour
         {
             Color dc = string.IsNullOrEmpty(drawWhy) ? Vivid(info.color) : new Color(1f, 0.25f, 0.2f, 0.85f);
             foreach (var cell in drawCells) AddCellQuad(ghostLayer, cell.x, cell.y, dc);
+            OutlineGhost(drawCells);
             return;
         }
 
@@ -6122,10 +6197,17 @@ public class PlanetViewWindow : MonoBehaviour
             // you are about to build, it is only the fallback for saves older than drawing. Showing it
             // would promise a shape the drag does not produce, so the idle ghost is a single-cell brush:
             // "press here and drag". The drag itself takes over the instant the button goes down.
-            if (IsDrawn(info)) AddCellQuad(ghostLayer, hoverCell.x, hoverCell.y, c);
+            if (IsDrawn(info))
+            {
+                AddCellQuad(ghostLayer, hoverCell.x, hoverCell.y, c);
+                OutlineGhost(new[] { hoverCell });
+            }
             else
-                foreach (var cell in SurfaceBuildingDatabase.Footprint(selected.Value, hoverCell.x, hoverCell.y, rotation))
-                    AddCellQuad(ghostLayer, cell.x, cell.y, c);
+            {
+                var fp = SurfaceBuildingDatabase.Footprint(selected.Value, hoverCell.x, hoverCell.y, rotation);
+                foreach (var cell in fp) AddCellQuad(ghostLayer, cell.x, cell.y, c);
+                OutlineGhost(fp);
+            }
         }
         else
         {
@@ -6139,6 +6221,10 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 var q = UIFactory.Panel(ghostLayer, "g", c);
                 q.raycastTarget = false;
+                // Off the grid there is no footprint to trace, so each cell gets its own black rim.
+                var rim = q.gameObject.AddComponent<Outline>();
+                rim.effectColor = GhostEdge;
+                rim.effectDistance = new Vector2(1.5f, -1.5f);
                 var qrt = q.rectTransform;
                 qrt.anchorMin = qrt.anchorMax = new Vector2(0.5f, 0.5f);
                 qrt.pivot = new Vector2(0.5f, 0.5f);
@@ -6931,6 +7017,43 @@ public class PlanetViewWindow : MonoBehaviour
         for (int i = ghostLayer.childCount - 1; i >= 0; i--) Destroy(ghostLayer.GetChild(i).gameObject);
     }
 
+    static readonly Color GhostEdge = new Color(0f, 0f, 0f, 0.95f);
+    const float GhostEdgePx = 2f;
+    readonly HashSet<Vector2Int> ghostCells = new HashSet<Vector2Int>();
+
+    /// A BLACK BORDER round the ghost's outer edge (2026-10-09), so the structure riding the cursor
+    /// reads against any terrain — a bright farm over bright grassland used to vanish. Only the
+    /// perimeter: a side is edged where the neighbouring cell is not part of the footprint.
+    void OutlineGhost(IEnumerable<Vector2Int> cells)
+    {
+        if (body?.surface == null) return;
+        ghostCells.Clear();
+        foreach (var c in cells) ghostCells.Add(c);
+        int w = body.surface.width, h = body.surface.height;
+        foreach (var c in ghostCells)
+        {
+            Vector2 a0 = new Vector2(c.x / (float)w, c.y / (float)h);
+            Vector2 a1 = new Vector2((c.x + 1) / (float)w, (c.y + 1) / (float)h);
+            if (!ghostCells.Contains(new Vector2Int(c.x, c.y + 1)))   // top
+                Edge(new Vector2(a0.x, a1.y), a1, new Vector2(0f, -GhostEdgePx), Vector2.zero);
+            if (!ghostCells.Contains(new Vector2Int(c.x, c.y - 1)))   // bottom
+                Edge(a0, new Vector2(a1.x, a0.y), Vector2.zero, new Vector2(0f, GhostEdgePx));
+            if (!ghostCells.Contains(new Vector2Int(c.x - 1, c.y)))   // left
+                Edge(a0, new Vector2(a0.x, a1.y), Vector2.zero, new Vector2(GhostEdgePx, 0f));
+            if (!ghostCells.Contains(new Vector2Int(c.x + 1, c.y)))   // right
+                Edge(new Vector2(a1.x, a0.y), a1, new Vector2(-GhostEdgePx, 0f), Vector2.zero);
+        }
+
+        void Edge(Vector2 aMin, Vector2 aMax, Vector2 oMin, Vector2 oMax)
+        {
+            var e = UIFactory.Panel(ghostLayer, "edge", GhostEdge);
+            e.raycastTarget = false;
+            var rt = e.rectTransform;
+            rt.anchorMin = aMin; rt.anchorMax = aMax;
+            rt.offsetMin = oMin; rt.offsetMax = oMax;
+        }
+    }
+
     // Grid cell -> a quad anchored in the map's normalized space, so it scales with the window.
     /// Returns the quad it made, so a caller that wants to keep animating it (the construction ghosts,
     /// which breathe) can hold onto it instead of hunting it back out of the layer's children.
@@ -7463,6 +7586,8 @@ public class PlanetViewWindow : MonoBehaviour
             else if (tab == Tab.Build && selected.HasValue
                      && UsesPlacementSession(SurfaceBuildingDatabase.Get(selected.Value)))
                 MapHoverPanel.Instance.ShowAtCursor(PlacementHoverText(x, y));
+            else if (tab == Tab.Build && selected.HasValue)
+                MapHoverPanel.Instance.ShowAtCursor(HeldHoverText(x, y));
             else MapHoverPanel.Instance.ShowAtCursor(TileHoverText(x, y));
         }
         else
@@ -7502,7 +7627,8 @@ public class PlanetViewWindow : MonoBehaviour
     /// `except` drops one index from the readout — the one the caller is about to report in more detail
     /// itself. While placing, the held structure's index gets its own line with an efficiency label and a
     /// percentile on it, and printing the plain figure directly above that is the same fact twice.
-    string TileHoverText(CelestialBody b, int x, int y, SurfaceIndexKind except = SurfaceIndexKind.None)
+    string TileHoverText(CelestialBody b, int x, int y, SurfaceIndexKind except = SurfaceIndexKind.None,
+                         bool placing = false)
     {
         var tile = b.surface.tiles[x, y];
         var sb = new System.Text.StringBuilder();
@@ -7565,7 +7691,9 @@ public class PlanetViewWindow : MonoBehaviour
         string tempHex = ColorUtility.ToHtmlStringRGB(PlanetTemperature.GradientColor(celsius));
         sb.Append($"\n<color=#{tempHex}>{PlanetTemperature.Label(celsius)}</color>");
 
-        AppendIndexReadout(sb, b, x, y, except);
+        // While a structure is held, the caller reports the one index that matters to it; the rest are
+        // noise for that decision.
+        if (!placing) AppendIndexReadout(sb, b, x, y, except);
 
         // A construction site names itself. The ghost on the map says a structure is coming and roughly
         // how far along it is; this is where you find out WHICH structure without going to the panel and

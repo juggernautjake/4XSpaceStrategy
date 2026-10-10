@@ -215,7 +215,7 @@ public static class HomeworldOnboarding
 
     /// The structure to flag on THIS world's Build tab, if any.
     public static SurfaceBuildingType? TargetOn(CelestialBody b)
-        => b != null && b == World && Step >= OnboardingStep.Farm && Step < OnboardingStep.Done ? Target : null;
+        => b != null && b == World && Step >= OnboardingStep.PlaceCapitol && Step < OnboardingStep.Done ? Target : null;
 
     /// Built or on the build queue.
     static int Have(CelestialBody b, SurfaceBuildingType t)
@@ -282,7 +282,7 @@ public static class HomeworldOnboarding
                 return Options.Count > 1
                     ? $"Choose your starting world: click one of the {Options.Count} worlds with a green ring."
                     : "Your starting world has a green ring: click it to begin.";
-            case OnboardingStep.PlaceCapitol: return $"Place your Planetary Capitol on {w}.";
+            case OnboardingStep.PlaceCapitol: return $"Choose where to place your capital on {w}: pick the Planet Capitol from the Civil tab.";
             case OnboardingStep.Farm: return "Place a Farm of at least 3 tiles (Agriculture tab).";
             case OnboardingStep.Combustion: return "Place a Combustion Plant of 2-3 tiles (Electrical tab).";
             case OnboardingStep.Mine: return "Place a Mine of at least 3 tiles (Industry tab).";
