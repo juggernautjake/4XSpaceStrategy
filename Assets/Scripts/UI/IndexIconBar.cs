@@ -199,22 +199,39 @@ public class IndexIconBar : MonoBehaviour
     // for the planet AND every moon at once: an index is offered if ANY of them has it (Dev Mode offers
     // all), and pressing it switches that overlay on or off on every one of them together.
     //
-    // "Has it" is SurfaceIndex.Present — whether the world generated with that index at all — not how far
-    // a survey has read it. Each pane's overlay still only paints what that world's survey has revealed.
+    // WHICH WORLDS COUNT, AND WHAT "HAS IT" MEANS (revised the same day): only the worlds whose maps are
+    // OPEN in the window (`OpenWorlds`, supplied by the Planet View) — so a moon opened on its own from
+    // the solar system shows only that moon's indexes, and the planet's map alone shows only the planet's
+    // — and a world only "has" an index if some of its ground actually clears that index's floor
+    // (`Has`). Present alone said yes to a Weather button on an airless moon in Dev Mode, and to a
+    // Mineral button on a moon with no highlighted ground at all.
     // ============================================================================================
+
+    /// The worlds whose maps are open, from the window that owns this bar. Null = the planet and its moons.
+    public System.Func<IEnumerable<CelestialBody>> OpenWorlds;
+
     IEnumerable<CelestialBody> Group()
     {
         if (body == null) yield break;
+        if (OpenWorlds != null)
+        {
+            foreach (var w in OpenWorlds()) if (w != null) yield return w;
+            yield break;
+        }
         yield return body;
         if (body.moons != null)
             foreach (var m in body.moons) if (m != null) yield return m;
     }
 
+    /// Does this world have any ground the index actually highlights?
+    public static bool Has(CelestialBody b, SurfaceIndexKind k)
+        => b != null && b.surface != null && SurfaceIndex.Present(b, k)
+           && SurfaceIndex.Best(b, k) >= SurfaceIndex.Floor(k);
+
     bool Offered(SurfaceIndexKind k)
     {
         if (body == null || k == SurfaceIndexKind.None) return false;
-        // Present already answers Dev Mode (everything but a gas giant's impossible indexes).
-        foreach (var b in Group()) if (SurfaceIndex.Present(b, k)) return true;
+        foreach (var b in Group()) if (Has(b, k)) return true;
         return false;
     }
 

@@ -469,8 +469,8 @@ public class SolarSystemGenerator : MonoBehaviour
     // 0.44 * cbrt(4) = 0.70 across. Rounded up a little, because this is a RESERVATION: undersizing it
     // means the layout reserves too little room and OrbitSafety has to push the whole system outward
     // afterwards, which is exactly the case the layout exists to avoid.
-    // 0.4 -> 0.8 when moon diameters doubled (MassRules, 2026-10-09).
-    const float MaxMoonVisRadius = 0.8f;
+    // Back to 0.4 with moon diameters (MassRules) — they were briefly doubled on 2026-10-09.
+    const float MaxMoonVisRadius = 0.4f;
 
     /// The largest a single moon of a GAS GIANT may be, whatever its host's allowance could afford.
     /// The request's number. Ganymede is 0.025 Earths, so 1.5 is already extremely generous — it is a

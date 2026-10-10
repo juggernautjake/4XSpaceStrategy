@@ -268,11 +268,14 @@ public static class MassRules
     /// Moons use a smaller coefficient than planets, so a moon reads as a satellite rather than a twin
     /// even when its mass is a large fraction of its host's.
     ///
-    /// DOUBLED 2026-10-09 (0.62 / 0.44 -> 1.24 / 0.88): "this may be a space game but it is also just a
-    /// game, I want things to be somewhat easier to see". Terrestrial worlds, moons and asteroids render
-    /// at twice their old diameter; GasGiantDiameterScale drops to 1.5 with it so giants come out 1.5x.
+    /// PLANETS DOUBLED 2026-10-09 (0.62 -> 1.24): "I want things to be somewhat easier to see". Rocky
+    /// worlds and asteroids render at twice their old diameter (GasGiantDiameterScale compensates so
+    /// giants stay their original size).
+    ///
+    /// MOONS WERE DOUBLED TOO AND ARE BACK AT 0.44: "a size 0.1 should be around the size of an asteroid
+    /// ... revert moon size back down to what it was". A tiny moon at 2x read as a sizeable world.
     public const float PlanetDiameterPerCubeRootMass = 1.24f;
-    public const float MoonDiameterPerCubeRootMass = 0.88f;
+    public const float MoonDiameterPerCubeRootMass = 0.44f;
 
     const float OneThird = 1f / 3f;
 

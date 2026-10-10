@@ -817,7 +817,11 @@ public class CameraController : MonoBehaviour
         // has to actually hand them the camera.
         ClearFocus();
 
-        float heightFactor = Mathf.Clamp(transform.position.y / 20f, 1f, 200f);
+        // SLOWER WHEN CLOSE (2026-10-09). The floor here was 1, so below a height of 20 the camera panned
+        // at full speed however far in it was — zoomed onto a planet in its gravity well, one tap of W
+        // threw the view clean past it. The floor is now a small fraction, so pan speed keeps falling
+        // with the zoom: a close-up nudges, the galaxy view still sweeps.
+        float heightFactor = Mathf.Clamp(transform.position.y / 20f, PanCloseFloor, 200f);
 
         // Rotated into the camera's own bearing, so W is always "away from the viewer" whichever way the
         // view has been spun. Panning in raw world axes was correct only while yaw was locked at 0; the
@@ -877,6 +881,9 @@ public class CameraController : MonoBehaviour
 
         targetHeight = got;
     }
+
+    /// The slowest panning gets, as a fraction of the speed at height 20 (see HandlePanning).
+    const float PanCloseFloor = 0.06f;
 
     // ---- Zoom lock ---------------------------------------------------------------------------------
 

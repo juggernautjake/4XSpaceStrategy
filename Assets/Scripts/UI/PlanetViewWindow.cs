@@ -760,6 +760,8 @@ public class PlanetViewWindow : MonoBehaviour
         // go and find. Parented to gridHolder rather than hostViewport so the viewport's RectMask2D
         // cannot clip it at the edges.
         hostIndexBar = IndexIconBar.Attach(gridHolder, body);
+        // Only the worlds whose maps are open count toward which indexes the bar offers.
+        hostIndexBar.OpenWorlds = () => openMaps;
         // ...and its mirror in the bottom-right corner: Demolish, Power Grid, Terrain Heightmap.
         BuildShortcutBar(gridHolder);
 
