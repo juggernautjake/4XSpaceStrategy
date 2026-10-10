@@ -178,6 +178,19 @@ Checked first against the code; none of these were already built.
   - Active toggles get a bright frame. The icons are drawn in code (`PixelIcons.cs`), so no new image imports are needed.
   - The tile readout and moon zoom/pan ignore the cursor over either button column.
 
+### 9. Fifth batch (same day)
+- [x] **No minimum building sizes.** Every free-drawn class starts at one tile. The Geothermal Plant is now a 2×2-minimum square like the Fusion Reactor. The founding power plant still gets 2 tiles, so a new colony keeps its starting power.
+- [x] **Pixel art for every building** (`BuildingArt.cs`, drawn in code):
+  - 16×16 tiles with two variants for single-tile classes. A cell's variant is picked "at random" by a stable hash, so it is the same while drawing and once built.
+  - 32×32 sites for 2×2 classes (Capitol, Spaceport, Colony Ship Base, Geothermal, Fusion) and a 48×48 site for the 3×3 Shipyard.
+  - A 3×3 nine-slice for the Storage Depot, so any length reads as one long building.
+  - The build cards show the art at the smallest placeable size, replacing the old tetromino shapes. Placed buildings and the placement ghost use the same art (red blocks still mark invalid spots).
+- [x] **Production strip** under the map, right of the tabs, on the Overview of a world you own. For Metal, Water, Energy and Food it shows income, upkeep and net, green or red (`WorldEconomy.cs`, which mirrors the economy's own tick).
+  - Upkeep is energy drawn and food eaten. There is no metal or water upkeep in the game, so those show a dash.
+- [x] **Tabs:** four across (Overview, Build, Survey, Orbit). A second row starts with a new **Terraform** tab, followed by Terrain in Dev Mode only.
+  - Everything about terraforming (habitability ceiling, toggle, fault list, projects console) moved there from Survey.
+  - The capitol prompt sits on the second row.
+
 ## Closing note
 
 **Not compiled. Unity isn't installed on this machine, so please build before playing.**

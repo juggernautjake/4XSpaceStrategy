@@ -721,40 +721,35 @@ public static class SurfaceBuildingDatabase
         // reactors and the hydro dam sit at 4 and a turbine hall sits at 2.
         // ============================================================================================
 
-        // ---- Free-drawn: paint as many tiles as you can afford, at or above the minimum ----
+        // ---- Free-drawn: paint as many tiles as you can afford ----
         //
         // These are the resource generators, and they are the reason the mechanic exists: a farm that
         // is not feeding the colony gets more tiles painted onto its edge, and stays ONE farm.
-        // 3 since 2026-10-09: the opening tutorial asks for "a farm of at least 3 grids".
-        Drawn(SurfaceBuildingType.Farm, BuildDrawMode.Free, 3);
-        Drawn(SurfaceBuildingType.Mine, BuildDrawMode.Free, 3);
-        Drawn(SurfaceBuildingType.Factory, BuildDrawMode.Free, 5);
-        Drawn(SurfaceBuildingType.Refinery, BuildDrawMode.Free, 4);
+        //
+        // NO MINIMUM SIZE (2026-10-09): "remove the building minimum grid placements". Every free-drawn
+        // class starts at a single tile; the per-tile art (BuildingArt) makes a lone tile read as a
+        // complete small building, and a bigger footprint as a bigger one.
+        Drawn(SurfaceBuildingType.Farm, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.Mine, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.Factory, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.Refinery, BuildDrawMode.Free, 1);
 
-        Drawn(SurfaceBuildingType.Capacitor, BuildDrawMode.Free, 2);
-        Drawn(SurfaceBuildingType.PowerDistribution, BuildDrawMode.Free, 3);
-        // 2 since 2026-10-09: the opening tutorial asks for "a combustion plant of at least 2-3 grids".
-        Drawn(SurfaceBuildingType.CombustionPlant, BuildDrawMode.Free, 2);
-        Drawn(SurfaceBuildingType.HydroPlant, BuildDrawMode.Free, 4);
-        Drawn(SurfaceBuildingType.WindFarm, BuildDrawMode.Free, 2);
-        Drawn(SurfaceBuildingType.SteamTurbine, BuildDrawMode.Free, 2);
-        Drawn(SurfaceBuildingType.SolarArray, BuildDrawMode.Free, 3);
-        Drawn(SurfaceBuildingType.GeothermalPlant, BuildDrawMode.Free, 4);
-        Drawn(SurfaceBuildingType.FissionReactor, BuildDrawMode.Free, 4);
-
-        // Not in the brief, set to match their neighbours rather than left at the permissive default of
-        // 1 — a 1-tile habitat block or laboratory would be the cheapest output in the game per tile and
-        // would undercut everything above. Flagged as a guess: these are the two numbers to change first
-        // if the balance reads wrong.
-        Drawn(SurfaceBuildingType.Habitat, BuildDrawMode.Free, 2);
-        Drawn(SurfaceBuildingType.ResearchOutpost, BuildDrawMode.Free, 2);
-
-        // The campus: a real commitment, so a real minimum. Free-drawn on purpose — "add three more
-        // tiles to the lab" is the science equivalent of adding tiles to a farm.
-        Drawn(SurfaceBuildingType.ResearchCenter, BuildDrawMode.Free, 6);
+        Drawn(SurfaceBuildingType.Capacitor, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.PowerDistribution, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.CombustionPlant, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.HydroPlant, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.WindFarm, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.SteamTurbine, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.SolarArray, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.FissionReactor, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.Habitat, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.ResearchOutpost, BuildDrawMode.Free, 1);
+        Drawn(SurfaceBuildingType.ResearchCenter, BuildDrawMode.Free, 1);
 
         // ---- Square: drag a corner, the far corner follows as a square ----
         Drawn(SurfaceBuildingType.FusionReactor, BuildDrawMode.Square, 4);   // 2x2 at minimum
+        // A plant is a 2x2 at the least (2026-10-09), like the fusion reactor — its art is a 32x32 site.
+        Drawn(SurfaceBuildingType.GeothermalPlant, BuildDrawMode.Square, 4);
 
         // ---- Rectangle, at least 2 wide in both directions ----
         // 2x8 and 10x2 are both fine; 1x9 is not. See BuildShapeRules.Rectangle.

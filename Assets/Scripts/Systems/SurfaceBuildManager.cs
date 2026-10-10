@@ -981,6 +981,9 @@ public static class SurfaceBuildManager
         return cells == null ? null : PlaceDrawn(b, t, cells);
     }
 
+    /// The smallest a founding building is drawn (see FindDrawnSite).
+    const int FoundingSiteTiles = 2;
+
     /// The nearest legal patch of `minTiles` connected cells for a drawn class.
     ///
     /// Rings outward from `near` so the first hit is genuinely the closest, then grows a 4-connected
@@ -992,7 +995,9 @@ public static class SurfaceBuildManager
         var info = SurfaceBuildingDatabase.Get(t);
         if (info == null || b?.surface == null) return null;
 
-        int want = Mathf.Max(1, info.minTiles);
+        // At least two tiles: drawn classes have no minimum any more (2026-10-09), and a founding plant
+        // sized to the new minimum of one would start a colony on half the power it always had.
+        int want = Mathf.Max(FoundingSiteTiles, info.minTiles);
 
         // Both sets hoisted out of the scan. Occupied and PendingCells each BUILD a fresh HashSet per
         // call, and the ring search asks about a few thousand cells — rebuilding both per cell would

@@ -95,6 +95,7 @@ public class EscapeMenu : MonoBehaviour
         // that dismisses itself AND pauses the game is answering one keypress twice.
         if (NamePrompt.SwallowsEscape) return;
         if (HomeworldOnboardingUI.SwallowsEscape) return;
+        if (LoadingFiesta.Active) return;   // the fiesta owns every key until it ends
         if (Input.GetKeyDown(KeyCode.Escape) && (IsOpen || GameRunning)) Toggle();
     }
 

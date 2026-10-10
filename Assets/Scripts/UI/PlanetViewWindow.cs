@@ -33,7 +33,9 @@ public class PlanetViewWindow : MonoBehaviour
 
     // Exactly the four tabs Raptok asked for, plus the Dev-Mode-only Terrain sandbox (hidden in normal
     // play). Sites and the Power grid folded into Survey; the Infrastructure list folded into Build.
-    public enum Tab { Overview, Build, Survey, Orbit, Terrain }
+    // Terraform appended (2026-10-09). Row one is the first four; row two holds Terraform and, in Dev
+    // Mode only, Terrain — see BuildTabStrip.
+    public enum Tab { Overview, Build, Survey, Orbit, Terrain, Terraform }
 
     // ============================================================================================
     // WHAT EACH TAB NEEDS, AND WHY
@@ -404,6 +406,79 @@ public class PlanetViewWindow : MonoBehaviour
     }
 
     /// Per frame: the bulldozer goes red while demolishing, and the frames show what is switched on.
+    // ============================================================================================
+    // THE PRODUCTION STRIP — this world's books, under the map (2026-10-09)
+    //
+    // Shown on the Overview of a world you own: for Metal, Water, Energy and Food, what comes in, what
+    // goes out as upkeep, and the net, green when it gains and red when it loses. Read from
+    // WorldEconomy, which mirrors the economy's own tick. Refreshed twice a second, not per frame.
+    // ============================================================================================
+    RectTransform econStrip;
+    TMP_Text econMetal, econWater, econEnergy, econFood;
+    float nextEconRefresh;
+    const float TabBlockWidth = 90f * 4f + 4f * 3f;     // four tabs and their gaps
+    const float BadgeReserve = 170f;                     // the world-modifier badges at the right end
+
+    void BuildEconStrip(RectTransform content)
+    {
+        var bg = UIFactory.Panel(content, "ProductionStrip", new Color(0.04f, 0.07f, 0.11f, 0.85f));
+        bg.raycastTarget = false;
+        econStrip = bg.rectTransform;
+        econStrip.anchorMin = new Vector2(0f, 0f); econStrip.anchorMax = new Vector2(MapFraction, 0f);
+        econStrip.pivot = new Vector2(0f, 0f);
+        econStrip.offsetMin = new Vector2(TabBlockWidth + 8f, TabStripBottom);
+        econStrip.offsetMax = new Vector2(-PanelGap - BadgeReserve, TabStripBottom + TabStripHeight);
+
+        var row = bg.gameObject.AddComponent<HorizontalLayoutGroup>();
+        row.padding = new RectOffset(8, 8, 3, 3); row.spacing = 10;
+        row.childControlWidth = true; row.childControlHeight = true;
+        row.childForceExpandWidth = true; row.childForceExpandHeight = true;
+
+        econMetal = EconCell(econStrip);
+        econWater = EconCell(econStrip);
+        econEnergy = EconCell(econStrip);
+        econFood = EconCell(econStrip);
+        econStrip.gameObject.SetActive(false);
+    }
+
+    TMP_Text EconCell(RectTransform parent)
+    {
+        var t = UIFactory.Text(parent, "", 10, UITheme.Text, TextAlignmentOptions.Left);
+        t.raycastTarget = false;
+        t.overflowMode = TextOverflowModes.Overflow;
+        return t;
+    }
+
+    void RefreshEconStrip()
+    {
+        if (econStrip == null) return;
+        // Not while the capitol is awaited: the prompt on the second tab row reaches across this space.
+        bool show = tab == Tab.Overview && body != null && body.owner == FactionManager.Player
+                    && !HomeworldOnboarding.AwaitingCapitol(body);
+        if (econStrip.gameObject.activeSelf != show) econStrip.gameObject.SetActive(show);
+        if (!show || Time.unscaledTime < nextEconRefresh) return;
+        nextEconRefresh = Time.unscaledTime + 0.5f;
+
+        var k = WorldEconomy.Of(body);
+        econMetal.text = EconBlock("METAL", "FFAE38", k.metal, k.metalUpkeep, "/s");
+        econWater.text = EconBlock("WATER", "61C2FF", k.water, k.waterUpkeep, "/s");
+        econEnergy.text = EconBlock("ENERGY", "F5F58C", k.energyMade, k.energyUsed, "/s");
+        // Food is a CAPACITY (people the farms can feed), not a flow, so it says feeds / eats.
+        econFood.text = body.settled
+            ? $"<b><color=#7BFF61>FOOD</color></b>\n<color=#9FB4C8>feeds</color> {k.foodMade:0}  <color=#9FB4C8>eats</color> {k.foodEaten:0}\n" +
+              $"<color=#9FB4C8>spare</color> <b>{WorldEconomy.Signed(k.FoodNet, "0")}</b>"
+            : "<b><color=#7BFF61>FOOD</color></b>\n<color=#9FB4C8>nobody to feed yet</color>";
+    }
+
+    /// "METAL / +1.20 in · -0.40 upkeep / net +0.80" — upkeep shown as a dash where nothing is spent.
+    static string EconBlock(string name, string hex, float income, float upkeep, string unit)
+    {
+        string up = upkeep > 0.005f ? $"<color=#FF8A7A>-{upkeep:0.0}</color>" : "<color=#7E8B9C>—</color>";
+        return $"<b><color=#{hex}>{name}</color></b>\n" +
+               $"<color=#9FB4C8>in</color> +{income:0.0}{unit}  <color=#9FB4C8>upkeep</color> {up}\n" +
+               $"<color=#9FB4C8>net</color> <b>{WorldEconomy.Signed(income - upkeep)}</b>{unit}";
+    }
+
     void TickShortcutBar()
     {
         if (shortcutBar == null) return;
@@ -549,7 +624,10 @@ public class PlanetViewWindow : MonoBehaviour
     // the side panel's contents are what a tab switches, and the eye travels tab → panel across the
     // bottom-right corner instead of all the way back up over the map. It also gives the map the full
     // height of the column, since the content area already clears the title bar on its own.
-    const float TabStripHeight = 26f;
+    // Two rows of tabs since 2026-10-09 (four across, then Terraform / Terrain).
+    const float TabRowHeight = 26f;
+    const float TabRowGap = 3f;
+    const float TabStripHeight = TabRowHeight * 2f + TabRowGap;
     const float TabStripGap = 6f;                                    // between the tabs and the map above
     const float TabStripBottom = StatusMapBottom;                    // tabs sit directly on the status line
     const float MapBottom = TabStripBottom + TabStripHeight + TabStripGap;
@@ -576,9 +654,15 @@ public class PlanetViewWindow : MonoBehaviour
         tabStrip.pivot = new Vector2(0.5f, 0);
         tabStrip.sizeDelta = new Vector2(-PanelGap, TabStripHeight);
         tabStrip.anchoredPosition = new Vector2(-PanelGap * 0.5f, TabStripBottom);
-        var th = tabStrip.gameObject.AddComponent<HorizontalLayoutGroup>();
-        th.spacing = 4; th.childControlWidth = true; th.childControlHeight = true; th.childForceExpandWidth = false;
-        th.childAlignment = TextAnchor.MiddleLeft;   // tabs read left-to-right from the map's left edge
+        // Two ROWS of tabs now (BuildTabStrip), stacked top to bottom, each left-aligned under the map.
+        var th = tabStrip.gameObject.AddComponent<VerticalLayoutGroup>();
+        th.spacing = TabRowGap; th.childControlWidth = true; th.childControlHeight = true;
+        th.childForceExpandWidth = true; th.childForceExpandHeight = false;
+        th.childAlignment = TextAnchor.UpperLeft;
+
+        // THE PRODUCTION STRIP (2026-10-09), on the Overview: this world's income, upkeep and net per
+        // resource, under the map and to the right of the four tabs. See RefreshEconStrip.
+        BuildEconStrip(content);
 
         // WORLD MODIFIERS — anchored under the map's bottom-RIGHT corner, on the same line as the tabs that
         // hang off its bottom-left. Its own object rather than a child of the tab strip, because the strip
@@ -1580,6 +1664,7 @@ public class PlanetViewWindow : MonoBehaviour
         RefreshSurveyMarkers();
         if (hostIndexBar != null) hostIndexBar.SetBody(body);
         TickShortcutBar();
+        RefreshEconStrip();
 
         // ---- the veil thins continuously, so it has to be repainted continuously ----------------
         //
@@ -1820,7 +1905,7 @@ public class PlanetViewWindow : MonoBehaviour
                             info.drawMode == BuildDrawMode.NodeChain ? "press and drag to lay a run of pylons"
                           : info.drawMode == BuildDrawMode.Square ? $"press and drag out a square (min {MinSideFor(info)}x{MinSideFor(info)})"
                           : info.drawMode == BuildDrawMode.Rectangle ? "press and drag out a rectangle (min 2 wide both ways)"
-                          : $"press and drag to draw it (min {info.minTiles} tiles)";
+                          : info.minTiles > 1 ? $"press and drag to draw it (min {info.minTiles} tiles)" : "click, or press and drag to paint as many tiles as you like";
                         sb.Append($" <size=10><color=#9FB4C8>· {how} · Esc cancels</color></size>");
                     }
                     else
@@ -1989,7 +2074,7 @@ public class PlanetViewWindow : MonoBehaviour
             string how =
                 info.drawMode == BuildDrawMode.Square ? $"press and drag out a square (min {MinSideFor(info)}x{MinSideFor(info)})"
               : info.drawMode == BuildDrawMode.Rectangle ? "press and drag out a rectangle (min 2 wide both ways)"
-              : $"press and drag to draw it — at least {info.minTiles} tiles, edge to edge";
+              : info.minTiles > 1 ? $"press and drag to draw it — at least {info.minTiles} tiles, edge to edge" : "click, or press and drag to paint tiles edge to edge";
             sb.Append($"  <size=10><color=#9FB4C8>{how}</color></size>");
 
             // The offer the merge rule makes, said out loud. The coloured cells around a standing farm
@@ -2232,6 +2317,7 @@ public class PlanetViewWindow : MonoBehaviour
             case Tab.Survey: BuildSurveyPanel(); break;
             case Tab.Orbit: BuildOrbitPanel(); break;
             case Tab.Terrain: BuildTerrainPanel(); break;
+            case Tab.Terraform: BuildTerraformPanel(); break;
         }
 
         RefreshOverlay();
@@ -2240,9 +2326,31 @@ public class PlanetViewWindow : MonoBehaviour
         if (tab != Tab.Build) ClearGhost();
     }
 
+    /// Two rows, four across (2026-10-09): Overview, Build, Survey, Orbit on top; Terraform first on the
+    /// second row, then Terrain in Dev Mode only.
+    static readonly Tab[] TabRowOne = { Tab.Overview, Tab.Build, Tab.Survey, Tab.Orbit };
+    static readonly Tab[] TabRowTwo = { Tab.Terraform, Tab.Terrain };
+    Transform tabRow1, tabRow2;
+
+    Transform TabRow(string name)
+    {
+        var row = UIFactory.NewUI(tabStrip, name);
+        var h = row.AddComponent<HorizontalLayoutGroup>();
+        h.spacing = 4; h.childControlWidth = true; h.childControlHeight = true;
+        h.childForceExpandWidth = false; h.childForceExpandHeight = true;
+        h.childAlignment = TextAnchor.MiddleLeft;
+        var le = row.AddComponent<LayoutElement>();
+        le.preferredHeight = TabRowHeight; le.minHeight = TabRowHeight; le.flexibleHeight = 0f;
+        return row.transform;
+    }
+
     void BuildTabStrip()
     {
-        foreach (Tab t in System.Enum.GetValues(typeof(Tab)))
+        tabRow1 = TabRow("TabRow1");
+        tabRow2 = TabRow("TabRow2");
+        var order = new List<Tab>(TabRowOne);
+        order.AddRange(TabRowTwo);
+        foreach (Tab t in order)
         {
             // The terrain editor doesn't exist outside Dev Mode — greying it would advertise a sandbox
             // tool to a player who can never use it. Every other tab is a real feature they can unlock,
@@ -2252,8 +2360,9 @@ public class PlanetViewWindow : MonoBehaviour
             var captured = t;
             bool active = t == tab;
             bool open = TabAvailable(t, out string why);
+            Transform rowParent = System.Array.IndexOf(TabRowOne, t) >= 0 ? tabRow1 : tabRow2;
 
-            var btn = UIFactory.Button(tabStrip, t.ToString(), () =>
+            var btn = UIFactory.Button(rowParent, t.ToString(), () =>
             {
                 if (!TabAvailable(captured, out _)) return;
                 tab = captured;
@@ -2299,7 +2408,7 @@ public class PlanetViewWindow : MonoBehaviour
         // on the first visit to the new homeworld, where the eye already is rather than in a banner.
         if (HomeworldOnboarding.AwaitingCapitol(body))
         {
-            var box = UIFactory.Panel(tabStrip, "CapitolPrompt", new Color(0.10f, 0.08f, 0.02f, 0.92f));
+            var box = UIFactory.Panel(tabRow2, "CapitolPrompt", new Color(0.10f, 0.08f, 0.02f, 0.92f));
             box.raycastTarget = false;
             var ol = box.gameObject.AddComponent<Outline>();
             ol.effectColor = new Color(1f, 0.85f, 0.2f, 0.9f);
@@ -3285,7 +3394,7 @@ public class PlanetViewWindow : MonoBehaviour
             var h = titleRow.AddComponent<HorizontalLayoutGroup>();
             h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true;
             h.childForceExpandWidth = false; h.childAlignment = TextAnchor.MiddleLeft;
-            BuildShapePreview(titleRow.transform, t, info.color);
+            BuildArtPreview(titleRow.transform, t);
             var nm = UIFactory.Text(titleRow.transform, $"<b>{info.name}</b>" + (isSel ? "  <color=#4DFF6E>(held)</color>" : ""),
                 UITheme.SmallSize, info.color, TextAlignmentOptions.Left);
             var nle = nm.gameObject.AddComponent<LayoutElement>(); nle.flexibleWidth = 1;
@@ -3420,6 +3529,22 @@ public class PlanetViewWindow : MonoBehaviour
     }
 
     // A tiny grid drawing of a footprint, so the list reads like a tetris piece tray.
+    /// The structure's PIXEL ART at the smallest size it can be placed at (2026-10-09) — a 1x1 tile for
+    /// free-drawn classes, the 2x2 (or 3x3) site for fixed and square ones, the depot's corners for a
+    /// rectangle. Replaced the old tetromino footprint preview: this is what will stand on the map.
+    void BuildArtPreview(Transform parent, SurfaceBuildingType t)
+    {
+        var holder = UIFactory.NewUI(parent, "Art");
+        var le = holder.AddComponent<LayoutElement>();
+        le.preferredWidth = 32; le.minWidth = 32; le.preferredHeight = 32; le.flexibleWidth = 0;
+        var img = holder.AddComponent<RawImage>();
+        img.texture = BuildingArt.CardArt(t);
+        img.raycastTarget = false;
+        var outline = holder.AddComponent<Outline>();
+        outline.effectColor = new Color(0f, 0f, 0f, 0.9f);
+        outline.effectDistance = new Vector2(1f, -1f);
+    }
+
     void BuildShapePreview(Transform parent, SurfaceBuildingType t, Color color)
     {
         var holder = UIFactory.NewUI(parent, "Shape");
@@ -4427,7 +4552,7 @@ public class PlanetViewWindow : MonoBehaviour
         // then Sites (points of interest), then the index overlays and the power grid.
         BuildSurveyClimate();
         BuildSurveyOres();
-        BuildSurveyTerraform();
+        // Terraforming has its own tab now (Tab.Terraform); Survey is about what the world IS.
         // Points of interest — folded from the retired Sites tab, which required a survey to reveal what's
         // on the world. Keep that gate now that Survey itself is always open.
         if (body.Surveyed || GameMode.DevMode) BuildSitesPanel();
@@ -4743,6 +4868,14 @@ public class PlanetViewWindow : MonoBehaviour
 
     // What is wrong with this world for your species, its habitability ceiling, and the road to fixing it:
     // a live terraform toggle, the fault list, and a link to the full projects console.
+    /// The Terraform tab (2026-10-09): everything about changing this world, moved here from Survey —
+    /// the habitability ceiling, the toggle, the fault list and the projects console.
+    void BuildTerraformPanel()
+    {
+        Note("<color=#9FB4C8>What is wrong with this world for your species, and what can be done about it.</color>");
+        BuildSurveyTerraform();
+    }
+
     void BuildSurveyTerraform()
     {
         var b = body;
@@ -5862,13 +5995,16 @@ public class PlanetViewWindow : MonoBehaviour
             // Drawn into the real layer AND both wrap mirrors. Structures have to survive the seam: a map
             // that loops but whose cities vanish as they cross the join is worse than one that does not
             // loop at all, because it looks like the buildings were destroyed.
-            foreach (var cell in cells) AddCellQuad(pieceLayer, cell.x, cell.y, c);
+            //
+            // PIXEL ART per cell now (BuildingArt, 2026-10-09) rather than a flat block of the class
+            // colour: the building reads as what it is from the map. The black outline stays.
+            AddBuildingArt(pieceLayer, p.Type, cells, 1f);
             OutlineFootprint(pieceLayer, cells);
 
             foreach (var m in mirrors)
             {
                 if (m.pieces == null) continue;
-                foreach (var cell in cells) AddCellQuad(m.pieces, cell.x, cell.y, c);
+                AddBuildingArt(m.pieces, p.Type, cells, 1f);
                 OutlineFootprint(m.pieces, cells);
             }
         }
@@ -6283,9 +6419,9 @@ public class PlanetViewWindow : MonoBehaviour
         // the cursor would show the piece in one place while the panel asks about another.
         if (pendingType.HasValue)
         {
-            var pc = Vivid(SurfaceBuildingDatabase.Get(pendingType.Value).color);
             var pending = SurfaceBuildingDatabase.Footprint(pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation);
-            foreach (var cell in pending) AddCellQuad(ghostLayer, cell.x, cell.y, pc);
+            // The ghost wears the building's own ART (2026-10-09) — exactly what will stand there.
+            AddBuildingArt(ghostLayer, pendingType.Value, pending, GhostArtAlpha);
             OutlineGhost(pending);
             return;
         }
@@ -6309,7 +6445,9 @@ public class PlanetViewWindow : MonoBehaviour
         if (BuildPlacement.IsFor(body) && BuildPlacement.Tiles > 0)
         {
             var pc = Vivid(info.color);
-            foreach (var cell in BuildPlacement.Cells) AddCellQuad(ghostLayer, cell.x, cell.y, pc);
+            // Each painted tile shows the variant it will be built with (BuildingArt.Variant is a hash
+            // of the cell, so the ghost and the finished building agree).
+            AddBuildingArt(ghostLayer, selected.Value, new List<Vector2Int>(BuildPlacement.Cells), GhostArtAlpha);
             OutlineGhost(BuildPlacement.Cells);
 
             // The brush still rides the cursor, so it is clear the shape is still being drawn — but only
@@ -6324,8 +6462,8 @@ public class PlanetViewWindow : MonoBehaviour
         // ---- The node chain, which is still a release-commits drag ----
         if (drawing && drawCells.Count > 0)
         {
-            Color dc = string.IsNullOrEmpty(drawWhy) ? Vivid(info.color) : new Color(1f, 0.25f, 0.2f, 0.85f);
-            foreach (var cell in drawCells) AddCellQuad(ghostLayer, cell.x, cell.y, dc);
+            if (string.IsNullOrEmpty(drawWhy)) AddBuildingArt(ghostLayer, selected.Value, drawCells, GhostArtAlpha);
+            else foreach (var cell in drawCells) AddCellQuad(ghostLayer, cell.x, cell.y, new Color(1f, 0.25f, 0.2f, 0.85f));
             OutlineGhost(drawCells);
             return;
         }
@@ -6339,15 +6477,19 @@ public class PlanetViewWindow : MonoBehaviour
             // you are about to build, it is only the fallback for saves older than drawing. Showing it
             // would promise a shape the drag does not produce, so the idle ghost is a single-cell brush:
             // "press here and drag". The drag itself takes over the instant the button goes down.
+            // Valid: the building's art. Invalid: a red block, so "not here" is unmistakable.
             if (IsDrawn(info))
             {
-                AddCellQuad(ghostLayer, hoverCell.x, hoverCell.y, c);
-                OutlineGhost(new[] { hoverCell });
+                var one = new List<Vector2Int> { hoverCell };
+                if (hoverValid) AddBuildingArt(ghostLayer, selected.Value, one, GhostArtAlpha);
+                else AddCellQuad(ghostLayer, hoverCell.x, hoverCell.y, c);
+                OutlineGhost(one);
             }
             else
             {
                 var fp = SurfaceBuildingDatabase.Footprint(selected.Value, hoverCell.x, hoverCell.y, rotation);
-                foreach (var cell in fp) AddCellQuad(ghostLayer, cell.x, cell.y, c);
+                if (hoverValid) AddBuildingArt(ghostLayer, selected.Value, fp, GhostArtAlpha);
+                else foreach (var cell in fp) AddCellQuad(ghostLayer, cell.x, cell.y, c);
                 OutlineGhost(fp);
             }
         }
@@ -7160,6 +7302,8 @@ public class PlanetViewWindow : MonoBehaviour
     }
 
     static readonly Color GhostEdge = new Color(0f, 0f, 0f, 0.95f);
+    /// Ghost art is nearly solid — the real building, a touch see-through so it reads as not built yet.
+    const float GhostArtAlpha = 0.88f;
     const float GhostEdgePx = 2f;
     readonly HashSet<Vector2Int> ghostCells = new HashSet<Vector2Int>();
 
@@ -7193,6 +7337,33 @@ public class PlanetViewWindow : MonoBehaviour
             var rt = e.rectTransform;
             rt.anchorMin = aMin; rt.anchorMax = aMax;
             rt.offsetMin = oMin; rt.offsetMax = oMax;
+        }
+    }
+
+    /// A structure's footprint, drawn with its pixel art: one RawImage per cell showing that cell's slice
+    /// of the art (BuildingArt.CellArt), anchored exactly as AddCellQuad anchors a flat quad.
+    void AddBuildingArt(RectTransform layer, SurfaceBuildingType t, ICollection<Vector2Int> cells, float alpha)
+    {
+        if (body?.surface == null || cells == null) return;
+        int w = body.surface.width, h = body.surface.height;
+        var tint = new Color(1f, 1f, 1f, alpha);
+        // A rectangle's slice depends on its neighbours; hand CellArt a set once rather than per cell.
+        var info = SurfaceBuildingDatabase.Get(t);
+        if (info != null && info.drawMode == BuildDrawMode.Rectangle && !(cells is HashSet<Vector2Int>))
+            cells = new HashSet<Vector2Int>(cells);
+        foreach (var cell in cells)
+        {
+            var tex = BuildingArt.CellArt(t, cells, cell, out Rect uv);
+            var img = UIFactory.NewUI(layer, "a").AddComponent<RawImage>();
+            img.texture = tex;
+            img.uvRect = uv;
+            img.color = tint;
+            img.raycastTarget = false;
+            var rt = img.rectTransform;
+            rt.anchorMin = new Vector2(cell.x / (float)w, cell.y / (float)h);
+            rt.anchorMax = new Vector2((cell.x + 1) / (float)w, (cell.y + 1) / (float)h);
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
         }
     }
 

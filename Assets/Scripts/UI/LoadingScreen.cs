@@ -372,7 +372,11 @@ public class LoadingScreen : MonoBehaviour
 
     public void Close()
     {
+        // Only a screen that was actually up gets the after-party — Close is also called as a backstop
+        // on paths where the screen already went away.
+        bool wasOpen = root != null && root.activeSelf;
         if (root != null) root.SetActive(false);
+        if (wasOpen) LoadingFiesta.Play();
     }
 
     // ============================================================================================

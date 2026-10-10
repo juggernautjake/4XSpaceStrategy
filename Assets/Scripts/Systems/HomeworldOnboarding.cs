@@ -283,9 +283,9 @@ public static class HomeworldOnboarding
                     ? $"Choose your starting world: click one of the {Options.Count} worlds with a green ring."
                     : "Your starting world has a green ring: click it to begin.";
             case OnboardingStep.PlaceCapitol: return $"Choose where to place your capital on {w}: pick the Planet Capitol from the Civil tab.";
-            case OnboardingStep.Farm: return "Place a Farm of at least 3 tiles (Agriculture tab).";
-            case OnboardingStep.Combustion: return "Place a Combustion Plant of 2-3 tiles (Electrical tab).";
-            case OnboardingStep.Mine: return "Place a Mine of at least 3 tiles (Industry tab).";
+            case OnboardingStep.Farm: return "Place a Farm (Agriculture tab) — paint as many tiles as you like.";
+            case OnboardingStep.Combustion: return "Place a Combustion Plant (Electrical tab).";
+            case OnboardingStep.Mine: return "Place a Mine (Industry tab) on bright Mineral ground.";
             case OnboardingStep.Housing:
                 int have = World != null ? Have(World, SurfaceBuildingType.Habitat) : 0;
                 return $"Place {HousingWanted} Habitat Blocks for your city (Civil tab) — {have}/{HousingWanted}.";

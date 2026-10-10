@@ -1,0 +1,15 @@
+Mariachi background track (Assets/Resources/Prank/mariachi.mp3)
+
+Title:     Mariachi Snooze
+Author:    Kevin MacLeod (incompetech.com)
+ISRC:      USUAN1100166
+Source:    https://commons.wikimedia.org/wiki/File:Mariachi_Snooze_(ISRC_USUAN1100166).mp3
+Original:  https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100166
+License:   Creative Commons Attribution 3.0 Unported (CC BY 3.0)
+           https://creativecommons.org/licenses/by/3.0/
+Changes:   None (file renamed only).
+
+Required attribution:
+"Mariachi Snooze" Kevin MacLeod (incompetech.com)
+Licensed under Creative Commons: By Attribution 3.0
+https://creativecommons.org/licenses/by/3.0/
