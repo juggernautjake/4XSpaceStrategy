@@ -22,7 +22,8 @@ using TMPro;
 // ============================================================================================
 public class LoadingFiesta : MonoBehaviour
 {
-    public const bool Enabled = true;
+    // Retired after its debut (2026-10-09). Flip back to true for an encore.
+    public const bool Enabled = false;
     const float SecondsLocked = 10f;
 
     public static bool Active => instance != null;
