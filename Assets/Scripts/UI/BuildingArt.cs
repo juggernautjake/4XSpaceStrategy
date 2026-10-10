@@ -2,9 +2,19 @@ using System.Collections.Generic;
 using UnityEngine;
 
 // ============================================================================================
-// BUILDING ART — preliminary pixel art for every surface structure (2026-10-09)
+// BUILDING ART — the pixel art for every surface structure
 //
-// One 16x16 tile per grid cell, drawn in code so no image import settings are needed (see PixelIcons).
+// FROM PNGs NOW (2026-10-10). The art lives in Resources/SpaceAssets/Buildings as Building_<Type>_<kind>
+// .png, drawn by tools/make-building-art.mjs — transparent, so a building stands ON the biome tile
+// rather than on a square of its own ground, with an ink outline and a soft drop shadow so it reads on
+// snow and on basalt alike. Only things that ARE ground (a field, a landing pad, the capital's plaza)
+// carry a footprint. The PNG's two ACCENT colours are keys: Livery() swaps them for the owning empire's
+// colour, so a world's buildings wear its owner's colours.
+//
+// The code-drawn art further down is the FALLBACK, used only for a kind whose PNG is missing — the same
+// "drop-in art is optional" rule as TerrainTextureMap. Delete the folder and the map still draws.
+//
+// One 16x16 tile per grid cell (the biome tiles' own size, TerrainTextureMap.ArtSize).
 // How a footprint is dressed depends on how the class is drawn:
 //
 //   FREE / node / grown  — every cell is its own small building, picked at random from TWO VARIANTS by
@@ -17,15 +27,19 @@ using UnityEngine;
 //                          neighbours are part of the building, so a storage depot of any length reads as
 //                          one long building with walls round the outside.
 //
-// "We can work out the details of buildings later": every drawing here is a first pass, kept in one
-// place so it can be redrawn without touching anything that uses it.
+// To change a building's look, edit its drawing in tools/make-building-art.mjs and re-run it; nothing
+// that uses the art needs to change.
 // ============================================================================================
 public static class BuildingArt
 {
     // ---- Public API ----------------------------------------------------------------------------
 
     /// The art shown on a build-menu card: the structure at the smallest size it can be placed at.
-    public static Texture2D CardArt(SurfaceBuildingType t)
+    /// `livery` is the empire colour its accents are painted in; null leaves the art's own.
+    public static Texture2D CardArt(SurfaceBuildingType t, Color? livery = null)
+        => Livery(CardArtRaw(t), livery);
+
+    static Texture2D CardArtRaw(SurfaceBuildingType t)
     {
         var info = SurfaceBuildingDatabase.Get(t);
         var mode = info != null ? info.drawMode : BuildDrawMode.Free;
@@ -37,6 +51,10 @@ public static class BuildingArt
             default: return Tile(t, 0);
         }
     }
+
+    /// The texture and its sub-rectangle for one cell of a footprint, in the owner's livery.
+    public static Texture2D CellArt(SurfaceBuildingType t, ICollection<Vector2Int> cells, Vector2Int cell, out Rect uv, Color? livery)
+        => Livery(CellArt(t, cells, cell, out uv), livery);
 
     /// The texture and its sub-rectangle for one cell of a footprint.
     public static Texture2D CellArt(SurfaceBuildingType t, ICollection<Vector2Int> cells, Vector2Int cell, out Rect uv)
@@ -135,14 +153,62 @@ public static class BuildingArt
 
     // ---- Cache -----------------------------------------------------------------------------------
 
+    const string Folder = "SpaceAssets/Buildings/";
     static readonly Dictionary<string, Texture2D> cache = new Dictionary<string, Texture2D>();
 
+    /// The PNG for this kind if there is one, else the code-drawn fallback.
     static Texture2D Get(SurfaceBuildingType t, string kind, System.Func<Px> draw)
     {
         string key = (int)t + ":" + kind;
         if (cache.TryGetValue(key, out var tex) && tex != null) return tex;
-        tex = draw().Tex("BuildingArt_" + t + "_" + kind);
+        tex = Resources.Load<Texture2D>(Folder + "Building_" + t + "_" + kind);
+        if (tex != null)
+        {
+            // The importer is already set to Point/Clamp (see the .meta files the tool writes); set again
+            // here so a re-import with the editor's defaults can never smear 16-texel art into a blur.
+            tex.filterMode = FilterMode.Point;
+            tex.wrapMode = TextureWrapMode.Clamp;
+        }
+        else tex = draw().Tex("BuildingArt_" + t + "_" + kind);
         cache[key] = tex;
+        return tex;
+    }
+
+    // ---- Livery ----------------------------------------------------------------------------------
+    //
+    // The art paints its accents in two KEY colours (tools/make-building-art.mjs, ACCENT). Every texel
+    // that is exactly one of them becomes the owner's colour, or a darker shade of it, in a copy cached
+    // per (texture, colour) — a handful of empires times a few dozen small textures, made once.
+    // Exact matching is safe because the art is imported uncompressed and the generator refuses any
+    // other palette entry equal to a key.
+
+    static readonly Color32 AccentKey = new Color32(64, 196, 170, 255);
+    static readonly Color32 AccentKeyDark = new Color32(36, 128, 112, 255);
+    static readonly Dictionary<string, Texture2D> liveries = new Dictionary<string, Texture2D>();
+
+    public static Texture2D Livery(Texture2D src, Color? livery)
+    {
+        // Not readable (someone re-imported it without Read/Write) or the code-drawn fallback, which has
+        // no keys: the art simply keeps its own accent colour.
+        if (src == null || !livery.HasValue || !src.isReadable) return src;
+        Color32 c = livery.Value;
+        string key = src.GetInstanceID() + ":" + c.r + "," + c.g + "," + c.b;
+        if (liveries.TryGetValue(key, out var tex) && tex != null) return tex;
+
+        var dark = new Color32((byte)(c.r * 0.62f), (byte)(c.g * 0.62f), (byte)(c.b * 0.62f), 255);
+        var px = src.GetPixels32();
+        for (int i = 0; i < px.Length; i++)
+        {
+            var p = px[i];
+            if (p.a == 0) continue;
+            if (p.r == AccentKey.r && p.g == AccentKey.g && p.b == AccentKey.b) px[i] = new Color32(c.r, c.g, c.b, p.a);
+            else if (p.r == AccentKeyDark.r && p.g == AccentKeyDark.g && p.b == AccentKeyDark.b) px[i] = new Color32(dark.r, dark.g, dark.b, p.a);
+        }
+        tex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false)
+        { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = src.name + "_livery" };
+        tex.SetPixels32(px);
+        tex.Apply(false, true);
+        liveries[key] = tex;
         return tex;
     }
 

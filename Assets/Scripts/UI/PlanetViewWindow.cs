@@ -118,6 +118,10 @@ public class PlanetViewWindow : MonoBehaviour
     RawImage mapImage, overlayImage;
     RectTransform mapRT, pieceLayer, ghostLayer;
 
+    // The tile frame under the cursor (DrawHoverFrame). Its own layer because it is rebuilt on its own
+    // trigger — the hovered cell changing — and must not take the pieces or the selection with it.
+    RectTransform hoverLayer;
+
     // Placement Mode's two layers: the translucent guidance grids under the ghost, and the numbers over
     // it (the per-tile yields, the size counter, the refusal label). See DrawPlacement.
     RectTransform placementLayer, placementHud;
@@ -804,6 +808,13 @@ public class PlanetViewWindow : MonoBehaviour
         // you are actually pointing, not to a copy of it one world away.
         BuildWrapMirror(-1);
         BuildWrapMirror(+1);
+
+        // The hover frame: above the pieces (a frame hidden behind the building it is framing is no
+        // frame), below the selection so the selected building's gold always wins.
+        hoverLayer = UIFactory.NewUI(mapRT, "HoverFrame").GetComponent<RectTransform>();
+        UIFactory.Stretch(hoverLayer);
+        var hlImg = hoverLayer.gameObject.AddComponent<Image>();
+        hlImg.color = new Color(0, 0, 0, 0); hlImg.raycastTarget = false;
 
         // Above the pieces so the ring/arrow are never hidden behind a structure's own tiles.
         markerLayer = UIFactory.NewUI(mapRT, "Markers").GetComponent<RectTransform>();
@@ -1700,6 +1711,7 @@ public class PlanetViewWindow : MonoBehaviour
         PollBuildDraw();
         PollDemolish();
         PollClickAway();
+        DrawHoverFrame();
 
         // The confirm panel is anchored to a map cell, so it has to be re-placed whenever the map moves
         // under it — which is every frame you're zooming or panning.
@@ -3540,11 +3552,10 @@ public class PlanetViewWindow : MonoBehaviour
         var le = holder.AddComponent<LayoutElement>();
         le.preferredWidth = 32; le.minWidth = 32; le.preferredHeight = 32; le.flexibleWidth = 0;
         var img = holder.AddComponent<RawImage>();
-        img.texture = BuildingArt.CardArt(t);
+        img.texture = BuildingArt.CardArt(t, FactionManager.Player?.color);   // in your own colours
         img.raycastTarget = false;
-        var outline = holder.AddComponent<Outline>();
-        outline.effectColor = new Color(0f, 0f, 0f, 0.9f);
-        outline.effectDistance = new Vector2(1f, -1f);
+        // No uGUI Outline any more: the art carries its own ink line and shadow, and on a transparent
+        // sprite the effect only stamped a second, offset black copy of it behind the first.
     }
 
     void BuildShapePreview(Transform parent, SurfaceBuildingType t, Color color)
@@ -5987,34 +5998,41 @@ public class PlanetViewWindow : MonoBehaviour
 
         foreach (var p in SurfaceBuildManager.On(body))
         {
-            var info = p.Info;
-            // Fully opaque and pushed past its own saturation. What separates a structure from the
-            // ground is now the black OUTLINE below, not the terrain being dulled to get out of its way
-            // — so this only has to be a strong, readable colour, not the only strong colour on screen.
-            var c = Vivid(info.color);
             var cells = SurfaceBuildingDatabase.Footprint(p);
 
             // Drawn into the real layer AND both wrap mirrors. Structures have to survive the seam: a map
             // that loops but whose cities vanish as they cross the join is worse than one that does not
             // loop at all, because it looks like the buildings were destroyed.
             //
-            // PIXEL ART per cell now (BuildingArt, 2026-10-09) rather than a flat block of the class
-            // colour: the building reads as what it is from the map. The black outline stays.
+            // TRANSPARENT ART (2026-10-10): a building stands on the terrain instead of on a square of
+            // its own colour, so the tiles it owns are no longer obvious from a filled block. What says
+            // which ground is the building's is a FAINT footprint line round its perimeter, always on
+            // and drawn UNDER the art — enough to plan around, quiet enough that a colony reads as
+            // buildings on a world rather than a spreadsheet of boxes. The hover frame (DrawHoverFrame)
+            // and the selected building's gold frame (DrawSelectionMarker) say it loudly on demand.
+            OutlineFootprint(pieceLayer, cells, FootprintLine);
             AddBuildingArt(pieceLayer, p.Type, cells, 1f);
-            OutlineFootprint(pieceLayer, cells);
 
             foreach (var m in mirrors)
             {
                 if (m.pieces == null) continue;
+                OutlineFootprint(m.pieces, cells, FootprintLine);
                 AddBuildingArt(m.pieces, p.Type, cells, 1f);
-                OutlineFootprint(m.pieces, cells);
             }
         }
 
         DrawConstructionGhosts();
 
         SyncWrapMirrors();
+
+        // A building may have just appeared or gone under a cursor that has not moved.
+        hoverFrameDirty = true;
     }
+
+    /// The line every standing building carries round its footprint: black, a little over a quarter
+    /// strength. Visible on bright grassland and on snow; gone into the ground on dark rock, where the
+    /// building's own ink outline and shadow already separate it.
+    static readonly Color FootprintLine = new Color(0f, 0f, 0f, 0.3f);
 
     // ============================================================================================
     // CONSTRUCTION GHOSTS — the ground a queued build has already claimed
@@ -6043,10 +6061,11 @@ public class PlanetViewWindow : MonoBehaviour
     /// rather than baking a brightness in at draw time and freezing it there until the next rebuild.
     struct ConstructionQuad
     {
-        public Image img;
+        public Graphic img;
         public SurfaceBuildJob job;
     }
     readonly List<ConstructionQuad> constructionQuads = new List<ConstructionQuad>();
+    readonly List<Graphic> constructionArt = new List<Graphic>();   // scratch, one job's quads at a time
 
     void DrawConstructionGhosts()
     {
@@ -6059,31 +6078,31 @@ public class PlanetViewWindow : MonoBehaviour
             var info = SurfaceBuildingDatabase.Get(job.type);
             if (info == null) continue;
 
-            // The colour the finished building will be, so the ghost is recognisably THAT structure —
-            // you can tell the queued reactor from the queued farm without reading a word. Alpha is set
-            // per frame by AnimateConstruction; this is only the starting value for the first frame.
-            var fill = Vivid(info.color);
-            fill.a = 0.3f;
+            // The finished building's own ART, see-through (2026-10-10; it was a flat block of the class
+            // colour, the last coloured square left on the map), so the ghost is recognisably THAT
+            // structure — you can tell the queued reactor from the queued farm without reading a word.
+            // Alpha is set per frame by AnimateConstruction; 0.3 is only the first frame's.
 
-            // The outline sits well above the fill's alpha: a shell that fades toward nothing still has
-            // a crisp edge, so the FOOTPRINT — which is the thing the player needs to plan around — is
-            // legible even when the site has barely started.
+            // The outline is the class colour at near full strength: a shell that fades toward nothing
+            // still has a crisp edge, so the FOOTPRINT — which is the thing the player needs to plan
+            // around — is legible even when the site has barely started.
             var edge = Vivid(info.color);
             edge.a = 0.85f;
 
-            foreach (var cell in job.cells)
-                constructionQuads.Add(new ConstructionQuad { img = AddCellQuad(pieceLayer, cell.x, cell.y, fill), job = job });
+            constructionArt.Clear();
             OutlineFootprint(pieceLayer, job.cells, edge);
+            AddBuildingArt(pieceLayer, job.type, job.cells, 0.3f, constructionArt);
 
             // Onto the wrap mirrors as well, for the same reason the buildings go there: a site that
             // vanishes as it crosses the seam looks like a cancelled project.
             foreach (var m in mirrors)
             {
                 if (m.pieces == null) continue;
-                foreach (var cell in job.cells)
-                    constructionQuads.Add(new ConstructionQuad { img = AddCellQuad(m.pieces, cell.x, cell.y, fill), job = job });
                 OutlineFootprint(m.pieces, job.cells, edge);
+                AddBuildingArt(m.pieces, job.type, job.cells, 0.3f, constructionArt);
             }
+            foreach (var g in constructionArt)
+                constructionQuads.Add(new ConstructionQuad { img = g, job = job });
         }
     }
 
@@ -6261,17 +6280,20 @@ public class PlanetViewWindow : MonoBehaviour
     /// `edge` overrides the colour. A standing building outlines in black — that black line is what
     /// separates it from the ground — while a construction site outlines in its own hue, so the two
     /// never read as the same kind of thing even at a glance.
-    void OutlineFootprint(RectTransform layer, List<Vector2Int> cells, Color? edge = null)
+    ///
+    /// `px` is the thickness in screen pixels; the hover and selection frames are heavier than the
+    /// standing building's hairline.
+    void OutlineFootprint(RectTransform layer, List<Vector2Int> cells, Color? edge = null, float px = OutlinePx)
     {
         if (cells == null || cells.Count == 0) return;
 
         var set = new HashSet<Vector2Int>(cells);
         foreach (var cell in cells)
         {
-            if (!set.Contains(cell + Vector2Int.up))    AddEdgeQuad(layer, cell.x, cell.y, 0, edge);
-            if (!set.Contains(cell + Vector2Int.right)) AddEdgeQuad(layer, cell.x, cell.y, 1, edge);
-            if (!set.Contains(cell + Vector2Int.down))  AddEdgeQuad(layer, cell.x, cell.y, 2, edge);
-            if (!set.Contains(cell + Vector2Int.left))  AddEdgeQuad(layer, cell.x, cell.y, 3, edge);
+            if (!set.Contains(cell + Vector2Int.up))    AddEdgeQuad(layer, cell.x, cell.y, 0, edge, px);
+            if (!set.Contains(cell + Vector2Int.right)) AddEdgeQuad(layer, cell.x, cell.y, 1, edge, px);
+            if (!set.Contains(cell + Vector2Int.down))  AddEdgeQuad(layer, cell.x, cell.y, 2, edge, px);
+            if (!set.Contains(cell + Vector2Int.left))  AddEdgeQuad(layer, cell.x, cell.y, 3, edge, px);
         }
     }
 
@@ -6281,7 +6303,7 @@ public class PlanetViewWindow : MonoBehaviour
 
     /// One edge of one cell. dir: 0=top, 1=right, 2=bottom, 3=left. Drawn INSIDE the cell, so the
     /// outline never encroaches on the neighbouring tile's ground.
-    void AddEdgeQuad(RectTransform layer, int x, int y, int dir, Color? edge = null)
+    void AddEdgeQuad(RectTransform layer, int x, int y, int dir, Color? edge = null, float px = OutlinePx)
     {
         if (body?.surface == null) return;
         int w = body.surface.width, h = body.surface.height;
@@ -6301,19 +6323,19 @@ public class PlanetViewWindow : MonoBehaviour
         {
             case 0:  // top
                 rt.anchorMin = new Vector2(l, t); rt.anchorMax = new Vector2(r, t);
-                rt.offsetMin = new Vector2(0f, -OutlinePx); rt.offsetMax = Vector2.zero;
+                rt.offsetMin = new Vector2(0f, -px); rt.offsetMax = Vector2.zero;
                 break;
             case 1:  // right
                 rt.anchorMin = new Vector2(r, b); rt.anchorMax = new Vector2(r, t);
-                rt.offsetMin = new Vector2(-OutlinePx, 0f); rt.offsetMax = Vector2.zero;
+                rt.offsetMin = new Vector2(-px, 0f); rt.offsetMax = Vector2.zero;
                 break;
             case 2:  // bottom
                 rt.anchorMin = new Vector2(l, b); rt.anchorMax = new Vector2(r, b);
-                rt.offsetMin = Vector2.zero; rt.offsetMax = new Vector2(0f, OutlinePx);
+                rt.offsetMin = Vector2.zero; rt.offsetMax = new Vector2(0f, px);
                 break;
             default: // left
                 rt.anchorMin = new Vector2(l, b); rt.anchorMax = new Vector2(l, t);
-                rt.offsetMin = Vector2.zero; rt.offsetMax = new Vector2(OutlinePx, 0f);
+                rt.offsetMin = Vector2.zero; rt.offsetMax = new Vector2(px, 0f);
                 break;
         }
     }
@@ -6340,6 +6362,19 @@ public class PlanetViewWindow : MonoBehaviour
         // Centre the marker on the footprint's middle, so it sits on the building rather than its origin.
         var cells = SurfaceBuildingDatabase.Footprint(sel);
         if (cells.Count == 0) return;
+
+        // THE SELECTED FRAME: the building's exact footprint in gold, over a dark keyline so it holds on
+        // pale ground (desert, snow) as well as dark. The ring below says "this one" from across the
+        // map; the frame says precisely which tiles "this one" is, which the transparent art no longer
+        // shows by itself. Both edges sit inside the cells, the dark one wider, so it shows as a thin
+        // rule just inside the gold.
+        // Thinner when the map is zoomed far out: at ~8 px a tile a full-weight frame would bury the very
+        // building it frames. This method re-runs on every zoom change, so the weight follows the zoom.
+        float cellPx = mapRT.rect.width / Mathf.Max(1, body.surface.width);
+        float selPx = Mathf.Clamp(cellPx * 0.1f, 1f, SelectedEdgePx);
+        OutlineFootprint(markerLayer, cells, SelectedKeyline, selPx + Mathf.Min(1.5f, selPx));
+        OutlineFootprint(markerLayer, cells, SelectedEdge, selPx);
+
         float sx = 0f, sy = 0f;
         foreach (var c in cells) { sx += c.x + 0.5f; sy += c.y + 0.5f; }
         Vector2 centre = new Vector2(sx / cells.Count, sy / cells.Count);
@@ -6379,6 +6414,60 @@ public class PlanetViewWindow : MonoBehaviour
         art.sizeDelta = new Vector2(22f, 28f);
         art.anchoredPosition = new Vector2(0, 6f);
         markerArrowBaseY = 6f;
+    }
+
+    static readonly Color SelectedEdge = new Color(1f, 0.92f, 0.42f, 1f);
+    static readonly Color SelectedKeyline = new Color(0f, 0f, 0f, 0.55f);
+    const float SelectedEdgePx = 2.5f;
+
+    // ============================================================================================
+    // THE HOVER FRAME — which tile the cursor is on, now that a building no longer fills its tile
+    //
+    // With the art transparent, the ground under a building is the biome, not a block of colour, so
+    // "which tile is that on?" needs an answer the art does not give. Three tiers, loudest last:
+    //
+    //   ALWAYS     a faint dark line round every standing building's footprint (DrawPieces)
+    //   HOVER      a white frame on the tile under the cursor — and, if a building stands there, a
+    //              softer one round that building's whole footprint, so you see what a click selects
+    //   SELECTED   a gold frame round the selected building (DrawSelectionMarker)
+    //
+    // Hover is OFF while a structure is in hand or demolition is painting: those draw their own
+    // cursor (the ghost with its black edge, the red demolition brush) and a second frame on the
+    // same tile would only argue with it.
+    //
+    // Rebuilt only when what it shows changes — the cell, the building under it, or whether it shows
+    // at all — never per frame.
+    // ============================================================================================
+    static readonly Color HoverCellEdge = new Color(1f, 1f, 1f, 0.8f);
+    static readonly Color HoverBuildingEdge = new Color(1f, 1f, 1f, 0.5f);
+    const float HoverEdgePx = 1.5f;
+
+    Vector2Int hoverFrameCell = new Vector2Int(-1, -1);
+    CelestialBody hoverFrameBody;
+    bool hoverFrameDirty = true;
+    readonly List<Vector2Int> hoverFrameOne = new List<Vector2Int>(1);
+
+    void DrawHoverFrame()
+    {
+        if (hoverLayer == null) return;
+
+        bool show = HasHoverCell && !selected.HasValue && !pendingType.HasValue && !BuildDemolition.IsFor(body);
+        var cell = show ? hoverCell : new Vector2Int(-1, -1);
+        if (!hoverFrameDirty && cell == hoverFrameCell && body == hoverFrameBody) return;
+
+        var building = show ? SurfaceBuildManager.At(body, cell.x, cell.y) : null;
+        hoverFrameDirty = false;
+        hoverFrameCell = cell;
+        hoverFrameBody = body;
+
+        for (int i = hoverLayer.childCount - 1; i >= 0; i--) Destroy(hoverLayer.GetChild(i).gameObject);
+        if (!show) return;
+
+        if (building != null)
+            OutlineFootprint(hoverLayer, SurfaceBuildingDatabase.Footprint(building), HoverBuildingEdge, HoverEdgePx);
+        hoverFrameOne.Clear();
+        hoverFrameOne.Add(cell);
+        OutlineFootprint(hoverLayer, hoverFrameOne, HoverCellEdge, HoverEdgePx);
     }
 
     // The pulse and the spin. Runs every frame, touching only transform/colour — never the layout.
@@ -6423,6 +6512,7 @@ public class PlanetViewWindow : MonoBehaviour
         {
             var pending = SurfaceBuildingDatabase.Footprint(pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation);
             // The ghost wears the building's own ART (2026-10-09) — exactly what will stand there.
+            GhostBed(pending);
             AddBuildingArt(ghostLayer, pendingType.Value, pending, GhostArtAlpha);
             OutlineGhost(pending);
             return;
@@ -6449,7 +6539,9 @@ public class PlanetViewWindow : MonoBehaviour
             var pc = Vivid(info.color);
             // Each painted tile shows the variant it will be built with (BuildingArt.Variant is a hash
             // of the cell, so the ghost and the finished building agree).
-            AddBuildingArt(ghostLayer, selected.Value, new List<Vector2Int>(BuildPlacement.Cells), GhostArtAlpha);
+            var painted = new List<Vector2Int>(BuildPlacement.Cells);
+            GhostBed(painted);
+            AddBuildingArt(ghostLayer, selected.Value, painted, GhostArtAlpha);
             OutlineGhost(BuildPlacement.Cells);
 
             // The brush still rides the cursor, so it is clear the shape is still being drawn — but only
@@ -6464,7 +6556,7 @@ public class PlanetViewWindow : MonoBehaviour
         // ---- The node chain, which is still a release-commits drag ----
         if (drawing && drawCells.Count > 0)
         {
-            if (string.IsNullOrEmpty(drawWhy)) AddBuildingArt(ghostLayer, selected.Value, drawCells, GhostArtAlpha);
+            if (string.IsNullOrEmpty(drawWhy)) { GhostBed(drawCells); AddBuildingArt(ghostLayer, selected.Value, drawCells, GhostArtAlpha); }
             else foreach (var cell in drawCells) AddCellQuad(ghostLayer, cell.x, cell.y, new Color(1f, 0.25f, 0.2f, 0.85f));
             OutlineGhost(drawCells);
             return;
@@ -6483,14 +6575,14 @@ public class PlanetViewWindow : MonoBehaviour
             if (IsDrawn(info))
             {
                 var one = new List<Vector2Int> { hoverCell };
-                if (hoverValid) AddBuildingArt(ghostLayer, selected.Value, one, GhostArtAlpha);
+                if (hoverValid) { GhostBed(one); AddBuildingArt(ghostLayer, selected.Value, one, GhostArtAlpha); }
                 else AddCellQuad(ghostLayer, hoverCell.x, hoverCell.y, c);
                 OutlineGhost(one);
             }
             else
             {
                 var fp = SurfaceBuildingDatabase.Footprint(selected.Value, hoverCell.x, hoverCell.y, rotation);
-                if (hoverValid) AddBuildingArt(ghostLayer, selected.Value, fp, GhostArtAlpha);
+                if (hoverValid) { GhostBed(fp); AddBuildingArt(ghostLayer, selected.Value, fp, GhostArtAlpha); }
                 else foreach (var cell in fp) AddCellQuad(ghostLayer, cell.x, cell.y, c);
                 OutlineGhost(fp);
             }
@@ -7307,6 +7399,18 @@ public class PlanetViewWindow : MonoBehaviour
     /// Ghost art is nearly solid — the real building, a touch see-through so it reads as not built yet.
     const float GhostArtAlpha = 0.88f;
     const float GhostEdgePx = 2f;
+
+    /// A pale wash under a VALID ghost's art (2026-10-10). The art is transparent now, so a ghost of a
+    /// pylon or a turbine covers a sliver of its tile and the rest is plain ground; the wash fills each
+    /// tile it will take, so the footprint is unmistakable before you commit to it. White and faint,
+    /// deliberately not green: an illegal tile is a solid red block, and a green "yes" beside it would
+    /// turn the two into a traffic light the eye compares instead of reading the building.
+    static readonly Color GhostWash = new Color(1f, 1f, 1f, 0.2f);
+
+    void GhostBed(IEnumerable<Vector2Int> cells)
+    {
+        foreach (var c in cells) AddCellQuad(ghostLayer, c.x, c.y, GhostWash);
+    }
     readonly HashSet<Vector2Int> ghostCells = new HashSet<Vector2Int>();
 
     /// A BLACK BORDER round the ghost's outer edge (2026-10-09), so the structure riding the cursor
@@ -7344,19 +7448,26 @@ public class PlanetViewWindow : MonoBehaviour
 
     /// A structure's footprint, drawn with its pixel art: one RawImage per cell showing that cell's slice
     /// of the art (BuildingArt.CellArt), anchored exactly as AddCellQuad anchors a flat quad.
-    void AddBuildingArt(RectTransform layer, SurfaceBuildingType t, ICollection<Vector2Int> cells, float alpha)
+    ///
+    /// The art's accents are painted in the world owner's colour (BuildingArt.Livery) — on an unclaimed
+    /// world, the art's own. `collect`, if given, receives every image made, for a caller that animates
+    /// them afterwards (the construction ghosts).
+    void AddBuildingArt(RectTransform layer, SurfaceBuildingType t, ICollection<Vector2Int> cells, float alpha,
+                        List<Graphic> collect = null)
     {
         if (body?.surface == null || cells == null) return;
         int w = body.surface.width, h = body.surface.height;
         var tint = new Color(1f, 1f, 1f, alpha);
+        Color? livery = body.owner != null ? body.owner.color : (Color?)null;
         // A rectangle's slice depends on its neighbours; hand CellArt a set once rather than per cell.
         var info = SurfaceBuildingDatabase.Get(t);
         if (info != null && info.drawMode == BuildDrawMode.Rectangle && !(cells is HashSet<Vector2Int>))
             cells = new HashSet<Vector2Int>(cells);
         foreach (var cell in cells)
         {
-            var tex = BuildingArt.CellArt(t, cells, cell, out Rect uv);
+            var tex = BuildingArt.CellArt(t, cells, cell, out Rect uv, livery);
             var img = UIFactory.NewUI(layer, "a").AddComponent<RawImage>();
+            collect?.Add(img);
             img.texture = tex;
             img.uvRect = uv;
             img.color = tint;
