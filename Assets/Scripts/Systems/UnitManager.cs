@@ -121,11 +121,8 @@ public class UnitManager : MonoBehaviour
         ShipUpgrades.Reset();
         StationEffects.Reset();
 
-        // Starting fleet: two scouts + one colony ship.
-        CreateUnit(UnitType.Scout, FactionManager.Player, homePlanet);
-        CreateUnit(UnitType.Scout, FactionManager.Player, homePlanet);
-        CreateUnit(UnitType.ColonyShip, FactionManager.Player, homePlanet);
-
+        // NO STARTING FLEET (2026-10-09): "do not spawn in any ships around any world". Every hull is
+        // built — the first ones from the shipyard the player places on their capital.
         OnUnitsChanged?.Invoke();
     }
 

@@ -8,9 +8,10 @@ using UnityEngine;
 // shipyard, a laboratory and a power station already standing. Now it opens on the home system with
 // nothing claimed, and the first minutes are the player's own decisions, in order:
 //
-//   ChooseWorld   — the home system is framed with the species' habitable zone on; click any planet or
-//                   moon. The generator guarantees one at 85%+ for the chosen species (the CRADLE).
-//                   "Are you sure you want <name>?", then the naming window (Back returns here).
+//   ChooseWorld   — the home system is framed with the species' habitable zone on, and only the
+//                   starting OPTIONS are ringed: the CRADLE (at the difficulty's floor — Easy 95+,
+//                   Medium 80+, Hard 70+) plus, on Easy/Medium, sometimes a second world (Options).
+//                   The game is paused. "Are you sure you want <name>?", then the naming window.
 //   PlaceCapitol  — the world is claimed and fully surveyed (level 2, every index), and its Surface Map
 //                   opens with the Planetary Capitol in hand. The capitol is never in the build menu; it
 //                   is placed here, free, and placing it is what settles the world.
@@ -28,14 +29,21 @@ public enum OnboardingStep { None, ChooseWorld, PlaceCapitol, Farm, Combustion, 
 
 public static class HomeworldOnboarding
 {
-    /// The guaranteed floor for the cradle world, for the chosen species.
-    public const float CradleMinHabitability = 85f;
-
     /// How many housing blocks the opening asks for ("at least 2 city buildings").
     public const int HousingWanted = 2;
 
     /// The world the generator built for the species. Set by GalaxyGenerator.ForceHomeWorld.
     public static CelestialBody Cradle;
+
+    /// Every world the player may start on: the cradle, plus the second option Easy and Medium can roll
+    /// (GalaxyGenerator.AddSecondOption). Only these can be chosen, and only these get a green ring
+    /// while choosing — a moon of a habitable world is not ringed unless it is one of them.
+    public static readonly HashSet<CelestialBody> Options = new HashSet<CelestialBody>();
+
+    public static bool IsOption(CelestialBody b) => b != null && Options.Contains(b);
+
+    /// Drop the last galaxy's cradle and options.
+    public static void ForgetWorlds() { Cradle = null; Options.Clear(); }
 
     public static OnboardingStep Step { get; private set; } = OnboardingStep.None;
 
@@ -100,6 +108,10 @@ public static class HomeworldOnboarding
         if (home == null || b.system != home) { why = "choose a world in your home system"; return false; }
         if (b.type == CelestialBodyType.GasGiant) { why = "a gas giant has no surface to build on"; return false; }
         if (b.type == CelestialBodyType.Asteroid) { why = "an asteroid is too small to found a civilisation on"; return false; }
+        // Difficulty decides how many worlds are on offer (GameConfig.SecondOptionChance); the rest of
+        // the system is for later.
+        if (Options.Count > 0 && !Options.Contains(b))
+        { why = "your people can't live there — choose a world with a green ring"; return false; }
         // There has to be dry ground the capitol fits on, or the opening could never get past it.
         if (!SurfaceBuildManager.FindSpot(b, SurfaceBuildingType.PlanetCapitol, out _, out _))
         { why = "there is no dry ground big enough for a capitol"; return false; }
@@ -266,7 +278,10 @@ public static class HomeworldOnboarding
         string w = World != null ? World.name : "your world";
         switch (Step)
         {
-            case OnboardingStep.ChooseWorld: return "Choose your starting world: click a planet or moon in this system. Green rings mark where your species can live.";
+            case OnboardingStep.ChooseWorld:
+                return Options.Count > 1
+                    ? $"Choose your starting world: click one of the {Options.Count} worlds with a green ring."
+                    : "Your starting world has a green ring: click it to begin.";
             case OnboardingStep.PlaceCapitol: return $"Place your Planetary Capitol on {w}.";
             case OnboardingStep.Farm: return "Place a Farm of at least 3 tiles (Agriculture tab).";
             case OnboardingStep.Combustion: return "Place a Combustion Plant of 2-3 tiles (Electrical tab).";

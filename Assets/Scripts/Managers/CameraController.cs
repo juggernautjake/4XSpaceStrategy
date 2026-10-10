@@ -327,12 +327,15 @@ public class CameraController : MonoBehaviour
         // Pressing a direction IS the player asking for the camera, and it is answered by handing it to
         // them and moving that way in the same frame. ClearFocus carries the zoom over rather than the
         // camera's world height (see EndFollowRebase), so the view does not lurch on the way out.
-        bool canPan = !menuOpen && !planetViewOpen;
+        // ...and not while TYPING (2026-10-09): naming a world "Westwater" used to fly the camera off it,
+        // because every W, A, S and D in the name was also a pan key.
+        bool typing = UIFactory.IsTypingInField();
+        bool canPan = !menuOpen && !planetViewOpen && !typing;
         if (canPan) HandlePanning();
 
         // Rotation is allowed even while following a body — spinning around what you are watching is the
-        // main reason to want it. Blocked only by a modal menu and the full-screen Planet View.
-        if (!menuOpen && !planetViewOpen) HandleRotationInput();
+        // main reason to want it. Blocked only by a modal menu, the full-screen Planet View, and typing.
+        if (!menuOpen && !planetViewOpen && !typing) HandleRotationInput();
 
         // Wheel-zoom the WORLD only when the wheel isn't wanted elsewhere: not while a modal menu is open,
         // not while the full-screen Planet View is up (its own map owns the wheel there), and — the fix for

@@ -60,6 +60,18 @@ public class NameplateManager : MonoBehaviour
     readonly HashSet<CelestialBody> wantBodies = new HashSet<CelestialBody>();
     readonly HashSet<StarSystemData> wantSystems = new HashSet<StarSystemData>();
 
+    /// Does this body carry a nameplate? The same test Reconcile uses, so the selection labels can drop
+    /// their own name line wherever a plate already says it (ObjectLabelManager).
+    public static bool HasPlate(CelestialBody b)
+        => b != null && (b.explorationProgress >= 1f || b.owner == FactionManager.Player);
+
+    /// Is this body's plate actually on screen right now? Plates are hidden at galaxy zoom, during the
+    /// intro, and for a moon crowding its planet — and in those cases the selection label must keep its
+    /// own name line, or a selected moon would show no name at all.
+    public static bool IsShowing(CelestialBody b)
+        => Instance != null && b != null && Instance.bodyPlates.TryGetValue(b, out var p)
+           && p != null && p.rt != null && p.rt.gameObject.activeSelf && Instance.canvas.enabled;
+
     public static void Create()
     {
         if (Instance != null) return;
@@ -100,8 +112,7 @@ public class NameplateManager : MonoBehaviour
                 foreach (var b in sys.AllBodies())
                     // A REAL survey, not CelestialBody.Surveyed — that is true of everything in Dev Mode, and
                     // a plate over every rock in the galaxy would bury the ones that mean something.
-                    if (b != null && b.visualObject != null &&
-                        (b.explorationProgress >= 1f || b.owner == FactionManager.Player))
+                    if (b != null && b.visualObject != null && HasPlate(b))
                         wantBodies.Add(b);
             }
 

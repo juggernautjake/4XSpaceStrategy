@@ -38,17 +38,27 @@ public static class GameConfig
     public static int StartingResearchPoints =>
         CurrentDifficulty == Difficulty.Easy ? 220 : CurrentDifficulty == Difficulty.Hard ? 70 : 120;
 
-    // The forced habitability of the starting home world.
-    //  Easy = always 100, Medium = 90-99, Hard = 80-89.
+    // The guaranteed habitability floor of the cradle — the world built for the player's species. Its
+    // real rating stands if it is higher (2026-10-09):
+    //  Easy = 95-100, Medium = 80-90, Hard = 70-80.
     public static float HomeHabitability()
     {
         switch (CurrentDifficulty)
         {
-            case Difficulty.Easy: return 100f;
-            case Difficulty.Hard: return Random.Range(80f, 89f);
-            default: return Random.Range(90f, 99f);
+            case Difficulty.Easy: return Random.Range(95f, 100f);
+            case Difficulty.Hard: return Random.Range(70f, 80f);
+            default: return Random.Range(80f, 90f);
         }
     }
+
+    // A SECOND starting option in the home system's habitable zone — another planet, or a habitable moon
+    // — so the opening is a real choice. Easy usually gets one at 90%+, Medium half the time at 70%+,
+    // Hard never: one world, take it.
+    public static float SecondOptionChance =>
+        CurrentDifficulty == Difficulty.Easy ? 0.85f : CurrentDifficulty == Difficulty.Hard ? 0f : 0.5f;
+
+    public static float SecondOptionMin =>
+        CurrentDifficulty == Difficulty.Easy ? 90f : 70f;
 
     // Extra starting resources on the home world (easy gives a big head start).
     public static float HomeResourceBonus =>

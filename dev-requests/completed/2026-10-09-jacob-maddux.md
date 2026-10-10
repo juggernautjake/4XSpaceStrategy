@@ -133,6 +133,25 @@ Checked first against the code; none of these were already built.
 - [x] The ore sections (the Survey tab's Mineral Survey and the Inspector's Ores tab) are hidden while ores are off.
 - [x] The Geothermal Plant's description now talks about pressure, matching the index.
 
+### 6. Second batch (same day)
+- [x] Gas giants are back to their original size (`GasGiantDiameterScale` = 1 on the doubled base). Rocky worlds and moons stay at 2× and stars at 1.5×.
+- [x] WASD and rotation camera keys are ignored while a text box has focus.
+- [x] Selecting a surveyed world no longer pops its name over its nameplate. The old name line is hidden wherever a plate exists; the type and habitability lines stay.
+- [x] No ships spawn at the start, around any world. The first hulls come from a shipyard the player builds.
+- [x] While choosing, green rings mark only the starting options. Afterwards a moon is ringed only if it is settleable (habitability ≥ the colony threshold).
+- [x] Difficulty:
+
+  | | Starting world | Second option in the zone |
+  |---|---|---|
+  | Easy | 95%+ | 85% chance, 90%+ |
+  | Medium | 80%+ | 50% chance, 70%+ |
+  | Hard | 70%+ | none |
+
+  - The second option is another planet in the zone (not a giant), or else a moon of a world in the zone, or else one of the cradle's moons.
+  - It gets the species' climate (`MakeHabitable`).
+  - Only these options can be chosen (`HomeworldOnboarding.Options`).
+  - The start menu labels say so.
+
 ## Closing note
 
 **Not compiled. Unity isn't installed on this machine, so please build before playing.**

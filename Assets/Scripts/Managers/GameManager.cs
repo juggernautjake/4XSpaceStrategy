@@ -149,7 +149,7 @@ public class GameManager : MonoBehaviour
         GameCalendar.Reset();   // a new game starts on Year 0001, Month 01, Day 01
         // ...and whatever opening the last galaxy was in the middle of. The generator sets a fresh cradle.
         HomeworldOnboarding.Reset();
-        HomeworldOnboarding.Cradle = null;
+        HomeworldOnboarding.ForgetWorlds();
 
         // Every derived-per-world cache is keyed on a CelestialBody REFERENCE, so a galaxy that is being
         // replaced would otherwise keep every one of its worlds alive in a static dictionary for the rest
@@ -443,7 +443,7 @@ public class GameManager : MonoBehaviour
         CombatManager.ResetAll();       // ...and every ship's firing state, plus whatever is in the air
         IndexToggles.ResetAll();        // ...and which index overlays were up, which is keyed on bodies
         HomeworldOnboarding.Reset();
-        HomeworldOnboarding.Cradle = null;
+        HomeworldOnboarding.ForgetWorlds();
         Galaxy = GalaxyGenerator.Generate(solarSystemGenerator, systemCount, SpeciesManager.Current);
         FocusedSystem = Galaxy.Home;
 
@@ -481,7 +481,7 @@ public class GameManager : MonoBehaviour
         FocusedSystem = g.Home;
         // A loaded game is past its opening (saving is refused until the capitol is down).
         HomeworldOnboarding.Reset();
-        HomeworldOnboarding.Cradle = null;
+        HomeworldOnboarding.ForgetWorlds();
 
         // The bodies moved, so the body-to-system index this galaxy's fog of war reads is about the
         // galaxy that just went away.

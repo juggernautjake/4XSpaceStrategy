@@ -232,7 +232,8 @@ public static class GalaxyGenerator
         }
     }
 
-    // Ensures a >=85%-habitable home world for the species, with 1-3 moons, all player-owned.
+    // Builds the species' cradle (habitability at the difficulty's floor) with 1-3 moons, plus sometimes a
+    // second starting option. Nothing is owned — the player chooses (HomeworldOnboarding).
     static void ForceHomeWorld(StarSystemData home, Species species, List<StarData> homeStars)
     {
         // The cluster (1-3 suns) comes from the plan rolled in Begin, NOT from a fresh roll here — that is
@@ -477,16 +478,25 @@ public static class GalaxyGenerator
         var keys = new List<ResourceType>(planet.resources.resources.Keys);
         foreach (var k in keys) planet.resources.resources[k] *= GameConfig.HomeResourceBonus;
 
-        // AT LEAST 85% FOR THIS SPECIES. The cradle is built from the species' own climate, air and mass,
+        // A DIFFICULTY FLOOR FOR THIS SPECIES. The cradle is built from the species' own climate, air and mass,
         // so its real rating usually clears this unaided; the difficulty figure and the 85 floor are the
         // backstop for the cases that miss, locked so a re-rate on load or a species switch doesn't take
         // the guarantee away.
         float real = Habitability.Rate(home.combinedStar, species, planet);
         planet.isHabitable = true;
-        planet.habitability = Mathf.Max(real, Mathf.Max(HomeworldOnboarding.CradleMinHabitability,
-                                                         GameConfig.HomeHabitability()));
+        // The floor is the DIFFICULTY's (GameConfig.HomeHabitability: Easy 95+, Medium 80+, Hard 70+),
+        // which replaced the flat 85 on 2026-10-09.
+        planet.habitability = Mathf.Clamp(Mathf.Max(real, GameConfig.HomeHabitability()), 0f, 100f);
         planet.habitabilityLocked = true;
         HomeworldOnboarding.Cradle = planet;
+        HomeworldOnboarding.Options.Clear();
+        HomeworldOnboarding.Options.Add(planet);
+
+        // A SECOND STARTING OPTION, by difficulty (GameConfig.SecondOptionChance): Easy usually, Medium
+        // half the time, Hard never.
+        // Gated so Hard draws nothing from the shared random stream.
+        if (GameConfig.SecondOptionChance > 0f && Random.value < GameConfig.SecondOptionChance)
+            AddSecondOption(home, planet, species, inner, outer);
 
         // ForceHomeWorld resizes the home world and rebuilds its moon system AFTER the system was laid
         // out, so its band is a different shape than the layout reserved for it. Re-enforce, or a big
@@ -495,6 +505,90 @@ public static class GalaxyGenerator
 
         if (!OrbitSafety.Validate(home.bodies, out string problem))
             Debug.LogWarning($"[OrbitSafety] home system {home.name}: {problem}");
+    }
+
+    /// Make a second world in the home system's habitable zone a real starting option: another planet
+    /// if one orbits in the zone (and is not a giant), otherwise a moon of a world in the zone, otherwise
+    /// one of the cradle's own moons. Rated at GameConfig.SecondOptionMin or better, locked.
+    static void AddSecondOption(StarSystemData home, CelestialBody cradle, Species species, float inner, float outer)
+    {
+        CelestialBody pick = null;
+
+        // Another planet in the zone, nearest its centre first.
+        float centre = (inner + outer) * 0.5f, best = float.MaxValue;
+        CelestialBody inZone = null;
+        foreach (var b in home.bodies)
+        {
+            if (b == null || b == cradle || b.beltId != 0 || b.type == CelestialBodyType.Asteroid) continue;
+            // The species band only — it is the band drawn while choosing, and a ring outside the green
+            // would contradict it.
+            if (b.distanceFromStar < inner || b.distanceFromStar > outer) continue;
+            float d = Mathf.Abs(b.distanceFromStar - centre);
+            if (d < best) { best = d; inZone = b; }
+        }
+
+        if (inZone != null && inZone.type != CelestialBodyType.GasGiant && Random.value < 0.6f)
+            pick = inZone;
+        else if (inZone != null && inZone.moons != null && inZone.moons.Count > 0)
+            pick = Largest(inZone.moons);
+        else if (inZone != null && inZone.type != CelestialBodyType.GasGiant)
+            pick = inZone;
+        else if (cradle.moons != null && cradle.moons.Count > 0)
+            pick = Largest(cradle.moons);
+        if (pick == null) return;
+
+        MakeHabitable(pick, species, home);
+        float real = Habitability.Rate(home.combinedStar, species, pick);
+        pick.isHabitable = true;
+        pick.habitability = Mathf.Clamp(Mathf.Max(real, GameConfig.SecondOptionMin + Random.Range(0f, 8f)), 0f, 100f);
+        pick.habitabilityLocked = true;
+        pick.visited = true;
+        pick.explorationProgress = 1f;
+        // Only offered if a capitol fits on it — an option the player cannot actually choose
+        // (HomeworldOnboarding.Eligible) would be a green ring that refuses the click.
+        if (SurfaceBuildManager.FindSpot(pick, SurfaceBuildingType.PlanetCapitol, out _, out _))
+            HomeworldOnboarding.Options.Add(pick);
+    }
+
+    static CelestialBody Largest(List<CelestialBody> list)
+    {
+        CelestialBody best = null;
+        foreach (var m in list) if (m != null && (best == null || m.mass > best.mass)) best = m;
+        return best;
+    }
+
+    /// Give a world the species' own climate — the same recipe the cradle gets in ForceHomeWorld, short
+    /// of choosing its orbit: a working dynamo, the species' air, its preferred heat, a biosphere if
+    /// the climate supports one, and a fresh surface baked from all of that.
+    static void MakeHabitable(CelestialBody b, Species species, StarSystemData home)
+    {
+        bool isMoon = b.parentBody != null;
+        b.type = BestTypeFor(species);
+        // Big enough to stand on and to hold air: a moon is lifted to at least 0.4, a planet kept in
+        // the terrestrial band.
+        b.mass = isMoon ? Mathf.Max(Mathf.Round(b.mass * 10f) / 10f, 0.4f)
+                        : MassRules.QuantizeTerrestrial(Mathf.Clamp(b.mass, 0.6f, 2.5f));
+        b.surfaceSize = MassRules.SurfaceSize(b.mass);
+        b.spinSpeed = Mathf.Max(RotationRules.MagneticFieldSpin + 2f, RotationRules.Roll(b.mass, isMoon));
+        b.hasMagneticField = true;
+        b.tidallyLocked = false;
+        b.hasTectonics = TectonicsRules.Roll(b.type, b.mass);
+        b.atmospheres = AtmosphereRules.Quantize(Mathf.Clamp(b.mass, species.minAtmospheres, species.maxAtmospheres));
+        SeedTerrain(b);
+        var tp = b.terrainParams;
+        tp.heat = CradleHeat(species, b);
+        b.terrainParams = tp;
+        TerraformVisuals.CaptureNatural(b);
+        b.biosphereActive = BiosphereRules.GeneratesWithBiosphere(b);
+        b.surface = PlanetTerrainGenerator.GenerateSurface(b);
+        OreGenerator.Populate(b);
+        b.resources = new ResourceDeposit();
+        ResourceGenerator.GenerateResources(b);
+        b.hostStar = home.combinedStar;
+        b.system = home;
+        // Re-derived from the new type and mass by whatever already caches them.
+        GeothermalMap.Invalidate(b);
+        TectonicsMap.Invalidate(b);
     }
 
     /// Put the cradle on the in-zone placement ring nearest the zone's centre — an empty one if any is,

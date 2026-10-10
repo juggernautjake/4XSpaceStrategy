@@ -33,6 +33,12 @@ public class HabitableZoneVisualizer : MonoBehaviour
 
     bool InBand(CelestialBody b)
     {
+        // Choosing a starting world: the rings mark exactly the worlds on offer, nothing else.
+        if (speciesMode && HomeworldOnboarding.Options.Count > 0)
+            return HomeworldOnboarding.IsOption(b);
+        // A moon shares its planet's distance from the star, so the band alone would ring every moon of
+        // an in-zone world. Only one that could actually be settled gets a ring.
+        if (b.parentBody != null && b.habitability < Colony.FoundThreshold) return false;
         if (speciesMode && SpeciesManager.Current != null)
             return Habitability.InZone(star, SpeciesManager.Current, b.distanceFromStar);
         return StarDatabase.InZone(star, b.distanceFromStar);

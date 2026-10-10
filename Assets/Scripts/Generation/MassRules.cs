@@ -288,9 +288,10 @@ public static class MassRules
     /// OrbitSafety.Scale reads VisualDiameter, so the orbital band a giant reserves grows with it and
     /// the ring-skipping in SolarSystemGenerator sees the new size for free.
     ///
-    /// 1.5 since the planet coefficient doubled (2026-10-09): 2 x 1.5 = 3, which is the old factor of 2
-    /// times the requested 1.5 — giants grow by half while rocky worlds double.
-    public const float GasGiantDiameterScale = 1.5f;
+    /// 1 since the planet coefficient doubled (2026-10-09): 1.24 x 1 is exactly the old 0.62 x 2, so
+    /// giants are back at their original size while rocky worlds double. (They were briefly 1.5x
+    /// larger; the follow-up asked for that to be reverted.)
+    public const float GasGiantDiameterScale = 1f;
 
     public static float VisualDiameter(float mass, bool isMoon)
     {

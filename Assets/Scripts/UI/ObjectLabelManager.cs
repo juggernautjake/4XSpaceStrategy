@@ -143,6 +143,11 @@ public class ObjectLabelManager : MonoBehaviour
         }
         if (concealed) return;
 
+        // A surveyed world already has its NAMEPLATE above it (NameplateManager); this older name line
+        // popped up over the top of it on selection. Re-asked every frame, because a survey finishing
+        // while the world is selected is exactly when the plate appears.
+        if (body != null) nameT.gameObject.SetActive(!NameplateManager.IsShowing(body));
+
         Vector3 center = cam.WorldToScreenPoint(target.position);
         if (center.z < 0f)
         {

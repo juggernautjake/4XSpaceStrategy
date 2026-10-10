@@ -55,9 +55,10 @@ public class GenerationMenu : MonoBehaviour
         CivIdentityPanel.Build(col, UpdateSummary);
 
         UIFactory.Label(col, "DIFFICULTY", UITheme.SmallSize, UITheme.Accent, 16);
-        UIFactory.Button(col, "Easy  (home 100%, more resources, fast research)", () => { selectedDifficulty = Difficulty.Easy; UpdateSummary(); }, 28);
-        UIFactory.Button(col, "Medium  (home 90-99%)", () => { selectedDifficulty = Difficulty.Medium; UpdateSummary(); }, 28);
-        UIFactory.Button(col, "Hard  (best world 85-89%, scarce, slow research)", () => { selectedDifficulty = Difficulty.Hard; UpdateSummary(); }, 28);
+        // Matches GameConfig.HomeHabitability / SecondOptionChance / SecondOptionMin.
+        UIFactory.Button(col, "Easy  (world 95%+, likely a 2nd at 90%+, rich, fast research)", () => { selectedDifficulty = Difficulty.Easy; UpdateSummary(); }, 28);
+        UIFactory.Button(col, "Medium  (world 80%+, 50% chance of a 2nd at 70%+)", () => { selectedDifficulty = Difficulty.Medium; UpdateSummary(); }, 28);
+        UIFactory.Button(col, "Hard  (one world, 70%+, scarce, slow research)", () => { selectedDifficulty = Difficulty.Hard; UpdateSummary(); }, 28);
 
         UIFactory.Label(col, "GALAXY", UITheme.SmallSize, UITheme.Accent, 16);
         systemsS = UIFactory.LabeledSlider(col, "Number of systems", 1f, 12f, 5f, _ => UpdateSummary(), "F0");
