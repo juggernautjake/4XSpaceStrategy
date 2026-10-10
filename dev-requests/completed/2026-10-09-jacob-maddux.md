@@ -163,6 +163,21 @@ Checked first against the code; none of these were already built.
 - [x] W/S and Up/Down pan the Surface View map north and south (alongside A/D). This works on moon panes too, and is ignored while typing or with a dialog open.
 - [x] Two pre-existing minus signs that rendered as boxes in TMP are now plain hyphens (`check-ui-glyphs` clean).
 
+### 8. Fourth batch (same day)
+- [x] **Root cause of the missing index toggles:** the bar deactivated its own GameObject whenever it had nothing to offer. That also stopped the bar's own `Update`, the code that checks for something new to offer, so it never came back. It now stays active and is just empty when there is nothing to show.
+- [x] There is ONE index bar, inside the top right of the map window, for the planet and all its moons:
+  - an index is offered if any of them generated with it (`SurfaceIndex.Present`), or always in Dev Mode;
+  - pressing it switches that overlay on or off for all of them together (`IndexToggles.ToggleSystem`, also used by the Survey tab's cards);
+  - moon panes no longer have their own bars.
+  - **Moon panes now actually draw index highlights.** They never had. Overlays were painted for the host planet only, so the old per-moon bars toggled state that nothing drew. Each moon pane now has its own overlay layer, painted by the same `PaintIndexInto` as the planet, on the moon's own survey.
+- [x] Highlights: the higher bands' fill moves toward that band's border colour and gains up to 15% more opacity at the top band, so the best ground is the brightest thing on the overlay.
+- [x] A shortcut column inside the bottom right of the map window, from the bottom up:
+  - **Demolish:** a white 16×16 bulldozer on black that turns red while demolition is on.
+  - **Power grid:** a lightning bolt.
+  - **Terrain heightmap:** a white arch over a darker flat line with a grey up-arrow. It toggles the 500 m contour lines (`SurfaceTextureRenderer.ShowContours`) and rebuilds the maps.
+  - Active toggles get a bright frame. The icons are drawn in code (`PixelIcons.cs`), so no new image imports are needed.
+  - The tile readout and moon zoom/pan ignore the cursor over either button column.
+
 ## Closing note
 
 **Not compiled. Unity isn't installed on this machine, so please build before playing.**

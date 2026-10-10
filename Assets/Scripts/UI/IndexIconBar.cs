@@ -62,6 +62,17 @@ public static class IndexToggles
         OnChanged?.Invoke();
     }
 
+    /// Toggle an index on a planet AND all its moons together, keyed off the planet's state — the one
+    /// switch the map's index bar and the Survey tab's cards both use (2026-10-09).
+    public static void ToggleSystem(CelestialBody host, SurfaceIndexKind k)
+    {
+        if (host == null || k == SurfaceIndexKind.None) return;
+        bool next = !IsOn(host, k);
+        Set(host, k, next);
+        if (host.moons != null)
+            foreach (var m in host.moons) if (m != null) Set(m, k, next);
+    }
+
     public static void Set(CelestialBody b, SurfaceIndexKind k, bool state)
     {
         if (b == null || k == SurfaceIndexKind.None) return;
@@ -180,12 +191,44 @@ public class IndexIconBar : MonoBehaviour
         Retint();
     }
 
+    // ============================================================================================
+    // ONE BAR FOR THE WHOLE PLANETARY SYSTEM (2026-10-09)
+    //
+    // There used to be a bar per pane — the planet's, and one on each open moon — each offering its own
+    // world's indexes. Now there is ONE, pinned inside the top right of the map window, and it speaks
+    // for the planet AND every moon at once: an index is offered if ANY of them has it (Dev Mode offers
+    // all), and pressing it switches that overlay on or off on every one of them together.
+    //
+    // "Has it" is SurfaceIndex.Present — whether the world generated with that index at all — not how far
+    // a survey has read it. Each pane's overlay still only paints what that world's survey has revealed.
+    // ============================================================================================
+    IEnumerable<CelestialBody> Group()
+    {
+        if (body == null) yield break;
+        yield return body;
+        if (body.moons != null)
+            foreach (var m in body.moons) if (m != null) yield return m;
+    }
+
+    bool Offered(SurfaceIndexKind k)
+    {
+        if (body == null || k == SurfaceIndexKind.None) return false;
+        // Present already answers Dev Mode (everything but a gas giant's impossible indexes).
+        foreach (var b in Group()) if (SurfaceIndex.Present(b, k)) return true;
+        return false;
+    }
+
+    /// On if it is on for the planet (the group moves together, so the planet speaks for it).
+    bool GroupOn(SurfaceIndexKind k) => IndexToggles.IsOn(body, k);
+
+    void ToggleGroup(SurfaceIndexKind k) => IndexToggles.ToggleSystem(body, k);
+
     bool AvailabilityChanged()
     {
         int n = 0;
         foreach (var k in SurfaceIndex.All)
         {
-            if (!IndexToggles.Available(body, k)) continue;
+            if (!Offered(k)) continue;
             if (n >= built.Count || built[n] != k) return true;
             n++;
         }
@@ -199,13 +242,17 @@ public class IndexIconBar : MonoBehaviour
         frames.Clear();
         plates.Clear();
 
-        if (body == null) { bar.gameObject.SetActive(false); return; }
+        // NEVER DEACTIVATED. This component lives on the bar's own GameObject, so switching that off
+        // when nothing was offered also switched off the Update that checks for something becoming
+        // offered — the bar went dark and never came back. That is how the buttons "disappeared". An
+        // empty bar is simply a zero-height bar with no children.
+        bar.gameObject.SetActive(true);
+        if (body == null) { bar.sizeDelta = new Vector2(IconPx, 0f); return; }
 
         foreach (var k in SurfaceIndex.All)
-            if (IndexToggles.Available(body, k)) built.Add(k);
+            if (Offered(k)) built.Add(k);
 
-        bar.gameObject.SetActive(built.Count > 0);
-        if (built.Count == 0) return;
+        if (built.Count == 0) { bar.sizeDelta = new Vector2(IconPx, 0f); return; }
 
         // A COLUMN, not a row. "The index toggle buttons should stack vertically, not horizontally."
         // Six icons across the top of the map is a strip of furniture over the ground you are reading;
@@ -252,7 +299,7 @@ public class IndexIconBar : MonoBehaviour
             var btn = cell.gameObject.AddComponent<Button>();
             btn.targetGraphic = plate;
             var captured = kind;
-            btn.onClick.AddListener(() => IndexToggles.Toggle(body, captured));
+            btn.onClick.AddListener(() => ToggleGroup(captured));
 
             UIFactory.Tooltip(cell.gameObject, TipFor(kind));
         }
@@ -293,7 +340,7 @@ public class IndexIconBar : MonoBehaviour
         if (body == null) return;
         for (int i = 0; i < built.Count && i < frames.Count; i++)
         {
-            bool active = IndexToggles.IsOn(body, built[i]);
+            bool active = GroupOn(built[i]);
             // The index's own BRIGHTEST colour, which is the top band's outline — so the square round
             // the button is literally the colour of the strongest ground that button will show.
             frames[i].color = active ? SurfaceIndex.Outline(built[i], 1f) : new Color(0, 0, 0, 0);

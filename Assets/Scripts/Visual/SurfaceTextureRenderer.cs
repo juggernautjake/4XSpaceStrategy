@@ -112,6 +112,9 @@ public static class SurfaceTextureRenderer
     /// the window closes. At this budget a 400x200 world renders at 8 texels per cell (3200x1600).
     public const int MapTexelBudget = 8 * 1024 * 1024;
 
+    /// Draw the 500 m elevation contours into the textured surface maps. A view setting, not saved.
+    public static bool ShowContours = true;
+
     public static Texture2D BuildGridTextured(CelestialBody body) => BuildGridTextured(body, MapTexelBudget);
 
     public static Texture2D BuildGridTextured(CelestialBody body, int texelBudget)
@@ -202,7 +205,10 @@ public static class SurfaceTextureRenderer
         // NOT ON A GAS GIANT. "Gas Giants do not need topography lines on their grid as they have no
         // surface." Its 'elevation' is cloud-deck noise, and a contour through it is a line about
         // nothing — the same reason the hover readout already leaves the metres off a giant.
-        bool[] contour = body.type == CelestialBodyType.GasGiant ? null
+        //
+        // ...AND NOT WHEN THE PLAYER HAS SWITCHED THEM OFF (the Surface View's Terrain Heightmap toggle,
+        // 2026-10-09). The lines are baked into this texture, so the toggle rebuilds it.
+        bool[] contour = body.type == CelestialBodyType.GasGiant || !ShowContours ? null
                        : PaintContours(body, px, w, h, tw, scale);
 
         tex.SetPixels32(px, 0);

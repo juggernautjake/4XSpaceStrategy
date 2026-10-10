@@ -1651,14 +1651,23 @@ public static class SurfaceIndex
     // ============================================================================================
     public const float HighlightAlphaMax = 0.40f;
 
+    /// Extra opacity the top band gains over HighlightAlphaMax, scaled in by band (see Highlight).
+    public const float HighlightTopBoost = 0.15f;
+
     /// The fill for a tile the overlay has decided to draw (see Shown), in the band `t`.
     public static Color Highlight(SurfaceIndexKind k, float t)
     {
         t = Mathf.Clamp01(t);
         var c = Ramp(k, Mathf.Lerp(0.5f, 1f, t));
-        // The band spread is kept — a 90s patch is still more opaque than a 70s one, which is half of
-        // how the bands read — just compressed into the ceiling above.
-        c.a = Mathf.Lerp(HighlightAlphaMax * 0.55f, HighlightAlphaMax, t);
+        // THE BEST GROUND IS THE BRIGHTEST (2026-10-09). The fill moves toward its band's own OUTLINE
+        // colour as the band rises, and the upper bands gain up to 15
+        // points of opacity over the base ceiling — so from map zoom the highest-quality patch is the
+        // brightest, most solid thing on the overlay rather than a wash the same weight as the fringe.
+        // Capped at 70% of the way, so even the top band's fill stays a shade under its own outline and
+        // the edge still separates from the ground it rings.
+        var edge = Outline(k, t);
+        c = Color.Lerp(c, edge, t * 0.7f);
+        c.a = Mathf.Lerp(HighlightAlphaMax * 0.55f, HighlightAlphaMax + HighlightTopBoost, t);
         return c;
     }
 

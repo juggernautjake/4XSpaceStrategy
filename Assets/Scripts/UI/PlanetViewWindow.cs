@@ -315,6 +315,128 @@ public class PlanetViewWindow : MonoBehaviour
     }
     readonly List<SurfaceIndexKind> scratchKinds = new List<SurfaceIndexKind>();
     readonly List<Unit> scratchParked = new List<Unit>();
+
+    // ============================================================================================
+    // THE SHORTCUT COLUMN — bottom right of the map window, mirroring the index bar (2026-10-09)
+    //
+    // From the bottom up: Demolish (a white bulldozer that turns red while demolition is on), Power Grid
+    // (a lightning bolt) and Terrain Heightmap (the arch over a flat line — the 500 m contours). Black
+    // plates like the index buttons, and the same bright square frame round whichever are switched on.
+    // ============================================================================================
+    RectTransform shortcutBar;
+    RawImage demolishIcon;
+    Image powerFrame, contourFrame, demolishFrame;
+    const float ShortcutPx = 26f, ShortcutGap = 4f, ShortcutMargin = 6f;
+    static readonly Color ShortcutPlate = new Color(0.02f, 0.02f, 0.03f, 0.88f);
+
+    void BuildShortcutBar(RectTransform parent)
+    {
+        shortcutBar = UIFactory.NewUI(parent, "ShortcutBar").GetComponent<RectTransform>();
+        shortcutBar.anchorMin = shortcutBar.anchorMax = new Vector2(1f, 0f);
+        shortcutBar.pivot = new Vector2(1f, 0f);
+        shortcutBar.anchoredPosition = new Vector2(-ShortcutMargin, ShortcutMargin);
+        shortcutBar.sizeDelta = new Vector2(ShortcutPx, ShortcutPx * 3f + ShortcutGap * 2f);
+
+        demolishIcon = ShortcutButton(0, PixelIcons.Bulldozer, Color.white, ToggleDemolishShortcut,
+            "<b>Demolish</b>\nClear buildings: paint the tiles, then confirm.", out demolishFrame);
+        ShortcutButton(1, PixelIcons.Bolt, new Color(0.96f, 0.96f, 0.55f), () => { showPowerOverlay = !showPowerOverlay; lastSig = null; },
+            "<b>Power grid</b>\nShow where electricity reaches.", out powerFrame);
+        ShortcutButton(2, PixelIcons.Heightmap, Color.white, ToggleContours,
+            "<b>Terrain heightmap</b>\nShow or hide the elevation lines.", out contourFrame);
+    }
+
+    RawImage ShortcutButton(int slot, Texture2D icon, Color tint, System.Action onClick, string tip, out Image frame)
+    {
+        var cell = UIFactory.NewUI(shortcutBar, "Shortcut").GetComponent<RectTransform>();
+        cell.anchorMin = cell.anchorMax = new Vector2(0.5f, 0f);
+        cell.pivot = new Vector2(0.5f, 0f);
+        cell.sizeDelta = new Vector2(ShortcutPx, ShortcutPx);
+        cell.anchoredPosition = new Vector2(0f, slot * (ShortcutPx + ShortcutGap));
+
+        var plate = cell.gameObject.AddComponent<Image>();
+        plate.color = ShortcutPlate;
+        var btn = cell.gameObject.AddComponent<Button>();
+        btn.targetGraphic = plate;
+        btn.onClick.AddListener(() => onClick());
+
+        var img = UIFactory.NewUI(cell, "Icon").AddComponent<RawImage>();
+        img.texture = icon;
+        img.color = tint;
+        img.raycastTarget = false;
+        var irt = img.rectTransform;
+        irt.anchorMin = Vector2.zero; irt.anchorMax = Vector2.one;
+        irt.offsetMin = new Vector2(3, 3); irt.offsetMax = new Vector2(-3, -3);
+
+        // The "on" frame: four 3px edges under a transparent holder, recoloured together (same build as
+        // the index bar's frame, so the two columns read as one family).
+        frame = UIFactory.Panel(cell, "Frame", new Color(0, 0, 0, 0));
+        frame.raycastTarget = false;
+        UIFactory.Stretch(frame.rectTransform);
+        FrameEdge(frame.rectTransform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -3), Vector2.zero);
+        FrameEdge(frame.rectTransform, new Vector2(0, 0), new Vector2(1, 0), Vector2.zero, new Vector2(0, 3));
+        FrameEdge(frame.rectTransform, new Vector2(0, 0), new Vector2(0, 1), Vector2.zero, new Vector2(3, 0));
+        FrameEdge(frame.rectTransform, new Vector2(1, 0), new Vector2(1, 1), new Vector2(-3, 0), Vector2.zero);
+
+        UIFactory.Tooltip(cell.gameObject, tip);
+        return img;
+    }
+
+    void ToggleDemolishShortcut()
+    {
+        if (BuildDemolition.IsFor(body)) { ExitDemolition(); return; }
+        if (!TabAvailable(Tab.Build, out string why))
+        {
+            NotificationManager.Instance?.Push("Can't demolish here", why, null, NotifKind.Info);
+            return;
+        }
+        EnterDemolition();
+    }
+
+    void ToggleContours()
+    {
+        SurfaceTextureRenderer.ShowContours = !SurfaceTextureRenderer.ShowContours;
+        // The lines are baked into the map textures: rebuild the planet's, and let the moon panes be
+        // rebuilt from scratch with the new setting.
+        RefreshMapTexture();
+        ClearMoonPanes();
+        LayoutPanes();
+        lastSig = null;
+    }
+
+    /// Per frame: the bulldozer goes red while demolishing, and the frames show what is switched on.
+    void TickShortcutBar()
+    {
+        if (shortcutBar == null) return;
+        bool demo = BuildDemolition.IsFor(body);
+        if (demolishIcon != null) demolishIcon.color = demo ? new Color(1f, 0.25f, 0.2f) : Color.white;
+        SetShortcutFrame(demolishFrame, demo, new Color(1f, 0.3f, 0.25f));
+        SetShortcutFrame(powerFrame, showPowerOverlay, new Color(0.96f, 0.96f, 0.55f));
+        SetShortcutFrame(contourFrame, SurfaceTextureRenderer.ShowContours, new Color(0.85f, 0.88f, 0.92f));
+    }
+
+    static void FrameEdge(RectTransform parent, Vector2 aMin, Vector2 aMax, Vector2 oMin, Vector2 oMax)
+    {
+        var e = UIFactory.Panel(parent, "Edge", new Color(0, 0, 0, 0));
+        e.raycastTarget = false;
+        var rt = e.rectTransform;
+        rt.anchorMin = aMin; rt.anchorMax = aMax;
+        rt.offsetMin = oMin; rt.offsetMax = oMax;
+    }
+
+    static void SetShortcutFrame(Image frame, bool on, Color c)
+    {
+        if (frame == null) return;
+        var col = on ? c : new Color(0, 0, 0, 0);
+        for (int i = 0; i < frame.transform.childCount; i++)
+        {
+            var img = frame.transform.GetChild(i).GetComponent<Image>();
+            if (img != null) img.color = col;
+        }
+    }
+
+    bool PointerOverShortcuts(Vector2 p)
+        => shortcutBar != null && shortcutBar.gameObject.activeInHierarchy &&
+           RectTransformUtility.RectangleContainsScreenPoint(shortcutBar, p, null);
     // The Power grid is now a Survey overlay rather than its own tab: this flag is the "showing the power
     // grid" option. NOT exclusive with the index ramps any more — the grid has its own layer above the
     // buildings while an index ramp sits below them, so both can be read at once.
@@ -352,7 +474,6 @@ public class PlanetViewWindow : MonoBehaviour
     readonly List<Image> surveyMarkerEdges = new List<Image>();
     IndexIconBar hostIndexBar;
     float nextFogRepaint;
-    readonly Dictionary<CelestialBody, IndexIconBar> moonIndexBar = new Dictionary<CelestialBody, IndexIconBar>();
     Texture2D surveyFogTex;
     Color32[] surveyFogPx;
 
@@ -555,6 +676,8 @@ public class PlanetViewWindow : MonoBehaviour
         // go and find. Parented to gridHolder rather than hostViewport so the viewport's RectMask2D
         // cannot clip it at the edges.
         hostIndexBar = IndexIconBar.Attach(gridHolder, body);
+        // ...and its mirror in the bottom-right corner: Demolish, Power Grid, Terrain Heightmap.
+        BuildShortcutBar(gridHolder);
 
         // ============================================================================================
         // THE POWER GRID GETS ITS OWN LAYER, BETWEEN THE GROUND AND THE BUILDINGS
@@ -1348,6 +1471,16 @@ public class PlanetViewWindow : MonoBehaviour
         scratchKinds.Clear();
         IndexToggles.Active(body, scratchKinds);
         for (int i = 0; i < scratchKinds.Count; i++) sb.Append((int)scratchKinds[i]).Append(',');
+        // ...and each open moon's, so an index only a MOON has still repaints its pane when toggled.
+        foreach (var om in moonOverlay.Keys)
+        {
+            IndexToggles.Active(om, scratchKinds);
+            sb.Append('m');
+            for (int i = 0; i < scratchKinds.Count; i++) sb.Append((int)scratchKinds[i]).Append(',');
+            // ...and its survey progress, so a moon's highlights fill in while it is being read.
+            sb.Append(Mathf.FloorToInt(om.explorationProgress * 200f)).Append('/')
+              .Append(Mathf.FloorToInt(om.deepProgress * 200f)).Append(';');
+        }
         sb.Append('|').Append((int)TopIndex()).Append('|').Append(showPowerOverlay ? 1 : 0).Append('|').Append(body.Surveyed ? 1 : 0).Append('|').Append(body.deepSurveyed ? 1 : 0).Append('|');
 
         // A SURVEY IN PROGRESS IS A CHANGING PICTURE, and the whole point of it is that you can watch.
@@ -1446,6 +1579,7 @@ public class PlanetViewWindow : MonoBehaviour
         // happens to change at. Costs a rectangle move and two colour writes per surveying ship.
         RefreshSurveyMarkers();
         if (hostIndexBar != null) hostIndexBar.SetBody(body);
+        TickShortcutBar();
 
         // ---- the veil thins continuously, so it has to be repainted continuously ----------------
         //
@@ -4394,7 +4528,7 @@ public class PlanetViewWindow : MonoBehaviour
             // The card and the icon on the map are two views of one switch. Toggling through
             // IndexToggles means pressing either one moves both, rather than the tab quietly holding a
             // different opinion from the map it is describing.
-            IndexToggles.Toggle(body, k);
+            IndexToggles.ToggleSystem(body, k);   // the planet and its moons together, like the map bar
             lastSig = null;
         }, 24);
         live.Button(btn, () =>
@@ -4759,6 +4893,10 @@ public class PlanetViewWindow : MonoBehaviour
         // being dragged around needs the index it will be scored against visible whether or not anyone
         // remembered to switch it on, and now that overlays composite rather than replace, showing it
         // costs the player's own selection nothing.
+        // The moon panes follow the same toggles (one bar for the whole system). Before the host's own
+        // early-outs, so a moon's highlights update even when the planet has nothing to draw.
+        RefreshMoonOverlays();
+
         overlayKinds.Clear();
         IndexToggles.Active(body, overlayKinds);
 
@@ -4883,8 +5021,12 @@ public class PlanetViewWindow : MonoBehaviour
 
     /// Composite one index into an overlay buffer that may already hold others.
     void PaintIndexInto(SurfaceIndexKind kind, Color32[] px, int tw, int th, int sub)
+        => PaintIndexInto(body, kind, px, tw, th, sub);
+
+    /// The same, for ANY world — the host planet, or a moon pane (RefreshMoonOverlays, 2026-10-09).
+    void PaintIndexInto(CelestialBody pb, SurfaceIndexKind kind, Color32[] px, int tw, int th, int sub)
     {
-        int w = body.surface.width, h = body.surface.height;
+        int w = pb.surface.width, h = pb.surface.height;
 
         // Resolved for every tile FIRST, because the outline pass has to ask about neighbours — and
         // asking Shown again per neighbour would re-sample the terrain noise four more times per tile.
@@ -4907,7 +5049,7 @@ public class PlanetViewWindow : MonoBehaviour
         // Survey.Reached, which is a ragged front travelling across the world rather than a dissolve.
         // A tile the front has not got to yet stays at the previous pass's fidelity, and during the
         // very first pass that means it is not drawn at all.
-        var reveal = Survey.RevealOf(body, kind);
+        var reveal = Survey.RevealOf(pb, kind);
         int maxBand = reveal.complete ? steps - 1 : Mathf.Min(Survey.ResolvedBand(reveal.pass, steps), steps - 1);
         // ...and what the PREVIOUS pass left behind, for cells the front has not reached yet.
         int prevBand = reveal.complete ? steps - 1 : Survey.ResolvedBand(reveal.pass - 1, steps);
@@ -4916,22 +5058,22 @@ public class PlanetViewWindow : MonoBehaviour
         // quietly fills in, and the player cannot tell whether anything is happening or where — which is
         // the whole reason the survey is drawn while it runs rather than reported when it ends.
         var activeMark = new Color32(240, 246, 255, 150);
-        int deepShips = Mathf.Max(1, Survey.ShipsOn(body, true));
+        int deepShips = Mathf.Max(1, Survey.ShipsOn(pb, true));
         bool sweeping = !reveal.complete && reveal.started;
 
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
                 int i = y * w + x;
-                float v = SurfaceIndex.Get(body, kind, x, y);
-                if (!SurfaceIndex.ShownFor(body, kind, v, out float t)) continue;
+                float v = SurfaceIndex.Get(pb, kind, x, y);
+                if (!SurfaceIndex.ShownFor(pb, kind, v, out float t)) continue;
 
                 int band = Mathf.Clamp(Mathf.RoundToInt(t * (steps - 1)), 0, steps - 1);
 
                 if (!reveal.complete)
                 {
                     // Has the front reached this cell during the pass currently being painted?
-                    bool reached = Survey.Reached(body, x, y, reveal.frac);
+                    bool reached = Survey.Reached(pb, x, y, reveal.frac);
                     int resolved = reached ? maxBand : prevBand;
                     if (resolved < 0) continue;                 // first pass, not yet reached: nothing here
                     band = Mathf.Min(band, resolved);
@@ -4944,7 +5086,7 @@ public class PlanetViewWindow : MonoBehaviour
 
                 // Under the sweep head, the cell is drawn white instead of its band colour — it is being
                 // read right now, and what it is worth is not settled until the head has passed.
-                if (sweeping && Survey.BeingSurveyed(body, x, y, reveal.frac, deepShips))
+                if (sweeping && Survey.BeingSurveyed(pb, x, y, reveal.frac, deepShips))
                 {
                     fill[i] = activeMark;
                     edgeOf[i] = activeMark;
@@ -4956,7 +5098,7 @@ public class PlanetViewWindow : MonoBehaviour
                 // the shown band by construction — a deposit floors the Mineral index at 0.6.
                 if (kind == SurfaceIndexKind.Mineral)
                 {
-                    var tile = body.surface.tiles[x, y];
+                    var tile = pb.surface.tiles[x, y];
                     if (tile != null && tile.HasOre)
                     {
                         var oc = OreDatabase.Get(tile.ore).color;
@@ -5022,8 +5164,8 @@ public class PlanetViewWindow : MonoBehaviour
         // Drawn after the bands and their outlines, so it sits over them, and only on tiles the survey
         // has already resolved — a plate map handed over before the survey reached that ground would be
         // giving away the very thing the survey is for.
-        if (kind == SurfaceIndexKind.Geothermal && TectonicsMap.Active(body))
-            PaintPlateLines(px, tw, th, sub, reveal, maxBand);
+        if (kind == SurfaceIndexKind.Geothermal && TectonicsMap.Active(pb))
+            PaintPlateLines(pb, px, tw, th, sub, reveal, maxBand);
     }
 
     /// Source-over. The straightforward compositing rule, written out because the alternative — letting
@@ -5072,11 +5214,11 @@ public class PlanetViewWindow : MonoBehaviour
     /// plate map handed over before the survey reached that ground would be giving away the very
     /// thing the survey is for. Asked here per border tile rather than precomputed for the whole
     /// world, because the border is a hairline: a few hundred tiles out of tens of thousands.
-    void PaintPlateLines(Color32[] px, int tw, int th, int sub, Survey.Reveal reveal, int maxBand)
+    void PaintPlateLines(CelestialBody pb, Color32[] px, int tw, int th, int sub, Survey.Reveal reveal, int maxBand)
     {
-        var map = TectonicsMap.Tiles(body);
+        var map = TectonicsMap.Tiles(pb);
         if (map == null) return;
-        int w = body.surface.width, h = body.surface.height;
+        int w = pb.surface.width, h = pb.surface.height;
         if (map.width != w || map.height != h) return;
 
         // Slightly deeper and more opaque than anything the Geothermal ramp itself can reach, so the line
@@ -5093,7 +5235,7 @@ public class PlanetViewWindow : MonoBehaviour
                 // reached during the pass in progress, or already carried by an earlier one.
                 if (!reveal.complete)
                 {
-                    bool reached = Survey.Reached(body, x, y, reveal.frac);
+                    bool reached = Survey.Reached(pb, x, y, reveal.frac);
                     // Unreached ground has only what the PREVIOUS pass resolved — and before the first
                     // pass finishes, that is nothing.
                     if (!reached && reveal.pass <= 0) continue;
@@ -7535,7 +7677,7 @@ public class PlanetViewWindow : MonoBehaviour
 
         // The index toggle icons float over the top-right of every map and show their own tooltip. The
         // tile behind them must not be read out (or clicked through to) while the cursor is on one.
-        if (IndexIconBar.PointerOverAny(Input.mousePosition))
+        if (IndexIconBar.PointerOverAny(Input.mousePosition) || PointerOverShortcuts(Input.mousePosition))
         {
             ClearHostHover();
             MapHoverPanel.Instance.Hide();
@@ -7604,7 +7746,7 @@ public class PlanetViewWindow : MonoBehaviour
     {
         var p = Input.mousePosition;
         if (zoomBar != null && RectTransformUtility.RectangleContainsScreenPoint(zoomBar, p, null)) return true;
-        if (IndexIconBar.PointerOverAny(p)) return true;
+        if (IndexIconBar.PointerOverAny(p) || PointerOverShortcuts(p)) return true;
         if (confirmPanel != null && confirmPanel.gameObject.activeInHierarchy &&
             RectTransformUtility.RectangleContainsScreenPoint(confirmPanel, p, null)) return true;
         // Placement Mode's Confirm/Cancel panel sits ON the map, directly under the shape it is asking
@@ -8165,6 +8307,10 @@ public class PlanetViewWindow : MonoBehaviour
     // are (re)ordered as tabs open and close.
     void KeepControlsOnTop()
     {
+        // The index bar and the shortcut column are furniture of the map WINDOW and must sit above every
+        // pane, including moon panes laid out after them.
+        if (hostIndexBar != null) hostIndexBar.transform.SetAsLastSibling();
+        if (shortcutBar != null) shortcutBar.SetAsLastSibling();
         if (zoomBar != null) zoomBar.SetAsLastSibling();
         if (viewFormatBtn != null) viewFormatBtn.SetAsLastSibling();
         if (moonTabStrip != null) moonTabStrip.SetAsLastSibling();
@@ -8179,6 +8325,7 @@ public class PlanetViewWindow : MonoBehaviour
         if (viewFormatBtn != null && viewFormatBtn.gameObject.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(viewFormatBtn, p, null)) return true;
         if (moonTabStrip != null && RectTransformUtility.RectangleContainsScreenPoint(moonTabStrip, p, null)) return true;
         if (confirmPanel != null && confirmPanel.gameObject.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(confirmPanel, p, null)) return true;
+        if (IndexIconBar.PointerOverAny(p) || PointerOverShortcuts(p)) return true;
         return false;
     }
 
@@ -8199,6 +8346,7 @@ public class PlanetViewWindow : MonoBehaviour
     // any whose tab was closed. The planet is not a moon frame — it uses hostViewport / mapRT.
     void RebuildMoonPanes()
     {
+        bool addedPane = false;
         List<CelestialBody> stale = null;
         foreach (var kv in moonFrame)
             if (!openMaps.Contains(kv.Key)) (stale ??= new List<CelestialBody>()).Add(kv.Key);
@@ -8210,9 +8358,10 @@ public class PlanetViewWindow : MonoBehaviour
                 // Same reasoning as ClearMoonPanes: the fog image dies with the frame, its texture does
                 // not belong to a GameObject and has to go by hand or it leaks per closed tab.
                 if (moonFogTex.TryGetValue(m, out var ft) && ft != null) Destroy(ft);
+                if (moonOverlayTex.TryGetValue(m, out var ot) && ot != null) Destroy(ot);
                 moonFrame.Remove(m); moonImg.Remove(m); moonTex.Remove(m);
                 moonFog.Remove(m); moonFogTex.Remove(m);
-                moonIndexBar.Remove(m);
+                moonOverlay.Remove(m); moonOverlayTex.Remove(m); moonOverlayPx.Remove(m);
             }
 
         foreach (var m in openMaps)
@@ -8252,22 +8401,32 @@ public class PlanetViewWindow : MonoBehaviour
             // scrollable map, so it gave away everything the host's mask was protecting.
             //
             // A child of the map image, stretched over it, so it pans and zooms with the terrain for free.
+            // ---- ITS INDEX OVERLAY (2026-10-09) ----
+            // The one index bar switches every index on the planet and its moons together, so each moon
+            // pane paints its own world's highlights here — the same drawing as the host's, on the
+            // moon's own survey. Below the fog, exactly like the host's overlay.
+            var movGO = UIFactory.NewUI(crt, "MoonIndex");
+            var mov = movGO.AddComponent<RawImage>();
+            UIFactory.Stretch(mov.rectTransform);
+            mov.raycastTarget = false;
+            movGO.SetActive(false);
+            moonOverlay[m] = mov;
+
             var fogGO = UIFactory.NewUI(crt, "MoonFog");
             var mfog = fogGO.AddComponent<RawImage>();
             UIFactory.Stretch(mfog.rectTransform);
             mfog.raycastTarget = false;
             fogGO.SetActive(false);
 
-            // ---- ITS OWN INDEX BUTTONS, ON ITS OWN SURVEY ----
-            //
-            // A moon is surveyed exactly as a planet is and has its own indexes on its own ground, so
-            // the bar is attached to the moon's FRAME and given the moon. Sharing the host planet's bar
-            // would offer the planet's indexes over the moon's terrain, which is worse than offering
-            // none — it would be confidently wrong about what is under the cursor.
-            moonIndexBar[m] = IndexIconBar.Attach(frame, m);
+            // NO PER-MOON INDEX BAR any more (2026-10-09): the one bar inside the top right of the map
+            // window toggles every index on the planet and all its moons together (IndexIconBar).
 
             moonFrame[m] = frame; moonImg[m] = img; moonTex[m] = tex; moonFog[m] = mfog;
+            addedPane = true;
         }
+        // A freshly built pane starts blank; paint its highlights now rather than waiting for the next
+        // change to the window's signature.
+        if (addedPane) RefreshMoonOverlays();
     }
 
     void ClearMoonPanes()
@@ -8277,8 +8436,51 @@ public class PlanetViewWindow : MonoBehaviour
         // The fog IMAGE is a child of the frame and dies with it; its TEXTURE is not owned by any
         // GameObject and leaks one per moon per world change if it is not destroyed here by hand.
         foreach (var kv in moonFogTex) if (kv.Value != null) Destroy(kv.Value);
+        foreach (var kv in moonOverlayTex) if (kv.Value != null) Destroy(kv.Value);
         moonFrame.Clear(); moonImg.Clear(); moonTex.Clear();
         moonFog.Clear(); moonFogTex.Clear();
+        moonOverlay.Clear(); moonOverlayTex.Clear(); moonOverlayPx.Clear();
+    }
+
+    // ---- Moon index overlays ----
+    readonly Dictionary<CelestialBody, RawImage> moonOverlay = new Dictionary<CelestialBody, RawImage>();
+    readonly Dictionary<CelestialBody, Texture2D> moonOverlayTex = new Dictionary<CelestialBody, Texture2D>();
+    readonly List<SurfaceIndexKind> moonKinds = new List<SurfaceIndexKind>();
+    readonly Dictionary<CelestialBody, Color32[]> moonOverlayPx = new Dictionary<CelestialBody, Color32[]>();
+
+    /// Paint each open moon pane's index highlights from that moon's own toggles and survey. Called with
+    /// the host's overlay refresh, which the shared toggles already drive.
+    void RefreshMoonOverlays()
+    {
+        foreach (var kv in moonOverlay)
+        {
+            var m = kv.Key; var img = kv.Value;
+            if (m == null || img == null) continue;
+            IndexToggles.Active(m, moonKinds);
+            bool show = moonKinds.Count > 0 && m.surface != null;
+            img.gameObject.SetActive(show);
+            if (!show) continue;
+
+            int w = m.surface.width, h = m.surface.height;
+            // Moons are small grids, and a pane is a fraction of the window: eighths are plenty.
+            int sub = Mathf.Min(OverlaySub(w, h), 8);
+            int tw = w * sub, th = h * sub;
+            if (!moonOverlayTex.TryGetValue(m, out var tex) || tex == null || tex.width != tw || tex.height != th)
+            {
+                if (tex != null) Destroy(tex);
+                tex = new Texture2D(tw, th, TextureFormat.RGBA32, false)
+                { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+                moonOverlayTex[m] = tex;
+            }
+            // One buffer per moon, cleared rather than reallocated — the host does the same with overlayPx.
+            if (!moonOverlayPx.TryGetValue(m, out var px) || px == null || px.Length != tw * th)
+                moonOverlayPx[m] = px = new Color32[tw * th];
+            else System.Array.Clear(px, 0, px.Length);
+            for (int i = 0; i < moonKinds.Count; i++) PaintIndexInto(m, moonKinds[i], px, tw, th, sub);
+            tex.SetPixels32(px);
+            tex.Apply();
+            img.texture = tex;
+        }
     }
 
     // Fit a moon map inside its fixed frame and apply its own zoom (px per cell), clipped by the frame's
