@@ -1,0 +1,392 @@
+// ============================================================================================
+// DOES EVERY WORLD MAKE SENSE WHERE IT ORBITS? (the 2026-10-10 Mirfak report)
+//
+//   node tools/world-placement-check.mjs [--seeds 2000]
+//
+// "Mirfak II, despite being very near to the sun, has an average surface temperature of 35 C. The
+// habitability is 60% and there is greenery on this planet... Planets that are predetermined types still
+// need to make sense where they are placed within a solar system."
+//
+// A Node port of the arithmetic behind the fix — InsolationRules (the law and its HeatBand),
+// PlacementRings (the ladder and RingForHeat), Habitability.PlacementZone, GalaxyGenerator.CradleHeat
+// and the starting-option choice, and WorldConsistency's two rules — run three ways:
+//
+//   1. THE LAW        starlight falls outward; nothing inside the zone's inner edge can be temperate.
+//   2. MIRFAK         the reported system rebuilt from the screenshots: what the OLD pipeline did (home
+//                     system generated around a red dwarf, then the G sun swapped in under it) and what
+//                     the NEW one does (generated around the G sun from the start), and what the
+//                     consistency check makes of the old Mirfak II.
+//   3. THE SWEEP      thousands of home systems across species, difficulties and home clusters, OLD
+//                     against NEW: start options outside the zone, forced climates their orbit could not
+//                     give, cradles on belt rocks, natural worlds whose climate belongs to another star.
+//
+// Constants are READ OUT OF THE C# so the port cannot drift from the game; a missing one fails loudly.
+// The sweep's ring layout is SIMPLIFIED (which rings fill, and with what, is drawn from plain odds rather
+// than the full mass-budget loop — tools/system-composition-check.mjs ports that). What it checks does
+// not depend on those odds: it is about where the forced worlds go and what climate they are given.
+// Exits 1 on any failure of the NEW pipeline.
+// ============================================================================================
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const PROJ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const argv = process.argv.slice(2);
+const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const SEEDS = parseInt(arg('--seeds', '2000'), 10);
+
+const read = f => fs.readFileSync(path.join(PROJ, f), 'utf8');
+const STAR = read('Assets/Scripts/Data/StarData.cs');
+const SPECIES = read('Assets/Scripts/Data/Species.cs');
+const INSO = read('Assets/Scripts/Generation/InsolationRules.cs');
+const RINGS = read('Assets/Scripts/Generation/PlacementRings.cs');
+const ATMO = read('Assets/Scripts/Generation/AtmosphereRules.cs');
+const TEMP = read('Assets/Scripts/Data/PlanetTemperature.cs');
+const TERRA = read('Assets/Scripts/Systems/Terraforming.cs');
+const SAFE = read('Assets/Scripts/Systems/OrbitSafety.cs');
+const CONS = read('Assets/Scripts/Generation/WorldConsistency.cs');
+const GAL = read('Assets/Scripts/Generation/GalaxyGenerator.cs');
+
+function num(src, re, what) {
+  const m = new RegExp(re).exec(src);
+  if (!m) { console.error(`FAIL  could not read ${what} — the constant moved or was renamed.`); process.exit(1); }
+  return parseFloat(m[1]);
+}
+
+const AU = num(STAR, String.raw`public const float AU = ([\d.]+)f`, 'StarDatabase.AU');
+const FLUX_MIN = num(STAR, String.raw`FluxMin = ([\d.]+)f`, 'FluxMin');
+const FLUX_MAX = num(STAR, String.raw`FluxMax = ([\d.]+)f`, 'FluxMax');
+const HZ_IN = num(STAR, String.raw`HzInnerRel = ([\d.]+)f`, 'HzInnerRel');
+const HZ_OUT = num(STAR, String.raw`HzOuterRel = ([\d.]+)f`, 'HzOuterRel');
+const STAR_SCALE_MUL = num(STAR, String.raw`s\.visualScale = baseScale \* ([\d.]+)f \* lumFactor`, 'star visualScale multiplier');
+const RUNAWAY = num(INSO, String.raw`RunawayGain = ([\d.]+)f`, 'RunawayGain');
+const INNER_FLOOR_C = num(INSO, String.raw`InnerFloorC = ([\d.]+)f`, 'InnerFloorC');
+const SNOWBALL = num(INSO, String.raw`SnowballGain = ([\d.]+)f`, 'SnowballGain');
+const OUTER_CEIL_C = -num(INSO, String.raw`OuterCeilingC = -([\d.]+)f`, 'OuterCeilingC');
+const JITTER = num(INSO, String.raw`Jitter = ([\d.]+)f`, 'Jitter');
+const REF_K = num(TEMP, String.raw`ReferenceKelvin = ([\d.]+)f`, 'ReferenceKelvin');
+const GREENHOUSE = num(TEMP, String.raw`GreenhouseMaxC = ([\d.]+)f`, 'GreenhouseMaxC');
+const THICK_REF = num(ATMO, String.raw`ThicknessReference = ([\d.]+)f`, 'ThicknessReference');
+const MIN_LIQ = num(TERRA, String.raw`MinLiquidC = ([\d.-]+)f`, 'MinLiquidC');
+const MAX_LIQ = num(TERRA, String.raw`MaxLiquidC = ([\d.]+)f`, 'MaxLiquidC');
+const STAR_CLEAR = num(SAFE, String.raw`StarClearance = ([\d.]+)f`, 'StarClearance');
+const INNER_REACH = num(RINGS, String.raw`InnerBodyReach = ([\d.]+)f`, 'InnerBodyReach');
+const INNER_RINGS = num(RINGS, 'InnerRings = ([0-9]+)', 'InnerRings');
+const MULTIPLES = (() => {
+  const m = /static readonly float\[\] Multiples = \{([^}]+)\}/.exec(RINGS);
+  if (!m) { console.error('FAIL  could not read PlacementRings.Multiples'); process.exit(1); }
+  return m[1].split(',').map(s => parseFloat(s)).filter(v => !Number.isNaN(v));
+})();
+const HEAT_SLACK = num(CONS, String.raw`HeatSlack = ([\d.]+)f`, 'WorldConsistency.HeatSlack');
+const OPTION_SLACK = num(GAL, String.raw`OptionClimateSlack = ([\d.]+)f`, 'GalaxyGenerator.OptionClimateSlack');
+
+let fails = 0, passes = 0;
+const ok = (cond, msg) => { if (cond) passes++; else { fails++; if (fails <= 25) console.log(`  FAIL  ${msg}`); } };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const clamp01 = v => clamp(v, 0, 1);
+const lerp = (a, b, t) => a + (b - a) * clamp01(t);
+
+// A seeded PRNG, so a run is reproducible and a failing seed can be named.
+function mulberry32(a) {
+  return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+let rnd = mulberry32(1);
+const range = (a, b) => a + rnd() * (b - a);
+
+// ---- species, parsed ------------------------------------------------------------------------
+function species(name) {
+  const i = SPECIES.indexOf(`name = "${name}"`);
+  if (i < 0) throw new Error(`no species ${name}`);
+  const block = SPECIES.slice(i, SPECIES.indexOf('};', i));
+  const f = (re, d) => { const m = re.exec(block); if (!m) { if (d !== undefined) return d; throw new Error(`${name}: ${re}`); } return parseFloat(m[1]); };
+  const affLine = new RegExp(String.raw`SetAff\(\w+, rocky: ([\d.]+)f, ocean: ([\d.]+)f, ice: ([\d.]+)f, volcanic: ([\d.]+)f, barren: ([\d.]+)f`)
+    .exec(SPECIES.slice(i));
+  const aff = { Rocky: +affLine[1], Ocean: +affLine[2], Ice: +affLine[3], Volcanic: +affLine[4], Barren: +affLine[5] };
+  // GalaxyGenerator.BestTypeFor: candidates in this order, strictly-greater wins.
+  let best = 'Rocky', bestA = -1;
+  for (const t of ['Ocean', 'Rocky', 'Ice', 'Volcanic', 'Barren']) if (aff[t] > bestA) { bestA = aff[t]; best = t; }
+  return {
+    name, idealTemp: f(/idealTemp = ([\d.]+)f/), tolerance: f(/tolerance = ([\d.]+)f/),
+    minAtm: f(/minAtmospheres = ([\d.]+)f/), maxAtm: f(/maxAtmospheres = ([\d.]+)f/),
+    cradleMass: f(/cradleMass = ([\d.]+)f/, 1), type: best,
+  };
+}
+const ALL_SPECIES = ['Terrans', 'Aquarii', 'Pyrothians', 'Cryithn', 'Sylvans'].map(species);
+const TERRANS = ALL_SPECIES[0];
+const wantsLife = s => s.type === 'Rocky' || s.type === 'Ocean';
+
+// ---- PlanetTemperature + InsolationRules -----------------------------------------------------
+const typeNudge = t => t === 'Volcanic' ? 90 : t === 'Ice' ? -50 : 0;
+const heatForKelvin = k => Math.max(0.01, (Math.max(0, k) / REF_K) ** 2);
+const baseC = (heat, thick, type = 'Rocky') => REF_K * Math.sqrt(Math.max(1e-5, heat)) - 273.15 + typeNudge(type) + clamp01(thick) * GREENHOUSE;
+const heatForC = (c, thick, type) => heatForKelvin(c + 273.15 - typeNudge(type) - clamp01(thick) * GREENHOUSE);
+const plainK = rel => REF_K / Math.sqrt(Math.max(0.01, rel));
+function kelvinAt(rel) {
+  if (rel < HZ_IN) return Math.max(plainK(HZ_IN) + (plainK(rel) - plainK(HZ_IN)) * RUNAWAY, INNER_FLOOR_C + 273.15);
+  if (rel > HZ_OUT) return Math.min(plainK(HZ_OUT) + (plainK(rel) - plainK(HZ_OUT)) * SNOWBALL, OUTER_CEIL_C + 273.15);
+  return plainK(rel);
+}
+function heatBand(rel) {
+  const k = kelvinAt(rel);
+  let lo = k * (1 - JITTER), hi = k * (1 + JITTER);
+  if (rel < HZ_IN) { lo = Math.max(lo, INNER_FLOOR_C + 273.15); hi = Math.max(hi, INNER_FLOOR_C + 273.15); }
+  else if (rel > HZ_OUT) { hi = Math.min(hi, OUTER_CEIL_C + 273.15); lo = Math.min(lo, hi); }
+  return { lo: heatForKelvin(lo), hi: heatForKelvin(hi) };
+}
+function rollHeat(rel) {
+  let k = kelvinAt(rel) * range(1 - JITTER, 1 + JITTER);
+  if (rel < HZ_IN) k = Math.max(k, INNER_FLOOR_C + 273.15); else if (rel > HZ_OUT) k = Math.min(k, OUTER_CEIL_C + 273.15);
+  return heatForKelvin(k);
+}
+const mismatch = (heat, rel) => { const { lo, hi } = heatBand(rel); return heat < lo ? (lo - heat) / lo : heat > hi ? (heat - hi) / hi : 0; };
+const clampToOrbit = (heat, rel) => { const { lo, hi } = heatBand(rel); return clamp(heat, lo, hi); };
+
+// ---- stars and rings -------------------------------------------------------------------------
+const CLASSES = { O: [50000, 8.0], B: [2000, 6.1], A: [20, 4.2], F: [4, 3.4], G: [1, 2.9], K: [0.3, 2.4], M: [0.05, 1.9] };
+const fluxScale = lum => clamp(Math.pow(Math.max(0.02, lum), 0.30), FLUX_MIN, FLUX_MAX);
+function makeStar(cls, lumMul = range(0.45, 1.9)) {
+  const [baseLum, scale] = CLASSES[cls];
+  const lum = baseLum * lumMul;
+  const visualScale = scale * STAR_SCALE_MUL * Math.pow(Math.max(0.001, lum / baseLum), 0.12) * range(0.85, 1.18);
+  const ref = fluxScale(lum) * AU;
+  return { cls, lum, visualScale, ref, hzInner: HZ_IN * ref, hzOuter: HZ_OUT * ref, hasZone: cls !== 'O' && cls !== 'B', radius: visualScale * 0.5 };
+}
+// The hottest sun sets the zone (StarDatabase.Recombine); the cluster reaches further than one sun.
+function combine(stars) {
+  if (stars.length === 1) return stars[0];
+  const hot = stars.reduce((a, b) => (CLASSES[a.cls][0] >= CLASSES[b.cls][0] ? a : b));
+  return { ...hot, radius: Math.max(...stars.map(s => s.radius)) * 1.8 };
+}
+const relOf = (star, d) => Math.max(1, d) / Math.max(0.5, star.ref);
+function ringRadii(star) {
+  const r = Math.max(1, star.ref);
+  const out = MULTIPLES.map(m => m * r);
+  const need = star.radius + STAR_CLEAR + INNER_REACH;
+  if (out[0] >= need) return out;
+  const hi = (star.hasZone && star.hzInner > need) ? star.hzInner : out[INNER_RINGS];
+  if (hi <= need) { const shift = need - out[0]; return out.map(v => v + shift); }
+  for (let i = 0; i < INNER_RINGS; i++) out[i] = need + (hi - need) * ((i + 0.5) / INNER_RINGS);
+  return out;
+}
+function ringForHeat(star, radii, inner, outer, heat) {
+  let best = -1, bestMiss = Infinity, bestOff = Infinity;
+  radii.forEach((r, i) => {
+    if (r < inner || r > outer) return;
+    const rel = relOf(star, r), miss = mismatch(heat, rel), { lo, hi } = heatBand(rel), off = Math.abs(heat - (lo + hi) / 2);
+    if (miss < bestMiss - 1e-4 || (Math.abs(miss - bestMiss) <= 1e-4 && off < bestOff)) { best = i; bestMiss = miss; bestOff = off; }
+  });
+  return best;
+}
+
+// ---- Habitability.PlacementZone + GalaxyGenerator.CradleHeat ---------------------------------
+function placementZone(star, s) {
+  const centre = (star.hzInner + star.hzOuter) / 2 * lerp(1.25, 0.80, s.idealTemp);
+  const half = (star.hzOuter - star.hzInner) * 0.5 * clamp(s.tolerance, 0.6, 1.4);
+  let inner = Math.max(star.hzInner, Math.max(0.5, centre - half * 0.9)), outer = Math.min(star.hzOuter, centre + half * 1.2);
+  if (inner > outer) { inner = star.hzInner; outer = star.hzOuter; }
+  return { inner, outer };
+}
+const targetC = s => lerp(MIN_LIQ + 5, MAX_LIQ - 8, s.idealTemp);
+const cradleHeat = (s, thick, type) => wantsLife(s) ? heatForC(targetC(s), thick, type) : lerp(0.55, 1.7, s.idealTemp);
+const quantize = a => Math.max(0, Math.round(a * 10) / 10);
+const cradleThick = s => clamp01(quantize(clamp(s.cradleMass, s.minAtm, s.maxAtm)) / THICK_REF);
+const inZone = (star, d) => star.hasZone && d >= star.hzInner && d <= star.hzOuter;
+
+// ============================================================================================
+// 1. THE LAW
+// ============================================================================================
+console.log('1. The law');
+{
+  let pk = Infinity, plo = Infinity, phi = Infinity;
+  for (let rel = 0.2; rel <= 6; rel += 0.005) {
+    const k = kelvinAt(rel), { lo, hi } = heatBand(rel);
+    ok(k <= pk + 1e-6 && lo <= plo + 1e-9 && hi <= phi + 1e-9, `starlight rose outward at rel ${rel.toFixed(3)}`);
+    if (rel < HZ_IN) ok(baseC(lo, 0) >= INNER_FLOOR_C - 0.5, `rel ${rel.toFixed(2)} inside the zone could be ${baseC(lo, 0).toFixed(0)} °C`);
+    pk = k; plo = lo; phi = hi;
+  }
+  // The standard ladder never inverts, jitter included: each ring's hottest roll is cooler than the
+  // coolest roll of the ring inside it.
+  for (let i = 1; i < MULTIPLES.length; i++)
+    ok(heatBand(MULTIPLES[i]).hi < heatBand(MULTIPLES[i - 1]).lo, `ring ${i + 1} can roll hotter than ring ${i}`);
+  console.log(`   ok   starlight falls outward; inside the inner edge nothing is under ${INNER_FLOOR_C} °C; adjacent standard rings never invert`);
+}
+
+// ============================================================================================
+// 2. MIRFAK
+// ============================================================================================
+console.log('\n2. Mirfak, rebuilt from the screenshots');
+{
+  rnd = mulberry32(20261010);
+  // Measured off "Planet out of place.png": the drawn zone's inner edge is 352 px from the star, so a G
+  // sun's 32-unit edge is 11 px a unit; Mirfak I's orbit sits at ~12.5 units, II at ~19, III at ~29, the
+  // IV belt at ~44. Mirfak II's 35 °C under 0.8 atmospheres is heat 1.11 from starlight — the plain law
+  // at 0.90x the Earth-warmth distance of WHATEVER STAR IT WAS CLIMATISED AGAINST.
+  const G = makeStar('G', 1); G.radius = 2.9 * STAR_SCALE_MUL * 0.5;
+  const M = makeStar('M', 1.9); M.radius = 1.9 * STAR_SCALE_MUL * 0.5;     // the brightest red dwarf the table makes
+  const thick08 = 0.8 / THICK_REF;
+  const heatII = heatForC(35, thick08, 'Rocky');
+  const dII = 19;
+  console.log(`   G sun:  zone ${G.hzInner.toFixed(1)}-${G.hzOuter.toFixed(1)}, rings ${ringRadii(G).map(r => r.toFixed(1)).join(' ')}`);
+  console.log(`   M dwarf: zone ${M.hzInner.toFixed(1)}-${M.hzOuter.toFixed(1)}, rings ${ringRadii(M).map(r => r.toFixed(1)).join(' ')}`);
+  console.log(`   Mirfak II: 35 °C at 0.8 atm is starlight heat ${heatII.toFixed(3)} (${baseC(heatII, 0).toFixed(0)} °C before greenhouse)`);
+
+  const relG = relOf(G, dII), relM = relOf(M, dII);
+  const bandG = heatBand(relG), bandM = heatBand(relM);
+  console.log(`   at ${dII} units — G sun: rel ${relG.toFixed(2)}, band ${bandG.lo.toFixed(2)}-${bandG.hi.toFixed(2)} (${baseC(bandG.lo, 0).toFixed(0)}-${baseC(bandG.hi, 0).toFixed(0)} °C)`);
+  console.log(`                  red dwarf: rel ${relM.toFixed(2)}, band ${bandM.lo.toFixed(2)}-${bandM.hi.toFixed(2)} (${baseC(bandM.lo, 0).toFixed(0)}-${baseC(bandM.hi, 0).toFixed(0)} °C)`);
+  ok(mismatch(heatII, relG) > HEAT_SLACK, 'Mirfak II is NOT flagged against the G sun it actually orbits');
+  ok(mismatch(heatII, relM) <= HEAT_SLACK, 'Mirfak II\'s climate is not explained by a red dwarf either — the reconstruction is wrong');
+  ok(relM >= HZ_IN && relM <= HZ_OUT, 'Mirfak II would not have been in a red dwarf\'s zone');
+  console.log('   =>   its 35 °C is exactly what a red dwarf gives its habitable ring, and impossible from the G sun:');
+  console.log('        the OLD pipeline generated the home system around a rolled star (45% red dwarfs) and then');
+  console.log('        swapped the species\' G/K sun in underneath it (ForceHomeWorld), re-deriving nothing.');
+
+  // What the consistency check makes of it, and what the NEW pipeline puts at that orbit.
+  const repaired = [];
+  for (let i = 0; i < 400; i++) repaired.push(baseC(rollHeat(relG), 0.1 / THICK_REF));
+  repaired.sort((a, b) => a - b);
+  ok(repaired[0] > 100, `re-derived Mirfak II can still be ${repaired[0].toFixed(0)} °C`);
+  console.log(`   NEW: a world on Mirfak II's orbit of the G sun runs ${repaired[0].toFixed(0)}-${repaired[repaired.length - 1].toFixed(0)} °C from starlight alone`);
+  console.log('        — a scorched world (or volcanic, with plates); never liquid water, never a biosphere.');
+
+  // The owner's "fine" cases.
+  const ringsG = ringRadii(G);
+  const iRel = relOf(G, ringsG[0]);
+  console.log(`   NEW: ring 1 (Mirfak I's place) ${baseC(heatBand(iRel).lo, 0).toFixed(0)}-${baseC(heatBand(iRel).hi, 0).toFixed(0)} °C before greenhouse, `
+    + `+90 and up to +620 internal for a volcanic world: still molten.`);
+  const r4 = relOf(G, ringsG[3]);
+  const hot4 = baseC(heatBand(r4).hi, 2 / THICK_REF);
+  ok(hot4 > 40 && hot4 < MAX_LIQ + 10, `ring 4 cannot hold a hot desert (${hot4.toFixed(0)} °C)`);
+  console.log(`   NEW: ring 4, just inside the zone, reaches ${hot4.toFixed(0)} °C under 2 atmospheres — a hot desert like Mirfak III stays possible there.`);
+  const relIII = relOf(G, 29);
+  console.log(`        (Mirfak III measures ~29 units, rel ${relIII.toFixed(2)}: ${relIII < HZ_IN ? 'just INSIDE the inner edge, so on the G sun it would be scorched' : 'inside the zone'} — see the report.)`);
+
+  // And the cradle: a belt rock nearest the zone centre.
+  const z = placementZone(G, TERRANS);
+  console.log(`   OLD cradle = the body nearest the zone centre ${((z.inner + z.outer) / 2).toFixed(1)}: the Mirfak IV belt at ~44 — a belt rock (Mirfak IV a).`);
+  const ring = ringForHeat(G, ringsG, z.inner, z.outer, cradleHeat(TERRANS, cradleThick(TERRANS), TERRANS.type));
+  ok(ring === 3, `Terran cradle ring should be 4, got ${ring + 1}`);
+  console.log(`   NEW cradle = the non-belt world nearest ring ${ring + 1} (${ringsG[ring].toFixed(1)} units), whose starlight gives a Terran its ${targetC(TERRANS).toFixed(1)} °C unclamped.`);
+}
+
+// ============================================================================================
+// 3. THE SWEEP — OLD against NEW
+// ============================================================================================
+console.log(`\n3. ${SEEDS} home systems per species x difficulty, OLD against NEW`);
+const DIFFS = [{ name: 'Easy', chance: 0.85 }, { name: 'Medium', chance: 0.5 }, { name: 'Hard', chance: 0 }];
+const ROLL = () => { const r = rnd(); return r < 0.45 ? 'M' : r < 0.65 ? 'K' : r < 0.80 ? 'G' : r < 0.90 ? 'F' : r < 0.96 ? 'A' : r < 0.99 ? 'B' : 'O'; };
+
+// A simplified home-system layout around `star`: rings filled by plain odds, the first in-zone ring
+// always a terrestrial, a belt possible after three planets, giants past the frost line. Every natural
+// body's heat is rolled from its orbit, exactly as SolarSystemGenerator.BiasHeat does.
+function layout(star) {
+  const radii = ringRadii(star);
+  const habitable = radii.findIndex(r => inZone(star, r));
+  const bodies = []; let planets = 0, belts = 0;
+  radii.forEach((r, i) => {
+    if (i !== habitable && rnd() > 0.55) return;
+    const rel = relOf(star, r);
+    const belt = i !== habitable && planets >= 3 && belts === 0 && rnd() < 0.25;
+    const giant = !belt && i !== habitable && rel > 2.2 && rnd() < 0.7;
+    const n = belt ? 3 + Math.floor(rnd() * 4) : 1;
+    for (let k = 0; k < n; k++) {
+      const temperate = rel >= HZ_IN && rel <= HZ_OUT;
+      bodies.push({ d: r, heat: rollHeat(rel), belt, giant, mass: giant ? 20 : range(0.6, 2.4),
+        moons: giant || rnd() < 0.38 ? [{ mass: range(0.2, 0.6) }] : [],
+        temperateType: !belt && !giant && temperate && rnd() < 0.6 });
+    }
+    if (belt) belts++; else planets++;
+  });
+  // A zoneless star (O/B) forces no ring, and the plain odds can leave it empty: give it one world.
+  if (!bodies.length) bodies.push({ d: radii[4], heat: rollHeat(relOf(star, radii[4])), belt: false, giant: false, mass: 1, moons: [], temperateType: false });
+  return bodies;
+}
+
+const tally = { old: {}, neu: {} };
+const clampedTo = {};
+const bump = (side, key) => { tally[side][key] = (tally[side][key] || 0) + 1; };
+
+for (const s of ALL_SPECIES)
+  for (const diff of DIFFS)
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      rnd = mulberry32(seed * 7919 + ALL_SPECIES.indexOf(s) * 104729 + DIFFS.indexOf(diff) * 15485863);
+      const n = (() => { const c = rnd(); return c < 0.04 ? 3 : c < 0.14 ? 2 : 1; })();
+      const home = combine(Array.from({ length: n }, (_, i) => makeStar(i === 0 && s.name === 'Terrans' ? 'G' : (rnd() < 0.5 ? 'G' : 'K'))));
+      const z = placementZone(home, s);
+      const thick = cradleThick(s);
+      const want = cradleHeat(s, thick, s.type);
+
+      // ---- OLD: generated around a rolled star, the home sun swapped in afterwards ----
+      {
+        const orig = makeStar(ROLL());
+        const bodies = layout(orig);
+        // Natural worlds keep the climate of the star they were made for.
+        for (const b of bodies) {
+          const rel = relOf(home, b.d);
+          if (mismatch(b.heat, rel) > HEAT_SLACK) bump('old', 'natural world with another star\'s climate');
+          if (b.temperateType && !inZone(home, b.d) && relOf(orig, b.d) <= HZ_OUT) bump('old', 'temperate world outside the zone');
+        }
+        // Cradle: nearest the zone centre, belts included; moved in only if outside; climate painted.
+        const centre = (z.inner + z.outer) / 2;
+        let cradle = bodies.reduce((a, b) => (Math.abs(b.d - centre) < Math.abs(a.d - centre) ? b : a), bodies[0]);
+        if (cradle.d < z.inner || cradle.d > z.outer) {
+          const rings = ringRadii(home).filter(r => r >= z.inner && r <= z.outer);
+          if (rings.length) cradle.d = rings.reduce((a, r) => (Math.abs(r - centre) < Math.abs(a - centre) ? r : a));
+        }
+        if (cradle.belt) bump('old', 'cradle is a belt rock');
+        if (mismatch(want, relOf(home, cradle.d)) > HEAT_SLACK) bump('old', 'cradle climate its orbit cannot give');
+        if (!inZone(home, cradle.d)) bump('old', 'start option outside the zone');
+      }
+
+      // ---- NEW: generated around the home sun; cradle on its climate's ring; climates clamped ----
+      {
+        const bodies = layout(home);
+        for (const b of bodies) ok(mismatch(b.heat, relOf(home, b.d)) <= HEAT_SLACK, `${s.name} ${diff.name} seed ${seed}: natural heat off its orbit`);
+        const radii = ringRadii(home);
+        const ring = ringForHeat(home, radii, z.inner, z.outer, want);
+        const wantD = ring >= 0 ? radii[ring] : (z.inner + z.outer) / 2;
+        let cradle = null;
+        for (const b of bodies) if (!b.belt && (!cradle || Math.abs(b.d - wantD) < Math.abs(cradle.d - wantD))) cradle = b;
+        if (ring >= 0 && Math.abs(cradle.d - wantD) > 0.5) cradle.d = wantD;   // MoveCradleIntoZone (free ring or swap)
+        if (cradle.d < z.inner || cradle.d > z.outer) cradle.d = wantD;
+        cradle.heat = clampToOrbit(want, relOf(home, cradle.d));
+        cradle.belt = false;
+        const options = [cradle];
+        // AddSecondOption: an in-zone planet whose orbit admits the species' climate, else its moon,
+        // else a cradle moon (which shares the cradle's orbit).
+        if (diff.chance > 0 && rnd() < diff.chance) {
+          let host = null, best = Infinity;
+          for (const b of bodies) {
+            if (b === cradle || b.belt || b.d < z.inner || b.d > z.outer) continue;
+            const miss = mismatch(cradleHeat(s, thick, s.type), relOf(home, b.d));
+            if (miss <= OPTION_SLACK && miss < best) { best = miss; host = b; }
+          }
+          const pick = host && (!host.giant || host.moons.length) ? { d: host.d } : { d: cradle.d };
+          { pick.heat = clampToOrbit(cradleHeat(s, thick, s.type), relOf(home, pick.d)); options.push(pick); }
+        }
+        if (cradle.heat !== want) {
+          const key = `${s.name} cradle: ideal ${baseC(want, thick, s.type).toFixed(0)} °C is past what any in-zone orbit gives; clamped to it`;
+          bump('neu', key);
+          const given = baseC(cradle.heat, thick, s.type), c = clampedTo[key] || (clampedTo[key] = { lo: Infinity, hi: -Infinity });
+          c.lo = Math.min(c.lo, given); c.hi = Math.max(c.hi, given);
+        }
+        for (const o of options) {
+          ok(home.hasZone && inZone(home, o.d), `${s.name} ${diff.name} seed ${seed}: start option at ${o.d.toFixed(1)} outside ${home.hzInner.toFixed(1)}-${home.hzOuter.toFixed(1)}`);
+          ok(mismatch(o.heat, relOf(home, o.d)) <= HEAT_SLACK, `${s.name} ${diff.name} seed ${seed}: start option climate off its orbit`);
+        }
+        ok(!cradle.belt, `${s.name} ${diff.name} seed ${seed}: cradle is a belt rock`);
+        if (wantsLife(s)) ok(ring >= 0 && mismatch(want, relOf(home, radii[ring])) === 0,
+          `${s.name} ${diff.name} seed ${seed}: no in-zone ring gives a living cradle its climate`);
+      }
+    }
+
+const total = SEEDS * ALL_SPECIES.length * DIFFS.length;
+console.log(`   OLD (per ${total} home systems):`);
+for (const [k, v] of Object.entries(tally.old)) console.log(`        ${String(v).padStart(6)}  ${k}`);
+console.log('   NEW:');
+for (const [k, v] of Object.entries(tally.neu)) console.log(`        ${String(v).padStart(6)}  ${k} (${clampedTo[k].lo.toFixed(0)}-${clampedTo[k].hi.toFixed(0)} °C before internal heat)`);
+console.log(`        every start option in the zone, every forced climate inside its orbit's band, no belt cradles`);
+
+console.log(`\n${passes} passed, ${fails} failed`);
+process.exit(fails ? 1 : 0);

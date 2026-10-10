@@ -31,6 +31,18 @@ public class SolarSystemGenerator : MonoBehaviour
     public bool isBlackHole;
     public string currentSystemName; // unique name of the most recently generated system
 
+    /// The sun(s) the NEXT system must be built around, instead of rolling its own. Set by
+    /// GalaxyGenerator for the home system only, and consumed (cleared) by RollStarSystem.
+    ///
+    /// THE MIRFAK BUG. The home system used to be generated around whatever star RollStarSystem
+    /// happened to roll — a red dwarf nearly half the time — and GalaxyGenerator.ForceHomeWorld then
+    /// swapped the species' G or K sun in underneath it. Every orbit, heat, atmosphere, water level and
+    /// type had already been decided against the OLD star, and nothing re-derived them: the red dwarf's
+    /// temperate habitable-ring world kept its 35 °C grassland while now orbiting inside the new sun's
+    /// runaway-greenhouse zone. Building the home system around its real sun from the start means there
+    /// is nothing to re-derive.
+    public List<StarData> forcedStars;
+
     int _idCounter;
 
     /// The finished system, written by GenerateSystemStepped.
@@ -734,7 +746,7 @@ public class SolarSystemGenerator : MonoBehaviour
         // fire, see ApplyWorldPipeline), and CaptureNatural LAST (AmplifyBiome moves the climate).
         best.type = WorldClassifier.Physics(best, bestRel, isMoon: false);
         best.biosphereActive = BiosphereRules.GeneratesWithBiosphere(best);
-        WorldClassifier.AmplifyBiome(best);
+        WorldClassifier.AmplifyBiome(best, bestRel);
         TerraformVisuals.CaptureNatural(best);
         {
             var bsurf = PlanetTerrainGenerator.BuildStepped(best, best.terrainParams,
@@ -749,7 +761,16 @@ public class SolarSystemGenerator : MonoBehaviour
         ApplyHabitability(best);
         POIGenerator.Populate(best);
 
-        foreach (var m in best.moons) { m.distanceFromStar = best.distanceFromStar; ApplyHabitability(m); }
+        // Its moons moved with it, and their starlight with them: re-derived for the new orbit rather than
+        // left carrying the climate of the lane they came from (WorldConsistency would catch them, but
+        // the place that moves a world is the place that should say so).
+        foreach (var m in best.moons)
+        {
+            bool moved = Mathf.Abs(m.distanceFromStar - best.distanceFromStar) > 0.001f;
+            m.distanceFromStar = best.distanceFromStar;
+            if (moved) ReconcileClimate(m, currentStar);
+            ApplyHabitability(m);
+        }
     }
 
     // NO SURFACE IS BAKED HERE — and that halves the cost of generating a galaxy.
@@ -822,8 +843,51 @@ public class SolarSystemGenerator : MonoBehaviour
         // amplification ever ran. CaptureNatural then has to come LAST, because AmplifyBiome moves heat and
         // moisture and the natural climate terraforming lerps from must be the amplified one.
         body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body);
-        WorldClassifier.AmplifyBiome(body);                    // make a flavoured world look like itself
+        WorldClassifier.AmplifyBiome(body, rel);               // make a flavoured world look like itself
         TerraformVisuals.CaptureNatural(body);                 // the real natural climate, post-amplify
+    }
+
+    /// RE-DERIVE A WORLD'S CLIMATE FROM WHERE IT NOW ORBITS — the climate half of ApplyWorldPipeline,
+    /// for a body that already exists and has been moved (a lane swap, an OrbitSafety push) or that the
+    /// consistency check (WorldConsistency) found contradicting its orbit.
+    ///
+    /// Mass, rotation, field, tectonics and continents are the world's own and are kept. Heat is rolled
+    /// fresh from the orbit; a world now inside the zone's inner edge boils its seas down to the
+    /// scorched band's near-dry level (SetBandWater); air is re-rolled against the new heat with the
+    /// inner-orbit cut; then the type is re-classified, the biosphere re-tested, the biome amplified,
+    /// the natural climate recaptured and the surface, ores and resources rebuilt to match.
+    ///
+    /// Draws from UnityEngine.Random, so — like RollHeat — it belongs to generation only.
+    public static void ReconcileClimate(CelestialBody body, StarData star)
+    {
+        if (body == null || star == null || star.isBlackHole) return;
+        bool isMoon = body.parentBody != null;
+        float rel = InsolationRules.RelOf(star, body.distanceFromStar);
+
+        body.type = ProvisionalType(body.mass, isMoon);
+        BiasHeat(body, body.distanceFromStar, star);
+        if (rel < WorldClassifier.HotRel)
+        {
+            var p = body.terrainParams;
+            p.seaLevel = Mathf.Min(p.SeaLevelOrNeutral, 0.15f);
+            body.terrainParams = p;
+        }
+        body.atmospheres = AtmosphereRules.RollAtmospheres(
+            body.type, body.mass, body.hasMagneticField,
+            AtmosphereRules.TectonicBonus(body), body.terrainParams.heat, rel);
+        AtmosphereRules.ApplyWaterLoss(body);
+
+        body.type = WorldClassifier.Physics(body, rel, isMoon);
+        body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body);
+        WorldClassifier.AmplifyBiome(body, rel);
+        TerraformVisuals.CaptureNatural(body);
+
+        GeothermalMap.Invalidate(body);
+        TectonicsMap.Invalidate(body);
+        body.surface = PlanetTerrainGenerator.GenerateSurface(body);
+        OreGenerator.Populate(body);
+        body.resources = new ResourceDeposit();
+        ResourceGenerator.GenerateResources(body);
     }
 
     /// The size-only physics class, used as a stand-in until the full classification. Gas giants and
@@ -1035,6 +1099,17 @@ public class SolarSystemGenerator : MonoBehaviour
     void RollStarSystem()
     {
         stars = new List<StarData>();
+
+        // The home system's sun(s), decided before the galaxy was built — see forcedStars.
+        if (forcedStars != null && forcedStars.Count > 0)
+        {
+            isBlackHole = false;
+            stars.AddRange(forcedStars);
+            forcedStars = null;
+            currentStar = StarDatabase.Combine(stars);
+            currentStarType = currentStar.type;
+            return;
+        }
 
         if (Random.value < 0.015f)   // very rare black hole
         {

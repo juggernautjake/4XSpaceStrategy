@@ -91,8 +91,13 @@ public static class GalaxyGenerator
     public static System.Collections.IEnumerator AddSystemStepped(
         Galaxy galaxy, SolarSystemGenerator gen, int i, int systemCount)
     {
+        // System 0 is the home system (Finish), and it is built around the home sun(s) rolled in Begin —
+        // not around a star of its own that ForceHomeWorld would later swap out from under every world
+        // already placed and climatised against it. See SolarSystemGenerator.forcedStars.
+        gen.forcedStars = i == 0 ? galaxy.homeStars : null;
         var inner = gen.GenerateSystemStepped();
         while (inner.MoveNext()) yield return inner.Current;
+        gen.forcedStars = null;
         Finalise(galaxy, gen, gen.lastSystem, i, systemCount);
     }
 
@@ -124,6 +129,9 @@ public static class GalaxyGenerator
         ForceHomeWorld(home, homeSpecies, galaxy.homeStars);
         AssignOwnership(galaxy);
         Recompute(galaxy);
+        // Every world against its own orbit, the starting options against the zone. Repairs what it
+        // can and logs the rest in development builds. See WorldConsistency.
+        WorldConsistency.Enforce(galaxy, homeSpecies);
 
         // Record every body's generated orbit so Dev Mode can reset a planet (or a whole system) back to
         // where it started after the orbit editor moves it. Done last, once every orbit is final — the home
@@ -278,13 +286,43 @@ public static class GalaxyGenerator
         // whatever already orbited there, which is exactly how planets ended up overlapping and their
         // orbit rings crossing. Its habitability is force-set by difficulty below and locked, so it does
         // not actually need to sit at the centre — only to be the right KIND of world.
-        var planet = home.bodies[0];
+        //
+        // NEAREST THE RING ITS CLIMATE BELONGS ON (2026-10-10), not nearest the centre. The cradle's mass
+        // and air are the species' own (below), so the heat its ideal climate needs is known before any
+        // world is chosen, and so is the in-zone ring whose starlight band holds that heat
+        // (PlacementRings.RingForHeat) — ring 4, the Earth ring, for a Terran. Nearest-the-centre was
+        // ring 5 for a Terran, where its sun gives about −20 °C, and the species' climate was then
+        // painted on regardless of the orbit.
+        float cradleMass = MassRules.QuantizeTerrestrial(species != null ? species.cradleMass : MassRules.TerrestrialDefault);
+        float cradleAir = species != null
+            ? AtmosphereRules.Quantize(Mathf.Clamp(cradleMass, species.minAtmospheres, species.maxAtmospheres))
+            : cradleMass;
+        CelestialBodyType cradleType = species != null ? BestTypeFor(species) : CelestialBodyType.RockyPlanet;
+        float wantHeat = species != null
+            ? CradleHeat(species, Mathf.Clamp01(cradleAir / AtmosphereRules.ThicknessReference), cradleType)
+            : 1f;
+        var ringR = new float[PlacementRings.Count];
+        PlacementRings.Radii(home.combinedStar, ringR);
+        int ring = PlacementRings.RingForHeat(home.combinedStar, ringR, inner, outer, wantHeat);
+        float want = ring >= 0 ? ringR[ring] : center;
+
+        // NEVER A BELT ROCK. "Nearest" used to consider every body, and a belt lying nearest the zone's
+        // centre handed the cradle — an Earth-mass world with moons — to one asteroid in a ring of rubble
+        // (Mirfak IV a, 2026-10-10). EnsureHabitableWorld and MoveCradleIntoZone already refuse belts;
+        // this was the one place that did not.
+        CelestialBody planet = null;
         float bestD = float.MaxValue;
         foreach (var b in home.bodies)
         {
-            float d = Mathf.Abs(b.distanceFromStar - center);
+            if (b == null || b.beltId != 0) continue;
+            float d = Mathf.Abs(b.distanceFromStar - want);
             if (d < bestD) { bestD = d; planet = b; }
         }
+        if (planet == null) planet = home.bodies[0];   // nothing but belts: the old behaviour, no worse
+
+        // NOT ON ITS RING: MOVE IT THERE, the same way an out-of-zone cradle is moved in below.
+        if (ring >= 0 && Mathf.Abs(planet.distanceFromStar - want) > 0.5f)
+            MoveCradleIntoZone(home, planet, inner, outer, want);
 
         // ...AND IF "NEAREST" IS STILL OUTSIDE THE ZONE, MOVE IT IN.
         //
@@ -297,9 +335,10 @@ public static class GalaxyGenerator
         // ring and the system's spacing exactly as the layout left it. The orbit safety pass at the end
         // of this method re-checks the result either way.
         if (planet.distanceFromStar < inner || planet.distanceFromStar > outer)
-            MoveCradleIntoZone(home, planet, inner, outer);
+            MoveCradleIntoZone(home, planet, inner, outer, want);
 
-        planet.type = BestTypeFor(species);
+        planet.beltId = 0;   // the all-belts fallback above may have promoted a rock; it is a world now
+        planet.type = cradleType;
 
         // THE CRADLE'S MASS IS THE SPECIES' OWN, AND FOR TERRANS IT IS EXACTLY ONE.
         //
@@ -314,7 +353,7 @@ public static class GalaxyGenerator
         // is exactly what its inhabitants need, so defining rather than rolling its pressure is the
         // honest form of that guarantee. "1 Mass would be 1 Earth", and a Terran homeworld IS Earth: it
         // is the anchor the whole scale is calibrated against, and it does not get a variance roll.
-        planet.mass = MassRules.QuantizeTerrestrial(species != null ? species.cradleMass : MassRules.TerrestrialDefault);
+        planet.mass = cradleMass;
         planet.surfaceSize = MassRules.SurfaceSize(planet.mass);
 
         // A cradle has a working dynamo. This is not a convenience: without a field the ceiling halves,
@@ -349,8 +388,13 @@ public static class GalaxyGenerator
         SeedTerrain(planet);
         // The home world's climate matches the species' preferred temperature, so a Pyrothian home
         // reads hot and a Cryithn home reads frozen — the race's biology visibly shapes its cradle.
+        //
+        // ...AS FAR AS ITS ORBIT ALLOWS (2026-10-10). The ring was chosen so the species' climate lies
+        // inside this orbit's starlight band (InsolationRules.HeatBand), so the clamp normally changes
+        // nothing. When no in-zone ring can give it — a species whose ideal is far from temperate — the
+        // cradle takes the nearest climate its sun can actually give it, not one its orbit contradicts.
         var htp = planet.terrainParams;
-        htp.heat = CradleHeat(species, planet);
+        htp.heat = InsolationRules.ClampToOrbit(CradleHeat(species, planet), home.combinedStar, planet.distanceFromStar);
         planet.terrainParams = htp;
         // Re-capture AFTER the override: this is the home world's natural climate, not what SeedTerrain
         // rolled a moment ago. It's already the species' ideal — a cradle needs no terraforming — and
@@ -423,6 +467,15 @@ public static class GalaxyGenerator
             moon.hasMagneticField = RotationRules.GeneratesField(moon.type, moon.mass, moon.spinSpeed);
             moon.hasTectonics = TectonicsRules.Roll(moon.type, moon.mass);
             SeedTerrain(moon);
+            // ITS STARLIGHT IS ITS PLANET'S. SeedTerrain leaves TerrainVariance's free 0.65-1.45 heat roll
+            // in place, which knows nothing about the orbit; every other moon in the galaxy has its heat
+            // set from where it orbits (SolarSystemGenerator.BiasHeat), and the cradle's now do too.
+            {
+                var mtp = moon.terrainParams;
+                mtp.heat = InsolationRules.RollHeat(home.combinedStar, planet.distanceFromStar);
+                moon.terrainParams = mtp;
+                TerraformVisuals.CaptureNatural(moon);
+            }
             // AFTER SeedTerrain, which is what sets terrainParams.heat — and heat is what decides how
             // much of the ceiling boils off. Rolling the air first would have been rolling it against a
             // temperature that did not exist yet.
@@ -514,8 +567,16 @@ public static class GalaxyGenerator
     {
         CelestialBody pick = null;
 
-        // Another planet in the zone, nearest its centre first.
-        float centre = (inner + outer) * 0.5f, best = float.MaxValue;
+        // Another planet in the zone WHOSE ORBIT CAN GIVE IT THE SPECIES' CLIMATE, best fit first.
+        //
+        // In the zone is necessary, not sufficient: a Terran climate painted onto the zone's cool outer
+        // ring contradicts its orbit as surely as one painted onto a furnace lane, just by less.
+        // MakeHabitable clamps the climate to the orbit either way; choosing a world whose starlight band
+        // already holds it is what leaves the species' climate intact. A moon shares its planet's orbit,
+        // so the same test picks the host for the moon branch below.
+        var star = home.combinedStar;
+        CelestialBodyType optionType = BestTypeFor(species);
+        float best = float.MaxValue;
         CelestialBody inZone = null;
         foreach (var b in home.bodies)
         {
@@ -523,8 +584,10 @@ public static class GalaxyGenerator
             // The species band only — it is the band drawn while choosing, and a ring outside the green
             // would contradict it.
             if (b.distanceFromStar < inner || b.distanceFromStar > outer) continue;
-            float d = Mathf.Abs(b.distanceFromStar - centre);
-            if (d < best) { best = d; inZone = b; }
+            float wantHeat = CradleHeat(species, OptionThickness(b, species), optionType);
+            float miss = InsolationRules.OrbitMismatch(wantHeat, InsolationRules.RelOf(star, b.distanceFromStar));
+            if (miss > OptionClimateSlack) continue;
+            if (miss < best) { best = miss; inZone = b; }
         }
 
         if (inZone != null && inZone.type != CelestialBodyType.GasGiant && Random.value < 0.6f)
@@ -548,6 +611,21 @@ public static class GalaxyGenerator
         // (HomeworldOnboarding.Eligible) would be a green ring that refuses the click.
         if (SurfaceBuildManager.FindSpot(pick, SurfaceBuildingType.PlanetCapitol, out _, out _))
             HomeworldOnboarding.Options.Add(pick);
+    }
+
+    /// How far (a fraction of heat) a second option's orbit may fall short of the species' climate. A
+    /// sliver: the band is already the full ±5% jitter every natural world gets.
+    const float OptionClimateSlack = 0.02f;
+
+    /// The air MakeHabitable would give this body, as a thickness — its greenhouse term once it is made
+    /// a home, which is what the orbit test has to be asked against.
+    static float OptionThickness(CelestialBody b, Species species)
+    {
+        bool isMoon = b.parentBody != null;
+        float mass = isMoon ? Mathf.Max(Mathf.Round(b.mass * 10f) / 10f, 0.4f)
+                            : MassRules.QuantizeTerrestrial(Mathf.Clamp(b.mass, 0.6f, 2.5f));
+        float air = AtmosphereRules.Quantize(Mathf.Clamp(mass, species.minAtmospheres, species.maxAtmospheres));
+        return Mathf.Clamp01(air / AtmosphereRules.ThicknessReference);
     }
 
     static CelestialBody Largest(List<CelestialBody> list)
@@ -575,8 +653,10 @@ public static class GalaxyGenerator
         b.hasTectonics = TectonicsRules.Roll(b.type, b.mass);
         b.atmospheres = AtmosphereRules.Quantize(Mathf.Clamp(b.mass, species.minAtmospheres, species.maxAtmospheres));
         SeedTerrain(b);
+        // The species' climate, clamped to what this orbit's starlight can give (InsolationRules) —
+        // never a temperate world painted onto an orbit that contradicts it.
         var tp = b.terrainParams;
-        tp.heat = CradleHeat(species, b);
+        tp.heat = InsolationRules.ClampToOrbit(CradleHeat(species, b), home.combinedStar, b.distanceFromStar);
         b.terrainParams = tp;
         TerraformVisuals.CaptureNatural(b);
         b.biosphereActive = BiosphereRules.GeneratesWithBiosphere(b);
@@ -591,14 +671,15 @@ public static class GalaxyGenerator
         TectonicsMap.Invalidate(b);
     }
 
-    /// Put the cradle on the in-zone placement ring nearest the zone's centre — an empty one if any is,
-    /// else by trading lanes with the world that holds it. Moons follow their hosts.
-    static void MoveCradleIntoZone(StarSystemData home, CelestialBody planet, float inner, float outer)
+    /// Put the cradle on the in-zone placement ring nearest `centre` — the ring whose starlight suits the
+    /// species (ForceHomeWorld) — an empty one if any is, else by trading lanes with the world that
+    /// holds it. Moons follow their hosts, and a world traded out has its climate re-derived for the
+    /// orbit it lands on.
+    static void MoveCradleIntoZone(StarSystemData home, CelestialBody planet, float inner, float outer, float centre)
     {
         var star = home.combinedStar;
         var rings = new float[PlacementRings.Count];
         int count = PlacementRings.Radii(star, rings);
-        float centre = (inner + outer) * 0.5f;
 
         float freeR = -1f, freeD = float.MaxValue;
         CelestialBody occupant = null; float occR = -1f, occD = float.MaxValue;
@@ -630,6 +711,11 @@ public static class GalaxyGenerator
         float was = planet.distanceFromStar;
         Place(planet, occR, star);
         Place(occupant, was, star);
+        // THE OCCUPANT KEEPS ITS WORLD, NOT ITS WEATHER. It used to arrive in the cradle's old lane
+        // still carrying the climate of the lane it left — a temperate world dropped on a furnace orbit.
+        // Its climate, and its moons', are re-derived for where it now orbits.
+        SolarSystemGenerator.ReconcileClimate(occupant, star);
+        foreach (var m in occupant.moons) SolarSystemGenerator.ReconcileClimate(m, star);
     }
 
     static void Place(CelestialBody b, float radius, StarData star)
@@ -665,6 +751,11 @@ public static class GalaxyGenerator
     // heat to offset their thicker air, and all three sizes land on the same comfortable climate.
     // ============================================================================================
     static float CradleHeat(Species species, CelestialBody planet)
+        => CradleHeat(species, planet.atmosphereThickness, planet.type);
+
+    /// The same, from the air and type a world WILL have, so its orbit can be chosen for the climate
+    /// before it is converted (ForceHomeWorld, AddSecondOption). Public for the consistency tests.
+    public static float CradleHeat(Species species, float atmosphereThickness, CelestialBodyType type)
     {
         float ideal = Mathf.Clamp01(species.idealTemp);
 
@@ -678,7 +769,7 @@ public static class GalaxyGenerator
         // terraforming moves it, and the Dev sandbox moves it further. A cradle that started 1°C inside
         // the ceiling would fall out of it the first time anything nudged the world.
         return PlanetTemperature.HeatForCelsius(
-            CradleTargetCelsius(species), planet.atmosphereThickness, planet.type);
+            CradleTargetCelsius(species), atmosphereThickness, type);
     }
 
     /// Is this species' own cradle one that is MEANT to be alive — a Rocky or Ocean world?

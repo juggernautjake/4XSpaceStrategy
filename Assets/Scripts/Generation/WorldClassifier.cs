@@ -270,18 +270,26 @@ public static class WorldClassifier
     /// Gentle on purpose — this leans the existing TerrainVariance roll toward its dominant biome, it
     /// does not overwrite it, so two desert worlds still differ. Applied at generation, before the bake,
     /// and only to the temperate rocky family; the other types already read unambiguously.
-    public static void AmplifyBiome(CelestialBody b)
+    ///
+    /// `rel` (distance / the star's Earth-warmth distance) keeps the heat nudges inside what the orbit
+    /// allows (InsolationRules.HeatBand). The desert lift used to be a flat "at least 1.15" — 36 °C from
+    /// starlight alone — so a dry world on the cool outer half of the zone, where its sun gives it about
+    /// −20 °C, was generated as a hot desert anyway. It still leans toward hot, as far as its orbit lets
+    /// it. Pass a negative `rel` (the default) only where no orbit exists yet.
+    public static void AmplifyBiome(CelestialBody b, float rel = -1f)
     {
         if (b == null || b.type != CelestialBodyType.RockyPlanet) return;
 
         string cls = Describe(b);
         var p = b.terrainParams;
+        float heatLo = 0f, heatHi = float.MaxValue;
+        if (rel > 0f) InsolationRules.HeatBand(rel, out heatLo, out heatHi);
 
         switch (cls)
         {
             case "desert world":
                 p.moisture = Mathf.Min(p.moisture, 0.55f);
-                p.heat = Mathf.Max(p.heat, 1.15f);
+                p.heat = Mathf.Max(p.heat, Mathf.Min(1.15f, heatHi));
                 break;
             case "savanna world":
                 p.moisture = Mathf.Clamp(p.moisture, 0.7f, 1.0f);
@@ -307,7 +315,7 @@ public static class WorldClassifier
                 p.elevation = Mathf.Max(p.elevation, 1.05f);   // relief, so islands clear the water
                 break;
             case "tundra world":
-                p.heat = Mathf.Min(p.heat, 0.75f);
+                p.heat = Mathf.Min(p.heat, Mathf.Max(0.75f, heatLo));
                 break;
             // Continental / Terran / Archipelago keep their natural roll — their character is the
             // land/water SPLIT, which is already set by the water level, not by moisture or heat.

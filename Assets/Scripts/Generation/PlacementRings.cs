@@ -168,6 +168,34 @@ public static class PlacementRings
         return best;
     }
 
+    /// The ring within [inner, outer] whose starlight best gives a world `heat` — the ring a world chosen
+    /// FOR its climate belongs on. -1 if no ring lies in the range. Pure.
+    ///
+    /// The cradle used to go on the in-zone ring nearest the zone's CENTRE and then have its heat set to
+    /// the species' ideal regardless. For a Terran that is ring 5, where starlight alone gives about
+    /// −20 °C, and the cradle was painted 45 degrees warmer than its own orbit. Asking which ring's band
+    /// (InsolationRules.HeatBand) holds the wanted heat puts a Terran cradle on ring 4 — the Earth ring —
+    /// where its ideal climate is simply what the sun gives it.
+    public static int RingForHeat(StarData star, float[] radii, float inner, float outer, float heat)
+    {
+        if (star == null || radii == null) return -1;
+        int best = -1;
+        float bestMiss = float.MaxValue, bestOff = float.MaxValue;
+        for (int i = 0; i < Count && i < radii.Length; i++)
+        {
+            if (radii[i] < inner || radii[i] > outer) continue;
+            float rel = InsolationRules.RelOf(star, radii[i]);
+            float miss = InsolationRules.OrbitMismatch(heat, rel);
+            InsolationRules.HeatBand(rel, out float lo, out float hi);
+            float off = Mathf.Abs(heat - (lo + hi) * 0.5f);   // tie-break: nearest the band's middle
+            if (miss < bestMiss - 0.0001f || (Mathf.Abs(miss - bestMiss) <= 0.0001f && off < bestOff))
+            {
+                best = i; bestMiss = miss; bestOff = off;
+            }
+        }
+        return best;
+    }
+
     /// The first ring inside the zone, or `NearestToZone` if none is. Never -1 for a star with a zone.
     ///
     /// The one call generation actually makes: "which ring must I fill to guarantee a liveable world".

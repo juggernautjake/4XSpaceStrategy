@@ -84,8 +84,7 @@ public static class InsolationRules
         return PlainKelvin(rel);
     }
 
-    public static float KelvinAt(StarData star, float distance)
-        => KelvinAt(Mathf.Max(1f, distance) / Mathf.Max(0.5f, StarDatabase.ReferenceDistance(star)));
+    public static float KelvinAt(StarData star, float distance) => KelvinAt(RelOf(star, distance));
 
     /// Shift a world's starlight after its ORBIT changes, from `oldDistance` to where it is now.
     ///
@@ -113,10 +112,73 @@ public static class InsolationRules
     /// generation, so it belongs in the generation stream and nowhere else.
     public static float RollHeat(StarData star, float distance)
     {
-        float rel = Mathf.Max(1f, distance) / Mathf.Max(0.5f, StarDatabase.ReferenceDistance(star));
+        float rel = RelOf(star, distance);
         float k = KelvinAt(rel) * Random.Range(1f - Jitter, 1f + Jitter);
         if (rel < StarDatabase.HzInnerRel) k = Mathf.Max(k, InnerFloorC + 273.15f);
         else if (rel > StarDatabase.HzOuterRel) k = Mathf.Min(k, OuterCeilingC + 273.15f);
         return PlanetTemperature.HeatForKelvin(k);
+    }
+
+    /// Distance as a multiple of the star's Earth-warmth distance — the `rel` every rule here reads.
+    /// The same expression RollHeat and KelvinAt(star, d) have always used, named once.
+    public static float RelOf(StarData star, float distance)
+        => Mathf.Max(1f, distance) / Mathf.Max(0.5f, StarDatabase.ReferenceDistance(star));
+
+    // ============================================================================================
+    // THE ORBIT'S HEAT BAND — what starlight ALLOWS at a distance, not just what it rolls
+    //
+    // "Mirfak II, despite being very near to the sun, has an average surface temperature of 35 C."
+    //
+    // Every heat a world is generated with has to be one its orbit could have given it: the law above,
+    // anywhere inside its own ±Jitter, with the regime's floor or ceiling re-imposed. That is the band
+    // below, and it is the test the generator and the consistency check (WorldConsistency) share. A
+    // world chosen FOR its climate — the species' cradle, a second starting world — no longer has its
+    // heat assigned; it is solved for and then CLAMPED into this band, and the orbit it is placed on is
+    // chosen so the clamp has nothing to do (PlacementRings.RingForHeat).
+    // ============================================================================================
+
+    /// The lowest and highest heat RollHeat can produce at `rel`. Pure.
+    public static void HeatBand(float rel, out float lo, out float hi)
+    {
+        float k = KelvinAt(rel);
+        float kLo = k * (1f - Jitter), kHi = k * (1f + Jitter);
+        if (rel < StarDatabase.HzInnerRel)
+        {
+            float floor = InnerFloorC + 273.15f;
+            kLo = Mathf.Max(kLo, floor);
+            kHi = Mathf.Max(kHi, floor);
+        }
+        else if (rel > StarDatabase.HzOuterRel)
+        {
+            float ceiling = OuterCeilingC + 273.15f;
+            kHi = Mathf.Min(kHi, ceiling);
+            kLo = Mathf.Min(kLo, kHi);
+        }
+        lo = PlanetTemperature.HeatForKelvin(kLo);
+        hi = PlanetTemperature.HeatForKelvin(kHi);
+    }
+
+    public static void HeatBand(StarData star, float distance, out float lo, out float hi)
+        => HeatBand(RelOf(star, distance), out lo, out hi);
+
+    /// `heat`, moved the least distance that puts it inside this orbit's band. Pure.
+    public static float ClampToOrbit(float heat, float rel)
+    {
+        HeatBand(rel, out float lo, out float hi);
+        return Mathf.Clamp(heat, lo, hi);
+    }
+
+    public static float ClampToOrbit(float heat, StarData star, float distance)
+        => ClampToOrbit(heat, RelOf(star, distance));
+
+    /// How far `heat` sits outside this orbit's band, as a fraction of the nearer edge — 0 inside it.
+    /// The consistency check compares this against a small slack rather than demanding exactly zero,
+    /// because OrbitSafety may nudge a world outward a little after its climate was rolled.
+    public static float OrbitMismatch(float heat, float rel)
+    {
+        HeatBand(rel, out float lo, out float hi);
+        if (heat < lo) return (lo - heat) / Mathf.Max(0.0001f, lo);
+        if (heat > hi) return (heat - hi) / Mathf.Max(0.0001f, hi);
+        return 0f;
     }
 }

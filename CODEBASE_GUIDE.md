@@ -129,6 +129,10 @@ the zone, 4 and 5 are in it, 6–9 are beyond** — Mercury and Venus inside, Ea
 is the arrangement the request asked for. Around a dim star the inner three are COMPRESSED into the
 room between the star and the zone rather than the whole ladder being shifted, because shifting pushed
 ring 3 into the zone and put the Earthlike world third from its sun.
+- **`RingForHeat(star, radii, inner, outer, heat)`** (2026-10-10) — the ring in a range whose starlight
+  band holds a wanted heat. It is how the species' cradle is placed: ring 4, the Earth ring, for a Terran,
+  where its ideal climate is simply what its sun gives it (it used to go on ring 5 and be painted 45 °C
+  warmer than its orbit).
 - **`Radii(star, into)` / `InZone` / `HabitableRing`**. Generation-time only — nothing at runtime snaps
   to a ring, so the Dev orbit slider and terraforming's orbit-moving are unaffected.
 
@@ -173,7 +177,12 @@ near 240, ring 1 near 440. Beyond the outer edge it is a **snowball**: `Snowball
 0.45..1.85 clamp — the reason a world a ring inside the zone had a 55 °C archipelago — is gone; heat
 now runs ~0.08..6 and `PlanetTemperature.HeatForKelvin` is the inverse it is stored through.
 - **`KelvinAt(rel)` / `KelvinAt(star, distance)`** (pure) and **`RollHeat(star, distance)`** (±5% jitter,
-  guarantee re-imposed). `TerraformVisuals.Compose` caps heat at `max(2.2, natural)` so a furnace world
+  guarantee re-imposed).
+- **`HeatBand(rel)` / `ClampToOrbit` / `OrbitMismatch` / `RelOf`** (2026-10-10, pure) — the range of heat
+  `RollHeat` can give at an orbit. Every heat a world is generated with must be inside it: a world chosen
+  FOR its climate (the cradle, a second starting option) has its climate solved for and then clamped into
+  it, and `WorldConsistency` checks every world against it. `WorldClassifier.AmplifyBiome(b, rel)` keeps
+  its desert/tundra heat nudges inside it too (the desert lift was a flat 36 °C even on the cool edge). `TerraformVisuals.Compose` caps heat at `max(2.2, natural)` so a furnace world
   is not cooled by three hundred degrees the moment it is surveyed.
 
 ### GeothermalMap.cs  *(the merged Heat Index + Tectonics field)*
@@ -222,6 +231,28 @@ One 0..1 field per surface point, from two sources, whichever is stronger:
   lane is deliberate.
 - `ApplyWorldPipeline` — mass → rotation → magnetic field → tectonics → seed → climate → water → air →
   CLASSIFY. `SeedTerrain(body)`, `ApplyHabitability(body)`, `RollStarType`.
+
+### WorldConsistency.cs  *(does every world make sense where it orbits? 2026-10-10)*
+The Mirfak report: a 35 °C grassland just outside a molten world, inside its G sun's runaway zone. Cause:
+the home system was generated around whatever star `RollStarSystem` rolled (a red dwarf 45% of the time)
+and `ForceHomeWorld` then swapped the species' G/K sun in underneath it, re-deriving nothing — that world
+was the red dwarf's habitable-ring world. Fixed at the source (`SolarSystemGenerator.forcedStars`: the
+home system is built around its real sun), and this class is the backstop, run once at the end of
+`GalaxyGenerator.Finish`:
+- **`Problem(b, star, species, out exception)`** (pure) — heat outside its orbit's `HeatBand` (beyond
+  `HeatSlack`, 3%, for OrbitSafety's nudges), or a temperate type / living biosphere / home-grade rating
+  outside the habitable zone. A liquid climate outside the zone that really comes from its greenhouse or
+  internal heat is an EXCEPTION, recorded with its reason on `CelestialBody.climateException`.
+- **`Enforce(galaxy, species)`** — checks every body, repairs (a natural world is re-derived from its
+  orbit by `SolarSystemGenerator.ReconcileClimate`; a forced one has its heat clamped to its orbit),
+  re-rates, checks every starting option is in the zone, and logs with `[WorldConsistency]` in
+  development builds. `LastFound` is how many it had to fix.
+- Related, same change: the cradle is never a belt rock (Mirfak IV a was one); it goes on the ring that
+  suits its species (`PlacementRings.RingForHeat`); a world traded out of that lane, and moons moved by
+  `EnsureHabitableWorld`, are re-derived for where they land; the cradle's moons take their heat from the
+  orbit instead of `TerrainVariance`; a second starting option must orbit where its species' climate is
+  what the sun gives. Tests: `Assets/Tests/Editor/WorldConsistencyTests.cs` (EditMode) and
+  `tools/world-placement-check.mjs`.
 
 ### ResourceGenerator.cs
 - **`GenerateResources(body)`** — bulk Metal/Energy/Water per body type (now covers every type).
@@ -853,6 +884,20 @@ that is not here — "Clean." has to mean all nine checks ran, or it is a claim 
 **None of this is a type checker.** It will not catch a wrong argument count, a wrong return type, or
 an assignment to a get-only property. It catches the classes that have actually reached `main`, which
 is a different and much smaller claim. Unity is still the real check.
+
+**`world-placement-check.mjs`** — does every world make sense where it orbits?
+
+```
+node tools/world-placement-check.mjs [--seeds 2000]
+```
+
+Ports `InsolationRules`' band, `PlacementRings.RingForHeat`, `Habitability.PlacementZone`, the cradle and
+second-option choice and `WorldConsistency`'s rules (constants read from the C#). Asserts the law runs
+hotter inward and nothing inside the zone's inner edge is temperate; rebuilds Mirfak from the 2026-10-10
+screenshots (Mirfak II's 35 °C is exactly a red dwarf's habitable ring, and 262-317 °C on the G sun it
+actually orbits); then sweeps thousands of home systems per species and difficulty, OLD pipeline against
+NEW. The layout is simplified — which rings fill is plain odds — because what it checks is where the
+forced worlds go and what climate they get.
 
 **`terrain-relief-check.mjs`** — how rough is a dead world from one tile to the next, and does a small
 moon read as a small moon?
