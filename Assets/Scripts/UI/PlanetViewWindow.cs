@@ -6943,23 +6943,31 @@ public class PlanetViewWindow : MonoBehaviour
                 for (int i = 0; i < n; i++)
                 {
                     if (i > 0) text.Append('\n');
-                    string hex = ColorUtility.ToHtmlStringRGB(SurfaceIndex.Outline(kinds[i], ts[i]));
-                    bool top = ts[i] >= 0.999f;
-                    text.Append("<color=#").Append(hex).Append('>');
-                    if (top) text.Append("<b>");
+                    // Lifted toward white so the number reads on any terrain, keeping its index's hue.
+                    var col = Color.Lerp(SurfaceIndex.Outline(kinds[i], ts[i]), Color.white, 0.25f);
+                    string hex = ColorUtility.ToHtmlStringRGB(col);
+                    text.Append("<color=#").Append(hex).Append("><b>");
                     text.Append(Mathf.RoundToInt(vals[i] * 100f));
-                    if (top) text.Append("</b>");
-                    text.Append("</color>");
+                    text.Append("</b></color>");
                 }
 
-                var label = UIFactory.Text(go.transform, text.ToString(),
-                                           n > 2 ? 10 : 11, Color.white, TextAlignmentOptions.Center);
-                label.raycastTarget = false;
-                label.lineSpacing = -18f;   // tight, so a four-line stack still sits inside its cell
+                // LARGER AND HIGHER-CONTRAST (2026-10-10): "it is a bit hard to see the relevant numbers
+                // of the tiles". A dark plate inset in the cell, a black TMP outline, and a size that grows
+                // with the cell instead of a fixed 10-11pt. (The old uGUI Shadow did nothing at all — mesh
+                // effects don't apply to TextMeshPro — so the numbers sat bare on the terrain.)
+                var plate = UIFactory.Panel(go.transform, "plate", new Color(0f, 0f, 0f, 0.55f));
+                plate.raycastTarget = false;
+                float inset = Mathf.Clamp(Mathf.Min(tileW, tileH) * 0.06f, 0.5f, 3f);
+                UIFactory.Stretch(plate.rectTransform, inset, inset, inset, inset);
 
-                var sh = label.gameObject.AddComponent<Shadow>();
-                sh.effectColor = new Color(0f, 0f, 0f, 0.85f);
-                sh.effectDistance = new Vector2(1f, -1f);
+                float size = Mathf.Clamp(Mathf.Min(tileW * 0.42f, tileH * 0.78f / n), 11f, 22f);
+                var label = UIFactory.Text(go.transform, text.ToString(),
+                                           Mathf.RoundToInt(size), Color.white, TextAlignmentOptions.Center);
+                label.raycastTarget = false;
+                label.lineSpacing = -size * 0.9f;   // tight, so a four-line stack still sits inside its cell
+                label.outlineWidth = 0.28f;
+                label.outlineColor = new Color32(0, 0, 0, 255);
+                label.overflowMode = TextOverflowModes.Overflow;
 
                 UIFactory.Stretch(label.rectTransform);
             }
