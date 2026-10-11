@@ -110,9 +110,10 @@ public static class PlanetAppearance
 
         var mr = shell.GetComponent<MeshRenderer>();
         var mat = new Material(Shader.Find("Sprites/Default"));   // reliable unlit transparent
-        // Volcanic worlds get a dirty ash-grey haze; everything else, white water cloud.
-        mat.color = body.type == CelestialBodyType.VolcanicPlanet
-            ? new Color(0.55f, 0.5f, 0.48f, 1f)
+        // Volcanic worlds get a dirty ash-grey haze; a runaway greenhouse a sulphur-cream overcast (see
+        // AddAtmosphere); everything else, white water cloud.
+        mat.color = AtmosphereRules.IsRunawayGreenhouse(body) ? GreenhouseCloud
+            : body.type == CelestialBodyType.VolcanicPlanet ? new Color(0.55f, 0.5f, 0.48f, 1f)
             : Color.white;
         mat.mainTexture = CloudTexture(body);
         mr.material = mat;
@@ -135,6 +136,10 @@ public static class PlanetAppearance
         };
         float seed = body.terrainSeed * 0.137f + 13f;
         float coverage = Mathf.Clamp01(body.atmosphereThickness) * 0.55f + 0.12f;   // 0.12..0.67
+        // A greenhouse world is overcast pole to pole — the surface is never seen through it. Banding in
+        // the deck still shows, so it reads as weather rather than a painted ball.
+        bool greenhouse = AtmosphereRules.IsRunawayGreenhouse(body);
+        if (greenhouse) coverage = 0.97f;
         var px = new Color32[w * h];
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
@@ -143,7 +148,7 @@ public static class PlanetAppearance
                 // Two octaves of Perlin, stretched 2:1 like the surface so bands read east-west.
                 float n = CloudFBm(u * 5f + seed, vv * 2.5f + seed);
                 // Fade cloud out toward the poles a little so caps aren't permanently overcast.
-                float polar = 1f - Mathf.Pow(Mathf.Abs(vv - 0.5f) * 2f, 3f) * 0.35f;
+                float polar = greenhouse ? 1f : 1f - Mathf.Pow(Mathf.Abs(vv - 0.5f) * 2f, 3f) * 0.35f;
                 float a = Mathf.Clamp01((n - (1f - coverage)) * 3.2f) * polar;
                 px[y * w + x] = new Color32(255, 255, 255, (byte)(a * 205f));
             }
@@ -163,6 +168,10 @@ public static class PlanetAppearance
     /// The colour of this kind of world's air, for anything that needs to match it — the survey veil,
     /// principally. Public so there is ONE table of atmosphere colours rather than a second one kept in
     /// step by hand, which is how a world ends up with a blue sky and an orange fog over its map.
+    /// A runaway greenhouse's sky: Venus's sulphuric-acid cloud deck, cream-yellow and opaque.
+    static readonly Color GreenhouseHaze = new Color(0.96f, 0.80f, 0.42f, 0.42f);
+    static readonly Color GreenhouseCloud = new Color(0.94f, 0.84f, 0.58f, 1f);
+
     public static bool AtmosphereColorOf(CelestialBodyType t, out Color color)
         => HasAtmosphere(t, out color, out _);
 
@@ -200,7 +209,13 @@ public static class PlanetAppearance
         var existing = go.transform.Find("Atmosphere");
         if (existing != null) Object.Destroy(existing.gameObject);
 
-        if (!HasAtmosphere(body.type, out Color color, out float thickness)) return;
+        // A RUNAWAY GREENHOUSE (2026-10-11) classifies as Barren — no plates — and Barren is airless in
+        // the table below, so a 30-90 atmosphere world was drawn with no sky at all. Its own shell: a
+        // dense yellow haze standing well off the surface, whatever the type underneath says.
+        bool greenhouse = AtmosphereRules.IsRunawayGreenhouse(body);
+        Color color; float thickness;
+        if (greenhouse) { color = GreenhouseHaze; thickness = 1.10f; }
+        else if (!HasAtmosphere(body.type, out color, out thickness)) return;
 
         // A gas giant's shell takes that particular giant's colour rather than the one tan-orange every
         // giant used to share. Everything else keeps its per-type colour, because a rocky world's sky is
