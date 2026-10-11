@@ -463,12 +463,26 @@ public class SolarSystemGenerator : MonoBehaviour
         var moved = new List<CelestialBody>();
         OrbitSafety.EnforceSystem(system, currentStar, moved);
         // A world the backstop pushed is now somewhere else, and its climate must say so.
-        RederiveMoved(moved, currentStar);
-        foreach (var b in moved)
-        {
-            ApplyHabitability(b);
-            if (b.moons != null) foreach (var m in b.moons) if (m != null) ApplyHabitability(m);
-        }
+        //
+        // ONE WORLD PER STEP. Re-deriving rebuilds a world's surface, ores and resources — the same
+        // work the per-world steps above yield after — so doing every moved world and its moons in one
+        // go ran 200+ ms without yielding ("[GenProfile] system 2/5: step 221 ran 218 ms").
+        if (currentStar != null && !currentStar.isBlackHole)
+            foreach (var b in moved)
+            {
+                if (b == null) continue;
+                Rederive(b, currentStar);
+                ApplyHabitability(b);
+                yield return null;
+                if (b.moons == null) continue;
+                foreach (var m in b.moons)
+                {
+                    if (m == null) continue;
+                    Rederive(m, currentStar);
+                    ApplyHabitability(m);
+                    yield return null;
+                }
+            }
 
         if (!OrbitSafety.Validate(system, out string problem))
             Debug.LogWarning($"[OrbitSafety] {currentSystemName}: {problem}");
