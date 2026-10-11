@@ -600,6 +600,7 @@ public class CoreProxyHover : MonoBehaviour
     // Opens the same Galaxy panel its event horizon does (see StarInteraction.isGalacticCore).
     void OnMouseDown()
     {
+        if (BoxSelectController.SwallowsClick) return;   // Ctrl+drag box-select owns this press
         if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
         if (galaxy == null) return;
         // A fleet mid-order owns the click, same guard every other map object carries.
@@ -905,6 +906,7 @@ public class GalaxyStarProxy : MonoBehaviour
     // Overview at all. Waiting costs 0.35s on the single click and makes the double click actually work.
     void OnMouseDown()
     {
+        if (BoxSelectController.SwallowsClick) return;   // Ctrl+drag box-select owns this press
         if (Concealed) return;
         if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
         SimpleAudio.Instance?.PlaySelect();

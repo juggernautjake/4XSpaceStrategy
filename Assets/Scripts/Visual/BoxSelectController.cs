@@ -3,12 +3,59 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 
-// Left-click-drag on empty space to box-select your units (whether parked in space or docked at a
-// body). A plain click on empty space clears the selection. Clicks that start on a token or body are
-// left to those objects' own handlers.
+// Left-click-drag to box-select your units (whether parked in space or docked at a body). A plain click
+// on empty space clears the selection. Clicks that start on a token or body are left to those objects'
+// own handlers.
+//
+// CTRL + DRAG (2026-10-11): "we need a click and drag feature for selecting ships... maybe hold down
+// control and click and drag". Holding Ctrl makes the press a box-select no matter what is under it —
+// a planet, a star, a ship — and those objects ignore the press (SwallowsClick), so dragging out from
+// a crowded world does not open its window first. Shift adds to the selection, with or without Ctrl.
+// Ctrl-click while aiming a fleet is still the "queue this move" gesture; the box steps aside then.
+//
+// The "is the pointer over UI" test ignores full-screen pass-through layers (ship markers, nameplates,
+// labels): a raycast-target that covers the whole screen is not a window, and treating it as one would
+// stop the box from ever starting.
 public class BoxSelectController : MonoBehaviour
 {
     public static BoxSelectController Instance;
+
+    /// Ctrl held, and not aiming a fleet: the press belongs to the box, and clickable objects must not
+    /// act on it. Read by PlanetClick, StarInteraction, the ship token/model handlers and ShipMarkers.
+    public static bool SwallowsClick =>
+        (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+        && !(FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting)
+        && !UIFactory.IsTypingInField();
+
+    /// True while a box is being dragged out.
+    public static bool Dragging => Instance != null && Instance.dragging;
+
+    static readonly List<RaycastResult> uiHits = new List<RaycastResult>();
+
+    /// Over a real window or control — not merely over a screen-filling overlay.
+    static bool OverBlockingUI(Vector2 screen)
+    {
+        var es = EventSystem.current;
+        if (es == null) return false;
+        var ped = new PointerEventData(es) { position = screen };
+        uiHits.Clear();
+        es.RaycastAll(ped, uiHits);
+        float screenArea = (float)Screen.width * Screen.height;
+        foreach (var h in uiHits)
+        {
+            var rt = h.gameObject.transform as RectTransform;
+            if (rt == null) return true;
+            var c = new Vector3[4];
+            rt.GetWorldCorners(c);
+            var canvas = h.gameObject.GetComponentInParent<Canvas>();
+            Camera ccam = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
+            Vector2 a = RectTransformUtility.WorldToScreenPoint(ccam, c[0]);
+            Vector2 b = RectTransformUtility.WorldToScreenPoint(ccam, c[2]);
+            float area = Mathf.Abs(b.x - a.x) * Mathf.Abs(b.y - a.y);
+            if (area < screenArea * 0.85f) return true;   // a window, a button, a panel
+        }
+        return false;
+    }
 
     const float DragThreshold = 8f;
 
@@ -17,7 +64,8 @@ public class BoxSelectController : MonoBehaviour
     RectTransform box;
     Vector2 startScreen;
     bool down, dragging;
-    bool startedOnCollider;   // the press began on a token/body, so a plain click belongs to that object
+    bool startedOnCollider;
+    bool ctrlPress;           // the press was a Ctrl-press: a box or nothing, never a deselect   // the press began on a token/body, so a plain click belongs to that object
 
     public static void Create(Transform canvas)
     {
@@ -59,8 +107,9 @@ public class BoxSelectController : MonoBehaviour
 
     void OnDown()
     {
-        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
+        if (OverBlockingUI(Input.mousePosition)) return;
         if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;
+        if (PlanetViewWindow.Instance != null && PlanetViewWindow.Instance.IsOpen) return;   // its map owns drags
 
         // Track the press wherever it starts — including on a token or a planet. A drag is unambiguously
         // a box-select, and requiring it to begin on empty space made the box impossible to start in a
@@ -69,8 +118,10 @@ public class BoxSelectController : MonoBehaviour
         var ray = cam.ScreenPointToRay(Input.mousePosition);
         // A ship's screen-space marker counts as something to click, too: it has no collider, and a click
         // on one in open space must not read as a click on empty space and clear the selection it made.
-        startedOnCollider = Physics.Raycast(ray, out _, 5000f) || ShipMarkers.AnyUnderCursor();
+        // With Ctrl held the press is the box's whatever is under it, so it never counts as "on" something.
+        startedOnCollider = !SwallowsClick && (Physics.Raycast(ray, out _, 5000f) || ShipMarkers.AnyUnderCursor());
 
+        ctrlPress = SwallowsClick;
         down = true; dragging = false; startScreen = Input.mousePosition;
     }
 
@@ -92,7 +143,7 @@ public class BoxSelectController : MonoBehaviour
             SelectInBox(startScreen, Input.mousePosition);
             box.gameObject.SetActive(false);
         }
-        else if (!startedOnCollider && UnitSelection.Selected.Count > 0)
+        else if (!startedOnCollider && !ctrlPress && UnitSelection.Selected.Count > 0)
         {
             UnitSelection.Clear();   // plain click on empty space -> deselect
         }

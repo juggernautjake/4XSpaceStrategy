@@ -1401,7 +1401,7 @@ public class UnitModelClick : MonoBehaviour
     /// The ship this hull stands for, so a raycast can identify what it hit (see ClickPriority).
     public Unit Unit => unit;
 
-    void OnMouseDown() => HandleClick();
+    void OnMouseDown() { if (!BoxSelectController.SwallowsClick) HandleClick(); }   // Ctrl = box-select
 
     /// See UnitToken.HandleClick — a docked ship loses the nearest-hit test to its world's oversized
     /// pick sphere, so the body's handler forwards the click here.

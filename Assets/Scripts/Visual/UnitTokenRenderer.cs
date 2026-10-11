@@ -243,7 +243,7 @@ public class UnitToken : MonoBehaviour
         transform.localScale = Vector3.one * (sel ? baseScale * 1.4f : baseScale);
     }
 
-    void OnMouseDown() => HandleClick();
+    void OnMouseDown() { if (!BoxSelectController.SwallowsClick) HandleClick(); }   // Ctrl = box-select
 
     /// Select this ship. Public because a DOCKED ship usually loses Unity's nearest-hit test to the
     /// oversized pick sphere of the world it is parked at, so its own OnMouseDown never fires — the

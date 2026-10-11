@@ -13,6 +13,7 @@ public class PlanetClick : MonoBehaviour
 
     private void OnMouseDown()
     {
+        if (BoxSelectController.SwallowsClick) return;   // Ctrl+drag box-select owns this press
         if (data == null)
         {
             Debug.LogWarning("Planet has no data!");

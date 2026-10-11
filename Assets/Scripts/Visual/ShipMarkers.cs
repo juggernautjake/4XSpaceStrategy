@@ -166,6 +166,7 @@ public class ShipMarkers : MonoBehaviour
     void Update()
     {
         if (!Input.GetMouseButtonDown(0)) return;
+        if (BoxSelectController.SwallowsClick) return;   // Ctrl+drag box-select owns this press
         if (canvas == null || !canvas.enabled) return;
         if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
         if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return;

@@ -59,6 +59,7 @@ public class StarInteraction : MonoBehaviour
 
     void OnMouseDown()
     {
+        if (BoxSelectController.SwallowsClick) return;   // Ctrl+drag box-select owns this press
         if (UnityEngine.EventSystems.EventSystem.current != null &&
             UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
             return;
