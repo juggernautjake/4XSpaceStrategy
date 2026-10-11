@@ -131,8 +131,10 @@ async function analyse(albedoPath, civ) {
 
     if (s >= RULES.minSaturation && v >= RULES.minValue) {
       satCount++;
-      if (hueDist(h, c.primary.keyHue) <= RULES.keyTolerance) prim++;
-      else if (hueDist(h, c.secondary.keyHue) <= RULES.keyTolerance) sec++;
+      // keyMinValue: an accent that shares its hue with the hull (Cryithn's glacier-blue glow on a
+      // glacier-blue hull) is told apart by BRIGHTNESS instead — only near-full-value pixels count.
+      if (hueDist(h, c.primary.keyHue) <= RULES.keyTolerance && v >= (c.primary.keyMinValue ?? 0)) prim++;
+      else if (hueDist(h, c.secondary.keyHue) <= RULES.keyTolerance && v >= (c.secondary.keyMinValue ?? 0)) sec++;
     }
   }
 
@@ -251,6 +253,7 @@ for (const [name, civ] of Object.entries(c)) {
   if (!civ.baseSaturated || civ.baseHue == null) continue;
   for (const role of ['primary', 'secondary']) {
     const d = hueDist(civ.baseHue, civ[role].keyHue);
+    if (civ[role].keyMinValue != null) continue;   // keyed on brightness: the hue overlap is handled
     if (d <= RULES.keyTolerance)
       console.log(`\nPALETTE CONFLICT  ${name}: base hue ${civ.baseHue} is ${d}° from the ${role} key ` +
                   `${civ[role].keyHue} (tolerance ${RULES.keyTolerance}°) — its "${role} swamped/missing" ` +

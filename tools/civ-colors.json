@@ -113,6 +113,7 @@
         "name": "Glacier Light",
         "hex": "#5FD8F0",
         "keyHue": 190,
+        "keyMinValue": 0.85,
         "role": "cool blue glowing light along the seams and drive slots"
       },
       "hueSeparation": 110,
