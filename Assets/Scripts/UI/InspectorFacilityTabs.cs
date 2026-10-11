@@ -36,21 +36,14 @@ public partial class InspectorWindow
         var t = UIFactory.WrapText(outp, "", UITheme.SmallSize, UITheme.Text);
         live.Text(t, () =>
         {
-            // What this colony actually contributes per second, mirroring ColonyManager.TickColony.
-            float popMult = 0.5f + b.population / 200f;
-            float oreRich = 1f + OreGenerator.OresOnBody(b).Count * 0.15f;
-            float metal = 0f, energy = 0f, water = 0f, research = 0f;
-            foreach (int id in b.buildings)
-            {
-                var info = BuildingDatabase.Get((BuildingType)id);
-                float mine = id == (int)BuildingType.Mine ? oreRich * TechEffects.OreYieldMult : 1f;
-                metal += info.metalPerSec * popMult * mine;
-                energy += info.energyPerSec * popMult;
-                water += info.waterPerSec * popMult;
-                research += info.researchPerSec * popMult * TechEffects.ResearchRateMult;
-            }
-            return $"<color=#9FB4C8>Per second:</color>  {metal:0.0} metal · {energy:0.0} energy · {water:0.0} water · {research:0.0} research\n" +
-                   $"<color=#9FB4C8>Scaled by population ({popMult:0.00}×) — a bigger city produces more of everything.</color>";
+            // What this world ACTUALLY earns, from WorldEconomy (the SurfaceOutput formulas the economy
+            // pays out of). This used to recompute the retired abstract-building model (the `buildings`
+            // list times a population multiplier), which ColonyManager no longer pays at all, so it quoted
+            // research and metal the world was not making and missed every lab it was.
+            var k = WorldEconomy.Of(b);
+            float research = k.research * TechEffects.ResearchRateMult;
+            return $"<color=#9FB4C8>Per day:</color>  {k.metal:0.0} metal · {k.EnergyNet:0.0} net energy · {k.water:0.0} water · {research:0.0} research\n" +
+                   "<color=#9FB4C8>From the structures on the surface — see the Planet View for each one.</color>";
         });
 
         Header(p, "STRUCTURES");
@@ -521,21 +514,14 @@ public partial class InspectorWindow
         var t = UIFactory.WrapText(outp, "", UITheme.SmallSize, UITheme.Text);
         live.Text(t, () =>
         {
-            float popMult = 0.5f + b.population / 200f;
-            var parts = new List<string>();
-            if (info.metalPerSec > 0f)
-            {
-                float mine = target.structure == BuildingType.Mine
-                    ? (1f + OreGenerator.OresOnBody(b).Count * 0.15f) * TechEffects.OreYieldMult : 1f;
-                parts.Add($"{info.metalPerSec * popMult * mine:0.00} metal/s");
-            }
-            if (info.energyPerSec > 0f) parts.Add($"{info.energyPerSec * popMult:0.00} energy/s");
-            if (info.waterPerSec > 0f) parts.Add($"{info.waterPerSec * popMult:0.00} water/s");
-            if (info.researchPerSec > 0f) parts.Add($"{info.researchPerSec * popMult * TechEffects.ResearchRateMult:0.00} research/s");
-            if (info.popGrowthPerSec > 0f) parts.Add($"{info.popGrowthPerSec:0.0} population growth/s");
-            if (parts.Count == 0) return "<color=#9FB4C8>This structure has no direct output — it unlocks a capability instead.</color>";
-            return string.Join("  ·  ", parts) +
-                   $"\n<color=#9FB4C8>Scaled by this colony's population ({popMult:0.00}×).</color>";
+            // The abstract facility's metal / energy / water / research figures are no longer paid —
+            // ColonyManager pays the structures on the SURFACE only (its population growth still counts).
+            // So this says what the world really earns instead of quoting a rate that never lands.
+            var k = WorldEconomy.Of(b);
+            string growth = info.popGrowthPerSec > 0f ? $"{info.popGrowthPerSec:0.0} population growth per day\n" : "";
+            return growth +
+                   "<color=#9FB4C8>Resources and research come from the structures on the surface. This world makes:</color>\n" +
+                   $"{k.metal:0.0} metal · {k.water:0.0} water · {k.research * TechEffects.ResearchRateMult:0.0} research per day";
         });
     }
 }

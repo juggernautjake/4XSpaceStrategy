@@ -284,9 +284,13 @@ public static class GameStateSerializer
     }
 
     // ---- Apply ----
+    /// The format of the save being applied, for the per-body migrations in FromDTO.
+    static int loadingFormat = SaveGame.CurrentVersion;
+
     public static void Apply(SaveGame game)
     {
         if (game == null) return;
+        loadingFormat = game.formatVersion;
 
         // Say it out loud rather than letting it be a mystery later. A save from before terrain and
         // plates were stored can only have them REGENERATED, so if the generator has moved on since,
@@ -591,8 +595,12 @@ public static class GameStateSerializer
             int known = b.researchLevel >= 3 ? 6 : b.researchLevel == 2 ? 5 : 3;
             b.deepProgress = Mathf.Clamp01(known / (float)SurfaceIndex.All.Length);
         }
-        else if (dto.deepProgress <= 0f && b.Surveyed)
+        else if (dto.deepProgress <= 0f && b.explorationProgress >= 1f && loadingFormat < 3)
         {
+            // FORMAT < 3 ONLY. This ran on every load, so in a current save a world mapped at level 1 and
+            // never deep-surveyed was handed part of its Mineral index each time the game was loaded —
+            // a different picture from the one the same world showed before saving. `b.Surveyed` was
+            // also the wrong test: it is true of every world in Dev Mode and of any world the player owns.
             // Surveyed but never deep-studied: the old rules still showed the Mineral index, which is
             // the first slot of the new order.
             b.deepProgress = Mathf.Clamp01(1f / SurfaceIndex.All.Length);

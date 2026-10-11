@@ -518,9 +518,11 @@ public static class GalaxyGenerator
             // nothing to decide. You can SEE them — a species that got as far as orbit has had telescopes
             // on its own moons for centuries, so they arrive surveyed and fully studied, and they are
             // where the player learns what the survey overlays even are. Taking them is a trip.
-            moon.visited = true;
-            moon.explorationProgress = 1f;
-            moon.researchLevel = CelestialBody.MaxResearchLevel;
+            // Survey.Grant, so "fully studied" is TRUE in the model the game now runs on: it used to set
+            // only researchLevel, which no longer reveals anything, so these moons showed no index overlays
+            // while every order button called them "fully studied" — a deep survey was refused and the
+            // indexes could never be read. Grant fills deepProgress and charts the sites as well.
+            Survey.Grant(moon, 2, false);
             // ...and the two guarantees that used to ride along with the birthright, kept: guaranteed
             // terraformable, and claimable at tech level 1. See CelestialBody.cradleMoon.
             moon.cradleMoon = true;

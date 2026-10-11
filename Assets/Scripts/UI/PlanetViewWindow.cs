@@ -336,7 +336,6 @@ public class PlanetViewWindow : MonoBehaviour
         return scratchKinds.Count > 0 ? scratchKinds[scratchKinds.Count - 1] : SurfaceIndexKind.None;
     }
     readonly List<SurfaceIndexKind> scratchKinds = new List<SurfaceIndexKind>();
-    readonly List<Unit> scratchParked = new List<Unit>();
 
     // ============================================================================================
     // THE SHORTCUT COLUMN — bottom right of the map window, mirroring the index bar (2026-10-09)
@@ -786,6 +785,9 @@ public class PlanetViewWindow : MonoBehaviour
         surveyMarkerLayer = UIFactory.NewUI(mapRT, "SurveyMarkers").GetComponent<RectTransform>();
         UIFactory.Stretch(surveyMarkerLayer);
         surveyMarkerLayer.gameObject.SetActive(false);
+        // The scan line at the survey front, and the deep-survey front (SurveyMapScan). The host draws its
+        // own level-1 block frames above, so this adds only the lines and the deep front here.
+        SurveyMapScan.Attach(mapRT, () => body, false);
 
         // Points of interest sit ABOVE the terrain but BELOW the pieces: a site is GROUND, so a building
         // put on top of it should cover it. Built before the piece layer so hierarchy order says so.
@@ -910,6 +912,8 @@ public class PlanetViewWindow : MonoBehaviour
         // The planet pane's border and corner controls, over the map in its own frame. Built once; they
         // ask for `body` when used, since this pane shows whichever world the window is on.
         hostChrome = BuildPaneChrome(hostViewport, () => body);
+        // The survey progress strip, top-left of the pane, visible from every tab (SurveyProgressUI).
+        SurveyPaneStrip.Attach(hostViewport, () => body);
 
         // The moon panes live in this full-area container, a sibling of the host viewport that stretches the
         // whole map area. It carries no mask of its own — each moon FRAME has its own RectMask2D — and each
@@ -1931,13 +1935,9 @@ public class PlanetViewWindow : MonoBehaviour
         sb.Append(body.shipyardLevel).Append('|').Append(body.researchCenterLevel).Append('|').Append(body.cities).Append('|');
         sb.Append(body.owner != null ? body.owner.id : -1).Append('|');
         sb.Append(body.units != null ? body.units.Count : 0).Append('|');
-        // Ships parked in the orbital field are listed on the Orbit tab too, so their count is structure.
-        if (tab == Tab.Orbit && ZoomFieldRules.IsHost(body))
-        {
-            scratchParked.Clear();
-            ZoomFieldRules.ParkedIn(body, scratchParked);
-            sb.Append(scratchParked.Count).Append('|');
-        }
+        // The Orbit tab lists every ship ShipRoster finds here — docked, at a moon, or holding in the
+        // field, any owner the fog shows — so that SET is structure.
+        if (tab == Tab.Orbit) sb.Append(ShipRoster.Signature(body)).Append('|');
 
         // Species and terraform projects reshape the Survey tab's Climate/Terraform sections (habitability
         // re-scores, the fault list changes) and the Overview's claim/settle road — all structural, and
@@ -2027,7 +2027,9 @@ public class PlanetViewWindow : MonoBehaviour
         // be re-uploading the whole fog texture sixty times a second, which is precisely the cost the
         // block rework was done to remove. The signature check cannot cover this because the fade is a
         // continuous quantity and a signature is a discrete one.
-        if (Survey.InProgress(body) && Time.unscaledTime >= nextFogRepaint)
+        // ...for an open MOON being surveyed too: this used to ask about the planet only, so a moon's veil
+        // stepped at signature changes instead of thinning smoothly.
+        if ((Survey.InProgress(body) || AnyOpenMoonSurveying()) && Time.unscaledTime >= nextFogRepaint)
         {
             nextFogRepaint = Time.unscaledTime + 0.125f;
             RefreshSurveyFog();
@@ -3276,31 +3278,17 @@ public class PlanetViewWindow : MonoBehaviour
         // ---- What's in orbit ----
         // Stations are infrastructure; ships are a fleet. Listed apart, like the Objects tab did, plus
         // what's inbound so you can see traffic before you decide anything.
-        var ships = new List<Unit>();
-        var stations = new List<Unit>();
-        if (body.units != null)
-            foreach (var u in body.units) (u.Info.isStation ? stations : ships).Add(u);
-        // ...and anything parked in open space inside this planet's orbital field, which is in its orbit
-        // as much as a docked ship is.
-        if (ZoomFieldRules.IsHost(body))
-        {
-            scratchParked.Clear();
-            ZoomFieldRules.ParkedIn(body, scratchParked);
-            foreach (var u in scratchParked) (u.Info.isStation ? stations : ships).Add(u);
-        }
+        // Every ship in this world's orbit — docked here or at one of its moons, or holding inside its
+        // orbital field — yours first, then any rival the fog lets you see, then stations. One list,
+        // built by ShipRoster and drawn by ShipRosterUI, shared with the Inspector (2026-10-11).
+        ShipRosterUI.OrbitSections(sidePanel, body, live, (p, t) => Header(t), (p, t) => Note(t));
 
-        Header("STATIONS & CONSTRUCTS");
-        if (stations.Count == 0) Note("No stations deployed here.");
-        else foreach (var u in stations) OrbitUnitRow(u);
-
-        Header("SHIPS IN ORBIT");
-        if (ships.Count == 0) Note("No ships here.");
-        else foreach (var u in ships) OrbitUnitRow(u);
-
+        // Inbound, and only what the player can see coming: a rival fleet hidden by the fog must not be
+        // announced here before it is drawn on the map.
         var inbound = new List<Unit>();
         if (UnitManager.Instance != null)
             foreach (var u in UnitManager.Instance.Units)
-                if (u.status == UnitStatus.Traveling && u.travelTarget == body) inbound.Add(u);
+                if (u.status == UnitStatus.Traveling && u.travelTarget == body && VisibilityService.ShownToPlayer(u)) inbound.Add(u);
         if (inbound.Count > 0)
         {
             Header("INBOUND");
@@ -3336,35 +3324,7 @@ public class PlanetViewWindow : MonoBehaviour
         }
     }
 
-    // A selectable ship/station row for the Orbit tab. Selecting it hands off to the unit selection
-    // system, exactly as the Inspector's Objects tab did.
-    void OrbitUnitRow(Unit u)
-    {
-        var cap = u;
-        var card = Card();
-        var row = UIFactory.NewUI(card, "Row"); UIFactory.AddLayout(row, 22);
-        var h = row.AddComponent<HorizontalLayoutGroup>();
-        h.spacing = 6; h.childControlWidth = true; h.childControlHeight = true;
-        h.childForceExpandWidth = false; h.childAlignment = TextAnchor.MiddleLeft;
-
-        var icon = UIFactory.NewUI(row.transform, "Icon");
-        var img = icon.AddComponent<Image>();
-        img.sprite = UnitIconRenderer.Sprite(u.type);
-        img.preserveAspect = true; img.raycastTarget = false;
-        var ile = icon.AddComponent<LayoutElement>();
-        ile.preferredWidth = 18; ile.minWidth = 18; ile.preferredHeight = 18; ile.flexibleWidth = 0;
-
-        var t = UIFactory.Text(row.transform, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
-        var tle = t.gameObject.AddComponent<LayoutElement>(); tle.flexibleWidth = 1;
-        live.Text(t, () =>
-        {
-            int g = ControlGroups.GroupOf(cap);
-            string badge = g > 0 ? $"<color=#5AB4F0>[{g}]</color> " : "";
-            return $"{badge}<b>{cap.name}</b>  <size=10><color=#9FB4C8>{cap.Info.name} · {cap.RankName} · {cap.status}</color></size>";
-        });
-
-        UIFactory.Button(card, "Select »", () => UnitSelection.SelectOnly(cap), 22);
-    }
+    // (The Orbit tab's per-ship rows are ShipRosterUI.Row now, shared with the Inspector and the Fleet list.)
 
     static string SizeWord(int size)
     {
@@ -5004,6 +4964,8 @@ public class PlanetViewWindow : MonoBehaviour
         // Folded from the retired Inspector body window (Raptok's mapping: Climate, Ores, Terraform all
         // land on the Survey tab). Climate first (what the world IS), then its ores, then how to fix it,
         // then Sites (points of interest), then the index overlays and the power grid.
+        // The survey's own progress first: level, live bar, ETA, ship — for the world and its moons.
+        SurveyProgressUI.BuildSection(sidePanel, body, live);
         BuildSurveyClimate();
         BuildSurveyOres();
         // Terraforming has its own tab now (Tab.Terraform); Survey is about what the world IS.
@@ -6196,6 +6158,13 @@ public class PlanetViewWindow : MonoBehaviour
         var img = e.gameObject.AddComponent<Image>();
         img.raycastTarget = false;
         e.gameObject.AddComponent<FrameEdgeTint>();
+    }
+
+    /// Is a ship mapping any moon whose pane is open? (No allocation: a Dictionary's own enumerator.)
+    bool AnyOpenMoonSurveying()
+    {
+        foreach (var kv in moonFog) if (Survey.InProgress(kv.Key)) return true;
+        return false;
     }
 
     void RefreshSurveyFog()
@@ -9435,6 +9404,9 @@ public class PlanetViewWindow : MonoBehaviour
             // in `views`, so a moon closed and reopened comes back as it was left.
             var paneBody = m;
             moonChrome[m] = BuildPaneChrome(frame, () => paneBody);
+            // The moon's own survey: scan lines + block frames on its map, and its progress strip.
+            SurveyMapScan.Attach(crt, () => paneBody, true);
+            SurveyPaneStrip.Attach(frame, () => paneBody);
             addedPane = true;
         }
         // A freshly built pane starts blank; paint its highlights now rather than waiting for the next

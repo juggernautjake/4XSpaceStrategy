@@ -67,7 +67,9 @@ public class BoxSelectController : MonoBehaviour
         // busy system, where most of the screen is covered by a body or its collider. A plain CLICK that
         // began on a collider is still left to that object's own handler (see OnUp).
         var ray = cam.ScreenPointToRay(Input.mousePosition);
-        startedOnCollider = Physics.Raycast(ray, out _, 5000f);
+        // A ship's screen-space marker counts as something to click, too: it has no collider, and a click
+        // on one in open space must not read as a click on empty space and clear the selection it made.
+        startedOnCollider = Physics.Raycast(ray, out _, 5000f) || ShipMarkers.AnyUnderCursor();
 
         down = true; dragging = false; startScreen = Input.mousePosition;
     }

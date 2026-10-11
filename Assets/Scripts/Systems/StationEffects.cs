@@ -66,6 +66,18 @@ public static class StationEffects
         return sum;
     }
 
+    /// Research per second from every deployed research aura (stations, Science Vessels), before the
+    /// empire's research-rate multiplier. What Tick pays; read by ResearchManager.IncomePerSecond.
+    public static float ResearchAuraTotal()
+    {
+        var um = UnitManager.Instance;
+        if (um == null) return 0f;
+        float sum = 0f;
+        foreach (var u in um.Units)
+            if (Deployed(u) && u.Info.researchAura > 0f) sum += u.Info.researchAura;
+        return sum;
+    }
+
     // Count of deployed relay-type stations (for UI / status readouts).
     public static int ActiveRelayCount()
     {

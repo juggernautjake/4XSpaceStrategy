@@ -47,11 +47,13 @@ public class SaveGame
     ///   1  terrain grids, tectonic layouts, ship travel/mission state, colony claim progress
     ///   2  system `visited` flags written under the fixed presence rule — a rival's settled world no
     ///      longer counts as the player's presence (SystemPresence.RepairLegacyVisited repairs older saves)
+    ///   3  `deepProgress` is authoritative: a surveyed world at 0 really has no index read. Older saves
+    ///      get the legacy "surveyed shows the Mineral index" inference once; v3 saves never do.
     ///
     /// NO INITIALIZER, deliberately. JsonUtility leaves a field the JSON does not mention at whatever
     /// the initializer set, so defaulting this to CurrentVersion would make every save ever written
     /// claim to be current — which is precisely the question it exists to answer. Capture sets it.
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
     public int formatVersion;
     public int speciesIndex = 0;
 

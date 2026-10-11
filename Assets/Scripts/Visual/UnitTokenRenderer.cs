@@ -256,17 +256,9 @@ public class UnitToken : MonoBehaviour
             UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return false;
         if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return false;
 
-        // Shift-click adds to the current fleet selection; a plain click selects just this ship.
-        bool additive = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-        if (additive) UnitSelection.Select(unit, true);
-        else UnitSelection.SelectOnly(unit);
-        SimpleAudio.Instance?.PlayUnitSelect(unit.type);
-        // FOLLOW the ship, the same way clicking a world follows it — and honour the same AutoFollow
-        // preference, so the two behave alike. FocusUnit tracks it by identity rather than by transform,
-        // because a ship's token is destroyed and rebuilt whenever the fleet changes.
-        CameraController.Instance?.FocusUnit(unit, CameraController.AutoFollow);
-        UnitInfoPanel.Instance?.Show(unit);
-        return true;
+        // One path for every way of clicking a ship: Shift adds, a double-click takes every ship of the
+        // class on screen. It no longer flies the camera — F frames the selection. See ShipSelect.
+        return ShipSelect.Click(unit);
     }
 
     void OnMouseEnter()

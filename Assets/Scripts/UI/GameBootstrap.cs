@@ -56,6 +56,10 @@ public static class GameBootstrap
 
         Safe("ObjectLabelManager", () => ObjectLabelManager.Create(canvas.transform));
         Safe("NameplateManager", () => NameplateManager.Create());        // names over surveyed worlds and discovered systems
+        Safe("ShipMarkers", () => ShipMarkers.Create());                  // a crisp, clickable marker for every ship too small to see
+        Safe("ShipHotkeys", () => ShipHotkeys.Create());                  // Tab / Shift+Tab cycle your ships, "." the next idle one
+        Safe("SurveyShipBars", () => SurveyShipBars.Create());            // progress bars over surveying ships (+ Dev Ctrl+Shift+U)
+        Safe("SurveyScanFx", () => SurveyScanFx.Create());                // scan rings and fans on worlds being surveyed
         Safe("ZoomFieldRenderer", () => ZoomFieldRenderer.Create());      // each planet's orbital / camera-lock field
         Safe("SystemFog", () => SystemFog.Create());                      // unexplored systems: star only, revealed live on arrival
         // Bottom-right Gravity Wells switch. Built BEFORE the windows so any window dragged over the

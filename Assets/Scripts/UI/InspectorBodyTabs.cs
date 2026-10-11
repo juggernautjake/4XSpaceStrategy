@@ -195,6 +195,28 @@ public partial class InspectorWindow
             Stat(detail, "Points of interest", () => b.pointsOfInterest != null ? b.pointsOfInterest.Count.ToString() : "0");
         }
 
+        // SURVEY STATUS, both levels — the same line and numbers as the Planet View's Survey card
+        // (SurveyProgressUI.StatusLine): which level, who is working it, the ETA, or what to send next.
+        {
+            var sc = Card(p);
+            var st = UIFactory.WrapText(sc, "", UITheme.SmallSize, UITheme.SubText);
+            live.Text(st, () => SurveyProgressUI.StatusLine(b));
+            // The deep bar only while there is something to report (same reasoning as the level-1 bar above).
+            if (b.Surveyed && (Survey.ResearchInProgress(b) || (b.deepProgress > 0f && b.deepProgress < 1f)))
+                Bar(sc, () => (b.deepProgress, $"Deep Survey {b.deepProgress * 100f:F0}%", UITheme.Good));
+
+            // DEV: survey fully now, through the real completion path (UnitManager.DevCompleteSurvey).
+            if (GameMode.DevMode)
+            {
+                var dev = UIFactory.Button(sc, "Dev: survey fully now  (Ctrl+Shift+U)", () =>
+                {
+                    if (GameMode.DevMode) UnitManager.Instance?.DevCompleteSurvey(b);
+                }, 22);
+                live.Button(dev, () => (GameMode.DevMode && (b.explorationProgress < 1f || b.deepProgress < 1f),
+                    b.explorationProgress >= 1f && b.deepProgress >= 1f ? "Dev: already fully surveyed" : "Dev: survey fully now  (Ctrl+Shift+U)"));
+            }
+        }
+
         // Colonization progress by someone else.
         if (b.claimProgress > 0f && b.owner != FactionManager.Player)
             Bar(p, () => (b.claimProgress, $"Being colonized — {b.claimProgress * 100f:F0}%", UITheme.Warn));
@@ -703,33 +725,30 @@ public partial class InspectorWindow
                 UIFactory.Button(card, "Inspect »", () => { PlanetUI.Instance?.Show(captured); }, 22);
             }
 
-        // Ships and stations are listed separately — a deployed station is infrastructure, not a fleet.
-        var ships = new List<Unit>();
-        var stations = new List<Unit>();
-        if (b.units != null)
-            foreach (var u in b.units) (u.Info.isStation ? stations : ships).Add(u);
-        // Parked in the planet's orbital field counts as in orbit (ZoomField.cs).
-        if (ZoomFieldRules.IsHost(b))
+        // Every ship in this world's orbit — docked here or at one of its moons, or holding inside its
+        // orbital field — yours first, then any rival the fog lets you see. One list, built by ShipRoster,
+        // shared with the Planet View's Orbit tab (2026-10-11).
+        //
+        // Clicking a row selects the ship (which re-targets this window to it) and frames it; the planet
+        // is pushed onto the breadcrumb so Back returns here instead of the trail being wiped.
+        ShipRosterUI.OrbitSections(p, b, live, Header, Note, u =>
         {
-            var parked = new List<Unit>();
-            ZoomFieldRules.ParkedIn(b, parked);
-            foreach (var u in parked) (u.Info.isStation ? stations : ships).Add(u);
-        }
-
-        Header(p, "STATIONS");
-        if (stations.Count == 0) Note(p, "No stations deployed here.");
-        else foreach (var u in stations) UnitRow(p, u);
-
-        Header(p, "SHIPS");
-        if (ships.Count == 0) Note(p, "No ships here.");
-        else foreach (var u in ships) UnitRow(p, u);
+            var back = target;
+            ShipSelect.SelectAndFocus(u);
+            if (target.kind == InspectorKind.Unit && back.kind == InspectorKind.Body && !trail.Contains(back))
+            {
+                trail.Add(back);
+                lastSig = null;
+            }
+        });
 
         // Ships on their way here are "associated" with this world too, and it's genuinely useful to
         // know what is inbound before you decide what to do.
         var inbound = new List<Unit>();
         if (UnitManager.Instance != null)
             foreach (var u in UnitManager.Instance.Units)
-                if (u.status == UnitStatus.Traveling && u.travelTarget == b) inbound.Add(u);
+                // Only what the player can see coming — a fogged rival is not announced here.
+                if (u.status == UnitStatus.Traveling && u.travelTarget == b && VisibilityService.ShownToPlayer(u)) inbound.Add(u);
         if (inbound.Count > 0)
         {
             Header(p, "INBOUND");

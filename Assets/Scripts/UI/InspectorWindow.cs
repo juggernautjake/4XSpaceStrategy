@@ -368,6 +368,9 @@ public partial class InspectorWindow : MonoBehaviour
             foreach (int id in b.buildings) sb.Append(id).Append(',');
             sb.Append('|').Append(b.units != null ? b.units.Count : 0).Append('|');
             sb.Append(b.moons != null ? b.moons.Count : 0).Append('|');
+            // The ships the Orbit tab lists (ShipRoster): docked here or at a moon, or holding in the
+            // field — a set body.units alone does not track, so a rival drifting in rebuilds the list.
+            sb.Append(ShipRoster.Signature(b)).Append('|');
             if (b.terraformProjects != null) foreach (int p in b.terraformProjects) sb.Append(p).Append(',');
         }
         if (target.unit != null) sb.Append('|').Append(target.unit.id).Append('|').Append((int)target.unit.type);

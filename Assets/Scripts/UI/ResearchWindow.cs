@@ -390,6 +390,7 @@ public class ResearchWindow : MonoBehaviour
         if (t.oreYield != 0f) p.Add($"+{t.oreYield * 100f:F0}% ore yield");
         if (t.shipyardPower != 0) p.Add($"+{t.shipyardPower} build power per shipyard");
         if (t.researchCap != 0) p.Add($"+{t.researchCap} research capacity per centre");
+        if (t.surveySpeed != 0f) p.Add($"+{t.surveySpeed * 100f:F0}% survey speed");
         return string.Join(" · ", p);
     }
 

@@ -1413,13 +1413,7 @@ public class UnitModelClick : MonoBehaviour
             UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return false;
         if (FleetMovementController.Instance != null && FleetMovementController.Instance.IsTargeting) return false;
 
-        bool add = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-        UnitSelection.Select(unit, add);
-        SimpleAudio.Instance?.PlayUnitSelect(unit.type);
-        // Same follow behaviour as a token — a ship with a real hull should not behave differently from
-        // one drawn as a billboard just because its class happens to have a model.
-        CameraController.Instance?.FocusUnit(unit, CameraController.AutoFollow);
-        UnitInfoPanel.Instance?.Show(unit);
-        return true;
+        // Same path as a token and a marker — see ShipSelect.
+        return ShipSelect.Click(unit);
     }
 }

@@ -359,7 +359,8 @@ public class FleetMovementController : MonoBehaviour
                     () => NotificationManager.Instance?.Push($"Out of range — {body.name}",
                         "Your fleet can't reach it yet. Upgrade drives or build a relay to extend your range.", null, NotifKind.Danger)));
             bool canSurvey = reach && !body.Surveyed && Any(group, u => u.Info.canExplore);
-            bool canResearch = reach && body.Surveyed && Any(group, u => u.Info.canResearch);
+            // Any research hull may take an unmapped world too (it maps it first), but not a finished one.
+            bool canResearch = reach && Any(group, u => Survey.CanDeepSurvey(body, u, out _));
             bool canColonize = reach && body.owner != FactionManager.Player && Any(group, u => u.Info.canColonize);
             // Sending a terraformer to a world is now a first-class map order (it used to live only in the
             // ship panel). Offered when a terraformer is present, the world isn't already terraforming, and

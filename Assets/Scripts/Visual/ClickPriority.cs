@@ -36,6 +36,22 @@ public static class ClickPriority
 
         var ray = cam.ScreenPointToRay(Input.mousePosition);
 
+        // A SHIP'S MARKER, FIRST (2026-10-11 — see ShipMarkers).
+        //
+        // At system zoom a hull is a few pixels and its pick box is often behind the planet entirely, so
+        // the raycast below can miss a ship the player is plainly pointing at. The screen-space marker is
+        // what they are pointing at, and it is picked by distance with a generous radius:
+        //
+        //   * outside the world as drawn — anywhere in the marker's radius wins (a docked stack sits just
+        //     beside its world for exactly this reason);
+        //   * ON the world's drawn disc — only a click on the marker's core wins, so a ship crossing in
+        //     front of (or behind) a planet does not make the planet unclickable around it.
+        if (ShipMarkers.Instance != null && ShipMarkers.Instance.Pick(Input.mousePosition, out var mark))
+        {
+            bool onDisc = bodyVisual != null && RayHitsDrawnSphere(ray, bodyVisual);
+            if (!onDisc || mark.core) return ShipSelect.Click(mark.unit, mark.stack);
+        }
+
         // THE BODY'S OWN DISC ALWAYS WINS.
         //
         // The first version of this handed the click to any ship under the cursor, which overshot: a
@@ -102,6 +118,12 @@ public static class ClickPriority
     {
         var cam = Camera.main;
         if (cam == null) return null;
+
+        // The marker first, for the same reason as above: at system zoom it is what the player is
+        // pointing at. A stack answers with its lead, which is enough to name a target.
+        if (ShipMarkers.Instance != null && ShipMarkers.Instance.Pick(Input.mousePosition, out var mark)
+            && mark.unit != null && !mark.unit.IsDestroyed)
+            return mark.unit;
 
         var ray = cam.ScreenPointToRay(Input.mousePosition);
         var hits = Physics.RaycastAll(ray);

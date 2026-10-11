@@ -115,7 +115,13 @@ public static class Survey
     ///
     /// A multiplier on SPEED rather than on time, so a caller divides the cell time by it and higher is
     /// always better — the direction of the number matches the direction of the improvement.
-    public static float TechSpeedMultiplier => 1f + 0.20f * Mathf.Max(0, EmpireTech.Level - 1);
+    ///
+    /// Two sources, multiplied: the Empire Tech level (every tier past the first) and the survey
+    /// technologies themselves (TechEffects.SurveySpeedMult — Deep Sensors, Autonomous Survey Drones).
+    /// The second used to be missing entirely, so "Surveys finish markedly faster" on the drone tech
+    /// was a promise nothing kept.
+    public static float TechSpeedMultiplier
+        => (1f + 0.20f * Mathf.Max(0, EmpireTech.Level - 1)) * Mathf.Max(1f, TechEffects.SurveySpeedMult);
 
     /// Seconds this ship takes over one cell of this world — the real number, for this world, after
     /// everything. What the reveal front advances at, and what a technology buys down.
@@ -218,6 +224,19 @@ public static class Survey
         // ground the empire lives on, which it does not need a ship to re-explain to it.
         if (GameMode.DevMode || b.deepProgress >= 1f || b.owner == FactionManager.Player)
             return new Reveal { started = true, pass = Bands - 1, frac = 1f, complete = true };
+
+        return SweepRevealOf(b, k);
+    }
+
+    /// Where the level-2 SWEEP itself has got to on one index, without the Dev Mode / owned-world
+    /// shortcut above. RevealOf answers "what may the player see"; this answers "where is the ship's
+    /// front", which the scan markers need even on a world the player owns (its overlays are already
+    /// shown in full, but a research ship may still be charting its sites).
+    public static Reveal SweepRevealOf(CelestialBody b, SurfaceIndexKind k)
+    {
+        var r = new Reveal();
+        if (b == null || k == SurfaceIndexKind.None) return r;
+        if (b.deepProgress >= 1f) return new Reveal { started = true, pass = Bands - 1, frac = 1f, complete = true };
 
         // -1 means this world has no use for this index at all — no plates and no plumes, no water, no
         // biosphere. It is never reached because it is never visited, which is the point.
@@ -789,13 +808,30 @@ public static class Survey
 
     /// Where in this world's band order a given band sits: 0 is the middle, then alternately one to
     /// the side the world's coin picked and one to the other.
+    ///
+    /// COMPACT, so it is exactly the band's index in BandOrder. It used to be the plain alternating
+    /// formula (2d-1 / 2d), which leaves a GAP once the shorter side runs out of bands: on a world with
+    /// an even band count the far band on the short side came out at rank 4 of 0..3, past the end of the
+    /// sweep, so `Reached` never reached it and the level-2 pass left that whole latitude blank until the
+    /// pass completed and it popped in at once. tools/survey-check.mjs already ported the compact order.
+    ///
+    /// Closed form, no loop and no allocation — this is asked per PIXEL by Reached:
+    ///   favoured side, distance k:  k + min(k-1, lenOther)
+    ///   other side,    distance k:  k + min(k-1, lenFav) + (k <= lenFav ? 1 : 0)
     public static int BandRank(CelestialBody b, int bands, int band)
     {
-        int d = band - bands / 2;
+        int cy = bands / 2;
+        int d = band - cy;
         if (d == 0) return 0;
         bool up = UpFirst(b);
-        // The favoured side takes the odd ranks, the other the even ones.
-        return (d > 0) == up ? 2 * d - 1 : 2 * Mathf.Abs(d);
+        int lenUp = bands - 1 - cy, lenDown = cy;
+        int lenFav = up ? lenUp : lenDown;
+        int lenOther = up ? lenDown : lenUp;
+        int k = Mathf.Abs(d);
+        bool favoured = (d > 0) == up;
+        return favoured
+            ? k + Mathf.Min(k - 1, lenOther)
+            : k + Mathf.Min(k - 1, lenFav) + (k <= lenFav ? 1 : 0);
     }
 
     /// Every band of this world, in the order a survey works them.
@@ -968,7 +1004,12 @@ public static class Survey
                 int bc = BlockCells(b, u);
                 int band = BandForShip(b, u, bc);
                 if (band < 0) continue;
-                int y0 = band * bc;
+                // BandY, not band * bc. Every other reader (RowBlockCells, ActiveBlocks, AdvanceGround)
+                // places a band with BandY, which spreads the bands evenly so none overhangs the map; this
+                // one still tiled from the origin, so on any world whose height is not a multiple of the
+                // block the fast path and the tooltip disagreed about which rows a ship was working, and
+                // the fog drew a stripe of cloud across ground that was already mapped.
+                int y0 = BandY(b, bc, band);
                 for (int y = y0; y < y0 + bc && y < h; y++) if (y >= 0) into[y] = bc;
             }
         }
@@ -1281,5 +1322,233 @@ public static class Survey
         if (GameMode.DevMode) return true;
         if (b.owner == FactionManager.Player || b.settled || b.Surveyed) return true;
         return b.explorationProgress > 0f || InProgress(b);
+    }
+
+    // ============================================================================================
+    // WHO MAY SURVEY WHAT, AND HOW THE JOB IS GOING (2026-10-11)
+    //
+    // One place for the order rules and the live readouts, so the ship panel, the Inspector, the
+    // right-click menu, the Planet View strip and the in-space bars all say the same thing:
+    //
+    //   LEVEL 1 (Survey)       any hull with canExplore: scouts, explorers, research ships, the Science
+    //                          Vessel, and (slowly) colony ships and terraformers. The ship must be AT the
+    //                          world, in its orbit. Progress lives on the WORLD, so a ship that leaves or
+    //                          is lost pauses it, another ship resumes it, and nothing is ever lost.
+    //   LEVEL 2 (Deep Survey)  research hulls only (canResearch). Needs level 1 first, but a research
+    //                          hull can do level 1 itself, so ordering a deep survey of an unmapped world
+    //                          maps it and then reads it instead of refusing at the door.
+    //
+    // Only the player builds ships (rival civilisations have no fleets in UnitManager), so every survey
+    // is the player's and nothing about a world leaks through another faction's work.
+    // ============================================================================================
+
+    /// Is this ship working a survey of either level right now?
+    public static bool IsWorking(Unit u)
+        => u != null && (u.status == UnitStatus.Exploring || u.status == UnitStatus.Researching);
+
+    /// Can this ship (or any capable ship, when `u` is null) take a level-1 survey of this world?
+    public static bool CanSurvey(CelestialBody b, Unit u, out string why)
+    {
+        why = null;
+        if (b == null) { why = "travel to a world first"; return false; }
+        if (u != null && (u.Info == null || !u.Info.canExplore)) { why = "this class can't survey"; return false; }
+        if (b.Surveyed) { why = $"{b.name} is already surveyed"; return false; }
+        return true;
+    }
+
+    /// Can this ship (or any research hull, when `u` is null) take a deep survey of this world?
+    /// Answers in words, because every refusal is shown on the button that refused.
+    public static bool CanDeepSurvey(CelestialBody b, Unit u, out string why)
+    {
+        why = null;
+        if (b == null) { why = "travel to a world first"; return false; }
+        if (u != null && (u.Info == null || !u.Info.canResearch)) { why = "needs a research ship"; return false; }
+        if (b.deepProgress >= 1f) { why = $"{b.name} is fully studied"; return false; }
+        // A research hull maps the ground itself first; anything else needs it done already.
+        if (!b.Surveyed && u != null && !u.Info.canExplore) { why = "survey this world first"; return false; }
+        return true;
+    }
+
+    /// 0..1 through the given level on this world.
+    public static float Progress(CelestialBody b, bool deep)
+        => b == null ? 0f : Mathf.Clamp01(deep ? b.deepProgress : b.explorationProgress);
+
+    /// Is anything working this world, and at which level? Deep wins when both are running.
+    public static bool Active(CelestialBody b, out bool deep)
+    {
+        deep = false;
+        if (b?.units == null) return false;
+        bool any = false;
+        foreach (var u in b.units)
+        {
+            if (u == null) continue;
+            if (u.status == UnitStatus.Researching) { deep = true; return true; }
+            if (u.status == UnitStatus.Exploring) any = true;
+        }
+        return any;
+    }
+
+    /// Fraction of the level ONE ship covers per second of game time on this world, working alone.
+    public static float ShipRatePerSecond(CelestialBody b, Unit u, bool deep)
+    {
+        if (b == null || u == null) return 0f;
+        return deep ? Fraction(b, u, 1f, true) : 1f / Mathf.Max(0.01f, SurveySeconds(b, u));
+    }
+
+    /// Fraction of the level covered per second by every ship working it now. Level 2 stacks exactly
+    /// (each ship adds its Fraction); level 1 stacks per band, so this is a close estimate there.
+    public static float RatePerSecond(CelestialBody b, bool deep)
+    {
+        if (b?.units == null) return 0f;
+        var want = deep ? UnitStatus.Researching : UnitStatus.Exploring;
+        float r = 0f;
+        foreach (var u in b.units)
+            if (u != null && u.status == want) r += ShipRatePerSecond(b, u, deep);
+        return r;
+    }
+
+    /// Seconds of game time (one second is one in-game day) until the level completes at the current
+    /// pace, or -1 when nothing is working it.
+    public static float EtaSeconds(CelestialBody b, bool deep)
+    {
+        float rate = RatePerSecond(b, deep);
+        if (rate <= 0f) return -1f;
+        return Mathf.Max(0f, (1f - Progress(b, deep)) / rate);
+    }
+
+    /// The first ship working this level here, or null. What the readouts name.
+    public static Unit LeadShip(CelestialBody b, bool deep)
+    {
+        if (b?.units == null) return null;
+        var want = deep ? UnitStatus.Researching : UnitStatus.Exploring;
+        foreach (var u in b.units) if (u != null && u.status == want) return u;
+        return null;
+    }
+
+    /// "Survey" / "Deep Survey · Mineral". The readouts' title for a running job.
+    public static string JobName(CelestialBody b, bool deep)
+    {
+        if (!deep) return "Survey";
+        var k = CurrentIndex(b);
+        return k == SurfaceIndexKind.None ? "Deep Survey" : $"Deep Survey · {SurfaceIndex.Name(k)}";
+    }
+
+    // ---- Granted surveys -------------------------------------------------------------------------
+
+    /// Give a world a survey without a ship: the home system's catalogue (level 1), the chosen starting
+    /// world and the cradle's moons (level 2). Does what the real completion does to the WORLD (fills
+    /// the progress, re-seeds the rows, and at level 2 charts every site), so a granted world is
+    /// indistinguishable from a surveyed one. Silent: no notifications, no research points.
+    ///
+    /// The site charting is the point. The homeworld used to be handed deepProgress = 1 with none of its
+    /// sites charted, and a site can only be commissioned once charted ("not charted yet — deep-survey
+    /// this world first"), while a deep survey of a world already at 100% ends on its first frame
+    /// without charting anything. The home sites were unreachable for the whole game.
+    ///
+    /// `discoverOres` enters the world's ores in the Codex, as a real deep survey does. Off for grants
+    /// made during generation, which ResearchManager.NewGame would wipe anyway.
+    public static void Grant(CelestialBody b, int level, bool discoverOres)
+    {
+        if (b == null || level <= 0) return;
+        b.visited = true;
+        if (b.explorationProgress < 1f || b.surveyRows == null)
+        {
+            b.surveyRows = null;          // re-seeded from the progress below, so nothing reads stale rows
+            b.explorationProgress = 1f;
+        }
+        if (level < 2) return;
+
+        b.deepProgress = 1f;
+        b.researchProgress = 1f;
+        b.researchLevel = CelestialBody.MaxResearchLevel;
+        if (b.pointsOfInterest != null)
+            foreach (var poi in b.pointsOfInterest) if (poi != null) poi.surveyed = true;
+        if (discoverOres)
+            foreach (var ore in OreGenerator.OresOnBody(b)) ResearchManager.Discover(ore);
+    }
+
+    // ---- Where the front is, for the scan effects ------------------------------------------------
+
+    /// Where on the map a ship is working right now, as fractions of the grid: `row01` is the middle of
+    /// the band being worked (0 = row 0, 1 = the last row) and `along01` how far around the world the
+    /// front is, from the map's left edge. The globe's sweep ring and the beam aim at this, so the 3D
+    /// effect and the Planet View describe the same place.
+    public static bool FrontOf(CelestialBody b, Unit u, out float row01, out float along01)
+    {
+        row01 = 0.5f; along01 = 0f;
+        if (b == null || u == null) return false;
+        int w = Mathf.Max(1, MapMetrics.SurfW(b));
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+
+        if (u.status == UnitStatus.Exploring)
+        {
+            int bc = BlockCells(b, u);
+            int band = BandForShip(b, u, bc);
+            if (band < 0) return false;
+            int y0 = BandY(b, bc, band);
+            row01 = Mathf.Clamp01((y0 + Mathf.Min(bc, h) * 0.5f) / h);
+            float fill = Mathf.Clamp01(BandFill(b, Rows(b), band, bc));
+            along01 = Mathf.Repeat((ColOrigin(w, bc) + fill * BlocksAcross(b, bc) * bc) / w, 1f);
+            return true;
+        }
+        if (u.status == UnitStatus.Researching)
+        {
+            if (!DeepFront(b, 0, out int x0, out int y0, out int bw, out int bh, out float frac)) return false;
+            row01 = Mathf.Clamp01((y0 + bh * 0.5f) / h);
+            along01 = Mathf.Repeat((x0 + frac * bw) / w, 1f);
+            return true;
+        }
+        return false;
+    }
+
+    /// The level-2 front as cell rectangles: one per research ship reading the field (the width
+    /// BeingSurveyed draws), the first carrying how far through its block the front has got. Returns
+    /// how many were written. Uses the SWEEP rather than the visibility shortcut, so it works on a world
+    /// the player owns too.
+    public static int DeepFrontBlocks(CelestialBody b, Block[] into)
+    {
+        if (b == null || into == null || GameMode.DevMode) return 0;
+        int ships = ShipsOn(b, true);
+        if (ships <= 0) return 0;
+        int n = 0;
+        int width = Mathf.Clamp(ships, 1, MaxHeads);
+        for (int k = 0; k < width && n < into.Length; k++)
+        {
+            if (!DeepFront(b, k, out int x0, out int y0, out int bw, out int bh, out float frac)) break;
+            into[n++] = new Block { x0 = x0, y0 = y0, w = bw, h = bh, frac = k == 0 ? frac : 0f };
+        }
+        return n;
+    }
+
+    /// The `offset`-th block at the level-2 front of the index being read.
+    static bool DeepFront(CelestialBody b, int offset, out int x0, out int y0, out int bw, out int bh, out float frac)
+    {
+        x0 = y0 = bw = bh = 0; frac = 0f;
+        var kind = CurrentIndex(b);
+        if (kind == SurfaceIndexKind.None) return false;
+        var r = SweepRevealOf(b, kind);
+        if (!r.started || r.complete) return false;
+
+        int w = Mathf.Max(1, MapMetrics.SurfW(b));
+        int h = Mathf.Max(1, MapMetrics.SurfH(b));
+        int bc = DeepBlockCells(b);
+        int across = BlocksAcross(b, bc);
+        int ny = BandCount(b, bc);
+        int total = Mathf.Max(1, across * ny);
+
+        float pos = r.frac * total;
+        int front = Mathf.FloorToInt(pos) + offset;
+        if (front >= total) return false;
+
+        var order = BandOrder(b, ny, BandOrderBuffer(ny));
+        int band = order[Mathf.Clamp(front / across, 0, ny - 1)];
+        int col = front % across;
+
+        x0 = ((ColOrigin(w, bc) + col * bc) % w + w) % w;
+        y0 = BandY(b, bc, band);
+        bw = Mathf.Min(bc, w);
+        bh = Mathf.Min(bc, h - y0);
+        frac = Mathf.Clamp01(pos - Mathf.Floor(pos));
+        return true;
     }
 }

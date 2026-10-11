@@ -136,11 +136,11 @@ public static class HomeworldOnboarding
         b.claimingFaction = null;
         // LEVEL 2: "give the player access to level 2 survey status on this world, so they can see all
         // the Index information" — before they choose where the capitol goes.
-        b.visited = true;
-        b.surveyRows = null;          // re-seeded from the progress below, so nothing reads stale rows
-        b.explorationProgress = 1f;
-        b.deepProgress = 1f;
-        b.researchLevel = CelestialBody.MaxResearchLevel;
+        // Survey.Grant rather than the three fields by hand: the hand version left every site on the
+        // homeworld uncharted, and a site must be charted before it can be commissioned — while a deep
+        // survey of a world already at 100% could never chart them. Ores go into the Codex as a real
+        // deep survey would put them.
+        Survey.Grant(b, 2, true);
 
         // THE HOME MOONS ARE THE CHOSEN WORLD'S. `cradleMoon` (claimable at tech 1, guaranteed
         // terraformable) was stamped on the cradle's moons at generation; it belongs to whatever the

@@ -170,7 +170,10 @@ public class GameHUD : MonoBehaviour
     void UpdateStatus()
     {
         if (statusText == null) return;
-        statusText.text = $"{PlayerEconomy.Summary()}   ·   <b>{SpeciesManager.Current.name}</b>   ·   RP <b>{ResearchManager.ResearchPoints}</b>";
+        // The income beside the bank, so a new laboratory visibly does something (ResearchManager.IncomePerSecond).
+        float rpIncome = ResearchManager.IncomePerSecond();
+        string rpRate = rpIncome > 0.005f ? $" <color=#8FD0FF>(+{rpIncome:0.0}/day)</color>" : "";
+        statusText.text = $"{PlayerEconomy.Summary()}   ·   <b>{SpeciesManager.Current.name}</b>   ·   RP <b>{ResearchManager.ResearchPoints}</b>{rpRate}";
     }
 
     void UpdateSpeed()

@@ -266,7 +266,7 @@ public class UnitInfoPanel : MonoBehaviour
                 task = $"Traveling to {(u.travelTarget != null ? u.travelTarget.name : "?")} ({GameCalendar.Duration(Mathf.Max(0f, u.travelDuration - u.travelElapsed))})";
                 break;
             case UnitStatus.Exploring:
-                prog = u.location != null ? u.location.explorationProgress : 0f;
+                prog = Survey.Progress(u.location, false);
                 task = $"Surveying {(u.location != null ? u.location.name : "?")}";
                 break;
             case UnitStatus.Colonizing:
@@ -274,7 +274,7 @@ public class UnitInfoPanel : MonoBehaviour
                 task = $"Colonizing {(u.location != null ? u.location.name : "?")}";
                 break;
             case UnitStatus.Researching:
-                prog = u.location != null ? u.location.researchProgress : 0f;
+                prog = Survey.Progress(u.location, true);
                 task = $"Deep surveying {(u.location != null ? u.location.name : "?")}";
                 break;
             case UnitStatus.Returning: task = "Returning home"; break;
@@ -366,20 +366,17 @@ public class UnitInfoPanel : MonoBehaviour
         var t = ActionTarget();
         bool q = QueueMode;
         surveyBtn.interactable = t != null && u.Info.canExplore && (q || !t.Surveyed);
-        // Gated on whether a tier is ACTUALLY available, not merely on the world being surveyed. A world
-        // that is fully studied, or whose next tier the empire has not reached, has nothing to offer —
-        // and a live button that does nothing is worse than a dead one that says why.
-        researchBtn.interactable = t != null && u.Info.canResearch
-                                && (q || DeepResearch.CanAdvance(t, out _));
-        // Names the TIER this world could reach, or why it cannot. "Deep Survey (again)" was the old
-        // label, and it was the tell that the action had no shape — a step you can repeat forever is not
-        // a decision. Each tier is now taken once, so the button says which one is next.
+        // One rule (Survey.CanDeepSurvey) for every surface that offers the order. The old three-tier
+        // ladder gated this behind Empire Tech 4 and 7 for a "tier" that no longer unlocks anything, so a
+        // half-read world from an older save could be locked out of finishing.
+        bool canDeep = t != null && Survey.CanDeepSurvey(t, u, out _);
+        researchBtn.interactable = t != null && u.Info.canResearch && (q || canDeep);
         if (researchLabel != null)
         {
-            if (t == null) researchLabel.text = "Deep Research";
-            else if (DeepResearch.CanAdvance(t, out _)) researchLabel.text = DeepResearch.Name(t.NextResearchLevel);
-            else if (t.NextResearchLevel == 0) researchLabel.text = "Fully studied";
-            else researchLabel.text = $"{DeepResearch.Name(t.NextResearchLevel)} (locked)";
+            if (t == null) researchLabel.text = "Deep Survey";
+            else if (t.deepProgress >= 1f) researchLabel.text = "Fully studied";
+            else if (!t.Surveyed && u.Info.canExplore && u.Info.canResearch) researchLabel.text = "Survey + Deep Survey";
+            else researchLabel.text = t.deepProgress > 0f ? $"Deep Survey ({t.deepProgress * 100f:F0}%)" : "Deep Survey";
         }
         returnBtn.interactable = u.location != null && u.location != UnitManager.Instance?.HomePlanet;
         scrapBtn.interactable = UnitManager.Instance != null && UnitManager.Instance.CanScrap(u);

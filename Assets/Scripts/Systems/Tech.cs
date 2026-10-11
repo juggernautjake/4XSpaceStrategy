@@ -32,6 +32,7 @@ public class Tech
     public float oreYield;       // +fractional ore/metal yield
     public int shipyardPower;    // +build power on EVERY shipyard you own
     public int researchCap;      // +research capacity on EVERY research centre you own
+    public float surveySpeed;    // +fractional survey speed, both levels (0.35 = surveys 35% faster)
     public string unlockNote;    // human-readable "this also enables …" (hulls/stations land later)
 
     // Research capacity this project occupies while it is being studied — the research-side twin of a
@@ -52,6 +53,8 @@ public static class TechEffects
     public static float TerraformCeilingBonus = 0f;
     public static float TerraformSpeedMult = 1f;
     public static float OreYieldMult = 1f;
+    /// Survey speed from the survey technologies, on top of the Empire Tech level's (Survey.TechSpeedMultiplier).
+    public static float SurveySpeedMult = 1f;
 
     // Per-facility parallelism bonuses: added to EVERY shipyard / research centre the player owns.
     public static int ShipyardPowerBonus = 0;
@@ -60,7 +63,7 @@ public static class TechEffects
     public static void Reset()
     {
         ResearchRateMult = 1f; BuildCostMult = 1f; BuildTimeMult = 1f;
-        TerraformCeilingBonus = 0f; TerraformSpeedMult = 1f; OreYieldMult = 1f;
+        TerraformCeilingBonus = 0f; TerraformSpeedMult = 1f; OreYieldMult = 1f; SurveySpeedMult = 1f;
         ShipyardPowerBonus = 0; ResearchCapacityBonus = 0;
     }
 }
@@ -117,7 +120,7 @@ public static class TechDatabase
 
         // ---- Science ----
         _all.Add(T("S1", "Deep Sensors", TechBranch.Science, 1, 70, 1, new[] { "F3" },
-            "Sharper survey scanners; reveal more anomalies.").With(researchRate: 0.05f));
+            "Sharper survey scanners; every survey reads its world faster.").With(researchRate: 0.05f, surveySpeed: 0.15f));
         _all.Add(T("S2", "Laboratory Networks", TechBranch.Science, 2, 110, 2, new[] { "F3" },
             "Linked research labs across your colonies.").With(researchRate: 0.25f));
         _all.Add(T("S3", "Xenoarchaeology", TechBranch.Science, 2, 150, 2, new[] { "S1" },
@@ -228,7 +231,7 @@ public static class TechDatabase
         _all.Add(e4.With(rangeMult: 0.60f));
         _all.Add(T("E5", "Autonomous Survey Drones", TechBranch.Exploration, 2, 140, 2, new[] { "E2", "S1" },
             "Every scout carries a swarm of drones that fan out and map a world in a fraction of the time a crew would need.")
-            .With(researchRate: 0.08f, unlock: "Surveys finish markedly faster."));
+            .With(researchRate: 0.08f, surveySpeed: 0.35f, unlock: "Surveys finish markedly faster."));
         _all.Add(T("E6", "Self-Sufficient Hulls", TechBranch.Exploration, 2, 190, 3, new[] { "E3", "X1" },
             "Closed-loop life support and fuel scoops aboard every ship — your fleet stops needing to come home.")
             .With(rangeMult: 0.22f, unlock: "Ships endure far longer on hostile worlds."));
@@ -335,11 +338,12 @@ public static class TechExtensions
 {
     public static Tech With(this Tech t, float researchRate = 0f, float buildCostCut = 0f, float buildTimeCut = 0f,
         float terraCeiling = 0f, float terraSpeed = 0f, float rangeMult = 0f, float oreYield = 0f,
-        int shipyardPower = 0, int researchCap = 0, string unlock = null)
+        int shipyardPower = 0, int researchCap = 0, string unlock = null, float surveySpeed = 0f)
     {
         t.researchRate = researchRate; t.buildCostCut = buildCostCut; t.buildTimeCut = buildTimeCut;
         t.terraCeiling = terraCeiling; t.terraSpeed = terraSpeed; t.rangeMult = rangeMult; t.oreYield = oreYield;
         t.shipyardPower = shipyardPower; t.researchCap = researchCap;
+        t.surveySpeed = surveySpeed;
         t.unlockNote = unlock;
         return t;
     }
@@ -705,7 +709,7 @@ public static class TechManager
     public static void Recompute()
     {
         TechEffects.Reset();
-        float rr = 0f, bc = 0f, bt = 0f, tc = 0f, ts = 0f, rm = 0f, oy = 0f;
+        float rr = 0f, bc = 0f, bt = 0f, tc = 0f, ts = 0f, rm = 0f, oy = 0f, ss = 0f;
         int sp = 0, rc = 0;
         foreach (var id in researched)
         {
@@ -713,6 +717,7 @@ public static class TechManager
             rr += t.researchRate; bc += t.buildCostCut; bt += t.buildTimeCut;
             tc += t.terraCeiling; ts += t.terraSpeed; rm += t.rangeMult; oy += t.oreYield;
             sp += t.shipyardPower; rc += t.researchCap;
+            ss += t.surveySpeed;
         }
         // THE VAEL LEGACY — recovering all ten Vael fragments grants their whole making as a broad, permanent
         // surge, folded straight into the same effect tables every system already reads (AncientClues).
@@ -728,6 +733,7 @@ public static class TechManager
         TechEffects.TerraformCeilingBonus = tc;
         TechEffects.TerraformSpeedMult = 1f + ts;
         TechEffects.OreYieldMult = 1f + oy;
+        TechEffects.SurveySpeedMult = 1f + ss;
         ShipUpgrades.TechRange = 1f + rm;   // multiplies the empire-level range bonus
     }
 

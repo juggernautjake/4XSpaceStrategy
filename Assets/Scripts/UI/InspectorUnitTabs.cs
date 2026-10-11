@@ -72,9 +72,7 @@ public partial class InspectorWindow
         }, 26);
         live.Button(surveyBtn, () =>
         {
-            if (!u.Info.canExplore) return (false, "Survey — this class can't survey");
-            if (u.location == null) return (false, "Survey — travel to a world first");
-            if (u.location.Surveyed) return (false, $"Survey — {u.location.name} is already surveyed");
+            if (!Survey.CanSurvey(u.location, u, out string why)) return (false, $"Survey — {why}");
             return (true, $"Survey {u.location.name}");
         });
 
@@ -84,15 +82,12 @@ public partial class InspectorWindow
         }, 26);
         live.Button(researchBtn, () =>
         {
-            if (!u.Info.canResearch) return (false, "Deep Research — needs a research ship");
-            if (u.location == null) return (false, "Deep Research — travel to a world first");
-
-            // DeepResearch owns the rules and answers in words, so the button says exactly what is
-            // missing — the tier, the empire level, or that the world has nothing left to give.
-            if (!DeepResearch.CanAdvance(u.location, out string why))
-                return (false, $"Deep Research — {why}");
-
-            return (true, $"{DeepResearch.Name(u.location.NextResearchLevel)} — {u.location.name}");
+            // Survey owns the rules and answers in words. A research hull may take an UNMAPPED world:
+            // it maps it first and then reads it (UnitManager.BeginAction), and the caption says so.
+            if (!Survey.CanDeepSurvey(u.location, u, out string why)) return (false, $"Deep Survey — {why}");
+            return (true, u.location.Surveyed
+                ? $"Deep Survey {u.location.name}"
+                : $"Survey + Deep Survey {u.location.name}");
         });
 
         var colonizeBtn = UIFactory.Button(p, "", () =>
@@ -171,7 +166,7 @@ public partial class InspectorWindow
                        $"({GameCalendar.Duration(Mathf.Max(0f, u.travelDuration - u.travelElapsed))})"; break;
             case UnitStatus.Exploring: task = $"Surveying {(u.location != null ? u.location.name : "?")}"; break;
             case UnitStatus.Colonizing: task = $"Colonizing {(u.location != null ? u.location.name : "?")}"; break;
-            case UnitStatus.Researching: task = $"Researching {(u.location != null ? u.location.name : "?")}"; break;
+            case UnitStatus.Researching: task = $"Deep surveying {(u.location != null ? u.location.name : "?")}"; break;
             case UnitStatus.Returning: task = "Returning home"; break;
             default: task = u.location != null ? $"Idle at {u.location.name}" : (u.inSpace ? "Holding position in deep space" : "Idle"); break;
         }
@@ -184,9 +179,9 @@ public partial class InspectorWindow
         switch (u.status)
         {
             case UnitStatus.Traveling: return u.TravelProgress;
-            case UnitStatus.Exploring: return u.location != null ? u.location.explorationProgress : 0f;
+            case UnitStatus.Exploring: return Survey.Progress(u.location, false);
             case UnitStatus.Colonizing: return u.location != null ? u.location.claimProgress : 0f;
-            case UnitStatus.Researching: return u.location != null ? u.location.researchProgress : 0f;
+            case UnitStatus.Researching: return Survey.Progress(u.location, true);
             default: return 0f;
         }
     }

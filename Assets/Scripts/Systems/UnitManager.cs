@@ -867,20 +867,31 @@ public class UnitManager : MonoBehaviour
                 else FinishAction(u, OrderKind.Survey, b);
                 break;
             case OrderKind.Research:
-                if (b != null && u.Info.canResearch && b.Surveyed)
+                if (b != null && Survey.CanDeepSurvey(b, u, out string whyNot))
                 {
+                    if (!b.Surveyed)
+                    {
+                        // MAP IT FIRST, THEN READ IT. Every research hull can survey, so a deep-survey order
+                        // on an unmapped world used to be refused at the door ("must be surveyed first") by a
+                        // ship perfectly able to do the mapping itself. Now it runs level 1 with the Research
+                        // order still at the front of its queue: Explore's completion pops only a SURVEY
+                        // order, the ship goes idle, StartNext comes straight back here, and this time the
+                        // world is surveyed.
+                        u.status = UnitStatus.Exploring;
+                        break;
+                    }
                     // Fresh clock per world. researchTimer is only zeroed on COMPLETION, so a ship
                     // pulled off a half-finished deep survey used to arrive at the next world already
-                    // 60% done — and that world's progress bar jumped to 60% on the first frame.
+                    // 60% done. (b.researchProgress is NOT zeroed any more: it mirrors the WORLD's
+                    // deepProgress, and zeroing it flashed every readout to 0% for a frame.)
                     u.researchTimer = 0f;
-                    b.researchProgress = 0f;
                     u.status = UnitStatus.Researching;
                 }
                 else
                 {
-                    if (b != null && !b.Surveyed)
-                        NotificationManager.Instance?.Push($"{u.name} can't start Deep Research yet",
-                            $"{b.name} must be surveyed first.", null, NotifKind.Info);
+                    if (b != null && whyNot != null && b.deepProgress < 1f)
+                        NotificationManager.Instance?.Push($"{u.name} can't start a Deep Survey",
+                            $"{b.name}: {whyNot}.", null, NotifKind.Info);
                     FinishAction(u, OrderKind.Research, b);
                 }
                 break;
@@ -912,7 +923,10 @@ public class UnitManager : MonoBehaviour
         if (u.Info.canColonize && b.owner != FactionManager.Player)
         { u.status = UnitStatus.Colonizing; b.claimingFaction = FactionManager.Player; }
         else if (u.Info.canExplore && !b.Surveyed) u.status = UnitStatus.Exploring;
-        else if (u.Info.canResearch && b.Surveyed) u.status = UnitStatus.Researching;
+        // Only while there is something left to read: a fully studied world used to put the ship into
+        // Researching for one frame and straight back out, which flickered its task line.
+        else if (u.Info.canResearch && b.Surveyed && b.deepProgress < 1f)
+        { u.researchTimer = 0f; u.status = UnitStatus.Researching; }
         else u.status = UnitStatus.Idle;
     }
 
@@ -1079,24 +1093,7 @@ public class UnitManager : MonoBehaviour
 
         if (b.explorationProgress >= 1f)
         {
-            u.AddExperience(XpSurvey);
-            SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
-
-            int sites = b.pointsOfInterest != null ? b.pointsOfInterest.Count : 0;
-            string found = sites > 0
-                ? $" {sites} point(s) of interest charted — see the Survey tab."
-                : " Nothing of note on the surface.";
-            string deeper = u.Info.canResearch
-                ? " This ship can also run DEEP RESEARCH here — the first of three studies, each reading what the surface map can only point at."
-                : " A research ship could run Deep Research here for far more than the surface shows.";
-
-            NotificationManager.Instance?.Push($"{b.name} surveyed", "Survey complete — map revealed.",
-                FlyTo(b), NotifKind.Research,
-                detail: $"{u.name} finished surveying {b.name}. Its detailed map and points of interest are now available.{found}{deeper}" +
-                (u.samples.Count > 0 ? $" {u.name} is carrying {u.samples.Count} ore sample(s) — take them to a world with a research centre to have them analysed." : ""));
-            RevealBodyVisual(b);
-            AncientLore.SurveyBody(b);   // announce any ancient ruins the surface pass turned up
-            FinishAction(u, OrderKind.Survey, b);
+            CompleteGround(u, b);
             return;
         }
 
@@ -1155,36 +1152,19 @@ public class UnitManager : MonoBehaviour
             // Each index finishing is worth saying out loud: it is the unit of progress the player is
             // actually watching, and six quiet overlays appearing is a worse story than six arrivals.
             var nowOn = Survey.CurrentIndex(b);
-            if (nowOn != wasOn && wasOn != SurfaceIndexKind.None)
+            // Not on the LAST index: finishing it is the whole survey finishing, and CompleteDeep says so
+            // in one report. Announcing it here as well put two notifications up in the same frame.
+            if (nowOn != wasOn && wasOn != SurfaceIndexKind.None && nowOn != SurfaceIndexKind.None)
             {
                 u.AddExperience(XpResearch);
                 NotificationManager.Instance?.Push($"{b.name}: {SurfaceIndex.Name(wasOn)} index charted",
-                    nowOn == SurfaceIndexKind.None
-                        ? "Every index read — this world is fully studied."
-                        : $"Now reading the {SurfaceIndex.Name(nowOn)} index.",
-                    FlyTo(b), NotifKind.Research);
+                    $"Now reading the {SurfaceIndex.Name(nowOn)} index.", FlyTo(b), NotifKind.Research);
             }
 
             if (before < 1f && b.deepProgress >= 1f)
             {
-                // The tier ladder is settled FIRST, so DoDeepResearch below sees a world with nothing
-                // left to advance and skips straight to the part that still matters. Reaching the end of
-                // the running order IS reaching the end of the ladder now; leaving researchLevel behind
-                // would leave every other reader of it describing a fully-studied world as unstudied.
-                b.researchLevel = CelestialBody.MaxResearchLevel;
-
-                // Still the thing that charts the surface's SITES and names its ores. That was never
-                // about which overlay you may look at — it is the ship writing up what it found — and it
-                // is what turns a point of interest into a job the player can commission.
-                DoDeepResearch(u, b);
-
-                // The Vael fragment surfaces here. It used to be Deep Research Tier III; that tier no
-                // longer gates anything, and the fragment belongs on the last thing a world has left to
-                // give rather than on a tier an empire might never buy the tech for. Reveal is a no-op
-                // on a world with no fragment and on one already recovered.
-                AncientClues.Reveal(b);
-
-                SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
+                u.AddExperience(XpResearch);
+                CompleteDeep(u, b);
                 FinishAction(u, OrderKind.Research, b);
             }
             return;
@@ -1193,6 +1173,110 @@ public class UnitManager : MonoBehaviour
         // Nothing left to read.
         b.researchProgress = 1f;
         FinishAction(u, OrderKind.Research, b);
+    }
+
+    // ============================================================================================
+    // THE TWO COMPLETIONS — one path each, whoever finishes the job
+    //
+    // A ship finishing a survey, a ship finishing a deep survey, and the Dev Mode "survey fully" control
+    // all end here, so nothing can be half-unlocked by taking a different road: the rows are filled, the
+    // progress is exactly 1, the research points are paid, the ruins are announced, the sites charted,
+    // the ores entered in the Codex, the clue revealed and the Planet View refreshed — every time.
+    // `u` may be null (the Dev control); everything ship-specific is skipped then.
+    // ============================================================================================
+
+    /// Level 1 is done on this world.
+    public void CompleteGround(Unit u, CelestialBody b)
+    {
+        if (b == null) return;
+        bool first = b.explorationProgress < 1f || u != null;   // a ship only gets here on the crossing frame
+
+        var rows = Survey.Rows(b);
+        for (int i = 0; i < rows.Length; i++) rows[i] = 1f;
+        b.explorationProgress = 1f;
+        b.visited = true;
+        if (!first) { RevealBodyVisual(b); return; }
+
+        // SURVEYS FEED RESEARCH. ResearchManager.AwardExploration existed and nothing called it, so a
+        // mapped world was worth nothing to the labs. A world's survey data is now worth a grant of RP.
+        ResearchManager.AwardExploration();
+        if (u != null) u.AddExperience(XpSurvey);
+        SimpleAudio.Instance?.PlayNotify(NotifKind.Research);
+
+        // Pop the order first, so whether the ship carries straight on into a deep survey is known
+        // before the report says what happens next.
+        bool chained = false;
+        if (u != null)
+        {
+            FinishAction(u, OrderKind.Survey, b);
+            // A research hull with nothing else queued carries straight on to level 2 rather than idling
+            // in orbit of a world it could be reading. (A queued Research order does the same through
+            // StartNext; anything else queued goes first.)
+            if (u.orders.Count == 0 && !u.queuePaused && Survey.CanDeepSurvey(b, u, out _))
+            {
+                u.researchTimer = 0f;
+                u.status = UnitStatus.Researching;
+                chained = true;
+            }
+        }
+
+        int sites = b.pointsOfInterest != null ? b.pointsOfInterest.Count : 0;
+        string found = sites > 0
+            ? $" {sites} point(s) of interest on the surface — see the Survey tab."
+            : " Nothing of note on the surface.";
+        string deeper = chained
+            ? $" {u.name} is starting the Deep Survey now: it reads every index overlay and charts the sites."
+            : (u != null && u.Info.canResearch)
+                ? " This ship can run a Deep Survey here next: it reads every index overlay and charts the sites."
+                : " A research ship can run a Deep Survey here to read its index overlays and chart its sites.";
+        string who = u != null ? u.name : "Dev Mode";
+        NotificationManager.Instance?.Push($"{b.name} surveyed", $"Survey complete — map revealed. +{ResearchManager.PointsPerExploration} research points.",
+            FlyTo(b), NotifKind.Research,
+            detail: $"{who} finished surveying {b.name}. Its surface map and habitability are now known.{found}{deeper}" +
+            (u != null && u.samples.Count > 0 ? $" {u.name} is carrying {u.samples.Count} ore sample(s) — take them to a world with a research centre to have them analysed." : ""));
+        RevealBodyVisual(b);
+        AncientLore.SurveyBody(b);   // announce any ancient ruins the surface pass turned up
+        PlanetViewWindow.Instance?.RefreshIfShowing(b);
+        OnUnitsChanged?.Invoke();
+    }
+
+    /// Level 2 is done on this world.
+    public void CompleteDeep(Unit u, CelestialBody b)
+    {
+        if (b == null) return;
+        if (b.explorationProgress < 1f) CompleteGround(null, b);
+        b.deepProgress = 1f;
+        b.researchProgress = 1f;
+        // Reaching the end of the running order IS reaching the end of the old ladder; leaving
+        // researchLevel behind would leave every reader of it describing a studied world as unstudied.
+        b.researchLevel = CelestialBody.MaxResearchLevel;
+
+        // Charts the sites, names the ores and pays the research points.
+        DoDeepResearch(u, b);
+
+        // The Vael fragment surfaces on the last thing a world has to give. A no-op on a world with no
+        // fragment or one already recovered.
+        AncientClues.Reveal(b);
+    }
+
+    /// DEV MODE: survey this world fully, now, through exactly the completions above. Inert outside
+    /// Dev Mode. Returns false when there was nothing to do.
+    public bool DevCompleteSurvey(CelestialBody b)
+    {
+        if (!GameMode.DevMode || b == null) return false;
+        if (b.explorationProgress >= 1f && b.deepProgress >= 1f) return false;
+        if (b.explorationProgress < 1f) CompleteGround(null, b);
+        if (b.deepProgress < 1f) CompleteDeep(null, b);
+        // Any ship still working the world has nothing left to do.
+        if (b.units != null)
+            foreach (var w in b.units)
+                if (w != null && (w.status == UnitStatus.Exploring || w.status == UnitStatus.Researching))
+                {
+                    FinishAction(w, w.status == UnitStatus.Exploring ? OrderKind.Survey : OrderKind.Research, b);
+                }
+        PlanetViewWindow.Instance?.RefreshIfShowing(b);
+        OnUnitsChanged?.Invoke();
+        return true;
     }
 
     // A research ship finishing a deep survey of a world.
@@ -1211,14 +1295,9 @@ public class UnitManager : MonoBehaviour
     {
         int studied = 0;
 
-        // ONE TIER, and only if this world and this empire can take it. Deep Research is a ladder of
-        // three steps now rather than a single flag that could be re-run forever — see DeepResearch,
-        // which owns which tier unlocks what and refuses in words when it cannot.
-        int reached = DeepResearch.Advance(b);
-        if (reached > 0)
-            NotificationManager.Instance?.Push(
-                $"{DeepResearch.Name(reached)} — {b.name}",
-                DeepResearch.Describe(reached), null);
+        // (The three-tier Deep Research ladder that used to be advanced here is gone: the level-2 survey
+        // replaced it, every index is read by finishing the job, and Advance had become a no-op called
+        // after researchLevel was already set to the maximum. See Survey.cs.)
 
         // ORES ARE DISCOVERED, NOT RESEARCHED.
         //
@@ -1275,7 +1354,10 @@ public class UnitManager : MonoBehaviour
             summary.Append($" — {quoted} research points to work through them all. Commission them from " +
                            "the Survey tab's site list. ");
         }
-        summary.Append("Heat, Fertile and Weather indexes are now available for this world.");
+        int indexes = Survey.PresentCount(b);
+        summary.Append($"All {indexes} of this world's index overlays are charted. ");
+        int rp = ResearchManager.AwardDeepSurvey(indexes);
+        summary.Append($"+{rp} research points from the data.");
 
         NotificationManager.Instance?.Push($"Deep survey complete at {b.name}", summary.ToString(),
                                            FlyTo(b), NotifKind.Research,
@@ -1353,7 +1435,9 @@ public class UnitManager : MonoBehaviour
         b.owner = FactionManager.Player;
         b.claimingFaction = null;
         b.visited = true;
-        b.explorationProgress = Mathf.Max(b.explorationProgress, 1f);   // owning fully reveals it
+        // Owning fully reveals it — through the real completion, so a world settled before anyone mapped
+        // it still pays its survey RP and announces its ruins rather than silently skipping both.
+        if (b.explorationProgress < 1f) CompleteGround(null, b);
         b.claimProgress = Colony.ClaimProgress(b);
         u.AddExperience(XpColonize);
 

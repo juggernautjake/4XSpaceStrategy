@@ -16,7 +16,10 @@ public static class ResearchManager
 
     const int StartingPoints = 120;
     const int PointsPerDiscovery = 10;
-    const int PointsPerExploration = 25;
+    /// Research points a world's level-1 survey data is worth (UnitManager.CompleteGround).
+    public const int PointsPerExploration = 25;
+    /// ...and each index overlay a deep survey reads (UnitManager.DoDeepResearch).
+    public const int PointsPerIndexRead = 12;
 
     public static void NewGame()
     {
@@ -106,6 +109,39 @@ public static class ResearchManager
     {
         ResearchPoints += PointsPerExploration;
         OnChanged?.Invoke();
+    }
+
+    // ---- What the empire earns per second, for the HUD ----
+    //
+    // The HUD showed the bank ("RP 340") and nothing about the income behind it, so whether building a
+    // laboratory had done anything was invisible until the number happened to move. This is the same
+    // sum the game pays out: every settled world of the player's labs (SurfaceBuildManager.ResearchPerSec,
+    // exactly what ColonyManager.TickColony accrues) plus deployed stations' and Science Vessels'
+    // research auras (StationEffects), all times the empire's research-rate technologies. Memoised for
+    // a second of real time: it walks the galaxy, and it is read whenever the bank changes.
+    static float incomeMemo, incomeAt = -10f;
+
+    public static float IncomePerSecond()
+    {
+        float now = Time.unscaledTime;
+        if (now - incomeAt < 1f) return incomeMemo;
+        incomeAt = now;
+        float sum = 0f;
+        if (SystemContext.Galaxy != null)
+            foreach (var b in SystemContext.AllBodies())
+                if (b != null && b.owner == FactionManager.Player && b.settled)
+                    sum += SurfaceBuildManager.ResearchPerSec(b);
+        sum += StationEffects.ResearchAuraTotal();
+        incomeMemo = sum * TechEffects.ResearchRateMult;
+        return incomeMemo;
+    }
+
+    /// Pay for a finished deep survey: PointsPerIndexRead for every index the world had. Returns the grant.
+    public static int AwardDeepSurvey(int indexes)
+    {
+        int p = Mathf.Max(0, indexes) * PointsPerIndexRead;
+        if (p > 0) { ResearchPoints += p; OnChanged?.Invoke(); }
+        return p;
     }
 
     public static void AddPoints(int p)
