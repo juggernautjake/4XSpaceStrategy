@@ -92,6 +92,14 @@ public static class WorldModifiers
 
     static void Set(CelestialBody b, WorldModifier m) => b.worldModifierFlags |= 1 << (int)m;
 
+    /// Give a world a modifier outright — for guarantees made at generation (every starting world has
+    /// Vast Mineral Deposits; see GalaxyGenerator.Finish). Only for the bit-backed modifiers.
+    public static void Grant(CelestialBody b, WorldModifier m)
+    {
+        if (b == null || !Solid(b)) return;
+        Set(b, m);
+    }
+
     /// Does this world carry this modifier RIGHT NOW?
     ///
     /// Live for the derived ones: terraform the plates away (or a remodel takes them) and the modifier

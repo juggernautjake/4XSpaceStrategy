@@ -191,6 +191,11 @@ public static class UnitModelLibrary
     /// Folder names under SpaceAssets, in SpeciesDatabase order.
     static readonly string[] CivFolders = { "Terran", "Aquarii", "Pyrothian", "Cryithn", "Sylvan" };
 
+    /// Which civilization's folder this unit's art comes from. Public so RaceVfx can ask the SAME
+    /// question for the effects — a second rule that disagreed would put one race's plumes on
+    /// another race's hull.
+    public static string CivFolder(Unit u) => CivFolderFor(u);
+
     static string CivFolderFor(Unit u)
     {
         int idx = (u?.owner == null || u.owner == FactionManager.Player)
@@ -612,17 +617,16 @@ public class UnitModelRenderer : MonoBehaviour
         // Player ships only: the other empires wear the colours their art shipped in, and a galaxy in
         // which every fleet had been recoloured to somebody's taste would lose the thing the accents
         // are for. Silent no-op until the player actually chooses. See CivLivery.
-        if (u.owner == FactionManager.Player)
-            CivLivery.Apply(go, SpeciesManager.CurrentIndex);
-
+        //
         // Tint toward the owner's colour so allegiance reads at a glance, matching the token emblem.
+        //
+        // Both now go through HullMaterials, for two reasons. It knows glTFast's property names as well
+        // as URP/Lit's — asking only for `_BaseColor`/`_BaseMap` found nothing on the generated .glb
+        // hulls, so neither the tint nor the livery had ever touched one. And it shares one tinted copy
+        // per (material, owner, livery) instead of cloning every material on every ship via
+        // `renderer.materials`, which made forty identical copies for forty scouts and never freed them.
         var tint = FactionManager.OwnerColor(u.owner);
-        foreach (var mr in go.GetComponentsInChildren<MeshRenderer>())
-            foreach (var mat in mr.materials)
-            {
-                if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", Color.Lerp(Color.white, tint, 0.3f));
-                else if (mat.HasProperty("_Color")) mat.color = Color.Lerp(Color.white, tint, 0.3f);
-            }
+        HullMaterials.Prepare(go, tint, u.owner == FactionManager.Player ? SpeciesManager.CurrentIndex : -1);
 
         // ---- and now the other two levels of detail -------------------------------------------
         //
@@ -729,6 +733,10 @@ public class UnitModelRenderer : MonoBehaviour
         if (Input.GetKeyDown(ReloadOrientationsKey))
         {
             UnitModelLibrary.ReloadOrientations();
+            // The race effects ride the same key, so tuning a plume colour in race-vfx.json is the
+            // same edit-F10-look loop as fixing a sideways hull. ShipLights reads its profile when a
+            // model is built, so the rebuild below is what puts the new values on screen.
+            RaceVfx.Reload();
             // Drop every built model so the next Rebuild picks the new rotations up. Cheap: there are
             // tens of these, not thousands, and this only happens when a key is pressed.
             foreach (var kv in models) if (kv.Value?.go != null) Destroy(kv.Value.go);
@@ -736,7 +744,7 @@ public class UnitModelRenderer : MonoBehaviour
             badges.Clear();
             Rebuild();
             NotificationManager.Instance?.Push("Ship orientations reloaded",
-                "Re-read ship-meshes.txt and rebuilt every model.", null, NotifKind.Info);
+                "Re-read ship-meshes.txt and race-vfx.json and rebuilt every model.", null, NotifKind.Info);
         }
     }
 

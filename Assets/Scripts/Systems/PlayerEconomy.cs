@@ -62,6 +62,9 @@ public static class PlayerEconomy
         return true;
     }
 
+    /// The least any new game starts with — see NewGame.
+    public const float StartFloorMetal = 900f, StartFloorEnergy = 650f, StartFloorWater = 300f;
+
     // Starting resources: base by home planet type, scaled by difficulty + a species flavour bonus.
     public static void NewGame(CelestialBody home, Species species)
     {
@@ -92,9 +95,14 @@ public static class PlayerEconomy
         }
 
         float mult = GameConfig.ResourceMult * GameConfig.HomeResourceBonus;
-        stock[ResourceType.Metal] = Mathf.Max(0f, metal * mult);
-        stock[ResourceType.Energy] = Mathf.Max(0f, energy * mult);
-        stock[ResourceType.Water] = Mathf.Max(0f, water * mult);
+        // A FLOOR EVERY START GETS (2026-10-10): "make sure the starting planet has enough of the necessary
+        // materials to actually start decently well". The opening build — farm, combustion plant, mine, two
+        // habitats — plus a shipyard, a scout and a colony ship costs about 605 metal and 415 energy, and a
+        // Hard start could open on 280 metal: stalled before its first ship. The floor covers that list
+        // with room to spare on any difficulty and any species; difficulty and species still add on top.
+        stock[ResourceType.Metal] = Mathf.Max(StartFloorMetal, metal * mult);
+        stock[ResourceType.Energy] = Mathf.Max(StartFloorEnergy, energy * mult);
+        stock[ResourceType.Water] = Mathf.Max(StartFloorWater, water * mult);
         OnChanged?.Invoke();
     }
 

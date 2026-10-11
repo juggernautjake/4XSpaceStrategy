@@ -147,6 +147,17 @@ public static class GalaxyGenerator
             foreach (var b in sys.AllBodies())
                 WorldModifiers.Roll(b);
 
+        // EVERY STARTING WORLD CAN BUILD (2026-10-10): "make sure there are always enough minerals on the
+        // starting planet for whatever race". Mines and combustion plants both run on the Mineral Index,
+        // and a world the dice gave thin mineral ground could not fund a shipyard. So whichever option the
+        // player picks has Vast Mineral Deposits — plenty of mine-worthy ground — on top of whatever it
+        // rolled.
+        foreach (var opt in HomeworldOnboarding.Options)
+        {
+            WorldModifiers.Grant(opt, WorldModifier.VastMineralDeposits);
+            SurfaceIndex.InvalidateStats(opt);
+        }
+
         // A very occasional world nobody has found yet.
         SeedUndiscoveredWorlds(galaxy);
 
@@ -275,8 +286,10 @@ public static class GalaxyGenerator
         LinkBodies(home);
 
         if (home.bodies.Count == 0) home.bodies.Add(new CelestialBody(CelestialBodyType.RockyPlanet));
-        // The overlap of the species' band and the star's drawn one — see Habitability.PlacementZone.
-        Habitability.PlacementZone(home.combinedStar, species, out float inner, out float outer);
+        // The overlap of the species' band and the star's drawn one — see Habitability.PlacementZone —
+        // reaching inward to the species' own edge when its climate is hotter than that overlap can give
+        // (Habitability.CradleZone: a Pyrothian cradle goes on ring 3, not clamped cold on ring 4).
+        Habitability.CradleZone(home.combinedStar, species, out float inner, out float outer);
         float center = (inner + outer) * 0.5f;
 
         // Promote the planet ALREADY nearest the habitable zone, and convert it where it stands.

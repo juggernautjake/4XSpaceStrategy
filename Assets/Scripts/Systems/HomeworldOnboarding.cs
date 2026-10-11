@@ -15,7 +15,7 @@ using UnityEngine;
 //   PlaceCapitol  — the world is claimed and fully surveyed (level 2, every index), and its Surface Map
 //                   opens with the Planetary Capitol in hand. The capitol is never in the build menu; it
 //                   is placed here, free, and placing it is what settles the world.
-//   Farm → Combustion → Mine → Housing ×2
+//   Farm → Combustion → Mine → Housing ×2 → Shipyard (a new game has no ships; the yard builds them)
 //                 — one at a time. A flashing yellow "!" sits on the Build category tab holding the next
 //                   structure and on that structure's card. A step counts as soon as the job is on the
 //                   build queue, so the player is not left waiting on construction to be told what next.
@@ -25,7 +25,7 @@ using UnityEngine;
 // treats the first player world in the home system as the capital. After the capitol the remaining
 // steps are only advice, and losing them to a save/load costs nothing.
 // ============================================================================================
-public enum OnboardingStep { None, ChooseWorld, PlaceCapitol, Farm, Combustion, Mine, Housing, Done }
+public enum OnboardingStep { None, ChooseWorld, PlaceCapitol, Farm, Combustion, Mine, Housing, Shipyard, Done }
 
 public static class HomeworldOnboarding
 {
@@ -208,6 +208,7 @@ public static class HomeworldOnboarding
                 case OnboardingStep.Combustion: return SurfaceBuildingType.CombustionPlant;
                 case OnboardingStep.Mine: return SurfaceBuildingType.Mine;
                 case OnboardingStep.Housing: return SurfaceBuildingType.Habitat;
+                case OnboardingStep.Shipyard: return SurfaceBuildingType.SurfaceShipyard;
                 default: return null;
             }
         }
@@ -289,6 +290,7 @@ public static class HomeworldOnboarding
             case OnboardingStep.Housing:
                 int have = World != null ? Have(World, SurfaceBuildingType.Habitat) : 0;
                 return $"Place {HousingWanted} Habitat Blocks for your city (Civil tab) — {have}/{HousingWanted}.";
+            case OnboardingStep.Shipyard: return "Place a Shipyard (Military tab) — your first ships are built there.";
             default: return "";
         }
     }

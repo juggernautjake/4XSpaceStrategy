@@ -99,20 +99,24 @@ public class ShipLights : MonoBehaviour
     /// authored rig, so they sit correctly on whatever mesh is actually there.
     public static bool Enabled = true;
 
-    /// Running lights: OFF even when the rig is on.
+    /// Running lights: ALLOWED, and each race decides (RaceVfxProfile.navLights).
     ///
-    /// They were built at 8.5% of hull length, which sounds small and is not — a ship is drawn at
-    /// 0.09-0.40 world units, so each lamp came out a substantial fraction of the whole vessel and the
-    /// fleet read as a string of fairy lights with a ship somewhere behind it. The blinking made it
-    /// worse by drawing the eye to the lamp rather than the hull.
+    /// They were off for a while. They were built at 8.5% of hull length, which sounds small and is
+    /// not — a ship is drawn at 0.09-0.40 world units, so each lamp came out a substantial fraction of
+    /// the whole vessel and the fleet read as a string of fairy lights with a ship somewhere behind it.
     ///
-    /// Turned off rather than deleted, and the size fixed at the same time, so switching it back on
-    /// gives pinpricks instead of beacons. The rhythm machinery in FleetClock is untouched and still
-    /// drives the drive plumes and the plasma pulse, which are the effects worth having.
-    public static bool ShowNavLights = false;
+    /// They are back because they are now sized as pinpricks (NavSizeFactor, capped by NavWidthCap),
+    /// and because not every race carries them: Terran and Cryithn hulls are engineered things and
+    /// read better lit, while a living Aquarii shrimp or a Pyrothian lava hull with an aviation strobe
+    /// on its tail reads as a toy. This flag is the master switch over all of that.
+    public static bool ShowNavLights = true;
 
     const int   MaxNavLights   = 7;
     const float NavSizeFactor  = 0.028f;   // of hull length — a third of what it was
+    /// ...and never more than this fraction of the beam. Length alone over-sizes the lamps on a long,
+    /// slender hull, where 2.8% of the length can be a large share of the width and the lamp stops
+    /// being a point ON the hull and becomes a blob beside it.
+    const float NavWidthCap    = 0.10f;
     const float ThrusterFactor = 0.30f;    // of hull width
     const float MuzzleLife     = 0.09f;    // seconds — matched to the shot leaving the barrel
 
@@ -151,6 +155,31 @@ public class ShipLights : MonoBehaviour
     readonly List<Lamp> muzzlePool = new List<Lamp>();
     readonly List<float> muzzleLife = new List<float>();
 
+    /// This hull's race effects, read once at build. F10 rebuilds every model, so a reloaded profile
+    /// still reaches every ship without this having to watch for changes.
+    RaceVfxProfile vfx;
+
+    // ---- the hull's own emissive glow ----
+    //
+    // One entry per (renderer, material slot) whose material actually emits. Driven through a
+    // MaterialPropertyBlock rather than a material copy: the hull materials are SHARED between every
+    // ship of the same look (HullMaterials), and the pulse is per ship — it follows this ship's
+    // throttle and sits on its own phase — so writing it into the material would make the whole fleet
+    // throb as one. The LOD levels are listed too; they borrow the base's materials but each renderer
+    // carries its own block.
+    struct Glow
+    {
+        public Renderer renderer;
+        public int slot;
+        public int property;
+        public Vector4 authored;   // the emissive as imported, so the multiplier never compounds
+    }
+
+    readonly List<Glow> glows = new List<Glow>();
+    static MaterialPropertyBlock glowBlock;
+    float glowPhase;
+    float glowApplied = -1f;
+
     // ============================================================================================
     // BUILD
     // ============================================================================================
@@ -175,8 +204,90 @@ public class ShipLights : MonoBehaviour
         if (hullLength < 1e-4f) hullLength = b.size.magnitude;
         if (hullWidth  < 1e-4f) hullWidth  = hullLength * 0.4f;
 
+        vfx = RaceVfx.For(u);
+
+        // BEFORE any lamp exists, so the glow list is the hull's renderers and nothing of ours.
+        CollectGlow();
+
         BuildNavLights(b, ownerColour);
         BuildThrusters(b);
+    }
+
+    // ---- hull glow ---------------------------------------------------------------------------
+    //
+    // The generated hulls carry an emissive texture at an emissive factor of exactly 1, and bloom's
+    // threshold is 1.05 (PostFxController) — so as imported, no hull glow in the fleet ever blooms,
+    // and lava and bioluminescence look like paint. The race's multiplier is what lifts it over.
+    //
+    // A material with NO authored emission is left alone: multiplying black is black, and inventing a
+    // glow the art does not have would light the whole hull evenly, which reads as a rendering fault.
+    void CollectGlow()
+    {
+        glows.Clear();
+        if (vfx == null || !vfx.AffectsHullGlow) return;   // the art as imported; leave it batchable
+
+        foreach (var r in GetComponentsInChildren<Renderer>())
+        {
+            if (r == null) continue;
+            var mats = r.sharedMaterials;
+            for (int i = 0; i < mats.Length; i++)
+            {
+                var m = mats[i];
+                int prop = HullMaterials.EmissiveId(m);
+                if (prop < 0) continue;
+
+                // GetVector, not GetColor. A colour property is stored LINEAR, and GetColor/SetColor
+                // convert through gamma on the way — which would turn a multiplier of 3 into roughly
+                // 11 by the time it reached the shader. The raw vector is the linear value, and scaling
+                // it is exactly "three times as bright".
+                Vector4 e = m.GetVector(prop);
+                if (Mathf.Max(e.x, Mathf.Max(e.y, e.z)) <= 1e-4f) continue;
+
+                // URP/Lit only draws `_EmissionColor` while its keyword is on. The material is a shared
+                // fleet copy (HullMaterials), never the imported asset, so switching it on here touches
+                // nothing outside the fleet — and it is already on for any material that emits.
+                if (HullMaterials.NeedsEmissionKeyword(prop)) m.EnableKeyword("_EMISSION");
+
+                glows.Add(new Glow { renderer = r, slot = i, property = prop, authored = e });
+            }
+        }
+
+        if (glows.Count == 0) return;
+        if (glowBlock == null) glowBlock = new MaterialPropertyBlock();
+
+        // On the quarter-beat grid like every other light, so a fleet's hulls swell together in
+        // syncopation rather than each on a phase of its own.
+        int seed = unit != null ? unit.id : 0;
+        glowPhase = FleetClock.Phases[Mathf.Abs(seed) % FleetClock.Phases.Length];
+
+        ApplyGlow(GlowFactor());
+    }
+
+    /// The multiplier this frame: the race's base level, dipping with its pulse, hotter under power.
+    float GlowFactor()
+    {
+        float k = vfx.emissiveMultiplier;
+        if (vfx.emissivePulseDepth > 0.001f)
+            k *= FleetClock.Breathe(RaceVfx.SnapBeats(vfx.emissivePulseBeats), glowPhase,
+                                    Mathf.Clamp01(vfx.emissivePulseDepth));
+        if (vfx.emissiveThrottleBoost > 0.001f)
+            k *= 1f + vfx.emissiveThrottleBoost * throttle;
+        return k;
+    }
+
+    void ApplyGlow(float factor)
+    {
+        glowApplied = factor;
+        for (int i = 0; i < glows.Count; i++)
+        {
+            var g = glows[i];
+            if (g.renderer == null) continue;
+            var e = g.authored;
+            glowBlock.Clear();
+            // Alpha is not brightness; only the colour channels scale.
+            glowBlock.SetVector(g.property, new Vector4(e.x * factor, e.y * factor, e.z * factor, e.w));
+            g.renderer.SetPropertyBlock(glowBlock, g.slot);
+        }
     }
 
     /// Bounds of every renderer under this object, in THIS transform's local space.
@@ -209,8 +320,18 @@ public class ShipLights : MonoBehaviour
     void BuildNavLights(Bounds b, Color ownerColour)
     {
         if (!ShowNavLights) return;
+        if (vfx != null && !vfx.navLights) return;   // this race flies dark; see ShowNavLights
+        var p = vfx ?? RaceVfx.ForCiv(null);
 
-        float size = hullLength * NavSizeFactor;
+        // Sized off the hull's OWN bounds, in the root's local space — the same space the lamps are
+        // parented in, so FitTo's scale applies to both and the ratio holds at any class size.
+        float size = Mathf.Min(hullLength * NavSizeFactor, hullWidth * NavWidthCap);
+
+        // The race's strobe tempo, with the three rates kept as the 1 : 2 : 6 ladder the rig was
+        // designed on and every one snapped to a legal FleetClock period.
+        float fast = RaceVfx.SnapBeats(p.navBlinkBeats);
+        float tail = RaceVfx.SnapBeats(p.navBlinkBeats * 2f);
+        float slow = RaceVfx.SnapBeats(p.navBlinkBeats * 6f);
         float halfW = hullWidth * 0.5f;
         float halfL = hullLength * 0.5f;
         Vector3 c = b.center;
@@ -222,15 +343,17 @@ public class ShipLights : MonoBehaviour
         float Pick(float[] a) => a[rng.Next(a.Length)];
 
         // port / starboard — constant, the way real ones are
-        Add(c - right * halfW + up * size * 0.4f, size * 0.85f, new Color(1f, 0.25f, 0.2f), 2f, 0f, constant: true);
-        Add(c + right * halfW + up * size * 0.4f, size * 0.85f, new Color(0.3f, 1f, 0.35f), 2f, 0f, constant: true);
+        Add(c - right * halfW + up * size * 0.4f, size * 0.85f, p.navPort, 2f, 0f, constant: true);
+        Add(c + right * halfW + up * size * 0.4f, size * 0.85f, p.navStarboard, 2f, 0f, constant: true);
 
-        // dorsal and tail strobes — white, the fastest things on the hull
-        Add(c + up * (Vector3.Dot(b.extents, up)) , size * 0.9f, new Color(1f, 1f, 0.95f), 0.5f, Pick(FleetClock.Phases));
-        Add(c - bow * halfL + up * size * 0.5f,     size * 0.8f, new Color(0.9f, 0.95f, 1f), 1f, Pick(FleetClock.Phases));
+        // dorsal and tail strobes — the race's strobe colour, the fastest things on the hull
+        Add(c + up * (Vector3.Dot(b.extents, up)) , size * 0.9f, p.navStrobe, fast, Pick(FleetClock.Phases));
+        Add(c - bow * halfL + up * size * 0.5f,     size * 0.8f, Color.Lerp(p.navStrobe, Color.white, 0.3f), tail, Pick(FleetClock.Phases));
 
-        // bow beacon — slow, so a ship reads bow-first at a glance
-        Add(c + bow * halfL, size * 0.7f, new Color(1f, 0.85f, 0.5f), 3f, Pick(FleetClock.Phases));
+        // bow beacon — slow, so a ship reads bow-first at a glance. Kept warm whatever the race, since
+        // it is the one lamp whose job is "which end is the front", and that wants to read the same on
+        // every hull in the game.
+        Add(c + bow * halfL, size * 0.7f, new Color(1f, 0.85f, 0.5f), slow, Pick(FleetClock.Phases));
 
         // owner-colour beacons, one dorsal one ventral
         var oc = ownerColour; oc.a = 1f;
@@ -282,9 +405,12 @@ public class ShipLights : MonoBehaviour
             {
                 // The core is white-hot and the tail cools toward the drive colour, because that is
                 // what a real exhaust does and it is most of what sells a plume as hot rather than as
-                // a blue smear.
+                // a blue smear. The two ends are the race's (RaceVfx): a Terran drive cools to blue,
+                // a Pyrothian one to furnace orange.
                 float k = s / (float)PlumeSegments;
-                Color c = Color.Lerp(new Color(0.85f, 0.95f, 1f), new Color(0.25f, 0.55f, 1f), k);
+                Color c = vfx != null
+                    ? Color.Lerp(vfx.thrusterCore, vfx.thrusterTail, k)
+                    : Color.Lerp(new Color(0.85f, 0.95f, 1f), new Color(0.25f, 0.55f, 1f), k);
 
                 Vector3 pos = nozzle + aft * (hullLength * 0.06f * s);
                 var lamp = MakeQuad(s == 0 ? "Thruster" : "Plume", pos, size * (1f - 0.16f * s), c);
@@ -335,6 +461,16 @@ public class ShipLights : MonoBehaviour
         float rate = throttleTarget > throttle ? 3.5f : 1.4f;
         throttle = Mathf.MoveTowards(throttle, throttleTarget, rate * dt);
 
+        // ---- hull glow ----
+        // Only for a race whose glow MOVES; a static one was written once in CollectGlow. And only
+        // when the value has changed enough to see — a property block write per renderer per frame is
+        // cheap, but not free, and a slow 4-beat breath spends most frames changing by nothing.
+        if (glows.Count > 0 && !vfx.HullGlowIsStatic)
+        {
+            float g = GlowFactor();
+            if (Mathf.Abs(g - glowApplied) > 0.01f) ApplyGlow(g);
+        }
+
         // ---- running lights ----
         for (int i = 0; i < lamps.Count; i++)
         {
@@ -356,8 +492,10 @@ public class ShipLights : MonoBehaviour
             if (t.tr == null) continue;
 
             // A slight flicker keeps a plume from looking like a decal, and it is locked to the beat
-            // like everything else so it never fights the running lights.
-            float flicker = 0.9f + 0.1f * Mathf.Sin(FleetClock.Beats * Mathf.PI * 2f * 3f + i);
+            // like everything else so it never fights the running lights. How deep it dips is the
+            // race's: 0.1 (the old fixed value) is a steady drive, and a Pyrothian one gutters.
+            float fl = vfx != null ? Mathf.Clamp01(vfx.thrusterFlicker) : 0.1f;
+            float flicker = (1f - fl) + fl * Mathf.Sin(FleetClock.Beats * Mathf.PI * 2f * 3f + i);
             float k = throttle * flicker;
 
             // Segments further down the plume need MORE throttle before they light, so the flame grows

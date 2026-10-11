@@ -114,18 +114,30 @@ public static class CivLivery
 
         foreach (var mr in model.GetComponentsInChildren<MeshRenderer>())
             foreach (var mat in mr.materials)
-            {
-                var src = mat.HasProperty("_BaseMap") ? mat.GetTexture("_BaseMap")
-                        : mat.HasProperty("_MainTex") ? mat.GetTexture("_MainTex")
-                        : null;
-                if (src == null) continue;
+                ApplyTo(mat, civIndex);
+    }
 
-                var painted = Repaint(src, civIndex);
-                if (painted == null) continue;
+    /// Repaint ONE material's base-colour texture into the player's colours. The hull path calls this
+    /// through HullMaterials, which owns the material copy and shares it between every ship that wears
+    /// the same paint — so the repaint lands once per look instead of once per renderer per ship.
+    ///
+    /// The texture property is looked up across both shader families (HullMaterials.BaseMapId): the
+    /// legacy FBX hulls carry `_BaseMap`, but the generated .glb hulls come through glTFast's shader
+    /// graphs as `baseColorTexture`, and asking only for the URP names found nothing on them — the
+    /// player's livery silently did not exist on any generated ship.
+    public static void ApplyTo(Material mat, int civIndex)
+    {
+        if (!Chosen || mat == null) return;
+        if (civIndex < 0 || civIndex >= keys.Length) return;
 
-                if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", painted);
-                else mat.SetTexture("_MainTex", painted);
-            }
+        int prop = HullMaterials.BaseMapId(mat);
+        if (prop < 0) return;
+        var src = mat.GetTexture(prop);
+        if (src == null) return;
+
+        var painted = Repaint(src, civIndex);
+        if (painted == null) return;
+        mat.SetTexture(prop, painted);
     }
 
     static Texture2D Repaint(Texture src, int civIndex)

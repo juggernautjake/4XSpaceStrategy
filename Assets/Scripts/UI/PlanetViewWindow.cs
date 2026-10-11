@@ -117,6 +117,8 @@ public class PlanetViewWindow : MonoBehaviour
     WorldModifierBadges modifierBadges;
     RawImage mapImage, overlayImage;
     RectTransform mapRT, pieceLayer, ghostLayer;
+    SurfaceFx surfaceFx;
+    BuildingGridPopup gridPopup;
 
     // The tile frame under the cursor (DrawHoverFrame). Its own layer because it is rebuilt on its own
     // trigger — the hovered cell changing — and must not take the pieces or the selection with it.
@@ -808,6 +810,21 @@ public class PlanetViewWindow : MonoBehaviour
         // you are actually pointing, not to a copy of it one world away.
         BuildWrapMirror(-1);
         BuildWrapMirror(+1);
+
+        // The living surface: building animations, areas of effect and the power-flow view (SurfaceFx).
+        // Above the pieces so smoke rises over the roofs; below the hover frame and markers.
+        surfaceFx = SurfaceFx.Create(mapRT);
+        surfaceFx.Body = () => body;
+        surfaceFx.Visible = () => IsOpen;
+        surfaceFx.Hover = () => HasHoverCell ? hoverCell : (Vector2Int?)null;
+        surfaceFx.Held = () => tab == Tab.Build ? selected : null;
+        surfaceFx.HeldRotation = () => rotation;
+
+        // The selected building's card (its grid's count, output and upkeep). A child of the host
+        // viewport, not the map, so it is never clipped by the map's own edges and stays on top of it.
+        gridPopup = BuildingGridPopup.Create(mapRT);
+        gridPopup.Body = () => body;
+        gridPopup.Visible = () => IsOpen && hostViewport.gameObject.activeInHierarchy;
 
         // The hover frame: above the pieces (a frame hidden behind the building it is framing is no
         // frame), below the selection so the selected building's gold always wins.
@@ -8237,6 +8254,7 @@ public class PlanetViewWindow : MonoBehaviour
         var hit = SurfaceBuildManager.At(body, x, y);
         if (hit != null)
         {
+            if (SurfaceSelection.Selected == hit) gridPopup?.Reopen();   // clicked again: card back
             SurfaceSelection.Select(body, hit);
             SimpleAudio.Instance?.PlaySelect();
         }

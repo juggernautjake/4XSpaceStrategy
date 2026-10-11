@@ -65,6 +65,11 @@ public class ProjectileRenderer : MonoBehaviour
         public Light light;                  // pooled point light, so the round lights what it passes
         public float phaseOffset;            // per-shot offset so a volley pulses out of step, not as one strobe
         public LineRenderer beam;            // pooled line (instant) — null for travelling shots
+
+        /// What this round is drawn in: the weapon CLASS colour leaned toward the shooter's race (see
+        /// RaceVfx.WeaponColour). Resolved once at Fire and carried, because the shooter can die
+        /// mid-flight and a round must not change colour when it does.
+        public Color colour;
     }
 
     readonly List<Shot> shots = new List<Shot>();
@@ -131,6 +136,9 @@ public class ProjectileRenderer : MonoBehaviour
         s.instant = w.IsInstant;
         s.hasLock = target != null && !target.IsDestroyed;
         s.phaseOffset = Random.Range(0f, Mathf.PI * 2f);
+        // A blend, never a replacement: the class colour is how a player tells a railgun from a plasma
+        // bolt, and the race only leans it — a Pyrothian railgun is a warmer white, still a railgun.
+        s.colour = RaceVfx.WeaponColour(shooter, w.colour);
         // Every field is written, including the ones a fresh object would have had at zero — a pooled
         // object carrying one stale field from its last flight is the classic way this goes wrong, and
         // it would show up as a round that inherited the previous round's lock or lifetime.
@@ -145,7 +153,7 @@ public class ProjectileRenderer : MonoBehaviour
         s.light = RentLight();
         if (s.light != null)
         {
-            s.light.color = w.colour;
+            s.light.color = s.colour;
             s.light.range = Mathf.Clamp(w.width * 26f + w.glow * 1.6f, 0.6f, 6f);
             s.light.intensity = Mathf.Clamp(w.glow * 2.2f, 0.6f, 7f);
             s.light.transform.position = from;
@@ -158,7 +166,7 @@ public class ProjectileRenderer : MonoBehaviour
         // The muzzle lights up on the SAME call that creates the round, so the flash and the shot can
         // never drift apart. Deriving it from the weapon's cooldown instead would re-time it against a
         // different clock and show a flash with no bullet the moment anything hitched.
-        UnitModelRenderer.Instance?.LightsOf(shooter)?.FlashMuzzle(from, w.colour);
+        UnitModelRenderer.Instance?.LightsOf(shooter)?.FlashMuzzle(from, s.colour);
     }
 
     /// A beam or a slug: hit or miss is decided here and now.
@@ -186,7 +194,7 @@ public class ProjectileRenderer : MonoBehaviour
         s.aimPoint = end;
 
         s.beam = RentBeam();
-        s.beam.startColor = s.beam.endColor = w.colour * w.glow;
+        s.beam.startColor = s.beam.endColor = s.colour * w.glow;
         s.beam.widthMultiplier = w.width;
         s.beam.SetPosition(0, from);
         s.beam.SetPosition(1, end);
@@ -236,7 +244,7 @@ public class ProjectileRenderer : MonoBehaviour
 
         s.tr = RentQuad();
         var mr = s.tr.GetComponent<MeshRenderer>();
-        mr.material.color = w.colour * w.glow;
+        mr.material.color = s.colour * w.glow;
         s.tr.localScale = new Vector3(w.width * 2f, w.length, 1f);
     }
 
@@ -267,7 +275,7 @@ public class ProjectileRenderer : MonoBehaviour
         float k = 1f - Mathf.Clamp01(s.age / s.maxLife);
         if (s.beam != null)
         {
-            Color c = s.weapon.colour * s.weapon.glow;
+            Color c = s.colour * s.weapon.glow;
             c.a = k;
             s.beam.startColor = s.beam.endColor = c;
         }
@@ -380,7 +388,7 @@ public class ProjectileRenderer : MonoBehaviour
             s.tr.localScale = new Vector3(w.width * 2f * k, w.length * k, 1f);
 
             var mr = s.tr.GetComponent<MeshRenderer>();
-            Color c = w.colour * (w.glow * boost);
+            Color c = s.colour * (w.glow * boost);
             c.a = fade;
             mr.material.color = c;
         }
@@ -459,7 +467,7 @@ public class ProjectileRenderer : MonoBehaviour
             if (owner == null || s.target.owner != owner.owner) continue;
             if (Vector3.Distance(s.pos, screenCentre) > escortRadius) continue;
 
-            ExplosionRenderer.Instance?.Burst(s.pos, 0.35f, s.weapon.colour);
+            ExplosionRenderer.Instance?.Burst(s.pos, 0.35f, s.colour);
             Retire(s); shots.RemoveAt(i); killed++;
         }
         return killed;
@@ -475,7 +483,7 @@ public class ProjectileRenderer : MonoBehaviour
             if (s.target != protectedUnit) continue;
             if (Vector3.Distance(s.pos, centre) > radius) continue;
 
-            ExplosionRenderer.Instance?.Burst(s.pos, 0.35f, s.weapon.colour);
+            ExplosionRenderer.Instance?.Burst(s.pos, 0.35f, s.colour);
             Retire(s); shots.RemoveAt(i); killed++;
         }
         return killed;

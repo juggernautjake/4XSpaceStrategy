@@ -532,6 +532,25 @@ barycentre), with the player's crest or a rival's colour swatch on the left. Scr
 - **`Create()`** + `Start()` — enables URP **Bloom, Vignette, ACES tonemapping, color grading** in
   code (no downloads). Guarded so it degrades gracefully.
 
+### RaceVfx.cs  *(per-race ship effects, data-driven)*
+- **`RaceVfxProfile`** — one civ's drive plume colours/flicker, hull emissive multiplier + pulse
+  (beats, depth, throttle boost), nav lights on/off + colours + blink tempo, weapon tint + blend
+  amount, shield colour (not drawn yet). Defaults: Pyrothian lava ×3 throbbing hotter under power,
+  Aquarii ×1.8 slow breath, Terran ×1 with aviation lamps; Cryithn and Sylvan in between.
+- **`RaceVfx.For(unit)`** — by `UnitModelLibrary.CivFolder(u)`, the SAME rule the mesh uses (player
+  = chosen species, others = `owner.id % 5`). **`WeaponColour(shooter, classColour)`** — 40% lean
+  toward the race tint; ownerless shooters keep the class colour. **`SnapBeats`** keeps hand-edited
+  periods on the FleetClock grid.
+- Optional override **`Resources/SpaceAssets/race-vfx.json`** (keys = civ folder names, only named
+  fields change, via `JsonUtility.FromJsonOverwrite` onto the defaults). Re-read on **F10** with
+  ship-meshes.txt (`UnitModelRenderer.Update`).
+- **`HullMaterials`** — property lookup across URP/Lit (`_BaseColor`/`_BaseMap`/`_EmissionColor`) AND
+  glTFast's graphs (`baseColorFactor`/`baseColorTexture`/`emissiveFactor`); the generated .glb hulls
+  only have the latter, so tint and livery used to do nothing on them. `Prepare` shares one tinted /
+  liveried copy per (material, owner tint, livery) instead of cloning per ship.
+- Consumers: `ShipLights` (plumes, nav lights, hull glow via a per-renderer MaterialPropertyBlock so a
+  shared material can still pulse per ship), `ProjectileRenderer.Fire` (`Shot.colour`), `CivLivery.ApplyTo`.
+
 ### AssetIntegration.cs
 - **`ApplyPlanetDetail(material, type)`** — auto-applies optional CC0 detail/normal maps from
   `Resources/SpaceAssets/Detail/`.

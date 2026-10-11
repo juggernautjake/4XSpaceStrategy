@@ -129,3 +129,6 @@ tools/ship-import-report.json
 
 # Meshy web session (refresh token) — never commit
 tools/.meshy-session.json
+
+# Meshy developer API key (never commit; the repo is public)
+tools/meshy-api-key.txt

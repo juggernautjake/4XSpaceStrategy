@@ -95,27 +95,11 @@ public class StarInteraction : MonoBehaviour
 
         // Clicking a star no longer moves the camera either (it just shows the info + the Inspector, which
         // has its own "Focus" button). Auto-focusing on click was disorienting and was also what let a star
-        // "lock" the camera onto itself. Labels still float so you can see what you clicked.
-        ObjectLabelManager.Instance?.ShowForStar(transform, transform.lossyScale.x * 0.5f, Name(), Category());
-    }
-
-    // The map label shows this sun's NAME (its own, with the A/B/C suffix in a cluster) — never its
-    // spectral type, which belongs in the star info panel.
-    string Name()
-    {
-        if (member != null && !string.IsNullOrEmpty(member.name)) return member.name;
-        if (star != null && star.isBlackHole) return "Black Hole";
-        return system != null && !string.IsNullOrEmpty(system.name) ? system.name : "Star";
-    }
-
-    // Classification + owner only — deliberately no spectral type here (it's in the panel).
-    string Category()
-    {
-        if (star != null && star.isBlackHole) return "Black hole";
-        string cls = star != null && star.starCount >= 3 ? "Ternary system"
-                   : star != null && star.starCount == 2 ? "Binary system"
-                   : "Star system";
-        string owner = system != null ? FactionManager.OwnerLabel(system.owner) : "";
-        return string.IsNullOrEmpty(owner) ? cls : $"{cls} · {owner}";
+        // "lock" the camera onto itself.
+        //
+        // NO FLOATING LABELS ON A STAR (2026-10-10): the old name-above / "Star system · owner"-below pair
+        // sat on top of the star's nameplate, which already names it — "old functionality and not needed
+        // any longer". Clear whatever a previously selected planet left up instead.
+        ObjectLabelManager.Instance?.Hide();
     }
 }
