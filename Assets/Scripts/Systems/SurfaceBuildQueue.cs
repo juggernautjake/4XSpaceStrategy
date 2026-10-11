@@ -333,7 +333,8 @@ public static class SurfaceBuildQueue
     {
         if (job == null) return 0f;
         if (job.paused) return float.PositiveInfinity;
-        return job.Remaining * BuildScaling.TimeFactorFor(job.labor, LaborGranted(b, job));
+        return job.Remaining * BuildScaling.TimeFactorFor(job.labor, LaborGranted(b, job))
+               / Mathf.Max(0.01f, Industry.SpeedMult(b));
     }
 
     public static void SetPaused(CelestialBody b, SurfaceBuildJob job, bool paused)
@@ -389,9 +390,9 @@ public static class SurfaceBuildQueue
             float granted = Mathf.Min(job.labor, Mathf.Max(0f, free));
             free -= granted;
 
-            // Short-handed work is slower, not stopped.
+            // Short-handed work is slower, not stopped. The world's factories speed every job (Industry).
             float factor = BuildScaling.TimeFactorFor(job.labor, granted);
-            job.elapsed += dt / Mathf.Max(0.01f, factor);
+            job.elapsed += dt * Industry.SpeedMult(b) / Mathf.Max(0.01f, factor);
         }
 
         // Completions collected FORWARD, then placed in queue order.

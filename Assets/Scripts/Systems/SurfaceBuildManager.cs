@@ -388,6 +388,8 @@ public static class SurfaceBuildManager
         if (info.researchPerSec > 0f) parts.Add($"{info.researchPerSec * eff:0.00} research/s");
         if (info.popGrowthPerSec > 0f) parts.Add($"{info.popGrowthPerSec * eff:0.0} growth/s");
         if (info.storageCapacity > 0f) parts.Add($"+{info.storageCapacity:0} storage");
+        if (t == SurfaceBuildingType.Factory)
+            parts.Add($"{Industry.PerFactory * eff:0.0} Industry (+{Industry.PerFactory * eff * Industry.SpeedPerPoint * 100f:0}% build speed)");
 
         // Power, from the placing player's point of view: what it will feed the grid, what it will take
         // out of it, and how far it will carry it. Quoted here rather than only on the card because
@@ -400,19 +402,15 @@ public static class SurfaceBuildManager
         // beyond their own footprint, and quoting "lights 3 tiles" for a switchyard that lights none
         // would be the card contradicting the map.
         if (PowerGrid.Projects(info)) parts.Add($"lights {info.powerRange:0.#} tiles");
-        if (info.powerDraw > 0f || info.powerStorage > 0f)
-        {
-            var net = PowerGrid.NetForFootprint(b, t, x, y, rotation);
-            string what = info.powerDraw > 0f ? $"draws {info.powerDraw:0.0}" : $"banks {info.powerStorage:0}";
-            // A capacitor gets the same warning as a consumer. It draws nothing, so it would otherwise
-            // sit off the grid quietly doing nothing at all, with the card still cheerfully quoting the
-            // bank it isn't providing.
-            parts.Add(net == null
-                ? $"<color=#FF6659>{what} — no grid reaches here</color>"
-                : net.Dead
-                    ? $"<color=#FFBF4D>{what} — Grid {net.index} has no plant on it</color>"
-                    : $"{what} · Grid {net.index}");
-        }
+
+        // Synergy and the power ROUTE (lit directly, via N adjacent buildings, or too far) — the same
+        // functions the economy and the building card use (SurfaceSynergy, PowerGrid.ProspectFor), so
+        // "+25% from adjacent Mine" here is what the tick will pay.
+        var cells = SurfaceBuildingDatabase.Footprint(t, x, y, rotation);
+        string syn = SurfaceSynergy.PreviewText(b, t, cells);
+        if (syn != null) parts.Add(syn);
+        string route = PowerGrid.ProspectText(b, info, cells, cells.Count, false);
+        if (route != null) parts.Add(route);
 
         if (parts.Count == 0) return "no direct output";
         return string.Join(" · ", parts);
@@ -1196,7 +1194,11 @@ public static class SurfaceBuildManager
         // building is a level-3 building, because that is the top of the structure ladder — the world
         // keeps its 5, and the model on the map is simply the biggest one there is.
         var placed = FirstOf(b, t);
-        if (placed != null) placed.level = Mathf.Clamp(level, 1, PlacedBuilding.MaxLevel);
+        if (placed != null)
+        {
+            placed.level = Mathf.Clamp(level, 1, PlacedBuilding.MaxLevel);
+            PowerGrid.Invalidate();   // the tier sets a plant's reach and every output; ForcePlace's invalidate predates it
+        }
     }
 
     // ---- Upgrades ----
@@ -1357,24 +1359,12 @@ public static class SurfaceBuildManager
     // ---- Adjacency ----
     // A power plant next to a Power Distribution hub runs better. This is checked LIVE rather than baked
     // into efficiency, so building a hub later rewards the plants already standing around it.
-    public static float AdjacencyBonus(CelestialBody b, PlacedBuilding p)
-    {
-        if (p == null || p.Info.energyPerSec <= 0f) return 0f;
-
-        var mine = new HashSet<Vector2Int>(SurfaceBuildingDatabase.Footprint(p));
-        float best = 0f;
-        foreach (var other in On(b))
-        {
-            if (other == p || other.Info.adjacencyPowerBonus <= 0f) continue;
-            foreach (var c in SurfaceBuildingDatabase.Footprint(other))
-            {
-                if (mine.Contains(new Vector2Int(c.x + 1, c.y)) || mine.Contains(new Vector2Int(c.x - 1, c.y)) ||
-                    mine.Contains(new Vector2Int(c.x, c.y + 1)) || mine.Contains(new Vector2Int(c.x, c.y - 1)))
-                { best = Mathf.Max(best, other.Info.adjacencyPowerBonus); break; }
-            }
-        }
-        return best;
-    }
+    //
+    // Since 2026-10-11 this is EVERY placement synergy, not just the switchyard's: refinery/mine/factory,
+    // depots and housing beside industry, labs beside labs. One function, SurfaceSynergy.Bonus, so the
+    // tick, the books, the card and the ghost can never disagree. The switchyard rule inside it is
+    // unchanged (+30% to touching plants, not stacking).
+    public static float AdjacencyBonus(CelestialBody b, PlacedBuilding p) => SurfaceSynergy.Bonus(b, p);
 
     /// Demolish a structure. A voluntary teardown refunds most of its cost (the materials are still
     /// standing there); a structure LOST — flattened by an earthquake — refunds nothing, so callers that
@@ -1641,8 +1631,8 @@ public static class SurfaceBuildManager
         foreach (var p in On(b))
         {
             var info = p.Info;
-            float eff = p.OutputMult * PowerGrid.PowerFactor(b, p);   // siting x tech level x power
-            if (info.metalPerSec > 0f) PlayerEconomy.Add(ResourceType.Metal, info.metalPerSec * eff * TechEffects.OreYieldMult * dt);
+            // siting x size x tech level x condition x power x synergy — SurfaceOutput, the one formula.
+            if (info.metalPerSec > 0f) PlayerEconomy.Add(ResourceType.Metal, SurfaceOutput.Metal(b, p) * dt);
 
             // A generator's output belongs to its GRID, and PowerGrid.Tick has already spent it on that
             // grid's load and sent whatever was left to the stockpile. Paying it out again here would
@@ -1650,16 +1640,19 @@ public static class SurfaceBuildManager
             // to put its power but the empire's books. (Every real plant lights its own ground, so in
             // practice this branch is for anything a future edit adds without a powerRange.)
             if (info.energyPerSec > 0f && PowerGrid.NetOf(b, p) == null)
-                PlayerEconomy.Add(ResourceType.Energy, info.energyPerSec * p.OutputMult * (1f + AdjacencyBonus(b, p)) * dt);
+                PlayerEconomy.Add(ResourceType.Energy, SurfaceOutput.Energy(b, p) * dt);
 
-            if (info.waterPerSec > 0f) PlayerEconomy.Add(ResourceType.Water, info.waterPerSec * eff * dt);
+            if (info.waterPerSec > 0f) PlayerEconomy.Add(ResourceType.Water, SurfaceOutput.Water(b, p) * dt);
         }
+
+        // Factories eat their metal now, before the build queue ticks on the speed it buys (Industry.cs).
+        Industry.Tick(b, dt);
     }
 
     public static float ResearchPerSec(CelestialBody b)
     {
         float sum = 0f;
-        foreach (var p in On(b)) sum += p.Info.researchPerSec * p.OutputMult * PowerGrid.PowerFactor(b, p);
+        foreach (var p in On(b)) sum += SurfaceOutput.Research(b, p);
         return sum;
     }
 

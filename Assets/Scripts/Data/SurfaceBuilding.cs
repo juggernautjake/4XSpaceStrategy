@@ -403,9 +403,9 @@ public static class SurfaceBuildingDatabase
 
         // 3x2 block.
         _all[(int)SurfaceBuildingType.Factory] = new SurfaceBuildingInfo(SurfaceBuildingType.Factory, SurfaceBuildingCategory.Industry, "Factory",
-            "Turns raw metal into more of it. Large, and indifferent to terrain.",
-            S(0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1), SurfaceIndexKind.None, 110, 70, 24f, new Color(0.75f, 0.55f, 0.85f))
-        { metalPerSec = 1.1f };
+            "Manufacturing. Turns metal and power into INDUSTRY, which speeds up every construction project on this world (+15% per point, up to double speed). Eats metal only while something is being built. Runs best fed by an adjacent Refinery, Storage Depot and housing. Indifferent to terrain.",
+            S(0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1), SurfaceIndexKind.None, 110, 70, 24f, new Color(0.75f, 0.55f, 0.85f));
+        // No metalPerSec since 2026-10-11: a factory's product is Industry (see Industry.cs), not metal.
 
         // J-tetromino.
         //
@@ -486,9 +486,11 @@ public static class SurfaceBuildingDatabase
 
         // Z-tetromino.
         _all[(int)SurfaceBuildingType.Refinery] = new SurfaceBuildingInfo(SurfaceBuildingType.Refinery, SurfaceBuildingCategory.Industry, "Refinery",
-            "Refines ore on site. Best next to the rock it's processing — it reads the Mineral Index too.",
-            S(1, 0, 2, 0, 0, 1, 1, 1), SurfaceIndexKind.Mineral, 95, 60, 22f, new Color(0.80f, 0.65f, 0.35f))
-        { metalPerSec = 1.2f };
+            "Smelts the ore of the mines it touches: every adjacent Mine runs +25% (up to +50%), and every adjacent Mine feeds it +25% in turn. One refinery tile handles two tiles of mine, shared across all it touches. Needs no ore under it — build it beside your mines, not on the seam.",
+            // Reads NO index since 2026-10-11 (was Mineral): a smelter needs ore NEXT to it, and making it
+            // compete with the mine for scarce seam tiles was the reason nobody built one.
+            S(1, 0, 2, 0, 0, 1, 1, 1), SurfaceIndexKind.None, 95, 60, 22f, new Color(0.80f, 0.65f, 0.35f))
+        { metalPerSec = 0.4f };
 
         // Hydro — the one thing that WANTS water, and needs relief to drop it through.
         var hydro = new SurfaceBuildingInfo(SurfaceBuildingType.HydroPlant, SurfaceBuildingCategory.Electrical,
@@ -562,7 +564,7 @@ public static class SurfaceBuildingDatabase
             "Combustion Plant",
             "Burns whatever is under it — coal, peat, timber. Primitive, dirty and cheap, and it will light a young colony's first grid on ground that could never support a reactor. Wants something worth burning: it reads the Mineral Index.",
             S(0, 0, 0, 1, 1, 0), SurfaceIndexKind.Mineral, 40, 10, 10f, new Color(0.75f, 0.45f, 0.25f));
-        comb.energyPerSec = 1.0f;
+        comb.energyPerSec = 1.2f;   // was 1.0 — raised with size-scaled draw so the opening grid balances
         _all[(int)SurfaceBuildingType.CombustionPlant] = comb;
 
         // Domino.
@@ -675,14 +677,18 @@ public static class SurfaceBuildingDatabase
         // PlayerEconomy sums straight off the building and PowerFactor never touches. Giving it a draw
         // would be a tax with no mechanism behind it — an unpowered depot would still hold exactly as
         // much, so the only thing the player could observe is the bill.
-        Draw(SurfaceBuildingType.SurfaceShipyard, 2.0f);
-        Draw(SurfaceBuildingType.Factory, 1.6f);
-        Draw(SurfaceBuildingType.Spaceport, 1.5f);
-        Draw(SurfaceBuildingType.Refinery, 1.4f);
-        Draw(SurfaceBuildingType.ResearchOutpost, 1.2f);
-        Draw(SurfaceBuildingType.ResearchCenter, 2.2f);   // the hungriest thing on a science world
-        Draw(SurfaceBuildingType.Mine, 0.8f);
-        Draw(SurfaceBuildingType.Farm, 0.4f);
+        // PER TILE for the drawn classes since 2026-10-11: PowerGrid.DrawOf scales these by BuildScaling's
+        // cost curve, so a 6-tile mine draws 6.75x the figure below. They were cut when that landed
+        // (Mine 0.8, Factory 1.6, Refinery 1.4, Lab 1.2, Centre 2.2, Farm 0.4, Shipyard 2.0 before) — the
+        // old numbers were per BUILDING whatever its size, which is why power never constrained anything.
+        Draw(SurfaceBuildingType.SurfaceShipyard, 1.5f);   // fixed 3x3: whole structure
+        Draw(SurfaceBuildingType.Factory, 0.8f);
+        Draw(SurfaceBuildingType.Spaceport, 1.5f);         // fixed 2x2: whole structure
+        Draw(SurfaceBuildingType.Refinery, 0.6f);
+        Draw(SurfaceBuildingType.ResearchOutpost, 0.5f);
+        Draw(SurfaceBuildingType.ResearchCenter, 1.0f);    // the hungriest thing on a science world
+        Draw(SurfaceBuildingType.Mine, 0.4f);
+        Draw(SurfaceBuildingType.Farm, 0.15f);
 
         // ---- Siting requirements ----
         // The floor below which a site is not merely poor but POINTLESS. Absolute, not graded on a
@@ -695,8 +701,6 @@ public static class SurfaceBuildingDatabase
             "Needs ground that is warm, wet and flat enough to plough. Rock, ice and desert cannot be farmed.");
         Require(SurfaceBuildingType.Mine, 0.18f,
             "Needs rock with something in it. Deep soil and open water have no seams to work.");
-        Require(SurfaceBuildingType.Refinery, 0.15f,
-            "Wants to sit on the ore it processes.");
         Require(SurfaceBuildingType.SolarArray, 0.25f,
             "Needs clear, well-lit ground. Permanent cloud or a distant, dim star make panels worthless.");
         Require(SurfaceBuildingType.WindFarm, 0.25f,

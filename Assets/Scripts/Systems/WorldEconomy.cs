@@ -4,48 +4,58 @@ using UnityEngine;
 // ONE WORLD'S BOOKS — income, upkeep and net, per resource (2026-10-09)
 //
 // For the production strip along the bottom of the Planet View's Overview. Read straight off the same
-// formulas the economy actually runs (SurfaceBuildManager.TickOutput, PowerGrid.Compute, Carrying), so
-// the strip can never quote a number the world is not really earning.
+// formulas the economy actually runs (SurfaceOutput — which SurfaceBuildManager.TickOutput pays out of —
+// PowerGrid and Carrying), so the strip can never quote a number the world is not really earning.
 //
-//   Metal  — mines and refineries: metalPerSec x siting x tech level x power x ore-yield research.
-//   Water  — hydro and the like.
-//   Energy — production is every generator's output (with the Power Distribution adjacency bonus, as
-//            the grid computes it); upkeep is every consumer's draw.
-//   Food   — how many people the farms can feed, against how many there are (Carrying). A capacity,
-//            not a per-second flow, and labelled that way.
-//
-// UPKEEP: energy drawn by consumers that are on a grid (as PowerGrid counts it), and — while the world
-// is terraforming — the water, energy and metal ColonyManager.TickTerraform burns each second.
+//   Metal    — mines and refineries: SurfaceOutput.Metal (siting x size x tech x condition x power x
+//              synergy x ore-yield research). Upkeep: the factories' metal while something is building
+//              (Industry.MetalDemand), plus terraforming.
+//   Water    — farms and the like.
+//   Energy   — production is every generator's output (switchyard synergy included, as the grid
+//              computes it); upkeep is every on-grid consumer's draw (PowerGrid.DrawOf, size-scaled).
+//   Research — labs, before the empire's research-rate research.
+//   Industry — factories' points, and the build speed they buy here (Industry).
+//   Food     — how many people the farms can feed, against how many there are (Carrying). A capacity,
+//              not a per-second flow, and labelled that way.
 // ============================================================================================
 public static class WorldEconomy
 {
     public struct Books
     {
-        public float metal, water;
+        public float metal, water, research;
         public float energyMade, energyUsed;
         public float metalUpkeep, waterUpkeep;
         public float foodMade, foodEaten;
+        public float industry, buildSpeed;
+        public int mines, refineries, factories;
         public float EnergyNet => energyMade - energyUsed;
         public float FoodNet => foodMade - foodEaten;
     }
 
     public static Books Of(CelestialBody b)
     {
-        var k = new Books();
+        var k = new Books { buildSpeed = 1f };
         if (b == null) return k;
 
         foreach (var p in SurfaceBuildManager.On(b))
         {
             var info = p.Info;
             if (info == null) continue;
-            float run = p.OutputMult * PowerGrid.PowerFactor(b, p);
-            if (info.metalPerSec > 0f) k.metal += info.metalPerSec * run * TechEffects.OreYieldMult;
-            if (info.waterPerSec > 0f) k.water += info.waterPerSec * run;
-            if (info.energyPerSec > 0f)
-                k.energyMade += info.energyPerSec * p.OutputMult * (1f + SurfaceBuildManager.AdjacencyBonus(b, p));
-            // Only consumers on a grid draw — exactly what PowerGrid.Compute adds to a net's load.
-            if (info.powerDraw > 0f && PowerGrid.NetOf(b, p) != null) k.energyUsed += info.powerDraw * p.LevelMult;
+            k.metal += SurfaceOutput.Metal(b, p);
+            k.water += SurfaceOutput.Water(b, p);
+            k.research += SurfaceOutput.Research(b, p);
+            k.energyMade += SurfaceOutput.Energy(b, p);
+            // Only consumers on a grid draw — exactly what PowerGrid adds to a net's load.
+            if (info.powerDraw > 0f && PowerGrid.NetOf(b, p) != null) k.energyUsed += PowerGrid.DrawOf(p);
+
+            if (p.Type == SurfaceBuildingType.Mine) k.mines++;
+            else if (p.Type == SurfaceBuildingType.Refinery) k.refineries++;
+            else if (p.Type == SurfaceBuildingType.Factory) k.factories++;
         }
+
+        k.industry = Industry.Points(b);
+        k.buildSpeed = Industry.SpeedMult(b);
+        k.metalUpkeep += Industry.MetalDemand(b);
 
         // Terraforming's running cost, per second, mirroring ColonyManager.TickTerraform.
         if (b.terraforming)

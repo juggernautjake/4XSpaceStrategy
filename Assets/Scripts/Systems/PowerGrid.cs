@@ -6,94 +6,112 @@ using UnityEngine;
 //
 // Energy used to be a stockpile and nothing else: a plant added to it, anything anywhere could spend
 // it, and where you put the plant never mattered. This makes power LOCAL. A generator lights the ground
-// around itself; a Power Node relays that reach further; anything standing on lit ground runs properly,
-// and anything off it limps along on its own back-up plant.
+// around itself; a Power Node relays that reach further; buildings pass power on to the buildings they
+// touch, a few at a time; and anything off the grid limps along on its own emergency backup.
 //
 // ---- WHO LIGHTS GROUND, AND WHO ONLY CARRIES IT ----
 //
-// This is the distinction the whole file now turns on, and it used to not exist.
+//   A GENERATOR PROJECTS. It lights its own footprint and a disc around it (two to four tiles by plant
+//   type, times its tier). That projection is what founds a grid: without a plant, nothing is lit.
 //
-//   A GENERATOR PROJECTS. It lights its own footprint and a disc around it, and the disc is generous
-//   now — two to four tiles depending on what kind of plant it is and what tier it has reached. That
-//   projection is what founds a grid: without a plant, nothing anywhere is lit.
+//   A POWER NODE projects a wide disc like a plant, but ONLY once it is itself connected. A pylon is
+//   a REPEATER: whatever its disc touches is powered directly again, so a chain of pylons carries power
+//   as far as you care to build it.
 //
-//   EVERYTHING ELSE ONLY CONDUCTS. A farm, a factory, a capacitor, a relay: each lights its OWN
-//   footprint and nothing beyond it, and only while it is itself connected. So a building on the grid
-//   passes power through itself to whatever is built against it, and a line of factories walks the
-//   supply along without a single pylon — but no non-generator ever throws light onto empty ground.
+//   EVERY OTHER BUILDING CONDUCTS — UP TO A POINT (2026-10-11). "If a building is placed next to another
+//   building that is already powered, it should be powered too, up to a point."
 //
-//   A POWER NODE is the exception that proves it, and it is deliberately awkward: it projects a wide
-//   disc like a plant, but ONLY once it is itself connected. See the note on the two passes below.
+// ---- THE ADJACENCY RULE: HOPS ----
 //
-// The old rule was one line — "two projectors are in the same grid when the ground they light
-// overlaps" — and it was elegant and wrong in one specific, exploitable way: a chain of Power Nodes
-// standing in empty desert, touching nothing, was a grid. Two such chains whose discs happened to
-// overlap were one grid. Nothing had to be connected to anything; the projections alone did it, and a
-// node dropped anywhere on the map with another node within fourteen tiles was instantly wired in.
+//   HOP 0   a plant, a live pylon, or any building with a tile inside a plant's or pylon's disc.
+//   HOP 1   a building touching (edge to edge) a hop-0 building.
+//   HOP k   a building touching a hop-(k-1) building.
 //
-// ---- WHAT A GRID IS NOW ----
+//   A building is ON THE GRID at hop 0 .. MaxContactHops (3). Past that it is TOO FAR: it touches the
+//   grid, it is drawn and listed as "too far", and it runs on its emergency backup like anything else
+//   off-grid. A building counts as ONE hop however many tiles it has — the unit is "a building", which
+//   is how the player reads it ("powered through 2 buildings, 1 hop left").
 //
-// A grid is still a connected component, but of a graph whose EDGES are contact rather than overlap:
+//   A pylon planted against a hop-3 building is energised (it is at hop <= 3), and being a pylon it
+//   then projects, so everything in its disc is hop 0 again. That is the pylon's job in one line.
 //
-//   Two buildings are joined when their footprints TOUCH edge-to-edge, or when one of them is a
-//   GENERATOR (or a connected node) whose projected disc covers a cell of the other.
+// ---- GRIDS ----
 //
-// So power flows out of a plant, across the ground it lights, and then THROUGH the buildings it
-// reaches, into whatever those touch. A node extends that reach, but only from inside it.
+//   A grid is a connected component of energised buildings, joined by: a disc covering another
+//   building, two discs overlapping, or two energised buildings touching. Every component contains a
+//   plant by construction (everything energised was reached FROM a plant), so a relay chain in the
+//   empty desert is still not a grid.
 //
-// Every behaviour still falls out of the connectivity rather than being maintained:
+// ---- SUPPLY, DEMAND, AND WHO GOES DARK FIRST ----
 //
-//   - Chain nodes from a city out to a mine and the two are one grid, because each node in the chain
-//     is lit by the one behind it, back to a plant.
-//   - Blow a node out of the middle and everything past it goes dark. Nothing splits them; the chain
-//     simply no longer reaches.
-//   - Drop a generator inside an existing grid and it contributes to that grid rather than starting
-//     its own.
-//   - Drop a node in the desert and it does nothing at all, which is the point.
+//   Generation vs draw decides each grid's supply. Surplus charges the capacitors, then goes to the
+//   empire stockpile; a shortfall drains the capacitors first. When the bank is empty and demand still
+//   exceeds supply, power is shared out NEAREST FIRST: every hop-0 consumer is served before any hop-1
+//   consumer gets anything, and so on outward. So a short grid browns out from the END OF ITS CHAINS
+//   inward — the buildings hanging off the most neighbours lose power first, the ones under a plant's
+//   disc last. Within one hop it is an even split. One rule, visible on the map (the hop tags), the
+//   building card ("this building gets 40% — it is 3 hops out") and the grid list.
 //
-// ---- Why this is DERIVED and not MAINTAINED ----
-// Merge-on-connect and split-on-destroy are where everyone writes the bugs. The split case needs a
-// graph search anyway, so maintaining incremental state buys nothing but a second source of truth that
-// can drift out of agreement with the map — and a grid that disagrees with the buildings you can see is
-// a miserable class of bug to chase.
+//   A consumer's output runs at Lerp(UnpoweredFactor, 1, its served fraction). UnpoweredFactor is the
+//   EMERGENCY BACKUP, now 15% (was 35%): a severely short grid, or no grid at all, very nearly halts a
+//   building. It is deliberately not zero, and it is the SAME floor for both cases, so being connected
+//   to a starved grid is never worse than being disconnected — otherwise demolishing your own pylon
+//   would be an optimisation — and a colony whose power collapses can still trickle the metal it needs
+//   to build the plant that fixes it.
 //
-// So there is no merge code and no split code. There is one function that derives every grid on a world
-// from the buildings standing on it, memoized for the frame. Merging and splitting are things you
-// OBSERVE, not things this code does.
+//   Demand scales with what you built: DrawOf = powerDraw x tech level x BuildScaling's cost curve for
+//   a drawn footprint (a 6-tile mine draws 6.75x a 1-tile one — "upkeep scales like cost", as
+//   BuildScaling always said; the draw used to ignore size entirely, so a 20-tile mine drew what a
+//   1-tile mine drew and power never constrained anything).
+//
+// ---- DERIVED, NOT MAINTAINED; AND MEMOISED ACROSS FRAMES ----
+//
+//   There is no merge code and no split code: one function derives every grid on a world from the
+//   buildings standing on it. The TOPOLOGY (who is energised, hops, components, coverage) is cached
+//   per world and rebuilt only when the buildings' structural signature changes (positions, shapes,
+//   types, tiers) or Invalidate() is called. The NUMBERS (generation, draw, served) are refreshed at
+//   most once a frame from that topology — cheap, allocation-free. Every mutation site still calls
+//   Invalidate(), so a placement is answered correctly on the same frame.
 // ============================================================================================
 public class PowerNet
 {
-    public int index;                                   // 1-based, stable within a frame (see Compute)
+    public int index;                                   // 1-based, stable while the topology holds
 
+    /// What PROJECTS on this grid: its plants and its live relays. (It used to hold every member, which
+    /// made every "pylon" count on the cards also count farms and mines.)
     public readonly List<PlacedBuilding> projectors = new List<PlacedBuilding>();
     public readonly List<PlacedBuilding> generators = new List<PlacedBuilding>();
     public readonly List<PlacedBuilding> capacitors = new List<PlacedBuilding>();
+
+    /// Everything drawing power here, NEAREST FIRST (by hop) — the order a shortfall is shared out in.
     public readonly List<PlacedBuilding> consumers = new List<PlacedBuilding>();
 
-    /// Every tile this grid reaches. The yellow in the overlay.
+    /// Every building on this grid, whatever it does.
+    public readonly List<PlacedBuilding> members = new List<PlacedBuilding>();
+
+    /// Every tile this grid reaches: its projectors' discs plus every member's own footprint.
     public readonly HashSet<Vector2Int> coverage = new HashSet<Vector2Int>();
 
     public float generation;     // units/sec produced at current output
     public float draw;           // units/sec demanded by everything connected
     public float storage;        // total capacitor capacity
 
-    /// Fraction of demand actually met — the number every consumer's output is scaled by.
+    /// Fraction of TOTAL demand actually met.
     public float served = 1f;
+
+    /// Per consumer: the fraction of ITS demand met under nearest-first sharing. Absent = 1.
+    public readonly Dictionary<PlacedBuilding, float> servedOf = new Dictionary<PlacedBuilding, float>();
+
+    /// The furthest hop any member sits at, and how many members are fed only through other buildings.
+    public int deepestHop;
+    public int viaContact;
 
     public float Net => generation - draw;
 
-    /// A grid with nothing generating on it. A chain of relays with no plant at the end of it is still
-    /// a grid by the connectivity rule — it just has no power IN it, which is a different and far more
-    /// confusing failure than having no grid at all. Naming it means the map and the panel can say so
-    /// instead of leaving the player to infer it from a zero.
+    /// A grid with nothing generating on it right now (a plant at zero efficiency, say).
     public bool Dead => generation <= 0.0001f;
 
     /// Dead AND out of bank — the moment a dead grid actually stops delivering.
-    ///
-    /// The distinction matters because a dead grid with charge left in it is still running everything on
-    /// it at FULL output, off the capacitors. It's a grid on borrowed time, not a failed one. Reporting
-    /// it as failed would put the panel in flat contradiction with the output figure printed beneath it,
-    /// which really is ×1.00 — so "no plant" is the explanation, and this is the fault.
     public bool Failed => Dead && Stored <= 0f;
 
     /// Charge held across this grid's capacitors right now.
@@ -102,317 +120,383 @@ public class PowerNet
         get { float s = 0f; foreach (var c in capacitors) s += c.stored; return s; }
     }
 
-    /// What this grid serves, computed from state alone rather than from the last tick.
-    ///
-    /// This exists because the two clocks disagree. Tick runs on ColonyManager's step — about once a
-    /// SECOND — while the UI reads every FRAME. If `served` were only ever written by Tick, then on the
-    /// other ~59 frames out of 60 every readout would be showing a number worked out without the
-    /// capacitors in it: the panel would report a grid at 60% while it was actually delivering 100% off
-    /// the bank, and the one building whose entire pitch is "rides a shortfall out" would never be seen
-    /// doing it. Derived from state, the tick and the UI agree on every frame.
+    /// What this grid serves, computed from state alone rather than from the last tick (the UI reads
+    /// every frame; the economy ticks about once a second).
     public float SteadyServed
     {
         get
         {
-            if (draw <= 0.0001f) return 1f;          // nothing drawing: trivially satisfied
-            if (generation >= draw) return 1f;       // covered by the plants alone
-            if (Stored > 0f) return 1f;              // covered by the bank, for as long as it lasts
-            return Mathf.Clamp01(generation / draw); // short, and nothing left to make it up with
+            if (draw <= 0.0001f) return 1f;
+            if (generation >= draw) return 1f;
+            if (Stored > 0f) return 1f;
+            return Mathf.Clamp01(generation / draw);
         }
     }
 
-    /// The balance the grid can hold INDEFINITELY, with the bank discounted. What the player needs to
-    /// know to decide between "build another capacitor" and "build another plant".
+    /// The supply rate the grid can deliver right now, bank included (see SteadyServed).
+    public float SteadySupply
+    {
+        get
+        {
+            if (draw <= 0.0001f) return 0f;
+            if (generation >= draw || Stored > 0f) return draw;
+            return generation;
+        }
+    }
+
+    /// The balance the grid can hold INDEFINITELY, with the bank discounted.
     public float Sustainable => draw <= 0.0001f ? 1f : Mathf.Clamp01(generation / draw);
 }
 
 public static class PowerGrid
 {
-    // What a building still manages with no grid under it at all: its own back-up plant, running badly.
-    // Deliberately NOT zero. A hard zero would mean one demolished node silently switches a continent's
-    // industry off, and the player's only clue is that all their numbers went to nothing at once. At a
-    // third of output it's an obvious, diagnosable wound rather than a mystery.
-    public const float UnpoweredFactor = 0.35f;
+    /// The EMERGENCY BACKUP: what a consumer manages with no grid, or on a grid giving it nothing. See
+    /// the header on why it is 15% and why it is the same floor for both.
+    public const float UnpoweredFactor = 0.15f;
 
-    // ---- Cache ----
-    // Per world, per frame. Everything here is derived, so the only correctness requirement is that it
-    // doesn't outlive a change to the buildings — and every mutation site calls Invalidate().
-    //
-    // KEYED ON THE BODY OBJECT, NOT b.id. `id` is NOT unique across a galaxy: SolarSystemGenerator
-    // resets its counter to 0 for every system it makes, so the third world of system 1 and the third
-    // world of system 7 are both id 2 — and ColonyManager ticks every body in the galaxy in one frame.
-    // Keying on the id meant the second of any colliding pair silently got the FIRST one's grids: its
-    // capacitors charged twice, its surplus exported twice, and every consumer on it pinned at the
-    // unpowered floor forever because the owner lookup held the other world's buildings. CelestialBody
-    // overrides neither Equals nor GetHashCode, so the reference is an exact, collision-free key.
-    static readonly Dictionary<CelestialBody, List<PowerNet>> cache
-        = new Dictionary<CelestialBody, List<PowerNet>>();
+    /// How many buildings power passes through by contact before it gives out. See the header.
+    public const int MaxContactHops = 3;
 
-    // Building -> the grid that reaches it, built during the same walk that builds the nets. This is
-    // not an optimisation so much as a necessity: the economy tick asks PowerFactor for every building
-    // on every world, and answering by re-walking each footprint against each net's coverage allocated
-    // a List per question, several times per building per tick.
-    static readonly Dictionary<CelestialBody, Dictionary<PlacedBuilding, PowerNet>> ownerCache
-        = new Dictionary<CelestialBody, Dictionary<PlacedBuilding, PowerNet>>();
+    /// How far past the limit the derivation keeps measuring, so a too-far building can say how far.
+    const int FarSearch = 6;
 
-    static int cacheFrame = -1;
-
-    // Handed back for worlds with no surface. Shared and never written to — the economy tick asks about
-    // every body every frame, and minting a throwaway list per question is pure garbage.
-    static readonly List<PowerNet> none = new List<PowerNet>();
-
-    /// Every grid on a world, derived fresh at most once a frame.
-    public static List<PowerNet> Nets(CelestialBody b)
+    /// One building's place in the power graph.
+    public struct Link
     {
-        if (b == null || b.surface == null) return none;
-        if (cacheFrame != Time.frameCount) { cache.Clear(); ownerCache.Clear(); cacheFrame = Time.frameCount; }
-        if (cache.TryGetValue(b, out var hit)) return hit;
-
-        var nets = Compute(b, out var owner);
-        cache[b] = nets;
-        ownerCache[b] = owner;
-        return nets;
+        /// 0 = a plant, a live pylon, or lit directly by a disc. 1..MaxContactHops = fed through that
+        /// many buildings. Above MaxContactHops = touching the grid but too far along the chain.
+        public int hop;
+        /// The building it takes its power from by contact (null at hop 0).
+        public PlacedBuilding via;
+        /// For a hop-0 building lit by a disc: the plant or pylon whose disc it is (null otherwise).
+        public PlacedBuilding source;
+        public bool Powered => hop <= MaxContactHops;
     }
 
-    /// Drop the cache. Every mutation calls this so the grid answers correctly on the SAME frame the
+    // ---- The memo ----
+    // KEYED ON THE BODY OBJECT, NOT b.id: ids repeat across systems (SolarSystemGenerator restarts its
+    // counter per system), and two worlds sharing a key once shared one set of grids.
+    sealed class Topology
+    {
+        public long sig;
+        public int checkedFrame = -1, numbersFrame = -1, lastUsed;
+        public readonly List<PlacedBuilding> all = new List<PlacedBuilding>();
+        public readonly Dictionary<PlacedBuilding, int> indexOf = new Dictionary<PlacedBuilding, int>();
+        public readonly Dictionary<Vector2Int, int> cellOwner = new Dictionary<Vector2Int, int>();
+        public List<PlacedBuilding>[] neighbours = new List<PlacedBuilding>[0];
+        public readonly List<PowerNet> nets = new List<PowerNet>();
+        public readonly Dictionary<PlacedBuilding, PowerNet> owner = new Dictionary<PlacedBuilding, PowerNet>();
+        public readonly Dictionary<PlacedBuilding, Link> links = new Dictionary<PlacedBuilding, Link>();
+    }
+
+    static readonly Dictionary<CelestialBody, Topology> topo = new Dictionary<CelestialBody, Topology>();
+    static readonly List<PowerNet> none = new List<PowerNet>();
+    static readonly List<PlacedBuilding> noBuildings = new List<PlacedBuilding>();
+    static readonly List<CelestialBody> pruneScratch = new List<CelestialBody>();
+    static int pruneFrame = -1;
+
+    /// Every grid on a world, with this frame's numbers.
+    public static List<PowerNet> Nets(CelestialBody b)
+    {
+        var t = Topo(b);
+        if (t == null) return none;
+        Numbers(b, t);
+        return t.nets;
+    }
+
+    /// Drop every memo. Every mutation calls this so the grid answers correctly on the SAME frame the
     /// map changed, rather than one frame later.
-    public static void Invalidate() { cache.Clear(); ownerCache.Clear(); cacheFrame = -1; }
+    public static void Invalidate()
+    {
+        topo.Clear();
+        SurfaceSynergy.Invalidate();
+        Industry.Invalidate();
+    }
+
+    static Topology Topo(CelestialBody b)
+    {
+        if (b == null || b.surface == null) return null;
+        int frame = Time.frameCount;
+        topo.TryGetValue(b, out var t);
+        if (t != null && t.checkedFrame == frame) return t;
+
+        var all = SurfaceBuildManager.On(b);
+        long sig = Signature(b, all);
+        if (t == null || t.sig != sig)
+        {
+            t = Build(b, all, sig);
+            topo[b] = t;
+        }
+        t.checkedFrame = frame;
+        t.lastUsed = frame;
+        Prune(frame);
+        return t;
+    }
+
+    /// Forget worlds nobody has asked about in a while (a replaced galaxy's bodies, mostly).
+    static void Prune(int frame)
+    {
+        if (frame - pruneFrame < 600) return;
+        pruneFrame = frame;
+        pruneScratch.Clear();
+        foreach (var kv in topo) if (frame - kv.Value.lastUsed > 1200) pruneScratch.Add(kv.Key);
+        foreach (var k in pruneScratch) topo.Remove(k);
+        pruneScratch.Clear();
+    }
+
+    static long Mix(long h, long v) { unchecked { return (h ^ v) * 1099511628211L; } }
+
+    /// Everything the topology depends on, hashed without allocating: which records stand here (by
+    /// reference), their type, tier, origin, rotation and drawn cells. Not health, not efficiency, not
+    /// charge — those move the numbers, which are refreshed every frame anyway.
+    static long Signature(CelestialBody b, List<PlacedBuilding> all)
+    {
+        long h = 1469598103934665603L;
+        h = Mix(h, b.surface.width); h = Mix(h, b.surface.height); h = Mix(h, all.Count);
+        for (int i = 0; i < all.Count; i++)
+        {
+            var p = all[i];
+            if (p == null) { h = Mix(h, -1); continue; }
+            h = Mix(h, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(p));
+            h = Mix(h, p.type); h = Mix(h, p.level); h = Mix(h, p.x); h = Mix(h, p.y); h = Mix(h, p.rotation);
+            if (p.HasDrawnShape)
+            {
+                h = Mix(h, p.cellsX.Count);
+                for (int k = 0; k < p.cellsX.Count; k++) h = Mix(h, p.cellsX[k] * 73856093L ^ p.cellsY[k] * 19349663L);
+            }
+        }
+        return h;
+    }
 
     // ---- Coverage ----
 
-    /// Does this class throw light onto ground OUTSIDE its own footprint?
-    ///
-    /// Only generators, and the relay whose entire purpose is to be one. This is the rule that replaced
-    /// "anything with a powerRange projects": a capacitor, a switchyard and a farm all have reasons to
-    /// be ON the grid and no business creating one, and letting them project meant a bank of capacitors
-    /// in the desert lit fourteen tiles of nothing.
+    /// Does this class throw light onto ground OUTSIDE its own footprint? Only generators, and the relay.
     public static bool Projects(SurfaceBuildingInfo info)
         => info != null && info.powerRange > 0f
         && (info.energyPerSec > 0f || info.type == SurfaceBuildingType.PowerNode);
 
-    /// The tiles one building lights.
-    ///
-    /// For a generator (or a connected node) that is a DISC of `powerRange` around every cell of its
-    /// footprint — Euclidean and measured cell-centre to cell-centre, so the reach is round rather than
-    /// the square a Chebyshev range would give.
-    ///
-    /// For EVERYTHING ELSE it is exactly its own footprint. That is not a degenerate case, it is the
-    /// pass-through rule: a building standing on the grid conducts, so its own tiles are lit and
-    /// anything built against them is reached — but nothing spills onto bare ground.
+    /// The tiles one building lights: a Euclidean disc of powerRange x tier around every footprint cell
+    /// for a projector, and exactly its own footprint for everything else. (A pylon's disc is shown even
+    /// when it is not connected — this answers "what would it light"; the derivation decides whether it
+    /// actually does.)
     public static HashSet<Vector2Int> CoverageOf(CelestialBody b, PlacedBuilding p)
     {
         var set = new HashSet<Vector2Int>();
         if (b?.surface == null || p == null) return set;
-
         var cells = SurfaceBuildingDatabase.Footprint(p);
         foreach (var c in cells)
             if (c.x >= 0 && c.y >= 0 && c.x < b.surface.width && c.y < b.surface.height) set.Add(c);
+        if (Projects(p.Info)) AddDisc(b, cells, p.Info.powerRange * p.LevelMult, set);
+        return set;
+    }
 
-        if (!Projects(p.Info)) return set;
-
-        // A projector's reach grows with its tech level: a level-3 relay genuinely covers more ground,
-        // which is what makes upgrading one worth doing instead of building a second.
-        float r = p.Info.powerRange * p.LevelMult;
+    static void AddDisc(CelestialBody b, List<Vector2Int> cells, float r, HashSet<Vector2Int> into)
+    {
         int ri = Mathf.CeilToInt(r);
         float r2 = r * r;
-
+        int w = b.surface.width, h = b.surface.height;
         foreach (var cell in cells)
             for (int dy = -ri; dy <= ri; dy++)
                 for (int dx = -ri; dx <= ri; dx++)
                 {
                     if (dx * dx + dy * dy > r2) continue;
                     int x = cell.x + dx, y = cell.y + dy;
-                    if (x < 0 || y < 0 || x >= b.surface.width || y >= b.surface.height) continue;
-                    set.Add(new Vector2Int(x, y));
+                    if (x < 0 || y < 0 || x >= w || y >= h) continue;
+                    into.Add(new Vector2Int(x, y));
                 }
-        return set;
     }
 
     // ============================================================================================
-    // DERIVATION — grow outward from the plants, twice
+    // DERIVATION
     //
-    // The old derivation was a union-find over everything that had a powerRange, joined wherever two
-    // discs overlapped. It could not express the rule this now needs, for a reason worth stating: union-
-    // find has no notion of a SOURCE. Every participant is symmetric, so "these two nodes are joined
-    // because their light overlaps" and "this node is joined because a plant reaches it" are the same
-    // statement to it, and there is no way to say that the second is required for the first.
-    //
-    // So this is a flood fill from the generators instead, and it runs TWICE:
-    //
-    //   PASS 1 grows the grid using only what is definitely energised — the plants' discs, and then
-    //          contact through the buildings those discs reach. Nodes joined during this pass are
-    //          CONNECTED, and being connected is what switches their own projection on.
-    //   PASS 2 re-runs the same fill with those nodes now projecting, which reaches further buildings,
-    //          which may energise further nodes...
-    //
-    // ...so it repeats until nothing new lights up. That fixed point is exactly the node chain: each
-    // pylon is lit by the one behind it, back to a plant, and a pylon that never gets lit never lights
-    // anything. A chain in the empty desert stays dark however long it is, which is the whole point.
-    //
-    // Every round only ever ADDS unions, so the set of live nodes grows monotonically and the loop
-    // converges — in at most one round per node, and in practice in two or three. Bounded anyway,
-    // because a grid derivation that failed to terminate would hang the game rather than look wrong.
-    //
-    // ---- WHAT COUNTS AS AN EDGE ----
-    //
-    //   SHARED COVERAGE   two buildings that light the same cell are joined. This is the old rule, kept,
-    //                     and it is what makes two reactors standing side by side one grid rather than
-    //                     two — their discs overlap over ground neither of them occupies. What CHANGED
-    //                     is which buildings have coverage beyond their own tiles at all.
-    //   CONTACT           two buildings whose footprints touch edge-to-edge are joined. This is new, and
-    //                     it is the pass-through rule: a building on the grid conducts, so a line of
-    //                     factories carries the supply along without a pylon.
-    //
-    // A COMPONENT IS A GRID ONLY IF IT CONTAINS A PLANT. That one line is what kills the relay chain in
-    // the desert: those nodes are perfectly well connected to each other and to nothing that generates,
-    // so they form a component with no plant in it and simply are not a grid.
+    // Rounds of a breadth-first search, because pylons switch on only once they are reached:
+    //   1. Sources at hop 0: every plant, every live pylon, and every building with a tile in one of
+    //      their discs.
+    //   2. BFS through edge contact: a neighbour of a hop-h building is at hop h+1. Measured past the
+    //      limit (FarSearch) so too-far buildings can say how far; energised means hop <= the limit.
+    //   3. Any pylon now energised goes live and starts projecting — run again. Liveness only grows, so
+    //      this converges, in practice in two or three rounds; bounded by the building count anyway.
+    // Then a union-find over the energised buildings splits them into grids.
     // ============================================================================================
-    static List<PowerNet> Compute(CelestialBody b, out Dictionary<PlacedBuilding, PowerNet> ownerByBuilding)
+    static Topology Build(CelestialBody b, List<PlacedBuilding> list, long sig)
     {
-        var nets = new List<PowerNet>();
-        ownerByBuilding = new Dictionary<PlacedBuilding, PowerNet>();
-
-        var all = SurfaceBuildManager.On(b);
-        if (all.Count == 0) return nets;
-
-        // Every building's own tiles, and a cell -> building index so contact is a lookup rather than a
-        // comparison of every footprint against every other.
+        var t = new Topology { sig = sig };
+        foreach (var p in list) if (p != null && p.Info != null) t.all.Add(p);
+        var all = t.all;
         int n = all.Count;
-        var own = new List<List<Vector2Int>>(n);
-        var cellOwner = new Dictionary<Vector2Int, int>();
-        var generators = new List<int>();
 
+        var own = new List<Vector2Int>[n];
         for (int i = 0; i < n; i++)
         {
-            var cells = SurfaceBuildingDatabase.Footprint(all[i]);
-            own.Add(cells);
-            foreach (var c in cells) cellOwner[c] = i;
-            if (all[i].Info.energyPerSec > 0f && all[i].Info.powerRange > 0f) generators.Add(i);
+            t.indexOf[all[i]] = i;
+            own[i] = SurfaceBuildingDatabase.Footprint(all[i]);
+            foreach (var c in own[i]) t.cellOwner[c] = i;
         }
 
-        // NO PLANT, NO GRID — the whole world at once, before doing any work for it.
-        if (generators.Count == 0) return nets;
+        // Edge neighbours, once. Shared with SurfaceSynergy, which asks the same question.
+        var nbr = new List<int>[n];
+        t.neighbours = new List<PlacedBuilding>[n];
+        var seen = new HashSet<int>();
+        for (int i = 0; i < n; i++)
+        {
+            nbr[i] = new List<int>();
+            t.neighbours[i] = new List<PlacedBuilding>();
+            seen.Clear();
+            foreach (var c in own[i])
+            {
+                TryNeighbour(t, i, c + Vector2Int.up, seen, nbr[i]);
+                TryNeighbour(t, i, c + Vector2Int.down, seen, nbr[i]);
+                TryNeighbour(t, i, c + Vector2Int.left, seen, nbr[i]);
+                TryNeighbour(t, i, c + Vector2Int.right, seen, nbr[i]);
+            }
+            foreach (int j in nbr[i]) t.neighbours[i].Add(all[j]);
+        }
 
-        // Union-find over BUILDINGS now, rather than over projectors. Joining two buildings is the
-        // primitive; what the passes below decide is which joins exist.
-        var parent = new int[n];
+        var isGen = new bool[n];
+        var isNode = new bool[n];
+        var live = new bool[n];
+        var disc = new HashSet<Vector2Int>[n];
+        bool anyGen = false;
+        for (int i = 0; i < n; i++)
+        {
+            var info = all[i].Info;
+            isGen[i] = info.energyPerSec > 0f && info.powerRange > 0f;
+            isNode[i] = info.type == SurfaceBuildingType.PowerNode;
+            if (isGen[i])
+            {
+                anyGen = true;
+                live[i] = true;
+                disc[i] = new HashSet<Vector2Int>();
+                AddDisc(b, own[i], info.powerRange * all[i].LevelMult, disc[i]);
+            }
+        }
+        if (!anyGen) return t;   // NO PLANT, NO GRID
 
-        // Which NODES are energised, and so are projecting. Grows across rounds; never shrinks, because
-        // rounds only add unions.
-        var liveNodes = new HashSet<int>();
-        var energised = new HashSet<int>();
+        var hop = new int[n];
+        var via = new int[n];
+        var src = new int[n];
+        var queue = new int[n];
+        int limit = MaxContactHops + FarSearch;
 
         for (int round = 0; round <= n; round++)
         {
-            for (int i = 0; i < n; i++) parent[i] = i;
+            int head = 0, tail = 0;
+            for (int i = 0; i < n; i++) { hop[i] = int.MaxValue; via[i] = -1; src[i] = -1; }
 
-            // ---- Edge kind 1: shared coverage ----
-            // A cell claimed twice joins its two claimants. Transitive by construction: if A meets B on
-            // one tile and B meets C on another, all three are one component without anyone comparing A
-            // to C.
-            var claimed = new Dictionary<Vector2Int, int>();
             for (int i = 0; i < n; i++)
-                foreach (var c in CoverageFor(b, all[i], liveNodes.Contains(i)))
-                {
-                    if (claimed.TryGetValue(c, out int j)) Union(parent, i, j);
-                    else claimed[c] = i;
-                }
+                if (live[i]) { hop[i] = 0; queue[tail++] = i; }
 
-            // ---- Edge kind 2: contact ----
             for (int i = 0; i < n; i++)
-                foreach (var c in own[i])
-                {
-                    TryContact(cellOwner, parent, i, c + Vector2Int.up);
-                    TryContact(cellOwner, parent, i, c + Vector2Int.down);
-                    TryContact(cellOwner, parent, i, c + Vector2Int.left);
-                    TryContact(cellOwner, parent, i, c + Vector2Int.right);
-                }
+            {
+                if (!live[i]) continue;
+                foreach (var c in disc[i])
+                    if (t.cellOwner.TryGetValue(c, out int j) && hop[j] != 0)
+                    { hop[j] = 0; src[j] = i; queue[tail++] = j; }
+            }
 
-            // ---- Which components have a plant in them? Those, and only those, are grids. ----
-            var powered = new HashSet<int>();
-            foreach (int g in generators) powered.Add(Find(parent, g));
+            while (head < tail)
+            {
+                int u = queue[head++];
+                if (hop[u] >= limit) continue;
+                int next = hop[u] + 1;
+                foreach (int v in nbr[u])
+                    if (hop[v] > next) { hop[v] = next; via[v] = u; queue[tail++] = v; }
+            }
 
-            energised.Clear();
-            for (int i = 0; i < n; i++)
-                if (powered.Contains(Find(parent, i))) energised.Add(i);
-
-            // ---- Did any new node light up? If not, this is the fixed point. ----
             bool grew = false;
             for (int i = 0; i < n; i++)
-                if (all[i].Info.type == SurfaceBuildingType.PowerNode
-                    && energised.Contains(i) && liveNodes.Add(i)) grew = true;
+                if (isNode[i] && !live[i] && hop[i] <= MaxContactHops)
+                {
+                    live[i] = true;
+                    disc[i] = new HashSet<Vector2Int>();
+                    AddDisc(b, own[i], all[i].Info.powerRange * all[i].LevelMult, disc[i]);
+                    grew = true;
+                }
             if (!grew) break;
         }
 
-        // ---- Turn the components into nets ----
-        var byRoot = new Dictionary<int, PowerNet>();
-        var netOf = new PowerNet[n];
+        // ---- Components over the energised ----
+        var on = new bool[n];
+        for (int i = 0; i < n; i++) on[i] = hop[i] <= MaxContactHops;
 
-        foreach (int i in energised)
-        {
-            int root = Find(parent, i);
-            if (!byRoot.TryGetValue(root, out var net))
-            {
-                net = new PowerNet();
-                byRoot[root] = net;
-                nets.Add(net);
-            }
-            netOf[i] = net;
-            net.projectors.Add(all[i]);
-
-            // COVERAGE IS WHAT THE GRID LIGHTS, which for a non-projector is its own footprint. That is
-            // the "buildings receiving power highlight their own tiles in the Power overlay" behaviour,
-            // and it falls out of the coverage rule rather than being drawn as a special case.
-            //
-            // A node contributes its disc only if it is actually live — the same CoverageFor the
-            // derivation used, so what the overlay paints yellow is exactly the ground the connectivity
-            // was computed from. Anything else would be a map that disagrees with the simulation.
-            net.coverage.UnionWith(CoverageFor(b, all[i], liveNodes.Contains(i)));
-        }
-
-        if (nets.Count == 0) return nets;
-
-        // NUMBER THEM DETERMINISTICALLY, by their topmost-leftmost lit tile. The derivation above walks
-        // the building list, so numbering in discovery order would mean demolishing something early in
-        // that list silently renumbers every grid after it — and "Grid 2" is a label the player reads on
-        // the map, in the status bar and in the panel, all of which must agree and stay put.
-        int w = b.surface.width;
-        nets.Sort((x, y) => Anchor(x, w).CompareTo(Anchor(y, w)));
-        for (int i = 0; i < nets.Count; i++) nets[i].index = i + 1;
-
-        // Hang every building off the grid that reaches it.
+        var parent = new int[n];
+        for (int i = 0; i < n; i++) parent[i] = i;
+        var claimed = new Dictionary<Vector2Int, int>();
         for (int i = 0; i < n; i++)
         {
+            if (!live[i] || !on[i]) continue;
+            foreach (var c in disc[i])
+            {
+                if (claimed.TryGetValue(c, out int k)) Union(parent, i, k); else claimed[c] = i;
+                if (t.cellOwner.TryGetValue(c, out int j) && on[j]) Union(parent, i, j);
+            }
+        }
+        for (int i = 0; i < n; i++)
+        {
+            if (!on[i]) continue;
+            foreach (int j in nbr[i]) if (on[j]) Union(parent, i, j);
+        }
+
+        var byRoot = new Dictionary<int, PowerNet>();
+        var netOf = new PowerNet[n];
+        for (int i = 0; i < n; i++)
+        {
+            if (!on[i]) continue;
+            int root = Find(parent, i);
+            if (!byRoot.TryGetValue(root, out var net)) { net = new PowerNet(); byRoot[root] = net; t.nets.Add(net); }
+            netOf[i] = net;
+            net.members.Add(all[i]);
+            net.coverage.UnionWith(own[i]);
+            if (live[i]) { net.projectors.Add(all[i]); net.coverage.UnionWith(disc[i]); }
+            if (hop[i] > net.deepestHop) net.deepestHop = hop[i];
+            if (hop[i] > 0) net.viaContact++;
+        }
+
+        // NUMBERED DETERMINISTICALLY by their topmost-leftmost lit tile, so "Grid 2" stays put on the
+        // map, the card and the list while the player builds elsewhere.
+        int w = b.surface.width;
+        t.nets.Sort((x, y) => Anchor(x, w).CompareTo(Anchor(y, w)));
+        for (int i = 0; i < t.nets.Count; i++) t.nets[i].index = i + 1;
+
+        for (int i = 0; i < n; i++)
+        {
+            if (hop[i] != int.MaxValue)
+                t.links[all[i]] = new Link
+                {
+                    hop = hop[i],
+                    via = via[i] >= 0 ? all[via[i]] : null,
+                    source = src[i] >= 0 ? all[src[i]] : null
+                };
+
             var net = netOf[i];
             if (net == null) continue;
             var p = all[i];
-            ownerByBuilding[p] = net;
+            t.owner[p] = net;
             var info = p.Info;
-
-            if (info.energyPerSec > 0f)
-            {
-                net.generators.Add(p);
-                // Matches TickOutput exactly, including the Power Distribution adjacency bonus — the
-                // number the grid runs on has to be the number the player was shown on the card.
-                net.generation += info.energyPerSec * p.OutputMult * (1f + SurfaceBuildManager.AdjacencyBonus(b, p));
-            }
-            if (info.powerStorage > 0f)
-            {
-                net.capacitors.Add(p);
-                net.storage += info.powerStorage * p.LevelMult;
-            }
-            if (info.powerDraw > 0f)
-            {
-                net.consumers.Add(p);
-                net.draw += info.powerDraw * p.LevelMult;
-            }
+            if (info.energyPerSec > 0f) net.generators.Add(p);
+            if (info.powerStorage > 0f) net.capacitors.Add(p);
+            if (info.powerDraw > 0f) net.consumers.Add(p);
         }
 
-        foreach (var net in nets) net.served = net.SteadyServed;
-        return nets;
+        // Nearest first: the order a shortfall is shared out in. Stable on the building list for ties.
+        foreach (var net in t.nets)
+        {
+            var hops = t.links;
+            var idx = t.indexOf;
+            net.consumers.Sort((x, y) =>
+            {
+                int c = hops[x].hop.CompareTo(hops[y].hop);
+                return c != 0 ? c : idx[x].CompareTo(idx[y]);
+            });
+        }
+        return t;
     }
 
-    /// A grid's position, as its topmost-leftmost lit tile, flattened to one comparable number.
+    static void TryNeighbour(Topology t, int i, Vector2Int c, HashSet<int> seen, List<int> into)
+    {
+        if (t.cellOwner.TryGetValue(c, out int j) && j != i && seen.Add(j)) into.Add(j);
+    }
+
     static long Anchor(PowerNet n, int width)
     {
         long best = long.MaxValue;
@@ -422,33 +506,6 @@ public static class PowerGrid
             if (k < best) best = k;
         }
         return best;
-    }
-
-    /// What this building lights, given whether it is a node that is currently live.
-    ///
-    /// The derivation and the overlay both go through this, so the ground the grid was computed from is
-    /// exactly the ground the map paints. A node's disc is conditional — a pylon whose chain has been
-    /// cut behind it is a building on the grid, not a relay — and CoverageOf cannot know that on its
-    /// own, because "is this node connected" is the very thing the derivation is working out.
-    static HashSet<Vector2Int> CoverageFor(CelestialBody b, PlacedBuilding p, bool nodeIsLive)
-    {
-        bool isNode = p.Info.type == SurfaceBuildingType.PowerNode;
-        if (isNode && !nodeIsLive)
-        {
-            // Its own tiles only: it conducts if something reaches it, and projects nothing.
-            var set = new HashSet<Vector2Int>();
-            foreach (var c in SurfaceBuildingDatabase.Footprint(p))
-                if (c.x >= 0 && c.y >= 0 && c.x < b.surface.width && c.y < b.surface.height) set.Add(c);
-            return set;
-        }
-        return CoverageOf(b, p);
-    }
-
-    /// If `c` belongs to another building, join the two. This is the pass-through rule: contact
-    /// conducts, whether or not either building generates anything.
-    static void TryContact(Dictionary<Vector2Int, int> cellOwner, int[] parent, int from, Vector2Int c)
-    {
-        if (cellOwner.TryGetValue(c, out int other) && other != from) Union(parent, from, other);
     }
 
     static int Find(int[] parent, int i)
@@ -463,13 +520,106 @@ public static class PowerGrid
         if (ra != rb) parent[ra] = rb;
     }
 
+    // ---- The numbers, once a frame ----
+    static void Numbers(CelestialBody b, Topology t)
+    {
+        int frame = Time.frameCount;
+        if (t.numbersFrame == frame) return;
+        t.numbersFrame = frame;   // first, so nothing below can re-enter
+
+        foreach (var net in t.nets)
+        {
+            net.generation = 0f; net.draw = 0f; net.storage = 0f;
+            foreach (var p in net.generators)
+                // Matches SurfaceOutput.Energy exactly, synergy (the switchyard) included — the number the
+                // grid runs on has to be the number the card shows.
+                net.generation += p.Info.energyPerSec * p.OutputMult * (1f + SurfaceSynergy.Bonus(b, p));
+            foreach (var p in net.capacitors) net.storage += p.Info.powerStorage * p.LevelMult;
+            foreach (var p in net.consumers) net.draw += DrawOf(p);
+            net.served = net.SteadyServed;
+            Allocate(t, net, net.SteadySupply);
+        }
+    }
+
+    /// Share `supply` (per second) over the grid's consumers, NEAREST FIRST. See the header.
+    static void Allocate(Topology t, PowerNet net, float supply)
+    {
+        net.servedOf.Clear();
+        if (net.draw <= 0.0001f || supply >= net.draw - 0.0001f) return;   // everyone at 1
+
+        float left = Mathf.Max(0f, supply);
+        int i = 0, count = net.consumers.Count;
+        while (i < count)
+        {
+            int h = HopIn(t, net.consumers[i]);
+            int j = i;
+            float tier = 0f;
+            while (j < count && HopIn(t, net.consumers[j]) == h) { tier += DrawOf(net.consumers[j]); j++; }
+            float s = tier > 0.0001f ? Mathf.Clamp01(left / tier) : 1f;
+            for (int k = i; k < j; k++) net.servedOf[net.consumers[k]] = s;
+            left = Mathf.Max(0f, left - tier);
+            i = j;
+        }
+    }
+
+    static int HopIn(Topology t, PlacedBuilding p) => t.links.TryGetValue(p, out var l) ? l.hop : 0;
+
     // ---- Queries ----
-    /// The grid feeding a building, or null if nothing reaches it.
+
+    /// The grid feeding a building, or null if nothing reaches it (or it is too far along a chain).
     public static PowerNet NetOf(CelestialBody b, PlacedBuilding p)
     {
         if (b == null || p == null) return null;
-        Nets(b);   // ensures this frame's cache exists
-        return ownerCache.TryGetValue(b, out var map) && map.TryGetValue(p, out var net) ? net : null;
+        var t = Topo(b);
+        if (t == null) return null;
+        Numbers(b, t);
+        return t.owner.TryGetValue(p, out var net) ? net : null;
+    }
+
+    /// Where a building sits in the power graph. False if no grid's chain touches it at all.
+    public static bool LinkOf(CelestialBody b, PlacedBuilding p, out Link link)
+    {
+        link = default;
+        var t = Topo(b);
+        return t != null && p != null && t.links.TryGetValue(p, out link);
+    }
+
+    /// The hop a building is powered at (0..MaxContactHops), or -1 if it is not on a grid.
+    public static int HopOf(CelestialBody b, PlacedBuilding p)
+        => LinkOf(b, p, out var l) && l.Powered ? l.hop : -1;
+
+    /// A building that touches a grid's chain but sits past the hop limit: which grid, and how far.
+    public static bool TooFar(CelestialBody b, PlacedBuilding p, out PowerNet near, out int hops)
+    {
+        near = null; hops = 0;
+        var t = Topo(b);
+        if (t == null || p == null || t.owner.ContainsKey(p)) return false;
+        if (!t.links.TryGetValue(p, out var l) || l.Powered) return false;
+        hops = l.hop;
+        // Walk the chain back to the first energised building; its grid is the one this is too far from.
+        var cur = l.via;
+        for (int guard = 0; cur != null && guard < 64; guard++)
+        {
+            if (t.owner.TryGetValue(cur, out near)) break;
+            cur = t.links.TryGetValue(cur, out var cl) ? cl.via : null;
+        }
+        if (near != null) Numbers(b, t);
+        return near != null;
+    }
+
+    /// Every building whose footprint touches `p` edge to edge. Cached with the topology; do not modify.
+    public static IReadOnlyList<PlacedBuilding> NeighboursOf(CelestialBody b, PlacedBuilding p)
+    {
+        var t = Topo(b);
+        if (t == null || p == null || !t.indexOf.TryGetValue(p, out int i)) return noBuildings;
+        return t.neighbours[i];
+    }
+
+    /// The building on a cell, from the cached cell index (far cheaper than SurfaceBuildManager.At).
+    public static PlacedBuilding OwnerAt(CelestialBody b, Vector2Int c)
+    {
+        var t = Topo(b);
+        return t != null && t.cellOwner.TryGetValue(c, out int i) ? t.all[i] : null;
     }
 
     /// Is this tile lit by anything?
@@ -480,170 +630,222 @@ public static class PowerGrid
         return null;
     }
 
-    /// The grid a structure WOULD join if it were placed here — the placement preview's question.
-    ///
-    /// ANY cell of the footprint is enough, matching the derivation. Testing only the origin cell (the
-    /// obvious shortcut) would tell a player "no grid here" for a four-tile plant whose origin happens
-    /// to sit one tile off the light, and then power it fully the moment they placed it anyway.
-    public static PowerNet NetForFootprint(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation)
-        => NetForCells(b, SurfaceBuildingDatabase.Footprint(t, x, y, rotation));
-
-    /// As above, for a drawn footprint.
-    public static PowerNet NetForCells(CelestialBody b, IEnumerable<Vector2Int> cells)
+    /// What a consumer draws: base draw x tech level x the cost curve of its drawn size.
+    public static float DrawOf(PlacedBuilding p)
     {
-        if (cells == null) return null;
-        foreach (var c in cells)
-        {
-            var net = NetAt(b, c.x, c.y);
-            if (net != null) return net;
-        }
-        return null;
+        if (p == null || p.Info == null || p.Info.powerDraw <= 0f) return 0f;
+        float size = p.HasDrawnShape ? BuildScaling.CostMultiplier(p.TileCount) : 1f;
+        return p.Info.powerDraw * p.LevelMult * size;
+    }
+
+    /// What a new building of this class and size would draw.
+    public static float DrawFor(SurfaceBuildingInfo info, int tiles, bool drawn)
+        => info == null ? 0f : info.powerDraw * (drawn ? BuildScaling.CostMultiplier(Mathf.Max(1, tiles)) : 1f);
+
+    /// The fraction of ITS demand a consumer is getting (1 for anything that draws nothing; 0 off-grid).
+    public static float ServedOf(CelestialBody b, PlacedBuilding p)
+    {
+        if (p == null || p.Info == null || p.Info.powerDraw <= 0f) return 1f;
+        var net = NetOf(b, p);
+        if (net == null) return 0f;
+        return net.servedOf.TryGetValue(p, out float s) ? s : 1f;
     }
 
     // ============================================================================================
-    // WHERE A RELAY MAY BE PLANTED
+    // WHAT A BUILDING WOULD GET IF IT WERE PLACED HERE — the placement preview's question
     //
-    // A Power Node is the one building whose placement is gated on the grid rather than on the ground,
-    // and it has to be: its entire function is to EXTEND a grid, and a relay that can be planted in
-    // empty desert is not extending anything — under the old rules two such relays fourteen tiles apart
-    // were a functioning grid with no plant anywhere near them.
-    //
-    // TWO WAYS TO QUALIFY, and the second matters as much as the first:
-    //
-    //   ON LIT GROUND. A cell the grid already reaches — the yellow in the overlay. This is the ordinary
-    //   case: you walk a chain outward, each pylon planted at the edge of what the last one lit.
-    //
-    //   TOUCHING A POWERED BUILDING. Because a building on the grid conducts (see the header), the tile
-    //   against a powered factory is a legitimate place to start a chain even though the factory itself
-    //   throws no light onto it. Without this the rule would be "you may only build a relay where you
-    //   already have a relay", and a city block full of powered industry would somehow be an invalid
-    //   place to begin.
+    // Any cell in a lit disc: hop 0. Otherwise the best energised neighbour's hop + 1, if within the
+    // limit. Otherwise the grid it would touch but be too far from. The same rule the derivation uses,
+    // asked of cells that hold nothing yet.
+    // ============================================================================================
+    public struct Prospect
+    {
+        public PowerNet net;     // the grid it would join, or null
+        public int hop;          // its hop on that grid
+        public PowerNet near;    // net == null: a grid it would touch but be too far from...
+        public int nearHop;      // ...and the hop it would have been at
+        public bool Connected => net != null;
+    }
+
+    public static Prospect ProspectFor(CelestialBody b, IEnumerable<Vector2Int> cells, PlacedBuilding extending = null)
+    {
+        var r = new Prospect { hop = -1, nearHop = -1 };
+        var t = Topo(b);
+        if (t == null || cells == null) return r;
+        Numbers(b, t);
+
+        // Extending a standing building: the merged building keeps that building's place in the graph,
+        // unless the new tiles reach something nearer.
+        if (extending != null && t.owner.TryGetValue(extending, out var en) && t.links.TryGetValue(extending, out var el))
+        { r.net = en; r.hop = el.hop; }
+
+        var mine = new HashSet<Vector2Int>(cells);
+        foreach (var c in mine)
+            foreach (var net in t.nets)
+                if (net.coverage.Contains(c) && !t.cellOwner.ContainsKey(c))
+                { r.net = net; r.hop = 0; return r; }
+
+        int farHop = int.MaxValue; PowerNet farNet = null;
+        foreach (var c in mine)
+        {
+            Consider(t, c + Vector2Int.up, mine, extending, ref r, ref farHop, ref farNet);
+            Consider(t, c + Vector2Int.down, mine, extending, ref r, ref farHop, ref farNet);
+            Consider(t, c + Vector2Int.left, mine, extending, ref r, ref farHop, ref farNet);
+            Consider(t, c + Vector2Int.right, mine, extending, ref r, ref farHop, ref farNet);
+        }
+        if (r.net == null && farNet != null) { r.near = farNet; r.nearHop = farHop; }
+        return r;
+    }
+
+    static void Consider(Topology t, Vector2Int c, HashSet<Vector2Int> mine, PlacedBuilding extending,
+                         ref Prospect r, ref int farHop, ref PowerNet farNet)
+    {
+        if (mine.Contains(c) || !t.cellOwner.TryGetValue(c, out int j)) return;
+        var p = t.all[j];
+        if (p == extending) return;
+        if (!t.links.TryGetValue(p, out var l)) return;
+        int h = l.hop + 1;
+        if (t.owner.TryGetValue(p, out var net) && h <= MaxContactHops)
+        {
+            if (r.net == null || h < r.hop) { r.net = net; r.hop = h; }
+            return;
+        }
+        // Too far: find the grid this chain belongs to.
+        PowerNet near = net;
+        var cur = l.via;
+        for (int guard = 0; near == null && cur != null && guard < 64; guard++)
+        {
+            if (t.owner.TryGetValue(cur, out near)) break;
+            cur = t.links.TryGetValue(cur, out var cl) ? cl.via : null;
+        }
+        if (near != null && h < farHop) { farHop = h; farNet = near; }
+    }
+
+    /// The grid a structure WOULD join if it were placed here (any footprint cell, plus contact).
+    public static PowerNet NetForFootprint(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation)
+        => ProspectFor(b, SurfaceBuildingDatabase.Footprint(t, x, y, rotation)).net;
+
+    /// As above, for a drawn footprint.
+    public static PowerNet NetForCells(CelestialBody b, IEnumerable<Vector2Int> cells)
+        => ProspectFor(b, cells).net;
+
+    /// One rich line for the placement readouts: what a structure of this class would feed or take from
+    /// the grid at these cells, and by what route. Null when power does not concern it.
+    public static string ProspectText(CelestialBody b, SurfaceBuildingInfo info, IEnumerable<Vector2Int> cells,
+                                      int tiles, bool drawn, PlacedBuilding extending = null)
+    {
+        if (b == null || info == null || cells == null) return null;
+        bool gen = info.energyPerSec > 0f, node = info.type == SurfaceBuildingType.PowerNode;
+        if (!gen && !node && info.powerDraw <= 0f && info.powerStorage <= 0f)
+        {
+            // Not a consumer, but it still CONDUCTS — say whether it would extend a grid.
+            var pc = ProspectFor(b, cells, extending);
+            return pc.Connected && pc.hop < MaxContactHops
+                ? $"<color=#9FB4C8>carries Grid {pc.net.index} on (hop {pc.hop} of {MaxContactHops})</color>"
+                : null;
+        }
+
+        var pr = ProspectFor(b, cells, extending);
+        if (gen)
+            return pr.Connected || pr.near != null
+                ? $"<color=#F5F58C>feeds Grid {(pr.net ?? pr.near).index}</color>"
+                : "<color=#F5F58C>starts a new grid</color>";
+
+        if (node)
+            return pr.Connected
+                ? $"<color=#4DC8FF>extends Grid {pr.net.index}</color>"
+                : "<color=#FF6659>a relay has to start from power — on lit ground, or touching a powered building</color>";
+        string what = info.powerDraw > 0f ? $"draws {DrawFor(info, tiles, drawn):0.0}" : $"banks {info.powerStorage:0}";
+        if (pr.Connected)
+        {
+            if (pr.hop == 0) return $"{what} · <color=#4DC8FF>Grid {pr.net.index}, lit directly</color>";
+            int left = MaxContactHops - pr.hop;
+            string hex = left == 0 ? "FFBF4D" : "4DC8FF";
+            return $"{what} · <color=#{hex}>Grid {pr.net.index} via {pr.hop} adjacent building{(pr.hop == 1 ? "" : "s")}, " +
+                   $"{left} hop{(left == 1 ? "" : "s")} left</color>";
+        }
+        if (pr.near != null)
+            return $"<color=#FF6659>{what} — too far: {pr.nearHop} buildings from Grid {pr.near.index} (limit {MaxContactHops}). " +
+                   $"Add a pylon or plant nearer</color>";
+        return $"<color=#FF6659>{what} — no grid reaches here (runs at {UnpoweredFactor * 100f:0}% backup)</color>";
+    }
+
+    // ============================================================================================
+    // WHERE A RELAY MAY BE PLANTED — on lit ground, or touching a building that would pass it power
+    // WITHIN THE HOP LIMIT. The limit matters: a pylon planted against a building already at the limit
+    // would itself be too far, never go live, and stand dark — the rule and the derivation would disagree.
     // ============================================================================================
     public static bool CanPlantNodeAt(CelestialBody b, IEnumerable<Vector2Int> cells, out string why)
     {
         why = null;
         if (b?.surface == null || cells == null) { why = "no ground here"; return false; }
-
-        foreach (var c in cells)
-        {
-            // On the grid already.
-            if (NetAt(b, c.x, c.y) != null) return true;
-
-            // Or against something that is on it.
-            if (PoweredNeighbour(b, c) != null) return true;
-        }
-
-        why = "a relay has to start from power — put it on lit ground, or against a building that " +
-              "already has some";
+        var pr = ProspectFor(b, cells);
+        if (pr.Connected) return true;
+        why = pr.near != null
+            ? $"too far from power — that chain is already {pr.nearHop - 1} buildings long (limit {MaxContactHops}); start nearer a plant or pylon"
+            : "a relay has to start from power — put it on lit ground, or against a building that already has some";
         return false;
     }
 
     // ============================================================================================
-    // THE LINES BETWEEN PYLONS
-    //
-    // A chain of relays reads as a row of unrelated blue dots. Whether two of them are actually carrying
-    // power to each other — the one thing a chain is for — is invisible: it depends on their reach and
-    // their tiers, which are numbers on a card, and the yellow puddles they light are the same colour
-    // whether they are one grid or five.
-    //
-    // So the overlay draws the connection. A pair of relays ON THE SAME GRID and within reach of each
-    // other gets a line, and the line means exactly what it looks like: power flows along it.
-    //
-    // WITHIN REACH OF EACH OTHER, not merely on the same grid. Six pylons around a city are all one
-    // grid; joining every pair of them would draw a cat's cradle that says nothing. The reach test
-    // leaves the actual chain — each mast to its neighbours — which is the shape the player laid down.
+    // THE LINES BETWEEN PYLONS — relay-to-relay spans on the same grid and within reach of each other.
     // ============================================================================================
     public struct NodeLink
     {
         public Vector2Int a, b;
-        public int net;        // which grid, so the overlay can colour a failing chain differently
+        public int net;
     }
 
-    /// Every relay-to-relay connection on this world.
     public static List<NodeLink> NodeLinks(CelestialBody b)
     {
         var links = new List<NodeLink>();
         if (b?.surface == null) return links;
 
-        // Relays only — a plant is not a pylon and a line from a reactor to a factory would be drawing
-        // the grid's whole adjacency graph rather than its transmission line.
         var relays = new List<PlacedBuilding>();
-        foreach (var p in SurfaceBuildManager.On(b))
-            if (p.Type == SurfaceBuildingType.PowerNode && NetOf(b, p) != null) relays.Add(p);
+        foreach (var net in Nets(b))
+            foreach (var p in net.projectors)
+                if (p.Type == SurfaceBuildingType.PowerNode) relays.Add(p);
 
         for (int i = 0; i < relays.Count; i++)
             for (int j = i + 1; j < relays.Count; j++)
             {
                 var pa = relays[i];
                 var pb = relays[j];
-
                 var na = NetOf(b, pa);
                 if (na == null || na != NetOf(b, pb)) continue;
-
-                // Reach is the LARGER of the two, because a link exists if either can reach the other —
-                // a level-3 mast talking to a level-1 one is still one span of wire.
                 float r = Mathf.Max(pa.Info.powerRange * pa.LevelMult, pb.Info.powerRange * pb.LevelMult);
-
                 var ca = new Vector2Int(pa.x, pa.y);
                 var cb = new Vector2Int(pb.x, pb.y);
                 float dx = ca.x - cb.x, dy = ca.y - cb.y;
                 if (dx * dx + dy * dy > r * r) continue;
-
                 links.Add(new NodeLink { a = ca, b = cb, net = na.index });
             }
-
         return links;
     }
 
-    /// A building on a live grid whose footprint touches this cell, or null.
-    static PlacedBuilding PoweredNeighbour(CelestialBody b, Vector2Int c)
-    {
-        var up = SurfaceBuildManager.At(b, c.x, c.y + 1);
-        if (up != null && NetOf(b, up) != null) return up;
-        var down = SurfaceBuildManager.At(b, c.x, c.y - 1);
-        if (down != null && NetOf(b, down) != null) return down;
-        var left = SurfaceBuildManager.At(b, c.x - 1, c.y);
-        if (left != null && NetOf(b, left) != null) return left;
-        var right = SurfaceBuildManager.At(b, c.x + 1, c.y);
-        if (right != null && NetOf(b, right) != null) return right;
-        return null;
-    }
-
-    /// How much of its rated output a building actually manages, given the power reaching it.
-    ///
-    /// Ramped rather than a cliff: a grid meeting half its demand runs its buildings partway between the
-    /// unpowered floor and full, so a browning-out grid degrades visibly instead of holding at 100% and
-    /// then falling off a step. Things that draw nothing (a node, a plant, a farm) are always 1.
+    /// How much of its rated output a consumer manages: Lerp(backup, 1, its own served fraction).
     public static float PowerFactor(CelestialBody b, PlacedBuilding p)
     {
-        if (p == null || p.Info.powerDraw <= 0f) return 1f;
+        if (p == null || p.Info == null || p.Info.powerDraw <= 0f) return 1f;
         var net = NetOf(b, p);
         if (net == null) return UnpoweredFactor;
-        return PowerFactorFor(net.served);
+        return PowerFactorFor(net.servedOf.TryGetValue(p, out float s) ? s : 1f);
     }
 
-    /// The output factor a consumer runs at on a grid serving this fraction of its demand.
+    /// The output factor a consumer runs at when this fraction of its demand is met.
     public static float PowerFactorFor(float served) => Mathf.Lerp(UnpoweredFactor, 1f, Mathf.Clamp01(served));
 
-    /// Everything on this world that wants a grid and hasn't got a working one. The Power tab's headline
-    /// problem — a list of what to go and fix.
+    /// Everything on this world that wants a grid and hasn't got a working one.
     public static List<PlacedBuilding> Unpowered(CelestialBody b)
     {
         var list = new List<PlacedBuilding>();
         foreach (var p in SurfaceBuildManager.On(b))
         {
             var info = p.Info;
+            if (info == null) continue;
             bool wantsGrid = info.powerDraw > 0f || info.powerStorage > 0f;
             if (!wantsGrid) continue;
-
             var net = NetOf(b, p);
-            // Nothing reaches it, OR what reaches it has no plant AND no charge left. Both are the same
-            // 35% to the player, and listing only the first would send someone hunting for a connection
-            // they already have — the actual fault being that their node chain ends in nothing.
-            //
-            // `Failed` rather than `Dead`: a dead grid still coasting on its capacitors is delivering
-            // full output, and listing its buildings as "in the dark" would be a lie the output figure
-            // would immediately contradict.
             if (net == null || (info.powerDraw > 0f && net.Failed)) list.Add(p);
         }
         return list;
@@ -667,7 +869,10 @@ public static class PowerGrid
     public static void Tick(CelestialBody b, float dt)
     {
         if (dt <= 0f) return;
-        foreach (var net in Nets(b))
+        var t = Topo(b);
+        if (t == null) return;
+        Numbers(b, t);
+        foreach (var net in t.nets)
         {
             float made = net.generation * dt;
             float need = net.draw * dt;
@@ -675,22 +880,20 @@ public static class PowerGrid
             if (made >= need)
             {
                 net.served = 1f;
-                // Surplus tops the capacitors up first and only then leaves the world. That ordering is
-                // what makes a capacitor worth building: it's the difference between a solar grid that
-                // dies every time demand spikes and one that rides through on what it banked.
+                net.servedOf.Clear();
+                // Surplus tops the capacitors up first and only then leaves the world.
                 float left = Charge(net, made - need);
                 if (left > 0f) PlayerEconomy.Add(ResourceType.Energy, left);
             }
             else
             {
-                // Short. Make up the difference from the bank if there's anything in it.
                 float pulled = Drain(net, need - made);
                 net.served = need <= 0.0001f ? 1f : Mathf.Clamp01((made + pulled) / need);
+                Allocate(t, net, (made + pulled) / dt);
             }
         }
     }
 
-    /// Push energy into a grid's capacitors. Returns what wouldn't fit.
     static float Charge(PowerNet net, float amount)
     {
         if (amount <= 0f) return 0f;
@@ -707,7 +910,6 @@ public static class PowerGrid
         return amount;
     }
 
-    /// Pull energy out of a grid's capacitors. Returns what was actually available.
     static float Drain(PowerNet net, float amount)
     {
         if (amount <= 0f) return 0f;
@@ -738,10 +940,45 @@ public static class PowerGrid
     public static Color SupplyColor(PowerNet net)
     {
         if (net.Failed) return UITheme.Bad;
-        if (net.Dead) return UITheme.Warn;                 // coasting on the bank: a warning, not a fault
+        if (net.Dead) return UITheme.Warn;
         if (net.draw <= 0.0001f) return UITheme.SubText;
         if (net.served >= 0.999f) return net.Sustainable >= 0.999f ? UITheme.Good : UITheme.Warn;
         if (net.served >= 0.6f) return UITheme.Warn;
         return UITheme.Bad;
+    }
+
+    /// Each grid's own identifying colour — the tag on its buildings and its row in the grid list. Hue
+    /// only identifies; health is always said in words and in SupplyColor beside it.
+    static readonly Color[] gridHues =
+    {
+        new Color(0.30f, 0.78f, 1.00f), new Color(1.00f, 0.62f, 0.25f), new Color(0.50f, 0.92f, 0.45f),
+        new Color(0.95f, 0.45f, 0.85f), new Color(1.00f, 0.90f, 0.35f), new Color(0.45f, 1.00f, 0.90f),
+        new Color(0.75f, 0.60f, 1.00f), new Color(1.00f, 0.50f, 0.50f)
+    };
+
+    public static Color GridColor(int index) => gridHues[((Mathf.Max(1, index) - 1) % gridHues.Length + gridHues.Length) % gridHues.Length];
+
+    /// How a building gets its power, in words — the card's line and the dark list's.
+    public static string ReachText(CelestialBody b, PlacedBuilding p)
+    {
+        if (b == null || p?.Info == null) return "";
+        var net = NetOf(b, p);
+        if (net != null && LinkOf(b, p, out var l))
+        {
+            if (l.hop == 0)
+            {
+                if (Projects(p.Info)) return p.Info.energyPerSec > 0f ? $"a plant on Grid {net.index}" : $"a live relay on Grid {net.index}";
+                string by = l.source?.Info != null ? l.source.Info.name : "a plant";
+                return $"lit directly by the {by}'s reach (Grid {net.index})";
+            }
+            int left = MaxContactHops - l.hop;
+            string from = l.via?.Info != null ? $" — through the {l.via.Info.name}" : "";
+            return $"powered through {l.hop} adjacent building{(l.hop == 1 ? "" : "s")}{from}, " +
+                   $"{left} hop{(left == 1 ? "" : "s")} left (Grid {net.index})";
+        }
+        if (TooFar(b, p, out var near, out int hops))
+            return $"too far — {hops} buildings from Grid {near.index}'s reach (limit {MaxContactHops}). " +
+                   "Put a pylon or plant nearer";
+        return "no grid reaches it";
     }
 }

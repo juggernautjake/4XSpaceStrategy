@@ -33,7 +33,8 @@ public static class PlayerEconomy
                 if (b == null || b.owner != FactionManager.Player || b.placedBuildings == null) continue;
                 // Scales with tech level, like every other surface output. A depot's siting is
                 // irrelevant (storageCapacity has no index), so this is purely its tier.
-                foreach (var p in b.placedBuildings) cap += p.Info.storageCapacity * p.LevelMult;
+                // SurfaceOutput.Storage also scales a depot drawn bigger than its authored footprint.
+                foreach (var p in b.placedBuildings) if (p != null) cap += SurfaceOutput.Storage(p);
             }
         capCache = cap; capFrame = Time.frameCount;
         return cap;

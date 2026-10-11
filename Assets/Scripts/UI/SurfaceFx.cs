@@ -22,7 +22,8 @@ using UnityEngine.UI;
 //
 //   POWER FLOW    Click anything standing on a grid and the grid shows itself working: its
 //                 transmission spans drawn between plants and pylons, a feed line to every building it
-//                 powers, and bright pulses running out from the generators along every one of them —
+//                 powers (a thin, paler ADJACENCY LINK for a building fed through its neighbour rather than
+//                 lit by a disc — PowerGrid's hop rule, drawn), and bright pulses running out from the generators along every one of them —
 //                 quick and gold on a healthy grid, slow and amber when it is short, red when it has
 //                 failed (PowerGrid.SupplyColor).
 //
@@ -611,7 +612,9 @@ public class SurfaceFx : MonoBehaviour
     // POWER FLOW
     // ==============================================================================================
 
-    struct Span { public Vector2 a, b; }
+    // `hop`: a building-to-building adjacency link (power passed on by contact) rather than a span
+    // from a plant or pylon. Drawn thinner and paler, so the chain reads as a different kind of wire.
+    struct Span { public Vector2 a, b; public bool hop; }
     readonly List<Span> spans = new List<Span>();
     readonly List<Image> spanLines = new List<Image>();
     readonly List<Particle> pulses = new List<Particle>();
@@ -630,7 +633,10 @@ public class SurfaceFx : MonoBehaviour
         int idx = net != null ? net.index : -1;
         int np = net != null ? net.projectors.Count : 0, nc = net != null ? net.consumers.Count : 0;
         int ncap = net != null ? net.capacitors.Count : 0, nb = SurfaceBuildManager.On(cur).Count;
-        if (flowDirty || idx != flowIndex || np != flowProj || nc != flowCons || ncap != flowCaps || nb != flowBuildings)
+        // `net != flowNet`: PowerGrid now keeps its nets across frames and makes new ones only when the
+        // topology changes, so a different object means the routes (hops, via, sources) may have moved
+        // even when every count matches — a type change or a re-route, say.
+        if (flowDirty || net != flowNet || idx != flowIndex || np != flowProj || nc != flowCons || ncap != flowCaps || nb != flowBuildings)
         {
             flowDirty = false;
             flowIndex = idx; flowProj = np; flowCons = nc; flowCaps = ncap; flowBuildings = nb;
@@ -652,9 +658,10 @@ public class SurfaceFx : MonoBehaviour
             var d = b - a;
             var rt = img.rectTransform;
             rt.anchoredPosition = a;
-            rt.sizeDelta = new Vector2(d.magnitude, Mathf.Max(1.5f, TilePx * 0.08f));
+            rt.sizeDelta = new Vector2(d.magnitude, s.hop ? Mathf.Max(1f, TilePx * 0.05f) : Mathf.Max(1.5f, TilePx * 0.08f));
             rt.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg);
-            img.color = new Color(col.r, col.g, col.b, 0.55f);
+            img.color = s.hop ? new Color(Mathf.Lerp(col.r, 1f, 0.45f), Mathf.Lerp(col.g, 1f, 0.45f), Mathf.Lerp(col.b, 1f, 0.45f), 0.5f)
+                              : new Color(col.r, col.g, col.b, 0.55f);
         }
 
         // The pulses: out from the generators along every span, faster on a healthy grid.
@@ -731,24 +738,36 @@ public class SurfaceFx : MonoBehaviour
             AddSpan(pos[bestA], pos[bestB]);
         }
 
-        // Feeds to everything the grid powers.
-        var fed = new List<PlacedBuilding>(net.consumers);
-        fed.AddRange(net.capacitors);
-        foreach (var c in fed)
+        // Feeds to everything else on the grid, along the route the power actually takes (PowerGrid's
+        // hops): a building lit by a disc gets a span from the plant or pylon whose disc it is; a building
+        // powered BY CONTACT gets a thin adjacency link from the neighbour it takes its power from — so a
+        // chain of three factories off a plant's edge draws as plant -> factory -> factory -> factory.
+        foreach (var c in net.members)
         {
             if (pos.ContainsKey(c)) continue;
             var cp = Centre(SurfaceBuildingDatabase.Footprint(c));
-            PlacedBuilding near = null; float best = float.MaxValue;
-            foreach (var p in proj) { float d = (pos[p] - cp).sqrMagnitude; if (d < best) { best = d; near = p; } }
+            PowerGrid.LinkOf(cur, c, out var link);
+            if (link.hop > 0 && link.via != null)
+            {
+                if (!pos.TryGetValue(link.via, out var vp)) vp = Centre(SurfaceBuildingDatabase.Footprint(link.via));
+                AddSpan(vp, cp, true);
+                continue;
+            }
+            PlacedBuilding near = link.source != null && pos.ContainsKey(link.source) ? link.source : null;
+            if (near == null)
+            {
+                float best = float.MaxValue;
+                foreach (var p in proj) { float d = (pos[p] - cp).sqrMagnitude; if (d < best) { best = d; near = p; } }
+            }
             if (near != null) AddSpan(pos[near], cp);
         }
     }
 
-    void AddSpan(Vector2 a, Vector2 b)
+    void AddSpan(Vector2 a, Vector2 b, bool hop = false)
     {
         // Spans that wrap the date line would be drawn across the whole map; skip those.
         if (Mathf.Abs(a.x - b.x) > W * 0.5f) return;
-        spans.Add(new Span { a = a, b = b });
+        spans.Add(new Span { a = a, b = b, hop = hop });
         var img = UIFactory.NewUI(flowLayer, "span").AddComponent<Image>();
         img.raycastTarget = false;
         var rt = img.rectTransform;

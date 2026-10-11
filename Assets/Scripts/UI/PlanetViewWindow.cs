@@ -119,6 +119,7 @@ public class PlanetViewWindow : MonoBehaviour
     RectTransform mapRT, pieceLayer, ghostLayer;
     SurfaceFx surfaceFx;
     BuildingGridPopup gridPopup;
+    PowerGridBadges gridBadges;   // grid tags on the map + the grid list, while the power overlay is up
 
     // The tile frame under the cursor (DrawHoverFrame). Its own layer because it is rebuilt on its own
     // trigger — the hovered cell changing — and must not take the pieces or the selection with it.
@@ -856,6 +857,11 @@ public class PlanetViewWindow : MonoBehaviour
         gridPopup = BuildingGridPopup.Create(mapRT);
         gridPopup.Body = () => body;
         gridPopup.Visible = () => IsOpen && hostViewport.gameObject.activeInHierarchy;
+
+        // Which grid everything is on: tags on the map and the clickable grid list (PowerGridBadges).
+        gridBadges = PowerGridBadges.Create(mapRT);
+        gridBadges.Body = () => body;
+        gridBadges.Visible = () => IsOpen && hostViewport.gameObject.activeInHierarchy && PowerOverlayActive;
 
         // The hover frame: above the pieces (a frame hidden behind the building it is framing is no
         // frame), below the selection so the selected building's gold always wins.
@@ -3947,7 +3953,7 @@ public class PlanetViewWindow : MonoBehaviour
                     ? "<color=#9FB4C8>full output</color>"
                     : $"<color=#{hex}>{cap.efficiency * 100f:F0}% — {SurfaceBuildManager.EfficiencyLabel(cap.efficiency)}</color>";
                 string adj = SurfaceBuildManager.AdjacencyBonus(body, cap) > 0f
-                    ? $"  <color=#F5F58C>+{SurfaceBuildManager.AdjacencyBonus(body, cap) * 100f:F0}% grid</color>" : "";
+                    ? $"  <color=#8FD0FF>+{SurfaceBuildManager.AdjacencyBonus(body, cap) * 100f:F0}% synergy</color>" : "";
                 return $"<b>{info.name}</b> at ({cap.x},{cap.y})  <size=10>{eff}{adj}</size>";
             });
 
@@ -4136,7 +4142,7 @@ public class PlanetViewWindow : MonoBehaviour
                 : $"{SurfaceIndex.Name(info.index)} <color=#{ColorUtility.ToHtmlStringRGB(SurfaceBuildManager.EfficiencyColor(cap.efficiency))}>" +
                   $"{cap.efficiency * 100f:F0}% ({SurfaceBuildManager.EfficiencyLabel(cap.efficiency)})</color>";
             string adj = SurfaceBuildManager.AdjacencyBonus(body, cap) > 0f
-                ? $" · <color=#F5F58C>+{SurfaceBuildManager.AdjacencyBonus(body, cap) * 100f:F0}% switchyard</color>" : "";
+                ? $" · <color=#8FD0FF>+{SurfaceBuildManager.AdjacencyBonus(body, cap) * 100f:F0}% synergy</color>" : "";
 
             // Power is now a THIRD multiplier on output, so it has to be visible next to the other two —
             // an Output ×0.35 with no explanation next to it is exactly the kind of unattributed number
@@ -4157,9 +4163,10 @@ public class PlanetViewWindow : MonoBehaviour
                                 : $" · <color=#FFBF4D>Grid {net.index} at {net.served * 100f:F0}%</color>";
             }
             return $"({cap.x},{cap.y}) · {site}{adj}{power}\n" +
-                   $"<color=#9FB4C8>Output ×{cap.OutputMult * pf:0.00}</color> (siting × tech level" +
+                   $"<color=#9FB4C8>Output ×{cap.OutputMult * pf * (1f + SurfaceBuildManager.AdjacencyBonus(body, cap)):0.00}</color> (siting × tech level" +
                    $"{(cap.health < 0.999f ? " × condition" : "")}" +
-                   $"{(info.powerDraw > 0f ? " × power" : "")})";
+                   $"{(info.powerDraw > 0f ? " × power" : "")}" +
+                   $"{(SurfaceBuildManager.AdjacencyBonus(body, cap) > 0f ? " × synergy" : "")})";
         });
 
         // Upgrade + demolish.
@@ -4314,7 +4321,7 @@ public class PlanetViewWindow : MonoBehaviour
                     if (net == null && info.powerStorage > 0f && info.powerDraw <= 0f)
                         fault = "<color=#FF6659>off the grid — banking nothing</color>";
                     else if (net == null)
-                        fault = $"<color=#FF6659>no grid reaches it — wants {info.powerDraw * cap2.LevelMult:0.0}</color>";
+                        fault = $"<color=#FF6659>{PowerGrid.ReachText(body, cap2)} — wants {PowerGrid.DrawOf(cap2):0.0}</color>";
                     else
                         fault = $"<color=#FF6659>on Grid {net.index}, which has no plant on it</color>";
 
@@ -7526,6 +7533,7 @@ public class PlanetViewWindow : MonoBehaviour
     // spending the metal out from under a shape the player is still looking at.
     bool placeOk;
     string placeWhy;
+    string placePlan;   // synergies + power route for the drawn shape (SurfaceSynergy.PlacementSummary), throttled with placeOk
     int placeCheckedTiles = -1;
     float placeCheckIn;
 
@@ -7553,6 +7561,7 @@ public class PlanetViewWindow : MonoBehaviour
             placeCheckedTiles = tiles;
             placeCheckIn = 0.25f;
             placeOk = BuildPlacement.CanConfirm(out placeWhy);
+            placePlan = SurfaceSynergy.PlacementSummary(body, BuildPlacement.Info, BuildPlacement.Cells, BuildPlacement.Expanding);
         }
         bool ok = placeOk;
         string why = placeWhy;
@@ -7573,6 +7582,7 @@ public class PlanetViewWindow : MonoBehaviour
         sb.Append($"<size=10><color=#9FB4C8>{m} metal · {e} energy · " +
                   $"{GameCalendar.Duration(info.buildTime * mult * TechEffects.BuildTimeMult)} · " +
                   $"x{BuildScaling.OutputMultiplier(tiles):0.0} output</color></size>");
+        if (!string.IsNullOrEmpty(placePlan)) sb.Append($"\n<size=10>{placePlan}</size>");
         // The refusal leads with "Can't build:" so it reads as the reason Confirm is greyed, not as one
         // more figure in the list above it.
         if (!ok) sb.Append($"\n<size=10><color=#{ColorUtility.ToHtmlStringRGB(UITheme.Bad)}><b>Can't build:</b> {why}</color></size>");
@@ -7645,7 +7655,9 @@ public class PlanetViewWindow : MonoBehaviour
 
         placeText = UIFactory.Text(placePanel, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
         var tle = placeText.gameObject.AddComponent<LayoutElement>();
-        tle.preferredHeight = 44f;
+        tle.minHeight = 44f;
+        // Grows with the synergy and power-route lines (placePlan) rather than clipping them.
+        placePanel.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
         var row = UIFactory.NewUI(placePanel, "Row");
         UIFactory.AddLayout(row, 22);
@@ -8507,7 +8519,8 @@ public class PlanetViewWindow : MonoBehaviour
         // for the ground hidden under it.
         if (IndexIconBar.PointerOverAny(Input.mousePosition) || PointerOverShortcuts(Input.mousePosition)
             || OverPaneControls(Input.mousePosition)
-            || (gridPopup != null && gridPopup.Covers(Input.mousePosition)))
+            || (gridPopup != null && gridPopup.Covers(Input.mousePosition))
+            || (gridBadges != null && gridBadges.Covers(Input.mousePosition)))
         {
             ClearHostHover();
             MapHoverPanel.Instance.Hide();
@@ -9313,6 +9326,7 @@ public class PlanetViewWindow : MonoBehaviour
         if (OverPaneControls(p)) return true;
         if (IndexIconBar.PointerOverAny(p) || PointerOverShortcuts(p)) return true;
         if (gridPopup != null && gridPopup.Covers(p)) return true;
+        if (gridBadges != null && gridBadges.Covers(p)) return true;
         // Placement Mode's Confirm/Cancel panel sits ON the map, directly under the shape it is asking
         // about — without this, pressing Confirm would also paint the cell behind the button.
         if (Showing(confirmPanel, p) || Showing(placePanel, p) || Showing(demolishPanel, p)) return true;
