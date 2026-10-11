@@ -241,10 +241,27 @@ for (const r of rows) {
 
 console.log('-'.repeat(96));
 console.log(`ok ${pass}   weak ${warn}   FAIL ${fail}   other ${other}   (of ${rows.length})`);
+// ---- PALETTE CONFLICTS ---------------------------------------------------------------------
+// A saturated base whose hue sits inside an accent's key window cannot be told apart from that
+// accent by hue at all — every hull pixel is counted as accent, and the hull reads "swamped" however
+// good the art is. Found on the first Cryithn fleet (2026-10-11): glacier-blue base 205, Glacier Light
+// secondary 190, and 27 of 29 hulls "failed" with 46-90% secondary on art that is exactly what was
+// asked for. Re-rolling cannot fix that; the palette (or keying the glow by brightness) has to.
+for (const [name, civ] of Object.entries(c)) {
+  if (!civ.baseSaturated || civ.baseHue == null) continue;
+  for (const role of ['primary', 'secondary']) {
+    const d = hueDist(civ.baseHue, civ[role].keyHue);
+    if (d <= RULES.keyTolerance)
+      console.log(`\nPALETTE CONFLICT  ${name}: base hue ${civ.baseHue} is ${d}° from the ${role} key ` +
+                  `${civ[role].keyHue} (tolerance ${RULES.keyTolerance}°) — its "${role} swamped/missing" ` +
+                  'verdicts measure the hull, not the accent. Fix civ-colors.json, not the art.');
+  }
+}
+
 console.log(`\nkey hues — ${Object.entries(c).map(([k, v]) => `${k}: ${v.primary.keyHue}/${v.secondary.keyHue}`).join('  ')}`);
 
 const redo = rows.filter(r => r.v && !r.v.pass).map(r => `${r.civ}/${r.unit}`);
-if (redo.length) {
-  fs.writeFileSync(path.join(PROJ, 'tools', 'retexture-worklist.json'), JSON.stringify(redo, null, 2));
-  console.log(`\n${redo.length} need re-texturing -> tools/retexture-worklist.json`);
-}
+// Written on EVERY run, empty included: skipping the write when nothing failed left the previous
+// run's failures in the file, so a fleet that had been fixed still read as broken.
+fs.writeFileSync(path.join(PROJ, 'tools', 'retexture-worklist.json'), JSON.stringify(redo, null, 2));
+if (redo.length) console.log(`\n${redo.length} need re-texturing -> tools/retexture-worklist.json`);

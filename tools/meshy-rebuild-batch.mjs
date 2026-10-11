@@ -2,6 +2,7 @@
 // REBUILD A FLEET: concept art -> textured 3D, with lineage
 //
 //   node tools/meshy-rebuild-batch.mjs --plan
+//   node tools/meshy-rebuild-batch.mjs --api-key-file tools/meshy-api-key.txt --only Sylvan   (public API, see below)
 //   node tools/meshy-rebuild-batch.mjs --token "Bearer ..." --only Aquarii --lineage scout
 //   node tools/meshy-rebuild-batch.mjs --token "..." --limit 6
 //
@@ -64,6 +65,32 @@ function readTokenFile() {
   return /^bearer\s/i.test(raw) || raw.startsWith('msy_') ? raw : 'Bearer ' + raw;
 }
 if (TOKEN_FILE) TOKEN = readTokenFile() || TOKEN;
+// ---- the public developer API (msy_ key) -------------------------------------------------------
+//
+// `--api-key-file tools/meshy-api-key.txt` switches every call to the PUBLIC REST API
+// (https://api.meshy.ai/openapi/v1) instead of the web-app API above. The key never expires, so a
+// whole fleet runs unattended. The key is read from the file at runtime and only ever sent to
+// api.meshy.ai — never print it, never copy it anywhere else.
+//
+//   concept, root tier     POST /openapi/v1/text-to-image   nano-banana-pro, 16:9      9 cr
+//   concept, chained tier  POST /openapi/v1/image-to-image  input_task_id = parent     9 cr
+//                          (or the parent's local _concept.png as a data URI when the parent was
+//                          made on the web API and has no public task id)
+//   concept -> 3D          POST /openapi/v1/image-to-3d     input_task_id = concept,
+//                          meshy-6, PBR (adds an EMISSION map — the glow), 2K textures  30 cr
+//
+// Same state file, same resume rules, same never-pay-twice: a task id is saved the moment it is
+// created and polled (never re-created) on the next run. Entries made this way carry `api: true`.
+const API_KEY_FILE = arg('--api-key-file', '');
+let API_KEY = '';
+if (API_KEY_FILE) {
+  if (!fs.existsSync(API_KEY_FILE)) { console.error(`no such key file: ${API_KEY_FILE}`); process.exit(1); }
+  API_KEY = fs.readFileSync(API_KEY_FILE, 'utf8').trim();
+  if (!API_KEY.startsWith('msy_')) { console.error('the key file does not hold an msy_ key'); process.exit(1); }
+}
+const PUB = 'https://api.meshy.ai/openapi/v1';
+const UNITS = arg('--units', '').split(',').map(s => s.trim()).filter(Boolean);   // e.g. Pyrothian/05-Probe
+const MODEL_3D = arg('--model', 'meshy-6');
 const OUT     = arg('--out', path.join(PROJ, 'Art', 'Incoming'));
 const STATE   = path.join(PROJ, 'tools', 'meshy-rebuild-state.json');
 const ONLY    = arg('--only', '');
@@ -331,6 +358,7 @@ function worklist() {
     for (const lin of lineages) {
       if (LINEAGE && lin.key !== LINEAGE) continue;
       lin.tiers.forEach((tier, idx) => {
+        if (UNITS.length && !UNITS.includes(`${civ}/${tier.unit}`)) return;
         jobs.push({
           key: `${civ}/${tier.unit}`,
           civ, lin, tier, idx,
@@ -519,6 +547,187 @@ async function runUnit(j) {
   save();
 }
 
+// ============================================================================================
+// PUBLIC API MODE (--api-key-file)
+// ============================================================================================
+
+// 402 (out of credits) and 401 (bad key) are not per-unit failures: every following request would
+// fail the same way. They stop the whole run cleanly, exactly as an expired web token does.
+async function pub(p, opts = {}) {
+  for (let attempt = 0; ; attempt++) {
+    let r;
+    try {
+      r = await fetch(PUB + p, {
+        ...opts,
+        headers: { authorization: 'Bearer ' + API_KEY, 'content-type': 'application/json', ...(opts.headers || {}) },
+      });
+    } catch (e) {
+      if (attempt < 5) { await sleep(5000 * (attempt + 1)); continue; }
+      throw e;
+    }
+    if ((r.status >= 500 || r.status === 429) && attempt < 6) {
+      const wait = 5000 * (attempt + 1);
+      console.log(`  ~ ${r.status} from Meshy, retrying in ${wait / 1000}s`);
+      await sleep(wait);
+      continue;
+    }
+    const body = await r.json().catch(() => null);
+    if (r.status === 401) throw new Error('TOKEN_EXPIRED');
+    if (r.status === 402) throw new Error('OUT_OF_CREDITS');
+    return { status: r.status, body };
+  }
+}
+
+async function pubWait(kind, id, tries = 400) {
+  for (let i = 0; i < tries; i++) {
+    const d = await pub(`/${kind}/${id}`);
+    const b = d.body;
+    if (b?.status === 'SUCCEEDED') return b;
+    if (b?.status === 'FAILED' || b?.status === 'CANCELED')
+      throw new Error(`${kind} task ${b.status}: ${b.task_error?.message || ''}`);
+    await sleep(6000);
+  }
+  throw new Error(`${kind} task timed out`);
+}
+
+const CONCEPT_MODEL = String(design.conceptModel || 'nano-banana-pro').replace(/^.*\//, '');
+
+/// The parent's concept as something the public API can read. A parent made through the public API
+/// is passed by task id (cannot go stale). A parent made on the web API has no public id and its
+/// signed URL has long expired, so its downloaded _concept.png is sent inline as a data URI.
+function localConcept(key) {
+  const [civ, unit] = key.split('/');
+  for (const root of [path.join(PROJ, 'Art', 'Active'), OUT]) {
+    const dir = path.join(root, civ, unit);
+    if (!fs.existsSync(dir)) continue;
+    const f = fs.readdirSync(dir).find(n => /_concept\.(png|jpe?g|webp)$/i.test(n));
+    if (f) {
+      const ext = path.extname(f).slice(1).toLowerCase().replace('jpg', 'jpeg');
+      return `data:image/${ext};base64,` + fs.readFileSync(path.join(dir, f)).toString('base64');
+    }
+  }
+  return '';
+}
+
+const lineageChainsApi = lin => !!lin.chain && (has('--chain-all') ||
+                               ((lin.chainMode || 'refit') === 'refit' && lin.key !== 'station'));
+const apiChains = j => j.chained && lineageChainsApi(j.lin);
+
+async function runUnitApi(j) {
+  const st = S(j.key);
+
+  // 1. concept art
+  if (!st.conceptTask || !st.api) {
+    let ref = null;
+    // ONLY REFIT LINEAGES CHAIN on the public API. Its image-to-image is an EDIT of the reference,
+    // far stronger than the web app's referenced generation: chaining the stations (2026-10-11) gave
+    // a deep-space station, a mega-station and a hyper-relay that were the same disc three times.
+    // Family-mode lineages (the battle line) and the stations are different classes of vessel, so
+    // they are generated from text; the civ signature and palette keep them one navy.
+    // --chain-all restores the old behaviour.
+    const chainHere = apiChains(j);
+    if (chainHere) {
+      const prev = state.units[j.prevKey];
+      if (!prev?.done && !prev?.conceptUrl) throw new Error(`waiting on ${j.prevKey}`);
+      if (prev.api && prev.conceptTask) ref = { input_task_id: prev.conceptTask };
+      else {
+        const uri = localConcept(j.prevKey);
+        if (!uri) throw new Error(`no local concept image for parent ${j.prevKey}`);
+        ref = { reference_image_urls: [uri] };
+      }
+    }
+    const prompt = conceptPrompt(j.civ, j.lin, j.tier, !!ref);
+    const kind = ref ? 'image-to-image' : 'text-to-image';
+    const body = { ai_model: CONCEPT_MODEL, prompt, aspect_ratio: design.aspectRatio || '16:9', ...(ref || {}) };
+    const t = await pub('/' + kind, { method: 'POST', body: JSON.stringify(body) });
+    if (t.status !== 200 && t.status !== 202 || !t.body?.result)
+      throw new Error(`${kind} failed ${t.status} ${JSON.stringify(t.body).slice(0, 200)}`);
+    Object.assign(st, { api: true, conceptPrompt: prompt, conceptKind: kind, conceptTask: t.body.result,
+                        conceptUrl: '', conceptId: '', modelTask: undefined, lastError: undefined });
+    save();
+  }
+  if (!st.conceptUrl) {
+    let info;
+    try { info = await pubWait(st.conceptKind, st.conceptTask); }
+    catch (e) {
+      // A FAILED task is refunded; forget it so the next run creates a fresh one instead of polling
+      // the corpse forever.
+      if (/FAILED|CANCELED/.test(e.message)) { st.conceptTask = undefined; save(); }
+      throw e;
+    }
+    st.conceptUrl = info.image_urls?.[0] || '';
+    st.conceptCredits = info.consumed_credits;
+    if (!st.conceptUrl) throw new Error('concept produced no image');
+    save();
+  }
+
+  // 2. concept -> textured 3D
+  //
+  // No texture_prompt on purpose: with one set, the public API textures from the PROMPT and ignores
+  // the concept image's colours, and the concept art is where the livery and the glow actually live.
+  // image_enhancement off keeps the concept's palette as drawn rather than "improved".
+  if (!st.modelTask) {
+    const body = {
+      input_task_id: st.conceptTask,
+      ai_model: MODEL_3D,
+      should_texture: true,
+      enable_pbr: true,
+      image_enhancement: false,
+      target_formats: FORMATS,
+    };
+    const t = await pub('/image-to-3d', { method: 'POST', body: JSON.stringify(body) });
+    if (t.status !== 200 && t.status !== 202 || !t.body?.result)
+      throw new Error(`image-to-3d failed ${t.status} ${JSON.stringify(t.body).slice(0, 200)}`);
+    st.modelTask = t.body.result; save();
+  }
+
+  let model;
+  try { model = await pubWait('image-to-3d', st.modelTask); }
+  catch (e) {
+    if (/FAILED|CANCELED/.test(e.message)) { st.modelTask = undefined; save(); }
+    throw e;
+  }
+  st.modelCredits = model.consumed_credits;
+
+  // 3. everything down to disk
+  const dest = path.join(OUT, j.civ, j.tier.unit);
+  fs.mkdirSync(dest, { recursive: true });
+  const base = `${j.civ}_${j.tier.unit.replace(/^\d+-/, '').replace(/-/g, '')}`;
+  const grab = async (url, file) => {
+    if (!url) return false;
+    for (let a = 0; a < 3; a++) {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) return false;
+        fs.writeFileSync(path.join(dest, file), Buffer.from(await r.arrayBuffer()));
+        return true;
+      } catch { await sleep(3000); }
+    }
+    return false;
+  };
+
+  await grab(st.conceptUrl, `${base}_concept.png`);
+  await grab(model.thumbnail_url, `${base}_thumbnail.png`);
+  const tex = model.texture_urls?.[0] || {};
+  await grab(tex.base_color, `${base}_albedo.png`);
+  await grab(tex.normal,     `${base}_normal.png`);
+  await grab(tex.roughness,  `${base}_roughness.png`);
+  await grab(tex.metallic,   `${base}_metallic.png`);
+  await grab(tex.emission,   `${base}_emission.png`);
+
+  st.formats ||= {};
+  const urls = model.model_urls || {};
+  for (const f of [...FORMATS, 'mtl']) {
+    if (st.formats[f] || !urls[f]) continue;
+    const zip = /\.zip(\?|$)/i.test(urls[f]) ? '.zip' : '';
+    if (await grab(urls[f], `${base}.${f}${zip}`)) st.formats[f] = true;
+  }
+  if (!st.formats.glb) throw new Error('model finished but the .glb did not download');
+
+  st.done = true;
+  save();
+}
+
 // ---- main ------------------------------------------------------------------------------------
 const jobs = worklist();
 const todo = jobs.filter(j => !S(j.key).done);
@@ -531,17 +740,23 @@ if (PLAN) {
   const sample = todo.slice(0, 3);
   for (const j of sample) {
     console.log(`\n--- ${j.key}${j.chained ? '  (chained from ' + j.prevKey + ')' : ''} ---`);
-    console.log(conceptPrompt(j.civ, j.lin, j.tier, j.chained));
+    console.log(conceptPrompt(j.civ, j.lin, j.tier, API_KEY_FILE ? apiChains(j) : j.chained));
   }
   process.exit(0);
 }
-if (!TOKEN) { console.error('\nNo --token.'); process.exit(1); }
+if (!TOKEN && !API_KEY) { console.error('\nNo --token, --token-file or --api-key-file.'); process.exit(1); }
+if (API_KEY) {
+  const b = await pub('/balance');
+  console.log(`credit balance : ${b.body?.balance ?? '?'}`);
+}
 
 // Chained lineages must run in order, so work is grouped: each worker takes a whole lineage and walks
 // its tiers in sequence. Two lineages run side by side; two tiers of the SAME lineage never do.
 const byLineage = new Map();
 for (const j of todo.slice(0, LIMIT)) {
-  const k = `${j.civ}/${j.lin.key}`;
+  // In API mode a lineage that does not chain has no ordering to keep, so each hull is its own group
+  // and they run side by side.
+  const k = API_KEY && !lineageChainsApi(j.lin) ? j.key : `${j.civ}/${j.lin.key}`;
   if (!byLineage.has(k)) byLineage.set(k, []);
   byLineage.get(k).push(j);
 }
@@ -557,11 +772,12 @@ async function worker() {
     for (const j of group) {
       if (expired) break;
       try {
-        await runUnit(j);
+        await (API_KEY ? runUnitApi(j) : runUnit(j));
         ok++;
         console.log(`  OK    ${j.key}${j.chained ? '  <- ' + j.prevKey : ''}`);
       } catch (e) {
-        if (e.message === 'TOKEN_EXPIRED') { expired = true; console.log('  !! token expired — stopping cleanly'); break; }
+        if (e.message === 'TOKEN_EXPIRED') { expired = true; console.log('  !! token/key rejected (401) — stopping cleanly'); break; }
+        if (e.message === 'OUT_OF_CREDITS') { expired = true; console.log('  !! 402 out of credits — stopping cleanly; re-run resumes'); break; }
         failed++;
         S(j.key).lastError = e.message; save();
         console.log(`  FAIL  ${j.key}  ${e.message}`);
@@ -573,4 +789,8 @@ async function worker() {
 
 await Promise.all(Array.from({ length: Math.min(CONC, groups.length) }, worker));
 console.log(`\ndone: ${ok} ok, ${failed} failed`);
+if (API_KEY) {
+  const b = await pub('/balance').catch(() => null);
+  console.log(`credit balance : ${b?.body?.balance ?? '?'}`);
+}
 if (expired) process.exit(2);

@@ -4,16 +4,42 @@
 `UnitModelRenderer` instantiates it in the world. Anything with a model is skipped by
 `UnitTokenRenderer`, so it never double-renders as a billboard as well.
 
-Current mapping:
+## Where a unit's model comes from
 
-| Class | Model | Motion |
+Every civilization has its own art. For each unit, `UnitModelRenderer.CivPath` looks for:
+
+    SpaceAssets/Stations/<Civ>/<Civ>_<UnitType>.glb    (any class with UnitInfo.isStation)
+    SpaceAssets/Ships/<Civ>/<Civ>_<UnitType>.glb       (everything else)
+
+`<Civ>` is one of `Terran`, `Aquarii`, `Pyrothian`, `Cryithn` or `Sylvan`
+(`UnitModelRenderer.CivFolders`). The player's ships use the species the player picked; other
+factions are mapped by `faction.id % 5`, so a given empire always looks the same.
+
+Each hull ships as a three-file LOD chain: `_hi` (~24k tris), the base file (~9k tris, the only one
+that carries textures) and `_lo` (~2.2k tris). `ShipLOD` gives the base file's materials to the other
+two levels. A level that would barely differ from the base is not written, which is common for
+stations. All of these files are produced by `tools/import-ship-models.mjs` from `Art/Active/`. Do
+not hand-edit them; see `Art/README.md`. Orientation for every mesh is set in
+`SpaceAssets/Ships/ship-meshes.txt`.
+
+**As of 2026-10-10:** Terran, Aquarii and Pyrothian have all 29 classes (20 ships, 9 stations).
+**Cryithn and Sylvan have none yet.** Their folders are empty, so those civilizations fly the legacy
+fallback below.
+
+### Legacy fallback (only when a civ's mesh is missing)
+
+`UnitModelLibrary.Build()` still maps every class to one of the three meshes that shipped with the
+project. It sets each class's size, motion and spin for every civ, but its mesh is only used when
+`CivPath` finds nothing:
+
+| Class | Fallback model | Motion |
 |---|---|---|
 | Every station (`UnitInfo.isStation`) | `SpaceAssets/Stations/LP Space Station` | orbits its host body + axial spin |
-| Colony Ship | `SpaceAssets/Ships/LP Colony Ship` | faces its course, idle bob |
-| Research Ship / Mk II / Mk III / Science Vessel | `SpaceAssets/Ships/LP Science Ship` | faces its course, idle bob |
+| Colony Ship, Frigate, Cruiser, Carrier, Dreadnought and other large hulls | `SpaceAssets/Ships/LP Colony Ship` | faces its course |
+| Research line, Scouts, Explorer, Probe, Fighters | `SpaceAssets/Ships/LP Science Ship` | faces its course |
 
-The whole research line shares one hull, scaled up per tier (0.22 → 0.34), so a Mk III visibly reads
-as a more serious ship than a Mk I without needing four models.
+Size still varies by class (for example the research line runs 0.20 to 0.30), so tiers are
+distinguishable even on borrowed hulls.
 
 ## Everything here is optional
 
@@ -45,7 +71,7 @@ orbiting one has to be a few tenths of a unit or it dwarfs the planet. A Mega-St
 ## Animation
 
 If an FBX ships with its own clip (an `Animator` with a controller, or a legacy `Animation` with a
-clip), the renderer plays it and skips its procedural motion. Neither current model has clips, so both
-are animated procedurally: stations orbit their host and spin on their axis; the colony ship turns to
-face its course and bobs gently. Drop in an animated replacement at the same path and it takes over
+clip), the renderer plays it and skips its procedural motion. None of the current models (the
+generated `.glb` fleet or the LP fallbacks) has clips, so all are animated procedurally: stations
+orbit their host and spin on their axis; ships turn to face their course. Drop in an animated replacement at the same path and it takes over
 automatically.

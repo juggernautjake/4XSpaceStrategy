@@ -93,7 +93,7 @@
         "name": "Ember Crimson",
         "hex": "#C0143C",
         "keyHue": 346,
-        "role": "iron banding and riveted straps"
+        "role": "DEEP CRIMSON lacquered armour bands and riveted plates (blood-red, not orange)"
       },
       "hueSeparation": 168,
       "baseSaturated": false,
@@ -118,7 +118,7 @@
       "hueSeparation": 110,
       "baseSaturated": true,
       "baseShort": "glacier-blue crystal hull",
-      "signature": "SLEEK AND REGAL: mirror-polished ice, snow-dusted facets, glimmering frost, blue light within."
+      "signature": "SLEEK AND REGAL: mirror-polished ice, snow-dusted facets, blue light glowing inside the ice."
     },
     "Sylvan": {
       "baseMaterial": "RICHLY COLOURED deep forest-green living hull, woven vine over a seed-pod shell, dark bark plating",
@@ -133,12 +133,12 @@
         "name": "Sap Amber",
         "hex": "#E2A32C",
         "keyHue": 40,
-        "role": "sap-light veins along the grain, blossoms, pod seams"
+        "role": "glowing bioluminescent sap-light veins along the grain, blossoms, pod seams"
       },
       "hueSeparation": 115,
       "baseSaturated": true,
       "baseShort": "deep forest-green living grown hull",
-      "signature": "GROWN, NOT BUILT: bark plating, vine over a seed-pod shell, moss in the seams, living wood grain."
+      "signature": "GROWN, NOT BUILT: bark plating, vine over a seed-pod shell, moss in the seams, living wood grain, softly BIOLUMINESCENT veins and blossoms."
     }
   },
   "_signatureNote": "signature: the surface condition every hull of this civ must show, sent in the prompt right after the hull description and before the tier clause. It exists because without it a fire civ and an ice civ came back as the same grey ship with a different accent colour."

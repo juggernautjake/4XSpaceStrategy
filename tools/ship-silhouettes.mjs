@@ -1,7 +1,7 @@
 // ============================================================================================
 // LOOK AT THE FLEET — silhouettes rendered straight from the geometry
 //
-//   node tools/ship-silhouettes.mjs [--out <png>] [--cols 5]
+//   node tools/ship-silhouettes.mjs [--out <png>] [--cols 5] [--match <regex>]
 //
 // Orientation has two halves. Which AXIS a hull is long on is answerable from its bounding box, and
 // make-orientation-manifest.mjs answers it. WHICH END IS THE BOW is not: a box is symmetric, and
@@ -35,6 +35,10 @@ const OUT  = path.resolve(PROJ, arg('--out', 'Art/_review/silhouettes.png'));
 const COLS = parseInt(arg('--cols', '5'), 10);
 const CELL = parseInt(arg('--cell', '300'), 10);
 const LABEL = 26;
+// --match <regex>: only meshes whose name matches, e.g. --match "^Cryithn_" for one new fleet.
+// The _hi/_lo LOD siblings are skipped whenever a filter is given (same hull, same facing).
+const MATCH = arg('--match', '');
+const MATCH_RE = MATCH ? new RegExp(MATCH) : null;
 
 const ROOTS = [
   path.join(PROJ, 'Assets', 'Resources', 'SpaceAssets', 'Ships'),
@@ -92,6 +96,7 @@ for (const root of ROOTS) {
   for (const f of walk(root)) {
     if (!f.toLowerCase().endsWith('.glb')) continue;
     const name = path.basename(f, '.glb');
+    if (MATCH_RE && (!MATCH_RE.test(name) || /_(hi|lo)$/.test(name))) continue;
     let doc;
     try { doc = await io.read(f); } catch (e) { console.log(`  !! ${name}: ${e.message}`); continue; }
     const tris = triangles(doc);
