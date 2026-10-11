@@ -40,7 +40,7 @@ public class BuildingGridPopup : MonoBehaviour
     PlacedBuilding shownFor, dismissedFor;
     float nextRefresh;
 
-    const float Width = 236f;
+    const float Width = 290f;
 
     public static BuildingGridPopup Create(RectTransform mapRT)
     {
@@ -286,11 +286,92 @@ public class BuildingGridPopup : MonoBehaviour
         else if (info != null && info.powerDraw > 0f) sb.Append("<color=#FFBF4D>needs power — no grid reaches it</color>");
         else sb.Append("<color=#7C8CA0>none</color>");
 
-        // A short grid health line when there is one, so "why is my output low" has its answer here.
-        if (net != null && net.draw > 0.0001f && PowerGrid.SupplyLabel(net) is string lbl && !string.IsNullOrEmpty(lbl))
-            sb.Append($"\n<size=11><color=#7C8CA0>Grid {net.index}: {lbl}</color></size>");
+        AppendPower(sb, b, sel, net);
 
         body.text = sb.ToString();
+    }
+
+    // ---- The power section ------------------------------------------------------------------------
+    //
+    // "If we click on an individual power tower, then it should show how much power it has access to...
+    // so that we can manage the power output and placement well and clearly see where power is going and
+    // how much." (2026-10-11)
+    //
+    // Anything standing on a grid gets the grid's whole ledger — supply and from how many plants, demand
+    // and from how many buildings, the balance, the bank, the reach — followed by THIS building's part in
+    // it: what a plant adds and its share, what a pylon lights and which buildings it feeds, what a
+    // consumer draws and how hard it is running, what a capacitor holds. Read from the same PowerNet the
+    // economy runs on, so it is the grid as it really is this frame.
+
+    void AppendPower(StringBuilder sb, CelestialBody b, PlacedBuilding sel, PowerNet net)
+    {
+        var info = sel.Info;
+        if (info == null) return;
+        if (net == null)
+        {
+            if (info.powerDraw > 0f || info.powerStorage > 0f)
+                sb.Append("\n<size=12><color=#FFBF4D>No grid reaches this. Build a pylon or plant within reach; " +
+                          $"until then it runs at {PowerGrid.UnpoweredFactor * 100f:0}% on its own backup.</color></size>");
+            else if (PowerGrid.Projects(info) && info.energyPerSec <= 0f)
+                sb.Append("\n<size=12><color=#FFBF4D>Not connected: no plant's reach touches this pylon.</color></size>");
+            return;
+        }
+
+        string hex = ColorUtility.ToHtmlStringRGB(PowerGrid.SupplyColor(net));
+        int pylons = 0;
+        foreach (var p in net.projectors) if (p.Info != null && p.Info.energyPerSec <= 0f) pylons++;
+
+        sb.Append($"\n<color=#{hex}><b>GRID {net.index}</b> · {PowerGrid.SupplyLabel(net)}</color>");
+        sb.Append($"\n<color=#9FB4C8>Supply</color>  <color=#4DFF6E>+{net.generation:0.0}/s</color> " +
+                  $"<color=#7C8CA0>from {net.generators.Count} plant{(net.generators.Count == 1 ? "" : "s")}</color>");
+        sb.Append($"\n<color=#9FB4C8>Demand</color>  <color=#FF6659>-{net.draw:0.0}/s</color> " +
+                  $"<color=#7C8CA0>by {net.consumers.Count} building{(net.consumers.Count == 1 ? "" : "s")}</color>");
+
+        float bal = net.generation - net.draw;
+        if (bal >= 0f)
+            sb.Append($"\n<color=#9FB4C8>Spare</color>  <color=#4DFF6E>{bal:0.0}/s</color> <color=#7C8CA0>free for new buildings</color>");
+        else
+            sb.Append($"\n<color=#9FB4C8>Short</color>  <color=#FF6659>{-bal:0.0}/s</color> " +
+                      $"<color=#7C8CA0>· buildings at {PowerGrid.PowerFactorFor(net.Sustainable) * 100f:0}%" +
+                      (net.Stored > 0f ? " once the bank runs dry" : "") + "</color>");
+
+        if (net.storage > 0f)
+            sb.Append($"\n<color=#9FB4C8>Bank</color>  {net.Stored:0}/{net.storage:0} " +
+                      $"<color=#7C8CA0>in {net.capacitors.Count} capacitor{(net.capacitors.Count == 1 ? "" : "s")}</color>");
+        sb.Append($"\n<color=#9FB4C8>Reach</color>  {net.coverage.Count} tiles " +
+                  $"<color=#7C8CA0>· {pylons} pylon{(pylons == 1 ? "" : "s")}</color>");
+
+        // This building's part in it.
+        string mine = null;
+        if (info.energyPerSec > 0f)
+        {
+            float adj = SurfaceBuildManager.AdjacencyBonus(b, sel);
+            float made = info.energyPerSec * sel.OutputMult * (1f + adj);
+            float share = net.generation > 0.0001f ? made / net.generation : 0f;
+            mine = $"This plant makes <color=#4DFF6E>+{made:0.0}/s</color>, {share * 100f:0}% of the grid's supply" +
+                   (adj > 0.001f ? $" (+{adj * 100f:0}% from a distribution hub)" : "") + ".";
+        }
+        else if (PowerGrid.Projects(info))
+        {
+            var lit = PowerGrid.CoverageOf(b, sel);
+            int fed = 0; float fedDraw = 0f;
+            foreach (var c in net.consumers)
+                foreach (var cell in SurfaceBuildingDatabase.Footprint(c))
+                    if (lit.Contains(cell)) { fed++; fedDraw += c.Info.powerDraw * c.LevelMult; break; }
+            mine = $"This pylon lights {lit.Count} tiles and reaches {fed} building{(fed == 1 ? "" : "s")} " +
+                   $"drawing {fedDraw:0.0}/s. Power available on its grid: " +
+                   (bal >= 0f ? $"<color=#4DFF6E>{bal:0.0}/s spare</color>." : $"<color=#FF6659>none, {-bal:0.0}/s short</color>.");
+        }
+        else if (info.powerStorage > 0f)
+            mine = $"This capacitor holds {sel.stored:0}/{info.powerStorage * sel.LevelMult:0}.";
+        else if (info.powerDraw > 0f)
+        {
+            float d = info.powerDraw * sel.LevelMult;
+            float f = PowerGrid.PowerFactor(b, sel);
+            mine = $"This building draws <color=#FF6659>{d:0.0}/s</color> and is running at " +
+                   $"<color=#{(f >= 0.999f ? "4DFF6E" : "FFBF4D")}>{f * 100f:0}%</color>.";
+        }
+        if (mine != null) sb.Append($"\n<size=12><color=#C8D6E5>{mine}</color></size>");
     }
 
     static string Rate(float v, string unit, string fmt = "0.0") => $"<color=#4DFF6E>+{v.ToString(fmt)} {unit}</color>";

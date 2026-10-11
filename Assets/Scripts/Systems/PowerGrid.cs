@@ -619,8 +619,11 @@ public static class PowerGrid
         if (p == null || p.Info.powerDraw <= 0f) return 1f;
         var net = NetOf(b, p);
         if (net == null) return UnpoweredFactor;
-        return Mathf.Lerp(UnpoweredFactor, 1f, Mathf.Clamp01(net.served));
+        return PowerFactorFor(net.served);
     }
+
+    /// The output factor a consumer runs at on a grid serving this fraction of its demand.
+    public static float PowerFactorFor(float served) => Mathf.Lerp(UnpoweredFactor, 1f, Mathf.Clamp01(served));
 
     /// Everything on this world that wants a grid and hasn't got a working one. The Power tab's headline
     /// problem — a list of what to go and fix.
