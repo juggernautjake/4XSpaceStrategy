@@ -190,11 +190,11 @@ public class PlanetViewWindow : MonoBehaviour
     // ---- Map panes (the planet AND its moons) ----
     // Every map is a toggleable pane now: the planet has its own (bigger) tab alongside the moon tabs, and
     // any mix of up to five can be open at once. The open panes TILE the whole map area with no gaps, sized
-    // purely by how many are open, and each pane zooms its CONTENTS inside a fixed frame — cover-fit at the
-    // fullest-out end, so a map always fills its frame instead of floating in letterbox. The host planet
-    // keeps its own tilePx / mapPan / mapRT and all its placement machinery; each open moon carries its own
-    // frame, content image, texture, zoom and pan in the dictionaries below (keyed by the moon, so opening
-    // or closing one never disturbs another's view).
+    // purely by how many are open, and each pane zooms its CONTENTS inside a fixed frame, from the
+    // whole-world fit inward (see PANE VIEWS). The host planet keeps its mapRT and all its placement
+    // machinery; each open moon carries its own frame, content image and texture in the dictionaries
+    // below, and every pane's zoom and pan live in `views` (keyed by world, so opening or closing one
+    // never disturbs another's view).
     readonly List<CelestialBody> openMaps = new List<CelestialBody>();   // in open order; host is `body`
     const int MaxOpenMaps = 5;
 
@@ -206,19 +206,17 @@ public class PlanetViewWindow : MonoBehaviour
     // its own texture per moon, because each moon has its own grid and its own survey progress.
     readonly Dictionary<CelestialBody, RawImage> moonFog = new Dictionary<CelestialBody, RawImage>();
     readonly Dictionary<CelestialBody, Texture2D> moonFogTex = new Dictionary<CelestialBody, Texture2D>();
-    readonly Dictionary<CelestialBody, float> moonTilePx = new Dictionary<CelestialBody, float>();   // px/cell, like the host's tilePx
-    readonly Dictionary<CelestialBody, Vector2> moonPan = new Dictionary<CelestialBody, Vector2>();
 
     // Downscaled planet/moon thumbnails on the tab strip itself, rebuilt whenever the strip is and freed
     // the same way.
     readonly List<Texture2D> moonTabThumbTextures = new List<Texture2D>();
 
-    // The pane the wheel / zoom bar currently acts on — whichever open frame the cursor is over, latched so
-    // the bar's own buttons (which the cursor sits on) keep acting on the last map hovered.
+    // The ACTIVE pane: the one the keyboard and the corner controls act on, marked by a bright border.
+    // Set by a click, a wheel turn or a corner button in a pane — never by merely hovering one, or the
+    // highlight would chase the mouse across the map. See FocusPane.
     CelestialBody activePane;
-    CelestialBody moonPanDrag;       // the moon whose map is being dragged, if any
-    Vector2 moonPanGrabScreen;
-    Vector2 moonPanGrabOffset;
+    // The one pane shown over the whole map area, or null for the tiled layout.
+    CelestialBody maximised;
 
     // How the open panes are arranged in the map area, cycled by the "Change Map View" button. Four formats,
     // each working with the planet plus any number (0–4) of moons, in any open/closed combination:
@@ -294,6 +292,16 @@ public class PlanetViewWindow : MonoBehaviour
     Vector2Int hoverCell = new Vector2Int(-1, -1);
     bool hoverValid;
 
+    /// Why the held structure cannot go on `hoverCell`, or null when it can. Set with hoverValid (see
+    /// RecomputeHoverValidity) so the ghost's red, the cursor readout and the status line all quote the
+    /// same answer, worked out once per cell rather than once per reader per frame.
+    string hoverWhy;
+
+    /// Re-ask the hover question a few times a second even when the cursor is still: the economy ticks
+    /// and another job can claim the ground, and a verdict that only refreshes on mouse movement would
+    /// go on saying "need 60 metal" after the metal has arrived.
+    float hoverRecheckIn;
+
     /// Is `hoverCell` a cell that exists on the world this window is showing RIGHT NOW?
     ///
     /// Every read of hoverCell has to go through this rather than the old `hoverCell.x >= 0`, because
@@ -351,7 +359,7 @@ public class PlanetViewWindow : MonoBehaviour
         shortcutBar.sizeDelta = new Vector2(ShortcutPx, ShortcutPx * 3f + ShortcutGap * 2f);
 
         demolishIcon = ShortcutButton(0, PixelIcons.Bulldozer, Color.white, ToggleDemolishShortcut,
-            "<b>Demolish</b>\nClear buildings: paint the tiles, then confirm.", out demolishFrame);
+            "<b>Demolish</b>  (X)\nClear buildings: paint the tiles, then confirm.", out demolishFrame);
         ShortcutButton(1, PixelIcons.Bolt, new Color(0.45f, 0.82f, 1.00f), () => { showPowerOverlay = !showPowerOverlay; lastSig = null; },
             "<b>Power grid</b>\nShow where electricity reaches.", out powerFrame);
         ShortcutButton(2, PixelIcons.Heightmap, Color.white, ToggleContours,
@@ -403,6 +411,19 @@ public class PlanetViewWindow : MonoBehaviour
             return;
         }
         EnterDemolition();
+    }
+
+    /// Is a text field taking the keyboard? The window's single-key shortcuts (R, X) must not fire while
+    /// the player is typing a world's or a fleet's name somewhere else on screen.
+    static bool TypingInField()
+    {
+        var es = EventSystem.current;
+        var go = es != null ? es.currentSelectedGameObject : null;
+        if (go == null) return false;
+        var tmp = go.GetComponent<TMP_InputField>();
+        if (tmp != null && tmp.isFocused) return true;
+        var legacy = go.GetComponent<InputField>();
+        return legacy != null && legacy.isFocused;
     }
 
     void ToggleContours()
@@ -615,9 +636,10 @@ public class PlanetViewWindow : MonoBehaviour
     //
     // THE OBVIOUS FIX — grow the box and push the map's bottom edge up with it — IS A TRAP, and it was
     // tried first. `gridHolder` is the map viewport, and every one of the map's own bounds is derived
-    // from its rect: `FitTilePx`, `CoverTilePx`, `MaxTilePx`, and `ClampPan`'s slack. `tilePx` and
-    // `mapPan` are persistent fields that those bounds CLAMP but never restore, so each resize was a
-    // one-way ratchet — hovering on and off the map stripped about 1% of zoom every time, permanently.
+    // from its rect (at the time: the fit, cover and max zoom, and the pan clamp's slack). `tilePx` and
+    // `mapPan` were persistent fields that those bounds CLAMPED but never restored, so each resize was a
+    // one-way ratchet (the views are relative to their frames now — see PANE VIEWS — but the geometry
+    // still should not move under the cursor) — hovering on and off the map stripped about 1% of zoom every time, permanently.
     // Worse, at contain zoom the map's bottom edge coincides with the viewport's, so a cursor in the
     // last few pixels flipped hover-valid → 3-line status → viewport shrinks → hover invalid → 1-line
     // status → viewport grows, a two-frame flicker that rebuilt the moon panes every frame it ran.
@@ -715,6 +737,7 @@ public class PlanetViewWindow : MonoBehaviour
         hostViewport = UIFactory.NewUI(gridHolder, "HostViewport").GetComponent<RectTransform>();
         UIFactory.Stretch(hostViewport);
         hostViewport.gameObject.AddComponent<RectMask2D>();
+        AddPaneBackdrop(hostViewport);   // first, so the map draws over it
 
         var mapGO = UIFactory.NewUI(hostViewport, "Map");
         mapImage = mapGO.AddComponent<RawImage>();
@@ -826,6 +849,7 @@ public class PlanetViewWindow : MonoBehaviour
         surfaceFx.Hover = () => HasHoverCell ? hoverCell : (Vector2Int?)null;
         surfaceFx.Held = () => tab == Tab.Build ? selected : null;
         surfaceFx.HeldRotation = () => rotation;
+        surfaceFx.Wraps = () => WrapEnabled;   // effects get twins across the seam, like the mirrors
 
         // The selected building's card (its grid's count, output and upkeep). A child of the host
         // viewport, not the map, so it is never clipped by the map's own edges and stays on top of it.
@@ -877,13 +901,16 @@ public class PlanetViewWindow : MonoBehaviour
         var probe = mapGO.AddComponent<SurfaceGridProbe>();
         probe.Init(this, mapRT);
 
+        // The planet pane's border and corner controls, over the map in its own frame. Built once; they
+        // ask for `body` when used, since this pane shows whichever world the window is on.
+        hostChrome = BuildPaneChrome(hostViewport, () => body);
+
         // The moon panes live in this full-area container, a sibling of the host viewport that stretches the
         // whole map area. It carries no mask of its own — each moon FRAME has its own RectMask2D — and each
         // frame is positioned into its own grid cell (disjoint from the host's), so the panes never overlap.
         moonLayer = UIFactory.NewUI(gridHolder, "MoonLayer").GetComponent<RectTransform>();
         UIFactory.Stretch(moonLayer);
 
-        BuildZoomBar();
         BuildViewFormatButton();
 
         // The map tab strip is anchored inside the area's TOP-LEFT corner and stacks vertically: the planet
@@ -1026,6 +1053,8 @@ public class PlanetViewWindow : MonoBehaviour
             tab = Tab.Build;
             selected = SurfaceBuildingType.ColonyShipBase;
             rotation = 0;
+            // On the tab whose card can pick it back up if it is put down (PlaceableFromTray).
+            buildCategory = SurfaceBuildingCategory.Civil;
         }
         // The new game's founding capitol does NOT open in hand (2026-10-09): the Build tab opens on the
         // Civil category, where the capitol waits with its "!" marker, and the player picks it up.
@@ -1034,10 +1063,9 @@ public class PlanetViewWindow : MonoBehaviour
             tab = Tab.Build;
             buildCategory = SurfaceBuildingCategory.Civil;
         }
-        // Open showing the WHOLE world, centred — the zoom of the last planet you looked at means
-        // nothing on this one.
-        tilePx = 0f;            // ApplyMapSize resolves this to the fit-everything zoom
-        mapPan = Vector2.zero;
+        // A DIFFERENT world opens fitted — whole and centred — because the zoom of the last planet you
+        // looked at means nothing on this one. The SAME world re-opened keeps the views you left it with.
+        ResetViewsFor(b);
         root.SetActive(true);
 
         // Always open centred AND re-sized to fill the current screen. The canvas rect isn't known at
@@ -1139,289 +1167,599 @@ public class PlanetViewWindow : MonoBehaviour
     // pass, here or there.
     Texture2D mapTex;
 
-    // ---- Zoom ----
-    // Expressed as PIXELS PER TILE, because that's what both limits are naturally about.
+    // ============================================================================================
+    // PANE VIEWS — ONE zoom/pan model for every map pane, the planet's and each moon's (2026-10-11)
     //
-    //   Zoomed OUT  = the whole surface fits the viewport, whatever size the world is.
-    //   Zoomed IN   = about MaxVisibleTiles cells fill it, so the closest view is the same "how much
-    //                 can I see" on every world rather than depending on how big the planet happens
-    //                 to be.
+    // "They start at random zoom levels, and the little viewing screens change size and do weird things
+    // when zooming." Every one of those came from the old model, which stored each pane's zoom as an
+    // ABSOLUTE px-per-cell and its pan as an absolute pixel offset, then CLAMPED both against whatever
+    // rect the pane had at the moment:
     //
-    // The window never changes size. Only the map inside it does.
+    //   * ShowFor zeroed tilePx and RefreshMapTexture resolved it at once against hostViewport's rect as
+    //     the LAST world's layout had left it (or a zero rect on a first open, which fell back to 4 px).
+    //     LayoutPanes then re-fitted the real frame — but tilePx was no longer 0, so it was merely
+    //     clamped. A world opened at whatever zoom the previous layout's shape implied.
+    //   * Every reflow (a moon opened or closed, the View format cycled, the window resized) kept the old
+    //     absolute px and clamped it into the new frame's range, so a pane's zoom drifted every time a
+    //     DIFFERENT pane changed.
+    //   * The default view was COVER (fill the frame, crop the long axis), so what a pane showed on open
+    //     depended on the frame's aspect — and the readout said 137% or 212% at "default".
+    //   * Zooming out below cover letterboxed the map inside a frame that had no backing of its own, so
+    //     the visible edge of the pane was the map's edge: the "screen" itself appeared to shrink.
+    //   * The x pan snapped from wrapped to centred the instant the map got narrower than its frame.
+    //
+    // Now a view is RELATIVE: `zoom` is a multiple of the pane's FIT (1 = the whole world, centred) and
+    // `centre` is the map point (uv) at the middle of the frame. Neither depends on the frame's size, so
+    // nothing is ever resolved against a stale or unlaid-out rect, and a reflow keeps exactly what you
+    // were looking at. px-per-cell and the pixel offset are DERIVED from them in ApplyView — for the
+    // planet into `tilePx` / `mapPan`, which the placement code reads.
+    // ============================================================================================
+
+    // Zoomed IN = about MaxVisibleTiles cells fill the pane, so the closest view shows the same amount of
+    // ground on every world — but never less than MinZoomRange x past fit, or a tiny moon in a small pane
+    // could not be zoomed at all.
     const int MaxVisibleTiles = 200;
+    const float MinZoomRange = 4f;
+    /// How much one button press, key press or wheel notch changes the zoom.
+    const float ZoomStep = 1.5f;
+    /// How quickly the drawn zoom catches the requested one (per second). ~0.15s to settle.
+    const float ZoomEase = 20f;
 
-    float tilePx;                  // current zoom
-    Vector2 mapPan;                // map offset within the viewport
-    Vector2 lastViewportSize;      // re-fit when the window is laid out or resized
-
-    // ---- Zoom bar ----
-    // Floats over the map's bottom-left corner: minus, plus, Fit, and a live zoom readout.
-    //
-    // The scroll wheel is the fast way to do this and the buttons are the discoverable one. Both exist
-    // because a wheel is invisible — nothing on screen says the map zooms — and because trackpads and
-    // some mice make a precise notch genuinely hard.
-    TMP_Text zoomLabel;
-    RectTransform zoomBar;
-
-    void BuildZoomBar()
+    sealed class PaneView
     {
-        var bar = zoomBar = UIFactory.NewUI(gridHolder, "ZoomBar").GetComponent<RectTransform>();
-        bar.anchorMin = bar.anchorMax = new Vector2(0, 0);
-        bar.pivot = new Vector2(0, 0);
-        bar.anchoredPosition = new Vector2(6, 6);
-        bar.sizeDelta = new Vector2(268, 26);
-
-        var bg = bar.gameObject.AddComponent<Image>();
-        bg.color = new Color(0.04f, 0.07f, 0.11f, 0.85f);
-
-        var h = bar.gameObject.AddComponent<HorizontalLayoutGroup>();
-        h.spacing = 4; h.padding = new RectOffset(4, 4, 3, 3);
-        h.childControlWidth = true; h.childControlHeight = true;
-        h.childForceExpandWidth = false; h.childForceExpandHeight = true;
-
-        ZoomButton(bar, "–", () => ZoomBy(1f / ZoomStep));
-        ZoomButton(bar, "+", () => ZoomBy(ZoomStep));
-
-        var fit = UIFactory.Button(bar.transform, "Fit", FitActive, 20f);
-        var fle = fit.gameObject.AddComponent<LayoutElement>();
-        fle.preferredWidth = 40f; fle.flexibleWidth = 0f;
-
-        zoomLabel = UIFactory.Text(bar, "100%", UITheme.SmallSize, UITheme.SubText, TextAlignmentOptions.Center);
-        var zle = zoomLabel.gameObject.AddComponent<LayoutElement>();
-        zle.flexibleWidth = 1f;
-
-        // Scroll arrows, on the same strip as the zoom controls and acting on the same map — whichever
-        // pane is active (see ActiveScrollTarget). They live here rather than floating over the map so
-        // there is one place the map's controls are, instead of two.
-        ScrollButton(bar, "<", -1f);
-        ScrollButton(bar, ">", +1f);
+        public float zoom = 1f;                              // requested zoom, a multiple of fit (1 = whole world)
+        public float shown = 1f;                             // drawn zoom; eases toward `zoom`
+        public Vector2 centre = new Vector2(0.5f, 0.5f);     // the map point (uv) at the frame's centre
+        public Vector2 anchor;                               // frame-centre-relative point the zoom pins
     }
 
-    /// A press-and-hold scroll arrow. Click nudges; holding scrolls continuously, which is what you want
-    /// for crossing a whole world rather than clicking twenty times.
-    void ScrollButton(RectTransform bar, string label, float dir)
-    {
-        var btn = UIFactory.Button(bar.transform, label, () => NudgeScroll(dir), 20f);
-        var le = btn.gameObject.AddComponent<LayoutElement>();
-        le.preferredWidth = 30f; le.flexibleWidth = 0f;
+    // One per world shown in a pane, kept for the session while the window stays on the same host world —
+    // close a moon's tab and reopen it and it comes back as you left it. Cleared when the window moves to
+    // a different world (ResetViewsFor), which therefore always opens fitted.
+    readonly Dictionary<CelestialBody, PaneView> views = new Dictionary<CelestialBody, PaneView>();
+    CelestialBody viewsFor;
 
-        var hold = btn.gameObject.AddComponent<ViewHoldButton>();
-        hold.onDown = () => scrollHoldDir = dir;
-        hold.onUp = () => { if (Mathf.Approximately(scrollHoldDir, dir)) scrollHoldDir = 0f; };
+    float tilePx;                  // the planet pane's px per cell — DERIVED by ApplyView(body)
+    Vector2 mapPan;                // the planet map's offset in its frame — DERIVED by ApplyView(body)
+    Vector2 lastViewportSize;      // re-tile when the window is laid out or resized
+
+    // The scroll arrows' press-and-hold: which pane, which way.
+    CelestialBody scrollHoldPane;
+
+    PaneView ViewOf(CelestialBody b)
+    {
+        if (!views.TryGetValue(b, out var v) || v == null) views[b] = v = new PaneView();
+        return v;
     }
 
-    void NudgeScroll(float dir)
+    void ResetViewsFor(CelestialBody b)
     {
-        var vp = ActiveScrollViewport();
-        if (vp == null) return;
-        ScrollActive(dir * vp.rect.width * ScrollStepFrac);
+        if (b == viewsFor) return;      // the same world re-opened keeps its views
+        views.Clear();
+        viewsFor = b;
     }
 
-    /// The viewport the scroll arrows act on.
-    ///
-    /// Whichever pane was last clicked — host or moon. `activePane` is already this window's notion of
-    /// "the map you are working in" (the tab strip, the zoom buttons and Fit all follow it), so the
-    /// arrows follow it too rather than inventing a second idea of which map has focus.
-    RectTransform ActiveScrollViewport()
+    /// The fixed frame a world's map is shown in, or null if it has no pane.
+    RectTransform FrameOf(CelestialBody b)
     {
-        var m = activePane;
-        if (m != null && m != body && moonFrame.TryGetValue(m, out var fr) && fr != null) return fr;
-        return hostViewport;
+        if (b == null) return null;
+        if (b == body) return hostViewport;
+        return moonFrame.TryGetValue(b, out var f) ? f : null;
     }
 
-    /// Note the NEGATION. `dx` is which way the player asked the VIEW to travel; the pan moves the MAP,
-    /// and those are opposites — pressing ">" to look further east has to slide the map west.
-    void ScrollActive(float dx)
+    /// The map image inside that frame — its size is the zoom, its position the pan.
+    RectTransform ContentOf(CelestialBody b)
     {
-        var m = activePane;
-        if (m != null && m != body && moonFrame.TryGetValue(m, out var fr) && fr != null
-            && moonImg.TryGetValue(m, out var img) && img != null)
+        if (b == null) return null;
+        if (b == body) return mapRT;
+        return moonImg.TryGetValue(b, out var img) && img != null ? img.rectTransform : null;
+    }
+
+    /// Open AND on screen: a maximised pane hides the others without closing them.
+    bool PaneShown(CelestialBody b)
+        => b != null && openMaps.Contains(b) && (maximised == null || maximised == b);
+
+    bool HostShown => PaneShown(body);
+
+    int ShownPaneCount()
+    {
+        int n = 0;
+        foreach (var b in openMaps) if (PaneShown(b)) n++;
+        return n;
+    }
+
+    /// The pane under a screen point, if any.
+    CelestialBody PaneAt(Vector2 screen)
+    {
+        foreach (var b in openMaps)
         {
-            Vector2 pan = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
-            pan.x -= dx;
-            ClampPanePan(fr.rect, img.rectTransform, ref pan);
-            moonPan[m] = pan;
-            SyncMoonMirrors(img, fr.rect);
-            return;
+            if (!PaneShown(b)) continue;
+            var f = FrameOf(b);
+            if (f != null && f.gameObject.activeInHierarchy
+                && RectTransformUtility.RectangleContainsScreenPoint(f, screen, null)) return b;
         }
-        ScrollMap(-dx);
+        return null;
     }
 
-    /// Continuous scroll while an arrow is held. Frame-rate independent, and unscaled so it works while
-    /// the game is paused — the Planet View is a place you use while paused.
+    /// The active pane: the one last clicked, scrolled or used (if still on screen), else the planet's,
+    /// else the first one showing.
+    CelestialBody FocusPane
+    {
+        get
+        {
+            if (PaneShown(activePane)) return activePane;
+            if (HostShown) return body;
+            foreach (var b in openMaps) if (PaneShown(b)) return b;
+            return null;
+        }
+    }
+
+    /// What the keyboard acts on: the pane under the cursor, else the active one.
+    CelestialBody KeyPane => PaneAt(Input.mousePosition) ?? FocusPane;
+
+    void Activate(CelestialBody b)
+    {
+        if (b == null || activePane == b) return;
+        activePane = b;
+        RefreshPaneChrome();
+    }
+
+    // ---- The limits, in px per cell, for a world in a frame ----
+
+    /// The whole world fits the frame (letterboxed on the proportionally shorter axis). Zoom 1.
+    static float FitPx(Rect fr, CelestialBody b)
+    {
+        if (b?.surface == null || fr.width < 1f || fr.height < 1f) return 0f;
+        return Mathf.Min(fr.width / b.surface.width, fr.height / b.surface.height);
+    }
+
+    /// The world exactly fills the frame, cropping the longer axis.
+    static float CoverPx(Rect fr, CelestialBody b)
+    {
+        if (b?.surface == null || fr.width < 1f || fr.height < 1f) return 0f;
+        return Mathf.Max(fr.width / b.surface.width, fr.height / b.surface.height);
+    }
+
+    /// The closest zoom: ~MaxVisibleTiles cells in view (area / px^2 = tiles), but always at least as
+    /// close as cover and MinZoomRange x past fit.
+    static float MaxPx(Rect fr, CelestialBody b)
+    {
+        float ceil = Mathf.Sqrt(Mathf.Max(1f, fr.width * fr.height) / MaxVisibleTiles);
+        return Mathf.Max(CoverPx(fr, b), ceil, FitPx(fr, b) * MinZoomRange);
+    }
+
+    /// Whole pixels per cell once zoomed in past fit, so cell edges, building quads and the grid land on
+    /// the same pixel columns at every step instead of shimmering between them. AT fit the exact value is
+    /// kept, so the world meets the frame edge to edge. Never below fit, never above the cap.
+    static float SnapPx(float raw, float fit, float max)
+    {
+        if (raw <= fit * 1.0001f || raw < 3f) return raw;
+        float s = Mathf.Round(raw);
+        if (s > max) s = Mathf.Floor(max);
+        return s < fit ? raw : s;
+    }
+
+    /// Resolve a pane's view into its map's size and position. The ONE place either is written, for the
+    /// planet and every moon. Safe to call at any time: until the frame has a real rect it does nothing,
+    /// and because the view is relative there is nothing to resolve wrongly in the meantime.
+    void ApplyView(CelestialBody b)
+    {
+        var frame = FrameOf(b);
+        var content = ContentOf(b);
+        if (b?.surface == null || frame == null || content == null) return;
+        Rect fr = frame.rect;
+        if (fr.width < 8f || fr.height < 8f) return;
+
+        var v = ViewOf(b);
+        float fit = FitPx(fr, b);
+        float max = MaxPx(fr, b);
+        float maxZoom = Mathf.Max(1f, max / fit);
+        v.zoom = Mathf.Clamp(v.zoom, 1f, maxZoom);
+        v.shown = Mathf.Clamp(v.shown, 1f, maxZoom);
+
+        float px = SnapPx(fit * v.shown, fit, max);
+        var size = new Vector2(b.surface.width * px, b.surface.height * px);
+        content.sizeDelta = size;
+        ClampCentre(v, fr, size, b.surface.width);
+
+        // Whole-pixel offsets, for the same reason as SnapPx: a map parked on a half pixel smears.
+        var pos = new Vector2(Mathf.Round((0.5f - v.centre.x) * size.x), Mathf.Round((0.5f - v.centre.y) * size.y));
+        content.anchoredPosition = pos;
+
+        if (b == body) { tilePx = px; mapPan = pos; SyncWrapMirrors(); }
+        else if (moonImg.TryGetValue(b, out var img) && img != null) SyncMoonMirrors(img, fr);
+        RefreshPaneLabel(b);
+    }
+
+    /// Keep the frame covered by map wherever the map is big enough to cover it, and centred where not.
+    ///
+    /// LATITUDE clamps: the poles are real edges. LONGITUDE wraps once the map is at least as wide as its
+    /// frame (the wrap mirrors fill the seam) — but how far the view may sit off the world's centre grows
+    /// smoothly from nothing at that width to the full wrap one doubling later. That is what lets
+    /// zooming out land exactly on the centred, whole-world fit without the jump the old clamp made the
+    /// instant the map got narrower than the frame and the wrapped pan snapped back to the middle.
+    static void ClampCentre(PaneView v, Rect fr, Vector2 size, int cellsWide)
+    {
+        float cx = v.centre.x, cy = v.centre.y;
+
+        if (!PaneWrapEnabled(fr, size)) cx = 0.5f;
+        else
+        {
+            float wrapPx = fr.width / Mathf.Max(1, cellsWide);          // px/cell where map width == frame width
+            float pxNow = size.x / Mathf.Max(1, cellsWide);
+            float freedom = Mathf.Clamp01((pxNow - wrapPx) / Mathf.Max(0.0001f, wrapPx));
+            float off = Mathf.Repeat(cx, 1f) - 0.5f;                     // -0.5 .. 0.5 from the centre meridian
+            off = Mathf.Clamp(off, -0.5f * freedom, 0.5f * freedom);
+            cx = Mathf.Repeat(0.5f + off, 1f);
+        }
+
+        if (size.y <= fr.height + 0.5f) cy = 0.5f;
+        else
+        {
+            float half = fr.height * 0.5f / size.y;
+            cy = Mathf.Clamp(cy, half, 1f - half);
+        }
+        v.centre = new Vector2(cx, cy);
+    }
+
+    /// Ask a pane to zoom by `factor`, pinned at a screen point (the cursor) or, with none, the frame's
+    /// centre. The request is the target; TickPaneViews eases the drawn zoom to it.
+    void ZoomPane(CelestialBody b, float factor, Vector2? screenAnchor)
+    {
+        var frame = FrameOf(b);
+        if (b?.surface == null || frame == null || !PaneShown(b)) return;
+        Rect fr = frame.rect;
+        float fit = FitPx(fr, b);
+        if (fit <= 0f) return;
+
+        var v = ViewOf(b);
+        float target = Mathf.Clamp(v.zoom * factor, 1f, Mathf.Max(1f, MaxPx(fr, b) / fit));
+        if (Mathf.Approximately(target, v.zoom)) return;
+
+        v.anchor = Vector2.zero;
+        if (screenAnchor.HasValue && RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                frame, screenAnchor.Value, null, out Vector2 lp))
+            v.anchor = lp - fr.center;   // relative to the frame's centre, whatever its pivot
+        v.zoom = target;
+    }
+
+    /// Ease every shown pane's drawn zoom toward its target, keeping the map point under its anchor still.
+    void TickPaneViews()
+    {
+        float k = 1f - Mathf.Exp(-ZoomEase * Time.unscaledDeltaTime);
+        foreach (var b in openMaps)
+        {
+            if (!PaneShown(b) || !views.TryGetValue(b, out var v) || v == null) continue;
+            if (Mathf.Approximately(v.shown, v.zoom)) continue;
+            var frame = FrameOf(b);
+            var content = ContentOf(b);
+            if (frame == null || content == null || b.surface == null) continue;
+
+            Rect fr = frame.rect;
+            float fit = FitPx(fr, b);
+            if (fit <= 0f) continue;
+            float max = MaxPx(fr, b);
+
+            float next = Mathf.Abs(v.zoom - v.shown) < 0.003f * v.zoom ? v.zoom : Mathf.Lerp(v.shown, v.zoom, k);
+            Vector2 oldSize = content.sizeDelta;
+            float newPx = SnapPx(fit * Mathf.Clamp(next, 1f, Mathf.Max(1f, max / fit)), fit, max);
+            Vector2 newSize = new Vector2(b.surface.width * newPx, b.surface.height * newPx);
+            if (oldSize.x > 0.5f && oldSize.y > 0.5f)
+            {
+                // uv under the anchor = centre + anchor / size; hold it fixed across the size change.
+                Vector2 uv = v.centre + new Vector2(v.anchor.x / oldSize.x, v.anchor.y / oldSize.y);
+                v.centre = uv - new Vector2(v.anchor.x / newSize.x, v.anchor.y / newSize.y);
+            }
+            v.shown = next;
+
+            float before = tilePx;
+            ApplyView(b);
+            // Pieces and the ghost ride the map's normalised space for free; the selection ring is sized
+            // in pixels, so it is redrawn whenever the planet's scale actually changed.
+            if (b == body && !Mathf.Approximately(before, tilePx)) DrawSelectionMarker();
+        }
+    }
+
+    /// Back to the whole world, centred.
+    void FitPane(CelestialBody b)
+    {
+        if (b == null) return;
+        var v = ViewOf(b);
+        v.zoom = v.shown = 1f;
+        v.centre = new Vector2(0.5f, 0.5f);
+        ApplyView(b);
+        if (b == body) DrawSelectionMarker();
+    }
+
+    /// Move a pane's VIEW by `viewDelta` frame pixels (positive x looks further east, positive y further
+    /// north) — the map itself slides the opposite way.
+    void ScrollPane(CelestialBody b, Vector2 viewDelta)
+    {
+        var content = ContentOf(b);
+        if (b?.surface == null || content == null || !PaneShown(b)) return;
+        Vector2 size = content.sizeDelta;
+        if (size.x < 1f || size.y < 1f) return;
+        var v = ViewOf(b);
+        v.centre += new Vector2(viewDelta.x / size.x, viewDelta.y / size.y);
+        ApplyView(b);
+    }
+
+    /// Kept for callers outside the panes: zoom the ACTIVE pane about its centre.
+    public void ZoomBy(float factor) => ZoomPane(FocusPane, factor, null);
+
+    // ---- Keyboard ----
+    //
+    // + / - zoom the pane under the cursor (else the active one), pinned at the cursor when it is over
+    // that pane. Home or F fits it. A/D and the arrows scroll east-west, W/S north-south. None of it
+    // while a text field has focus or a modal is up — renaming a world must not drive the map.
     void TickScrollHold()
     {
-        // A/D and the arrow keys scroll the same way the held "<" / ">" buttons do. Skipped while a text
-        // field has focus, or renaming a world would scroll the map under the cursor.
-        float dir = scrollHoldDir;
         bool modal = (EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen) || NamePrompt.IsOpen
                      || HomeworldOnboardingUI.DialogOpen;
         bool keys = !modal && !UIFactory.IsTypingInField();
-        if (Mathf.Approximately(dir, 0f) && keys)
-        {
-            if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) dir -= 1f;
-            if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) dir += 1f;
-        }
-        if (!Mathf.Approximately(dir, 0f)) ScrollActive(dir * ScrollHoldSpeed * Time.unscaledDeltaTime);
 
-        // W/S and Up/Down pan north and south (2026-10-09). Latitude clamps rather than wraps, so this
-        // only moves when the map is zoomed in past the viewport's height.
         if (keys)
         {
-            float dy = 0f;
-            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) dy += 1f;
-            if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) dy -= 1f;
-            if (!Mathf.Approximately(dy, 0f)) ScrollActiveY(dy * ScrollHoldSpeed * Time.unscaledDeltaTime);
+            bool zin = Input.GetKeyDown(KeyCode.Equals) || Input.GetKeyDown(KeyCode.Plus) || Input.GetKeyDown(KeyCode.KeypadPlus);
+            bool zout = Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.KeypadMinus);
+            bool fit = Input.GetKeyDown(KeyCode.Home) || Input.GetKeyDown(KeyCode.F);
+            if (zin || zout || fit)
+            {
+                var kp = KeyPane;
+                if (kp != null)
+                {
+                    Activate(kp);
+                    if (fit) FitPane(kp);
+                    else
+                    {
+                        Vector2 mouse = Input.mousePosition;
+                        ZoomPane(kp, zin ? ZoomStep : 1f / ZoomStep, PaneAt(mouse) == kp ? mouse : (Vector2?)null);
+                    }
+                }
+            }
         }
-    }
 
-    /// The vertical twin of ScrollActive. `dy` positive looks further NORTH, which slides the map down.
-    void ScrollActiveY(float dy)
-    {
-        var m = activePane;
-        if (m != null && m != body && moonFrame.TryGetValue(m, out var fr) && fr != null
-            && moonImg.TryGetValue(m, out var img) && img != null)
+        // A held "<" / ">" arrow scrolls ITS pane; otherwise the keys scroll the key pane.
+        if (scrollHoldPane != null && !Mathf.Approximately(scrollHoldDir, 0f))
         {
-            Vector2 pan = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
-            pan.y -= dy;
-            ClampPanePan(fr.rect, img.rectTransform, ref pan);
-            moonPan[m] = pan;
-            SyncMoonMirrors(img, fr.rect);
+            ScrollPane(scrollHoldPane, new Vector2(scrollHoldDir * ScrollHoldSpeed * Time.unscaledDeltaTime, 0f));
             return;
         }
-        if (body == null || body.surface == null) return;
-        mapPan.y -= dy;
-        ClampPan();
+        if (!keys) return;
+
+        Vector2 dir = Vector2.zero;
+        if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) dir.x -= 1f;
+        if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) dir.x += 1f;
+        // Latitude clamps rather than wraps, so W/S only move a map zoomed in past its frame's height.
+        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) dir.y += 1f;
+        if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) dir.y -= 1f;
+        if (dir == Vector2.zero) return;
+        var target = KeyPane;
+        if (target != null) ScrollPane(target, dir * ScrollHoldSpeed * Time.unscaledDeltaTime);
     }
 
-    void ZoomButton(RectTransform bar, string label, System.Action onClick)
+    // ============================================================================================
+    // PANE CHROME — each pane's backing, border and corner controls
+    //
+    // Bottom-left of every pane, the same place for every map: its NAME and zoom, then zoom out / in,
+    // Fit, the scroll arrows, Maximise/Restore and Close. These replace the single floating zoom bar,
+    // which acted on whichever pane the cursor had last crossed — so the button you pressed was never
+    // visibly attached to the map it was about to move. The strip sits at reduced opacity until the
+    // cursor is over its pane, and drops its label and then its arrows when a pane is too narrow.
+    // ============================================================================================
+    sealed class PaneChrome
     {
-        var b = UIFactory.Button(bar.transform, label, onClick, 20f);
-        var le = b.gameObject.AddComponent<LayoutElement>();
-        le.preferredWidth = 26f; le.flexibleWidth = 0f;
+        public RectTransform strip;
+        public CanvasGroup group;
+        public TMP_Text label;
+        public GameObject labelGO, arrowL, arrowR, maxBtn;
+        public RawImage maxIcon;
+        public readonly Image[] edges = new Image[4];
     }
 
-    /// How much one button press (or one wheel notch) changes the zoom.
-    const float ZoomStep = 1.5f;
+    PaneChrome hostChrome;
+    readonly Dictionary<CelestialBody, PaneChrome> moonChrome = new Dictionary<CelestialBody, PaneChrome>();
 
-    /// Which pane the zoom bar acts on: the last one the cursor was over (if still open), else the host if
-    /// it's open, else the first open pane. The bar's own buttons sit under the cursor, so without the latch
-    /// the target would flip to "nothing" the moment you moved off a map to press a button.
-    CelestialBody ZoomTarget =>
-        (activePane != null && openMaps.Contains(activePane)) ? activePane
-        : HostOpen ? body
-        : (openMaps.Count > 0 ? openMaps[0] : null);
-
-    /// Zoom the active pane about the CENTRE of its frame — the buttons have no cursor to zoom toward, and
-    /// pulling the view sideways when someone presses "+" would be its own bug. Dispatches to the host or
-    /// the relevant moon.
-    public void ZoomBy(float factor)
+    PaneChrome ChromeOf(CelestialBody b)
     {
-        var t = ZoomTarget;
-        if (t == null) return;
-        if (t == body) ZoomHostBy(factor); else ZoomMoonBy(t, factor);
+        if (b == null) return null;
+        if (b == body) return hostChrome;
+        return moonChrome.TryGetValue(b, out var c) ? c : null;
     }
 
-    void ZoomHostBy(float factor)
+    const float PaneStripHeight = 24f;
+    const float PaneStripInset = 6f;
+    const float PaneBtn = 22f;
+    const float PaneLabelWidth = 112f;
+    static readonly Color PaneBacking = new Color(0.015f, 0.022f, 0.035f, 1f);   // deep space behind a letterboxed map
+    static readonly Color PaneStripBg = new Color(0.04f, 0.07f, 0.11f, 0.88f);
+
+    /// The pane's own dark backing, FIRST in its frame so the map draws over it. With it the frame is a
+    /// visible, fixed screen whatever the map inside is doing.
+    static void AddPaneBackdrop(RectTransform frame)
     {
-        if (body?.surface == null) return;
-        float fit = FitTilePx();
-        float max = Mathf.Max(CoverTilePx(), MaxTilePx());
-        float next = Mathf.Clamp(tilePx * factor, fit, max);
-        if (Mathf.Approximately(next, tilePx)) return;
-        mapPan *= next / tilePx;   // centre stays put: scale the pan by the same ratio the map scaled by
-        tilePx = next;
-        ApplyMapSize();
-        DrawSelectionMarker();
+        var bg = UIFactory.Panel(frame, "PaneBacking", PaneBacking);
+        UIFactory.Stretch(bg.rectTransform);
+        bg.raycastTarget = false;
     }
 
-    void ZoomMoonBy(CelestialBody m, float factor)
+    /// Border and control strip, built LAST in the frame so they sit over the map. `who` is asked at click
+    /// time: the planet's pane is built once and shows whichever world the window is on.
+    PaneChrome BuildPaneChrome(RectTransform frame, System.Func<CelestialBody> who)
     {
-        if (!moonFrame.TryGetValue(m, out var frame) || frame == null) return;
-        Rect fr = frame.rect;
-        float floor = ContainFit(fr, m);
-        float max = Mathf.Max(CoverFit(fr, m), CeilTilePx(fr));
-        float cur = moonTilePx.TryGetValue(m, out float z) ? z : CoverFit(fr, m);
-        float next = Mathf.Clamp(cur * factor, floor, max);
-        if (Mathf.Approximately(next, cur)) return;
-        Vector2 pan = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
-        moonPan[m] = pan * (next / cur);   // centre stays put, same as the host
-        moonTilePx[m] = next;
-        ApplyMoonSize(m);
-    }
-
-    /// Reset the active pane to its framed default (cover fit, centred). Zoom out from here to see the whole
-    /// map within the fixed frame.
-    void FitActive()
-    {
-        var t = ZoomTarget;
-        if (t == null) return;
-        if (t == body) { tilePx = 0f; mapPan = Vector2.zero; ApplyMapSize(); DrawSelectionMarker(); }
-        else { moonTilePx[t] = 0f; moonPan[t] = Vector2.zero; ApplyMoonSize(t); }
-    }
-
-    /// Current zoom of the active pane as a percentage of its CONTAIN fit (100% = the whole map fits the
-    /// frame). The cover default reads above 100%; zooming out toward the whole map approaches 100%.
-    float ZoomPercent()
-    {
-        var t = ZoomTarget;
-        if (t == null) return 100f;
-        if (t == body) { float fit = FitTilePx(); return fit > 0.001f ? tilePx / fit * 100f : 100f; }
-        if (moonFrame.TryGetValue(t, out var frame) && frame != null)
+        var c = new PaneChrome();
+        for (int i = 0; i < 4; i++)
         {
-            float fit = ContainFit(frame.rect, t);
-            float cur = moonTilePx.TryGetValue(t, out float z) ? z : CoverFit(frame.rect, t);
-            return fit > 0.001f ? cur / fit * 100f : 100f;
+            c.edges[i] = UIFactory.Panel(frame, "PaneEdge", new Color(0, 0, 0, 0));
+            c.edges[i].raycastTarget = false;
         }
-        return 100f;
+
+        var strip = c.strip = UIFactory.NewUI(frame, "PaneControls").GetComponent<RectTransform>();
+        strip.anchorMin = strip.anchorMax = Vector2.zero;
+        strip.pivot = Vector2.zero;
+        strip.anchoredPosition = new Vector2(PaneStripInset, PaneStripInset);
+        strip.sizeDelta = new Vector2(0f, PaneStripHeight);
+        var sbg = strip.gameObject.AddComponent<Image>();
+        sbg.color = PaneStripBg;
+        var h = strip.gameObject.AddComponent<HorizontalLayoutGroup>();
+        h.spacing = 3; h.padding = new RectOffset(4, 3, 2, 2);
+        h.childControlWidth = true; h.childControlHeight = true;
+        h.childForceExpandWidth = false; h.childForceExpandHeight = true;
+        h.childAlignment = TextAnchor.MiddleLeft;
+        var csf = strip.gameObject.AddComponent<ContentSizeFitter>();
+        csf.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+        c.group = strip.gameObject.AddComponent<CanvasGroup>();
+        c.group.alpha = 0.6f;
+
+        // A FIXED width, so the strip never changes size as the percentage ticks from 100% to 1250%.
+        c.label = UIFactory.Text(strip, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Left);
+        c.label.textWrappingMode = TextWrappingModes.NoWrap;
+        c.label.overflowMode = TextOverflowModes.Ellipsis;
+        var lle = c.label.gameObject.AddComponent<LayoutElement>();
+        lle.preferredWidth = PaneLabelWidth; lle.minWidth = PaneLabelWidth; lle.flexibleWidth = 0f;
+        c.labelGO = c.label.gameObject;
+
+        PaneButton(strip, "–", PaneBtn, "Zoom out  <color=#7E93A8>(- or scroll)</color>",
+                   () => { var b = who(); Activate(b); ZoomPane(b, 1f / ZoomStep, null); });
+        PaneButton(strip, "+", PaneBtn, "Zoom in  <color=#7E93A8>(+ or scroll)</color>",
+                   () => { var b = who(); Activate(b); ZoomPane(b, ZoomStep, null); });
+        PaneButton(strip, "Fit", 34f, "Fit the whole world  <color=#7E93A8>(Home or F)</color>",
+                   () => { var b = who(); Activate(b); FitPane(b); });
+        c.arrowL = PaneScrollButton(strip, "←", -1f, who);
+        c.arrowR = PaneScrollButton(strip, "→", +1f, who);
+
+        var max = PaneButton(strip, "", PaneBtn, "Maximise or restore this map  <color=#7E93A8>(double-click its tab; Esc restores)</color>",
+                             () => ToggleMaximise(who()));
+        c.maxBtn = max.gameObject;
+        c.maxIcon = UIFactory.NewUI(max.transform, "Icon").AddComponent<RawImage>();
+        c.maxIcon.texture = PixelIcons.Maximise;
+        c.maxIcon.raycastTarget = false;
+        UIFactory.Stretch(c.maxIcon.rectTransform, 3f, 3f, 3f, 3f);
+
+        PaneButton(strip, "×", PaneBtn, "Close this map  <color=#7E93A8>(its tab reopens it)</color>",
+                   () => ClosePane(who()));
+        return c;
     }
 
-    /// Pixels per cell at the zoomed-all-the-way-OUT end: a CONTAIN fit, where the WHOLE map fits inside the
-    /// frame (letterboxed on whichever axis is proportionally shorter). This is the floor you can zoom out
-    /// to so you can always see the entire map within its fixed window, and the 100% reference for the zoom
-    /// readout. The DEFAULT view on open is CoverTilePx (fills the frame, no dead space); you zoom out from
-    /// there to this to see the whole map, or in past it to see fewer, larger cells.
-    float FitTilePx()
+    UnityEngine.UI.Button PaneButton(RectTransform strip, string label, float width, string tip, System.Action onClick)
     {
-        if (body?.surface == null) return 4f;
-        var vp = hostViewport.rect;
-        if (vp.width < 1f || vp.height < 1f) return 4f;
-        return Mathf.Min(vp.width / body.surface.width, vp.height / body.surface.height);
+        var b = UIFactory.Button(strip.transform, label, onClick, PaneBtn - 2f);
+        var le = b.gameObject.GetComponent<LayoutElement>();
+        if (le == null) le = b.gameObject.AddComponent<LayoutElement>();
+        le.preferredWidth = width; le.minWidth = width; le.flexibleWidth = 0f;
+        var t = b.GetComponentInChildren<TMP_Text>();
+        if (t != null) t.fontSize = UITheme.SmallSize;
+        UIFactory.Tooltip(b.gameObject, tip);
+        return b;
     }
 
-    /// Pixels per cell at which the map exactly COVERS the frame (fills it, cropping the longer axis) — the
-    /// framed default view, so there's no dead space around a map until you deliberately zoom out to fit.
-    float CoverTilePx()
+    /// A press-and-hold scroll arrow for one pane. A click nudges; holding scrolls continuously, for
+    /// crossing a whole world rather than clicking twenty times.
+    GameObject PaneScrollButton(RectTransform strip, string label, float dir, System.Func<CelestialBody> who)
     {
-        if (body?.surface == null) return 4f;
-        var vp = hostViewport.rect;
-        if (vp.width < 1f || vp.height < 1f) return 4f;
-        return Mathf.Max(vp.width / body.surface.width, vp.height / body.surface.height);
+        var btn = PaneButton(strip, label, PaneBtn, dir < 0f ? "Scroll west  <color=#7E93A8>(A)</color>" : "Scroll east  <color=#7E93A8>(D)</color>",
+            () =>
+            {
+                var b = who();
+                var f = FrameOf(b);
+                if (f != null) ScrollPane(b, new Vector2(dir * f.rect.width * ScrollStepFrac, 0f));
+            });
+        var hold = btn.gameObject.AddComponent<ViewHoldButton>();
+        hold.onDown = () => { var b = who(); Activate(b); scrollHoldPane = b; scrollHoldDir = dir; };
+        hold.onUp = () => { if (Mathf.Approximately(scrollHoldDir, dir)) { scrollHoldDir = 0f; scrollHoldPane = null; } };
+        return btn.gameObject;
     }
 
-    /// Pixels per cell at the zoomed-all-the-way-IN end: roughly MaxVisibleTiles cells fill the
-    /// viewport, so the closest view shows the same amount of ground on every world rather than
-    /// depending on how big the planet happens to be.
-    ///
-    /// visibleTiles = (w/px) * (h/px) = area / px^2  ->  px = sqrt(area / visibleTiles)
-    float MaxTilePx()
+    /// "Luna · 150%" — the zoom relative to the whole-world fit, so a freshly opened map always reads 100%.
+    void RefreshPaneLabel(CelestialBody b)
     {
-        var vp = hostViewport.rect;
-        float area = Mathf.Max(1f, vp.width * vp.height);
-        return Mathf.Sqrt(area / MaxVisibleTiles);
+        var c = ChromeOf(b);
+        if (c == null || c.label == null || b == null) return;
+        float pct = views.TryGetValue(b, out var v) && v != null ? v.zoom * 100f : 100f;
+        string s = $"{b.name} <color=#7E93A8>· {pct:F0}%</color>";
+        if (c.label.text != s) c.label.text = s;
     }
 
-    void ApplyMapSize()
+    /// Borders, strip contents and the maximise icon, for the current layout and active pane. Run after
+    /// every layout and whenever the active pane changes — never per frame.
+    void RefreshPaneChrome()
     {
-        if (body?.surface == null) return;
+        int shown = ShownPaneCount();
+        var focus = FocusPane;
+        foreach (var b in openMaps)
+        {
+            var c = ChromeOf(b);
+            var f = FrameOf(b);
+            if (c == null || f == null) continue;
 
-        float floor = FitTilePx();                          // fully zoomed out = whole map fits (contain)
-        float max = Mathf.Max(CoverTilePx(), MaxTilePx());  // in past cover to ~200 cells
-        tilePx = Mathf.Clamp(tilePx <= 0f ? CoverTilePx() : tilePx, floor, max);   // default view = cover
+            // The border takes the colour of the pane's TAB outline, so tab and pane read as one thing;
+            // the active pane's is full strength and thicker. With a single pane there is nothing to
+            // choose between, so it stays quiet.
+            bool active = shown > 1 && b == focus;
+            Color hue = MoonTabHover.HueFor(b);
+            hue.a = active ? 1f : 0.32f;
+            float t = active ? 2f : 1f;
+            SetEdge(c.edges[0], new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -t), Vector2.zero, hue);
+            SetEdge(c.edges[1], new Vector2(0, 0), new Vector2(1, 0), Vector2.zero, new Vector2(0, t), hue);
+            SetEdge(c.edges[2], new Vector2(0, 0), new Vector2(0, 1), Vector2.zero, new Vector2(t, 0), hue);
+            SetEdge(c.edges[3], new Vector2(1, 0), new Vector2(1, 1), new Vector2(-t, 0), Vector2.zero, hue);
 
-        mapRT.sizeDelta = new Vector2(body.surface.width * tilePx, body.surface.height * tilePx);
-        ClampPan();
+            // Narrow panes shed the label first, then the arrows (both stay reachable: the name is on the
+            // tab, and A/D or a drag scrolls).
+            float w = f.rect.width;
+            bool roomForLabel = w >= 330f;
+            bool roomForArrows = w >= 215f;
+            if (c.labelGO != null && c.labelGO.activeSelf != roomForLabel) c.labelGO.SetActive(roomForLabel);
+            if (c.arrowL != null && c.arrowL.activeSelf != roomForArrows) c.arrowL.SetActive(roomForArrows);
+            if (c.arrowR != null && c.arrowR.activeSelf != roomForArrows) c.arrowR.SetActive(roomForArrows);
+
+            // Maximise means nothing with one map open; with one maximised, the button restores.
+            bool canMax = openMaps.Count > 1;
+            if (c.maxBtn != null && c.maxBtn.activeSelf != canMax) c.maxBtn.SetActive(canMax);
+            if (c.maxIcon != null) c.maxIcon.texture = maximised == b ? PixelIcons.Restore : PixelIcons.Maximise;
+
+            RefreshPaneLabel(b);
+        }
     }
+
+    static void SetEdge(Image e, Vector2 aMin, Vector2 aMax, Vector2 oMin, Vector2 oMax, Color c)
+    {
+        if (e == null) return;
+        var rt = e.rectTransform;
+        rt.anchorMin = aMin; rt.anchorMax = aMax;
+        rt.offsetMin = oMin; rt.offsetMax = oMax;
+        e.color = c;
+    }
+
+    /// Per frame: the strip under the cursor comes up to full strength, the others rest at 60%.
+    void TickPaneChrome()
+    {
+        var under = PaneAt(Input.mousePosition);
+        float step = Time.unscaledDeltaTime * 6f;
+        foreach (var b in openMaps)
+        {
+            var c = ChromeOf(b);
+            if (c == null || c.group == null) continue;
+            float target = b == under ? 1f : 0.6f;
+            if (!Mathf.Approximately(c.group.alpha, target)) c.group.alpha = Mathf.MoveTowards(c.group.alpha, target, step);
+        }
+    }
+
+    /// Is the point over any shown pane's control strip?
+    bool OverPaneControls(Vector2 p)
+    {
+        foreach (var b in openMaps)
+        {
+            if (!PaneShown(b)) continue;
+            var c = ChromeOf(b);
+            if (c?.strip != null && c.strip.gameObject.activeInHierarchy
+                && RectTransformUtility.RectangleContainsScreenPoint(c.strip, p, null)) return true;
+        }
+        return false;
+    }
+
+    /// Kept for the call sites that resize or retexture the planet's map.
+    void ApplyMapSize() => ApplyView(body);
 
     // ---- Wrap mirrors --------------------------------------------------------------------------
 
@@ -1539,40 +1877,8 @@ public class PlanetViewWindow : MonoBehaviour
         body != null && body.surface != null && hostViewport != null && mapRT != null &&
         mapRT.rect.width >= hostViewport.rect.width - 0.5f;
 
-    /// Scroll the map horizontally by `dx` pixels, wrapping around the seam.
-    public void ScrollMap(float dx)
-    {
-        if (body == null || body.surface == null) return;
-        mapPan.x += dx;
-        ClampPan();
-    }
-
-    // Keep the viewport covered: you can never drag the map so far that you're looking at the letterbox
-    // instead of the world. When the map is smaller than the viewport on an axis, it centres on it.
-    //
-    // X WRAPS rather than clamping, once the map is wide enough for there to be an edge to run off. The
-    // pan is folded back into one map-width, and because a mirror is sitting exactly one map-width to
-    // either side, the fold lands on identical content — so the position jumps and the picture does not.
-    // Y still clamps: latitude has real ends. The poles are edges, not a seam.
-    void ClampPan()
-    {
-        var vp = hostViewport.rect;
-        Vector2 size = mapRT.sizeDelta;
-
-        if (WrapEnabled && size.x > 0.5f)
-            mapPan.x = Mathf.Repeat(mapPan.x + size.x * 0.5f, size.x) - size.x * 0.5f;
-        else
-        {
-            float slackX = Mathf.Max(0f, (size.x - vp.width) * 0.5f);
-            mapPan.x = Mathf.Clamp(mapPan.x, -slackX, slackX);
-        }
-
-        float slackY = Mathf.Max(0f, (size.y - vp.height) * 0.5f);
-        mapPan.y = Mathf.Clamp(mapPan.y, -slackY, slackY);
-        mapRT.anchoredPosition = mapPan;
-
-        SyncWrapMirrors();
-    }
+    /// Scroll the planet's map horizontally by `dx` pixels (the MAP moves; the view goes the other way).
+    public void ScrollMap(float dx) => ScrollPane(body, new Vector2(-dx, 0f));
 
     // Signature covers only the SHAPE of the window: which world, which tab, what's selected, what's
     // built. Live values (costs, efficiency under the cursor) refresh in place, so nothing rebuilds
@@ -1732,9 +2038,10 @@ public class PlanetViewWindow : MonoBehaviour
 
         live.Tick();
         PollHover();
-        PollMapZoom();
-        PollMapPan();
-        PollMoonZoomPan();
+        PollPaneZoom();
+        PollPanePan();
+        TickPaneViews();
+        TickPaneChrome();
         // AFTER PollHover, which is what resolves `hoverCell` from the cursor — the drag reads that cell
         // every frame, so running first would draw one frame behind the mouse for the whole gesture.
         PollBuildDraw();
@@ -1745,14 +2052,6 @@ public class PlanetViewWindow : MonoBehaviour
         // The confirm panel is anchored to a map cell, so it has to be re-placed whenever the map moves
         // under it — which is every frame you're zooming or panning.
         if (pendingType.HasValue) RefreshConfirmPanel();
-
-        // Written straight rather than through LiveSet: it's one short string on one label with no
-        // layout group above it, and it only changes while you're actively zooming.
-        if (zoomLabel != null)
-        {
-            string z = $"{ZoomPercent():F0}%";
-            if (zoomLabel.text != z) zoomLabel.text = z;
-        }
 
         // The selection marker is rebuilt only when the SELECTION changes — not on the signature, since
         // clicking a building must move the ring instantly without tearing down the whole side panel.
@@ -1777,11 +2076,29 @@ public class PlanetViewWindow : MonoBehaviour
         // hand already, while leaving the mode meant travelling back to the tray to put the building
         // down. Not while a confirm is up: the panel is asking about a specific footprint at a specific
         // rotation, and rotating underneath the question would make the answer mean something else.
-        if (tab == Tab.Build && selected.HasValue && !pendingType.HasValue && Input.GetKeyDown(KeyCode.R))
+        if (tab == Tab.Build && selected.HasValue && !pendingType.HasValue && Input.GetKeyDown(KeyCode.R)
+            && !TypingInField())
         {
             rotation = (rotation + 1) % 4;
             RecomputeHoverValidity();   // a rotated piece may now fit (or stop fitting) where it is
             SimpleAudio.Instance?.PlayTick();
+        }
+
+        // X TOGGLES DEMOLITION — the keyboard half of the bulldozer button in the map's corner, so the
+        // one tool every builder reaches for constantly is not a trip across the screen. Not while a
+        // name is being typed, and not while a placement confirm is asking its question.
+        if (Input.GetKeyDown(KeyCode.X) && !pendingType.HasValue && !TypingInField())
+        {
+            ToggleDemolishShortcut();
+            SimpleAudio.Instance?.PlayTick();
+        }
+
+        // The hover verdict is re-asked a few times a second while a structure is held, so it follows
+        // the economy and the queue rather than only the mouse.
+        if (selected.HasValue && HasHoverCell)
+        {
+            hoverRecheckIn -= Time.unscaledDeltaTime;
+            if (hoverRecheckIn <= 0f) RecomputeHoverValidity();
         }
 
         // ---- RIGHT-CLICK LEAVES PLACEMENT MODE ----
@@ -1804,6 +2121,15 @@ public class PlanetViewWindow : MonoBehaviour
                 return;
             }
         }
+
+        // Is this Escape free for the map panes? Only when none of the build-mode steps below will take
+        // it: those are a ladder the player is partway down, and restoring the tiling instead of putting
+        // the piece down would answer a different question than the one they asked.
+        // Not while the pause menu is up: there Esc closes the menu, and must not also restore a pane.
+        bool escForPanes = Input.GetKeyDown(KeyCode.Escape) && !pendingType.HasValue
+            && !(EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen)
+            && !(tab == Tab.Build && (selected.HasValue || BuildDemolition.IsFor(body)
+                                      || (BuildPlacement.IsFor(body) && BuildPlacement.Tiles > 0)));
 
         // Escape backs out of the confirm first, and only then drops the held piece — one step at a
         // time, so cancelling a misclick doesn't also make you re-pick the building.
@@ -1834,6 +2160,15 @@ public class PlanetViewWindow : MonoBehaviour
             else if (BuildDemolition.Tiles > 0) BuildDemolition.ClearShape();
             else ExitDemolition();
             return;
+        }
+
+        // Escape with a pane maximised restores the tiled layout (and is kept from the pause menu).
+        if (escForPanes && maximised != null)
+        {
+            maximised = null;
+            escSwallowedOnFrame = Time.frameCount;
+            SimpleAudio.Instance?.PlayTick();
+            LayoutPanes();
         }
 
         if (tab == Tab.Build) { DrawGhost(); DrawPlacement(); }
@@ -1884,8 +2219,8 @@ public class PlanetViewWindow : MonoBehaviour
                     statusText.text = DemolitionModeBanner();
 
                 else if (!selected.HasValue)
-                    statusText.text = "<color=#9FB4C8>Pick a structure on the right, then click the map to site it — you'll be asked to confirm. " +
-                                      "Right-click rotates. Esc cancels.  ·  Scroll to zoom · drag the map to pan.</color>";
+                    statusText.text = "<color=#9FB4C8>Pick a structure on the right, then click or drag on the map to site it — you'll be asked to confirm. " +
+                                      "X demolishes.  ·  Scroll to zoom · drag the map to pan.</color>";
 
                 // ============================================================================
                 // PLACEMENT MODE: THE READOUT MOVES TO THE CURSOR
@@ -1949,10 +2284,10 @@ public class PlanetViewWindow : MonoBehaviour
                           : info.drawMode == BuildDrawMode.Square ? $"press and drag out a square (min {MinSideFor(info)}x{MinSideFor(info)})"
                           : info.drawMode == BuildDrawMode.Rectangle ? "press and drag out a rectangle (min 2 wide both ways)"
                           : info.minTiles > 1 ? $"press and drag to draw it (min {info.minTiles} tiles)" : "click, or press and drag to paint as many tiles as you like";
-                        sb.Append($" <size=10><color=#9FB4C8>· {how} · Esc cancels</color></size>");
+                        sb.Append($" <size=10><color=#9FB4C8>· {how} · right-click or Esc puts it down</color></size>");
                     }
                     else
-                        sb.Append($" · rot {rotation * 90}° <size=10><color=#9FB4C8>(R / right-click rotates · Esc cancels · middle-drag pans)</color></size>");
+                        sb.Append($" <size=10><color=#9FB4C8>· {ControlsHint(info)}</color></size>");
 
                     // WHAT THE MAP IS SHOWING YOU WHILE YOU HOLD THIS. The overlay switched to this
                     // building's own index the moment it was picked up, so name it — an unexplained
@@ -2141,19 +2476,14 @@ public class PlanetViewWindow : MonoBehaviour
 
         // The one thing the player must always be able to find: the way out.
         sb.Append(tiles > 0
-            ? "\n<size=10><color=#9FB4C8>Esc clears the shape · Esc again puts the structure down · Cancel does both</color></size>"
-            : "\n<size=10><color=#9FB4C8>Esc puts the structure down</color></size>");
+            ? "\n<size=10><color=#9FB4C8>Esc clears the shape · Esc again puts the structure down · right-click or Cancel does both</color></size>"
+            : "\n<size=10><color=#9FB4C8>Right-click or Esc puts the structure down</color></size>");
 
         // AT THE CEILING. Said here as well as at the tile, because the tile label fades and this does
         // not: a player who stopped painting a while ago and is wondering why the shape will not grow
         // should not have to try again to be told.
         if (BuildPlacement.IsFor(body) && BuildPlacement.AtResourceCeiling)
-        {
-            BuildPlacement.CanAffordTiles(tiles + 1, out int sm, out int se);
-            string need = sm > 0 && se > 0 ? $"{sm} metal and {se} energy"
-                        : sm > 0 ? $"{sm} metal" : $"{se} energy";
-            sb.Append($"   <color=#FF6659><b>At your limit</b> — another tile needs {need}</color>");
-        }
+            sb.Append($"   <color=#FF6659><b>At your limit</b> — {tiles + 1} tiles would {BuildPlacement.ShortfallFor(tiles + 1)}</color>");
 
         return sb.ToString();
     }
@@ -2169,7 +2499,7 @@ public class PlanetViewWindow : MonoBehaviour
         {
             sb.Append("  <size=10><color=#9FB4C8>left-drag over built tiles to select them · " +
                       "right-drag to un-select · nothing comes down until you confirm</color></size>");
-            sb.Append("\n<size=10><color=#9FB4C8>Esc leaves the mode</color></size>");
+            sb.Append("\n<size=10><color=#9FB4C8>Esc or X leaves the mode · fixed structures (spaceport, shipyard, capitol) come down whole</color></size>");
             return sb.ToString();
         }
 
@@ -2207,6 +2537,16 @@ public class PlanetViewWindow : MonoBehaviour
         var sb = new System.Text.StringBuilder();
         sb.Append(TileHoverText(body, x, y, info.index, placing: true));
         AppendHeldIndex(sb, info, x, y);
+
+        // The verdict for this spot, then — only when it could go here — what the grid will do to it.
+        sb.Append(HoverVerdict(x, y));
+        if (hoverValid && info.drawMode == BuildDrawMode.Fixed)
+        {
+            string pw = SurfaceBuildManager.PowerWarning(body, info,
+                SurfaceBuildingDatabase.Footprint(selected.Value, x, y, rotation));
+            if (pw != null) sb.Append($"\n<size=10><color=#{ColorUtility.ToHtmlStringRGB(UITheme.Warn)}>{pw}</color></size>");
+        }
+        sb.Append($"\n<size=10><color=#9FB4C8>{ControlsHint(info)}</color></size>");
         return sb.ToString();
     }
 
@@ -2220,6 +2560,9 @@ public class PlanetViewWindow : MonoBehaviour
         // put it here, and it gets its own line below.
         sb.Append(TileHoverText(body, x, y, info.index, placing: true));
         AppendHeldIndex(sb, info, x, y);
+        // Directly under the index figure, because the index is usually the reason: "Mineral Index 34%"
+        // and then "Can't build here: needs 70%" read as one thought.
+        sb.Append(HoverVerdict(x, y));
         return AppendPlacementTail(sb, x, y);
     }
 
@@ -2289,11 +2632,10 @@ public class PlanetViewWindow : MonoBehaviour
             sb.Append($"  <color=#{ch}><b>{m} metal · {e} energy</b></color>");
 
             if (BuildPlacement.AtResourceCeiling)
-                sb.Append("\n<color=#FF6659><b>Cannot afford another tile</b></color>");
+                sb.Append($"\n<color=#FF6659><b>Cannot afford another tile</b> — {BuildPlacement.ShortfallFor(tiles + 1)}</color>");
         }
-        else
-            sb.Append("\n<size=10><color=#4DFF6E>Press and drag to draw</color></size>");
 
+        sb.Append($"\n<size=10><color=#9FB4C8>{ControlsHint(SurfaceBuildingDatabase.Get(selected.Value))}</color></size>");
         return sb.ToString();
     }
 
@@ -2318,7 +2660,9 @@ public class PlanetViewWindow : MonoBehaviour
             // being told about it by a dialog after the fact.
             var probe = new HashSet<Vector2Int>(BuildDemolition.Cells) { new Vector2Int(x, y) };
             int pieces = SurfaceBuildManager.WouldSplitInto(hit, probe);
-            if (pieces == 0)
+            if (BuildDemolition.ComesDownWhole(hit))
+                sb.Append("\n<color=#FFBF4D>A fixed structure — it comes down whole</color>");
+            else if (pieces == 0)
                 sb.Append("\n<color=#FFBF4D>Taking this removes the whole structure</color>");
             else if (pieces > 1)
                 sb.Append($"\n<color=#FFBF4D>Taking this splits it into {pieces}</color>");
@@ -2332,7 +2676,7 @@ public class PlanetViewWindow : MonoBehaviour
                       $" <color=#9FB4C8>· {m}m {e}e back</color>");
         }
         else
-            sb.Append("\n<size=10><color=#9FB4C8>Left-drag to select · right-drag to un-select</color></size>");
+            sb.Append("\n<size=10><color=#9FB4C8>Left-drag to select · right-drag to un-select · Esc or X leaves</color></size>");
 
         return sb.ToString();
     }
@@ -2340,8 +2684,7 @@ public class PlanetViewWindow : MonoBehaviour
     string HoverWhy()
     {
         if (!selected.HasValue || !HasHoverCell) return "";
-        SurfaceBuildManager.CanPlace(body, selected.Value, hoverCell.x, hoverCell.y, rotation, out string why);
-        return why ?? "";
+        return hoverWhy ?? "";
     }
 
     // ---- Rebuild ----
@@ -3106,7 +3449,7 @@ public class PlanetViewWindow : MonoBehaviour
         Header("STRUCTURES");
         Note(demo
             ? "<color=#FF6659><b>Demolition mode.</b></color> Left-drag over built tiles to select them, right-drag to un-select. Confirm below the selection."
-            : "Click a structure to pick it up, then draw it on the map. Esc cancels. Footprints interlock — pack them tightly.");
+            : "Click a structure to pick it up, then click or drag on the map. Right-click or Esc puts it down; X demolishes. A card that can't be built says why in red.");
 
         // A ROW OF COLOURED TABS, not one long list with headings.
         //
@@ -3321,7 +3664,11 @@ public class PlanetViewWindow : MonoBehaviour
         // only ever once: placing it ends the wait and it leaves the list (HomeworldOnboarding).
         if (info.type == SurfaceBuildingType.PlanetCapitol)
             return Instance != null && HomeworldOnboarding.AwaitingCapitol(Instance.body);
-        if (info.type == SurfaceBuildingType.ColonyShipBase && !GameMode.DevMode) return false;
+        // The landing hull is in the tray while a colony ship is waiting on THIS world. It opens already
+        // in hand (ShowFor), but right-click and Esc put a held piece down — and with no card to pick it
+        // back up, one stray click stranded the landing until the window was closed and reopened.
+        if (info.type == SurfaceBuildingType.ColonyShipBase)
+            return GameMode.DevMode || (Instance != null && ColonyLanding.AwaitingOn(Instance.body));
         if (CityGrowth.IsSettlement(info.type) && !GameMode.DevMode) return false;
         return true;
     }
@@ -3372,7 +3719,9 @@ public class PlanetViewWindow : MonoBehaviour
             buildCategory = captured;
             // Picking up a structure and then switching category would leave a ghost from a tab you can
             // no longer see, so the selection is dropped with the tab — same rule the main tab strip uses.
-            selected = null; CancelPlace();
+            // ...and the drawing session with it: dropping only `selected` left a half-drawn shape and its
+            // live Confirm panel on the map with nothing held.
+            selected = null; CancelPlace(); BuildPlacement.Cancel();
             lastSig = null;                 // force one rebuild; the tray is redrawn for the new category
         }, 22f);
 
@@ -3450,12 +3799,18 @@ public class PlanetViewWindow : MonoBehaviour
             var meta = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.SubText);
             live.Text(meta, () =>
             {
-                int m = ColonyManager.DiscCost(info.costMetal), e = ColonyManager.DiscCost(info.costEnergy);
+                // THE PRICE OF THE SMALLEST LEGAL BUILDING, not of one tile: a square reactor must be at
+                // least 2x2, so quoting a single tile's price showed an affordable card for a building the
+                // Confirm panel would then refuse for want of four times as much.
+                SurfaceBuildManager.MinimumCost(info, out int m, out int e);
                 bool afford = GameMode.DevMode || PlayerEconomy.CanAfford(m, e);
                 string hex = ColorUtility.ToHtmlStringRGB(afford ? UITheme.SubText : UITheme.Bad);
+                // The ground it needs, with the number: the highlight floor is the actual rule
+                // (SurfaceBuildManager.CellBuildable), so the card states it rather than leaving the player
+                // to find it by being refused.
                 string idx = info.index == SurfaceIndexKind.None
                     ? "<color=#9FB4C8>terrain doesn't matter</color>"
-                    : $"<color=#8FD0FF>{SurfaceIndex.Name(info.index)}</color>";
+                    : $"<color=#8FD0FF>needs {SurfaceIndex.Name(info.index)} {SurfaceIndex.Floor(info.index) * 100f:F0}%+</color>";
 
                 // What this thing does to the GRID, said on the card rather than only discovered after
                 // it's standing there: what it feeds in, what it takes out, how far it carries power.
@@ -3465,10 +3820,35 @@ public class PlanetViewWindow : MonoBehaviour
                 if (PowerGrid.Projects(info)) pw.Append($" · <color=#4DC8FF>lights {info.powerRange:0.#}</color>");
                 if (info.powerStorage > 0f) pw.Append($" · <color=#4DC8FF>banks {info.powerStorage:0}</color>");
 
-                string price = t == SurfaceBuildingType.PlanetCapitol && HomeworldOnboarding.AwaitingCapitol(body)
+                bool free = t == SurfaceBuildingType.PlanetCapitol && HomeworldOnboarding.AwaitingCapitol(body);
+                string fromWord = info.drawMode == BuildDrawMode.Fixed ? "" : "from ";
+                string price = free
                     ? "<color=#4DFF6E>free</color>"
-                    : $"<color=#{hex}>{m} metal · {e} energy</color>";
-                return $"{price} · {info.Cells} tiles · {idx}{pw}";
+                    : $"<color=#{hex}>{fromWord}{m} metal · {e} energy</color>";
+                string line = $"{price} · {FootprintWords(info)} · {idx}{pw}";
+
+                // ---- WHY IT CAN'T BE BUILT, ON THE CARD ----
+                // In the order that decides what the player should do about it: something about the
+                // empire or the world that no siting can fix first, then the money, then the ground. Only
+                // the first two grey the button out — a card whose only problem is poor ground stays
+                // pickable, so the player can still look at the map for themselves.
+                string bad = ColorUtility.ToHtmlStringRGB(UITheme.Bad), warn = ColorUtility.ToHtmlStringRGB(UITheme.Warn);
+                if (!free && !SurfaceBuildManager.CanPlaceType(body, t, out string blocked))
+                    return $"{line}\n<color=#{bad}><b>Can't build:</b> {blocked}</color>";
+                if (!free && !afford)
+                {
+                    string shortBy = SurfaceBuildManager.ShortfallText(m, e) ?? "not enough metal or energy";
+                    return $"{line}\n<color=#{bad}><b>Short:</b> {shortBy}</color>";
+                }
+                if (info.index != SurfaceIndexKind.None && !GameMode.DevMode)
+                {
+                    if (!SurfaceIndex.Unlocked(body, info.index))
+                        return $"{line}\n<color=#{warn}>{SurfaceIndex.Name(info.index)} not surveyed yet — {SurfaceIndex.LockReason(body, info.index)}</color>";
+                    float best = SurfaceIndex.Best(body, info.index), floor = SurfaceIndex.Floor(info.index);
+                    if (best < floor)
+                        return $"{line}\n<color=#{warn}>This world's best {SurfaceIndex.Name(info.index)} is {best * 100f:F0}% — nowhere here qualifies</color>";
+                }
+                return line;
             });
 
             var btn = UIFactory.Button(card, "", () =>
@@ -3515,10 +3895,36 @@ public class PlanetViewWindow : MonoBehaviour
                     return (false, $"Needs {(tech != null ? tech.name : info.requiredTech)}");
                 }
 
-                int m = ColonyManager.DiscCost(info.costMetal), e = ColonyManager.DiscCost(info.costEnergy);
+                // Any other world-or-empire gate (not settled, already has one, solar under a thick sky):
+                // greyed, with the full reason in red on the line above.
+                if (!SurfaceBuildManager.CanPlaceType(body, t, out _)) return (false, "Can't build here");
+
+                SurfaceBuildManager.MinimumCost(info, out int m, out int e);
                 bool afford = GameMode.DevMode || PlayerEconomy.CanAfford(m, e);
                 return (afford, afford ? "Select" : $"Need {m}m {e}e");
             }, group);
+        }
+    }
+
+    /// The card's description of a footprint: what shape it has to be and how small it can go.
+    static string FootprintWords(SurfaceBuildingInfo info)
+    {
+        switch (info.drawMode)
+        {
+            case BuildDrawMode.Fixed:
+            {
+                int w = 0, h = 0;
+                foreach (var c in info.shape) { w = Mathf.Max(w, c.x + 1); h = Mathf.Max(h, c.y + 1); }
+                return $"fixed {w}x{h}";
+            }
+            case BuildDrawMode.Square:
+            {
+                int s = BuildPlacement.MinSide(info);
+                return $"square, {s}x{s} or bigger";
+            }
+            case BuildDrawMode.Rectangle: return "rectangle, 2x2 or bigger";
+            case BuildDrawMode.NodeChain: return "1 tile per pylon";
+            default: return info.minTiles > 1 ? $"drawn, {info.minTiles}+ tiles" : "drawn, any size";
         }
     }
 
@@ -4222,9 +4628,8 @@ public class PlanetViewWindow : MonoBehaviour
     void CentreOn(float u, float v)
     {
         if (body?.surface == null || mapRT == null) return;
-        // mapPan moves the MAP, so it's the negative of where the point sits relative to the centre.
-        mapPan = new Vector2(-(u - 0.5f) * mapRT.rect.width, -(v - 0.5f) * mapRT.rect.height);
-        ClampPan();
+        ViewOf(body).centre = new Vector2(u, v);
+        ApplyView(body);   // clamps it: at the whole-world fit the site is already in view
     }
 
     static Color SiteColor(PointOfInterest p)
@@ -6208,7 +6613,32 @@ public class PlanetViewWindow : MonoBehaviour
         bool wasFounding = HomeworldOnboarding.AwaitingCapitol(body)
                         && pendingType.Value == SurfaceBuildingType.PlanetCapitol;
 
-        if (SurfaceBuildManager.CanPlace(body, pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation, out _) &&
+        // EVERYTHING ELSE IS QUEUED. Only the two placements that SETTLE a world — the landing hull and
+        // the founding capitol — go up on the spot, because they are what make building possible at all.
+        // A spaceport or a shipyard now takes its build time and Labor like every other structure
+        // (SurfaceBuildQueue.EnqueueFixed), and a refusal says why at the tile rather than just ticking.
+        if (!wasLanding && !wasFounding)
+        {
+            var job = SurfaceBuildQueue.EnqueueFixed(body, pendingType.Value, pendingCell.x, pendingCell.y,
+                                                     pendingRotation, out string why);
+            if (job != null)
+            {
+                lastSig = null;               // the queue gained a row and the map gained a ghost
+                SimpleAudio.Instance?.PlayComplete();
+                // Unique classes are done once queued — holding a second shipyard would only show red.
+                if (SurfaceBuildingDatabase.Get(pendingType.Value).uniquePerWorld) selected = null;
+            }
+            else
+            {
+                SimpleAudio.Instance?.PlayTick();
+                BuildPlacement.Flash(pendingCell, why);
+            }
+            CancelPlace();
+            RecomputeHoverValidity();
+            return;
+        }
+
+        if (SurfaceBuildManager.CanPlace(body, pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation, out string refused) &&
             SurfaceBuildManager.Place(body, pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation))
         {
             lastSig = null;   // the built list and the map both changed
@@ -6228,7 +6658,11 @@ public class PlanetViewWindow : MonoBehaviour
                 HomeworldOnboarding.CapitolPlaced(body);
             }
         }
-        else SimpleAudio.Instance?.PlayTick();
+        else
+        {
+            SimpleAudio.Instance?.PlayTick();
+            BuildPlacement.Flash(pendingCell, refused ?? "that spot is no longer free");
+        }
 
         CancelPlace();
     }
@@ -6264,7 +6698,19 @@ public class PlanetViewWindow : MonoBehaviour
         UIFactory.Button(row.transform, "Build", DoPlace, 20);
         UIFactory.Button(row.transform, "Cancel", CancelPlace, 20);
 
-        confirmPanel.SetAsLastSibling();   // above the zoom bar, which is also a child of the viewport
+        confirmPanel.SetAsLastSibling();   // above the pane's corner controls, also a child of the viewport
+    }
+
+    /// Grow a floating confirm panel to fit its text, so a warning line never spills over the buttons.
+    /// The width is fixed; the height follows the text. Padding and the button row match how the three
+    /// panels (fixed confirm, placement confirm, demolition confirm) are built.
+    static void FitPanelToText(RectTransform panel, TMP_Text text, float width)
+    {
+        if (panel == null || text == null) return;
+        float th = Mathf.Ceil(text.GetPreferredValues(text.text, width - 12f, 0f).y);
+        var le = text.GetComponent<LayoutElement>();
+        if (le != null) le.preferredHeight = th;
+        panel.sizeDelta = new Vector2(width, th + 5f + 5f + 4f + 22f);
     }
 
     void RefreshConfirmPanel()
@@ -6279,8 +6725,21 @@ public class PlanetViewWindow : MonoBehaviour
         // The founding capitol costs nothing (SurfaceBuildManager.Founding), so it says so.
         bool free = pendingType.Value == SurfaceBuildingType.PlanetCapitol && HomeworldOnboarding.AwaitingCapitol(body);
         string price = free ? "free" : $"{m} metal · {e} energy";
-        confirmText.text = $"<color=#{hex}>•</color> Build <b>{info.name}</b> here?\n" +
-                           $"<size=10><color=#9FB4C8>{price} · ({pendingCell.x},{pendingCell.y})</color></size>";
+        bool settles = free || (ColonyLanding.AwaitingOn(body) && pendingType.Value == SurfaceBuildingType.ColonyShipBase);
+        var csb = new System.Text.StringBuilder();
+        csb.Append($"<color=#{hex}>•</color> Build <b>{info.name}</b> here?\n");
+        csb.Append($"<size=10><color=#9FB4C8>{price} · ({pendingCell.x},{pendingCell.y})</color></size>");
+        // How long, and how much of the workforce — the same figures the queue row will show, so the
+        // decision is made with them rather than discovered after.
+        csb.Append(settles
+            ? "\n<size=10><color=#9FB4C8>goes up at once and settles this world</color></size>"
+            : $"\n<size=10><color=#9FB4C8>builds in {GameCalendar.Duration(info.buildTime * TechEffects.BuildTimeMult)} · " +
+              $"{BuildScaling.LaborPerTile(pendingType.Value):0.#} Labor</color></size>");
+        string pw = SurfaceBuildManager.PowerWarning(body, info,
+            SurfaceBuildingDatabase.Footprint(pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation));
+        if (pw != null) csb.Append($"\n<size=10><color=#{ColorUtility.ToHtmlStringRGB(UITheme.Warn)}>{pw}</color></size>");
+        confirmText.text = csb.ToString();
+        FitPanelToText(confirmPanel, confirmText, 212f);
 
         // Follow the cell. Anchored in the MAP's normalised space so it tracks through zoom and pan
         // rather than being pinned to a screen position the map has since slid out from under.
@@ -6578,12 +7037,30 @@ public class PlanetViewWindow : MonoBehaviour
             AddBuildingArt(ghostLayer, selected.Value, painted, GhostArtAlpha);
             OutlineGhost(BuildPlacement.Cells);
 
-            // The brush still rides the cursor, so it is clear the shape is still being drawn — but only
-            // over ground the next tile could actually go on.
-            if (HasHoverCell && !BuildPlacement.HasCell(hoverCell)
-                && BuildPlacement.Guidance().Contains(hoverCell))
-                AddCellQuad(ghostLayer, hoverCell.x, hoverCell.y,
-                            new Color(pc.r, pc.g, pc.b, 0.55f));
+            bool box = info.drawMode == BuildDrawMode.Square || info.drawMode == BuildDrawMode.Rectangle;
+
+            // A BOX may hold cells it cannot be built on — it is a shape, and SetBox deliberately leaves
+            // them in (see there). Each such cell is marked red over the art, so the reason Confirm is
+            // greyed is visible on the map and not only in the panel.
+            if (box)
+            {
+                var occ = SurfaceBuildManager.Occupied(body);
+                var pend = SurfaceBuildQueue.PendingCells(body);
+                foreach (var c in BuildPlacement.Cells)
+                    if (occ.Contains(c) || pend.Contains(c) || !SurfaceBuildManager.CellBuildable(body, info, c.x, c.y, out _))
+                        AddCellQuad(ghostLayer, c.x, c.y, new Color(1f, 0.25f, 0.2f, 0.7f));
+            }
+
+            // The brush still rides the cursor, so it is clear the shape is still being drawn: in the
+            // structure's colour over ground the next tile could go on, and RED over ground it could not —
+            // so "not there" is visible before the click, with the reason in the cursor window.
+            if (!box && HasHoverCell && !BuildPlacement.HasCell(hoverCell))
+            {
+                if (BuildPlacement.Guidance().Contains(hoverCell) && !BuildPlacement.AtResourceCeiling)
+                    AddCellQuad(ghostLayer, hoverCell.x, hoverCell.y, new Color(pc.r, pc.g, pc.b, 0.55f));
+                else
+                    AddCellQuad(ghostLayer, hoverCell.x, hoverCell.y, new Color(1f, 0.25f, 0.2f, 0.6f));
+            }
             return;
         }
 
@@ -6674,11 +7151,14 @@ public class PlanetViewWindow : MonoBehaviour
         // putting something down and taking something up at the same time.
         if (BuildDemolition.IsFor(body)) { DrawDemolition(); return; }
 
+        // Before the session check: a fixed structure's refused click and a pylon run that laid nothing
+        // put their reason up here too (BuildPlacement.Flash), and neither opens a drawing session.
+        DrawRefusal();
+
         if (!BuildPlacement.IsFor(body)) return;
 
         DrawGuidanceGrids();
         DrawSizeCounter();
-        DrawRefusal();
 
         // The yield numbers are NOT drawn from here any more. They belong to the cursor rather than to
         // Placement Mode — they are up on the Survey tab too — so Update owns them, and clearing them on
@@ -6753,22 +7233,23 @@ public class PlanetViewWindow : MonoBehaviour
         var label = UIFactory.Text(go.transform, $"<b>{text}</b>", 17, col, TextAlignmentOptions.Center);
         label.raycastTarget = false;
 
-        // A hard shadow, because this sits over terrain that can be any colour from snow to lava and the
-        // one thing it must always be is readable.
-        var shadow = label.gameObject.AddComponent<Shadow>();
-        shadow.effectColor = new Color(0f, 0f, 0f, 0.95f);
-        shadow.effectDistance = new Vector2(1.5f, -1.5f);
+        // A dark plate, because this sits over terrain that can be any colour from snow to lava and the
+        // one thing it must always be is readable. (It was a uGUI Shadow, which TextMeshPro ignores.)
+        var plate = go.AddComponent<Image>();
+        plate.color = new Color(0f, 0f, 0f, 0.6f);
+        plate.raycastTarget = false;
+        go.transform.SetAsFirstSibling();   // under the refusal label if the two meet
 
         var rt = go.GetComponent<RectTransform>();
         int w = body.surface.width, h = body.surface.height;
         rt.anchorMin = rt.anchorMax = new Vector2(centre.x / w, centre.y / h);
         rt.pivot = new Vector2(0.5f, 0.5f);
-        rt.sizeDelta = new Vector2(64f, 24f);
+        rt.sizeDelta = new Vector2(48f, 22f);
         rt.anchoredPosition = Vector2.zero;
         UIFactory.Stretch(label.rectTransform);
     }
 
-    /// "Need 34 metal!" in red at the tile the player just tried to paint, fading out.
+    /// "Need 34 metal!" in red at the tile the player just tried to build on, fading out.
     void DrawRefusal()
     {
         if (!BuildPlacement.RefusalShowing) return;
@@ -6777,23 +7258,32 @@ public class PlanetViewWindow : MonoBehaviour
         float fade = BuildPlacement.RefusalFade;
 
         var go = UIFactory.NewUI(placementHud, "Refusal");
-        var label = UIFactory.Text(go.transform, $"<b>{BuildPlacement.RefusalText}</b>", 13,
-            new Color(1f, 0.28f, 0.24f, fade), TextAlignmentOptions.Center);
-        label.raycastTarget = false;
 
-        var shadow = label.gameObject.AddComponent<Shadow>();
-        shadow.effectColor = new Color(0f, 0f, 0f, 0.9f * fade);
-        shadow.effectDistance = new Vector2(1.5f, -1.5f);
+        // A DARK PLATE behind the words rather than a uGUI Shadow, which TextMeshPro ignores — the old
+        // label sat bare on the terrain, red on red ground. Sized to the text and wrapped, because the
+        // reasons now carry their numbers ("Mineral Index here 34%, needs 70%") and no longer fit one
+        // fixed 190-pixel line.
+        var plate = go.AddComponent<Image>();
+        plate.color = new Color(0f, 0f, 0f, 0.78f * fade);
+        plate.raycastTarget = false;
+
+        string text = $"<b>{BuildPlacement.RefusalText}</b>";
+        var label = UIFactory.Text(go.transform, text, 12,
+            new Color(1f, 0.42f, 0.38f, fade), TextAlignmentOptions.Center);
+        label.raycastTarget = false;
+        label.textWrappingMode = TextWrappingModes.Normal;
+        const float MaxRefusalWidth = 280f;
+        Vector2 pref = label.GetPreferredValues(text, MaxRefusalWidth, 0f);
 
         int w = body.surface.width, h = body.surface.height;
         var rt = go.GetComponent<RectTransform>();
         rt.anchorMin = rt.anchorMax = new Vector2((cell.x + 0.5f) / w, (cell.y + 0.5f) / h);
         rt.pivot = new Vector2(0.5f, 0f);
-        rt.sizeDelta = new Vector2(190f, 20f);
+        rt.sizeDelta = new Vector2(Mathf.Min(pref.x, MaxRefusalWidth) + 12f, pref.y + 6f);
         // Drifts upward as it fades — the standard "this happened just now" motion, and it also lifts the
         // text off the tile so the ground underneath is visible again by the time it matters.
         rt.anchoredPosition = new Vector2(0f, 14f + (1f - fade) * 12f);
-        UIFactory.Stretch(label.rectTransform);
+        UIFactory.Stretch(label.rectTransform, 6f, 6f, 3f, 3f);
     }
 
     // ============================================================================================
@@ -7083,8 +7573,19 @@ public class PlanetViewWindow : MonoBehaviour
         sb.Append($"<size=10><color=#9FB4C8>{m} metal · {e} energy · " +
                   $"{GameCalendar.Duration(info.buildTime * mult * TechEffects.BuildTimeMult)} · " +
                   $"x{BuildScaling.OutputMultiplier(tiles):0.0} output</color></size>");
-        if (!ok) sb.Append($"\n<size=10><color=#FF6659>{why}</color></size>");
+        // The refusal leads with "Can't build:" so it reads as the reason Confirm is greyed, not as one
+        // more figure in the list above it.
+        if (!ok) sb.Append($"\n<size=10><color=#{ColorUtility.ToHtmlStringRGB(UITheme.Bad)}><b>Can't build:</b> {why}</color></size>");
+        else
+        {
+            // Not a refusal — an off-grid consumer is legal, just poor — so amber, and only once the
+            // shape is otherwise buildable.
+            string pw = SurfaceBuildManager.PowerWarning(body, info, BuildPlacement.Cells);
+            if (pw != null) sb.Append($"\n<size=10><color=#{ColorUtility.ToHtmlStringRGB(UITheme.Warn)}>{pw}</color></size>");
+        }
+        sb.Append($"\n<size=9><color=#7E8B9C>{ControlsHint(info)}</color></size>");
         placeText.text = sb.ToString();
+        FitPanelToText(placePanel, placeText, 228f);
 
         // Written directly rather than registered with `live`. This runs every frame while a shape is
         // drawn, and LiveSet entries are registered once and ticked — feeding it a new closure per frame
@@ -7156,7 +7657,7 @@ public class PlanetViewWindow : MonoBehaviour
         placeConfirmBtn = UIFactory.Button(row.transform, "Confirm", DoConfirmPlacement, 20);
         UIFactory.Button(row.transform, "Cancel", DoCancelPlacement, 20);
 
-        placePanel.SetAsLastSibling();   // above the zoom bar, which is also a child of the viewport
+        placePanel.SetAsLastSibling();   // above the pane's corner controls, also a child of the viewport
     }
 
     // ============================================================================================
@@ -7586,109 +8087,88 @@ public class PlanetViewWindow : MonoBehaviour
         return true;
     }
 
-    // Scroll over the viewport to zoom the MAP inside it — the window itself never moves or resizes.
-    // Proportional, like the world camera, so one notch feels the same at every scale. Only when the
-    // cursor is over the viewport, so scrolling the side panel still scrolls the side panel.
-    void PollMapZoom()
+    // Scroll over a pane to zoom ITS map, pinned at the cursor — the frame itself never moves or resizes.
+    // Proportional, so one notch feels the same at every scale, and only over a pane, so scrolling the
+    // side panel still scrolls the side panel.
+    void PollPaneZoom()
     {
-        if (!HostOpen || body?.surface == null || mapRT == null) return;
         float scroll = Input.GetAxis("Mouse ScrollWheel");
         if (Mathf.Approximately(scroll, 0f)) return;
         // A scrollable menu dragged OVER the map owns the wheel — let it scroll, don't also zoom the map.
-        // A non-scrolling panel over the map does NOT block the zoom (the wheel passes through to the map).
-        if (UIScroll.PointerOverScroller()) return;
-        if (!RectTransformUtility.RectangleContainsScreenPoint(hostViewport, Input.mousePosition, null)) return;
-        activePane = body;
-
-        float fit = FitTilePx();                            // zoom-out floor = whole map fits
-        float max = Mathf.Max(CoverTilePx(), MaxTilePx());
-
-        // One wheel notch = one press of + or -, so the two controls agree. Unity's ScrollWheel axis is
-        // ~0.1 per notch, hence the 10x before raising ZoomStep to it: pow(1.5, 0.1*10) = 1.5.
-        float next = Mathf.Clamp(tilePx * Mathf.Pow(ZoomStep, scroll * 10f), fit, max);
-        if (Mathf.Approximately(next, tilePx)) return;
-
-        // Zoom TOWARD THE CURSOR: keep whatever is under the pointer pinned there, rather than
-        // zooming to the middle and making the player chase what they were looking at.
-        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                hostViewport, Input.mousePosition, null, out Vector2 vpPoint))
-        {
-            Vector2 mapPoint = vpPoint - mapPan;          // cursor, in map space, before the zoom
-            float ratio = next / tilePx;
-            mapPan = vpPoint - mapPoint * ratio;          // ...still under the cursor after it
-        }
-
-        tilePx = next;
-        ApplyMapSize();
-        // Pieces and the ghost are anchored in the map's normalised space and follow for free, but the
-        // selection ring's size is in pixels, so it has to be rebuilt at the new scale.
-        DrawSelectionMarker();
+        if (UIScroll.PointerOverScroller() || OverMapChrome(Input.mousePosition)) return;
+        var b = PaneAt(Input.mousePosition);
+        if (b == null) return;
+        Activate(b);
+        // One wheel notch = one press of + or -. Unity's ScrollWheel axis is ~0.1 per notch, hence the
+        // 10x before raising ZoomStep to it: pow(1.5, 0.1*10) = 1.5.
+        ZoomPane(b, Mathf.Pow(ZoomStep, scroll * 10f), Input.mousePosition);
     }
 
-    // Drag the map with the middle or right mouse button to pan. (Right-click also rotates a held
-    // piece, so panning with it only starts once you've actually moved — a click stays a rotate.)
+    // ---- Grab a map and drag it ----
+    //
+    // LEFT drag is the pan, because that's what "grab the map" means everywhere else. On the planet it
+    // only conflicts with left-click-to-select for as long as it takes to move DragThreshold pixels:
+    // under that it's still a click; over it, `panDragged` latches and OnGridClick ignores the release.
+    //
+    // Left-drag is off on the planet while a piece is held or in Demolition Mode — there a left press is
+    // the brush. Middle drag pans in every case. Right drag never pans: right-click leaves placement.
+    // Moon panes are viewers, so a left drag always pans them.
+    //
+    // Measured in the FRAME's local units rather than raw screen pixels, so the map tracks the cursor
+    // exactly whatever the canvas scale.
     Vector2 panGrabScreen;
-    Vector2 panGrabOffset;
+    Vector2 panGrabLocal;
+    Vector2 panGrabCentre;
+    CelestialBody panPane;
     bool panning;
 
-    // ---- Grab the map and drag it ----
-    //
-    // LEFT drag is the pan, because that's what "grab the map" means everywhere else. It only conflicts
-    // with left-click-to-select for as long as it takes to move DragThreshold pixels: under that it's
-    // still a click and the map never moves; over it, `panDragged` latches and OnGridClick ignores the
-    // release, so a drag can't accidentally select whatever you happened to start the drag on top of.
-    //
-    // Middle drag pans too, and works even while a building is held.
-    //
-    // RIGHT drag used to pan, which was a straight conflict: right-click is also "rotate the held
-    // piece", so rotating nudged the map and panning rotated the piece.
-    void PollMapPan()
+    void PollPanePan()
     {
-        if (!HostOpen || body?.surface == null) return;
-
-        // Cleared on ANY press, not just one that starts a pan. It has to be: a piece-holding press
-        // never starts a pan (see leftPans below), so if the flag only reset when a pan began, one drag
-        // would latch it true and silently swallow every click from then on.
+        // Cleared on ANY press, not just one that starts a pan, or one drag would latch it true and
+        // silently swallow every click from then on.
         if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(2)) panDragged = false;
 
-        // Left-drag is off while a piece is held — there, a left press is placing a building, and
-        // dragging the ground out from under it is the last thing anyone wants.
-        //
-        // ...and off in Demolition Mode for exactly the same reason. That mode holds no piece, so the
-        // `selected` test alone let left-drag pan the map instead of selecting tiles: the one gesture
-        // the mode is built around would have scrolled the world instead. Middle-drag still pans in
-        // both modes, which is how you reposition without leaving what you are doing.
-        bool leftPans = !selected.HasValue && !BuildDemolition.IsFor(body);
-
-        if (!panning &&
-            ((leftPans && Input.GetMouseButtonDown(0)) || Input.GetMouseButtonDown(2)) &&
-            RectTransformUtility.RectangleContainsScreenPoint(hostViewport, Input.mousePosition, null) &&
-            // The zoom bar and moon-tab strip float INSIDE the viewport, so their rects are inside the pan
-            // region too. Without this, pressing + or a moon tab and twitching would drag the map.
-            !RectTransformUtility.RectangleContainsScreenPoint(zoomBar, Input.mousePosition, null) &&
-            !RectTransformUtility.RectangleContainsScreenPoint(moonTabStrip, Input.mousePosition, null) &&
-            // The selected building's card floats over the map too; dragging on it must not pan.
-            !(gridPopup != null && gridPopup.Covers(Input.mousePosition)) &&
-            // The host frame and the moon frames tile disjoint cells, but guard the seam anyway so a press
-            // right on the boundary can't start a host pan while the cursor is over a moon frame.
-            !OverAnyMoonFrame(Input.mousePosition))
+        if (!panning && (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(2)))
         {
-            panning = true;
-            panGrabScreen = Input.mousePosition;
-            panGrabOffset = mapPan;
+            Vector2 p = Input.mousePosition;
+            var b = PaneAt(p);
+            // The tab strip, the corner controls, the index bar, the building card and the confirm panels
+            // all float over the panes; pressing one of them and twitching must not drag the map.
+            if (b != null && !OverMapChrome(p))
+            {
+                Activate(b);
+                bool leftPans = b != body || (!selected.HasValue && !BuildDemolition.IsFor(body));
+                var frame = FrameOf(b);
+                if (((leftPans && Input.GetMouseButtonDown(0)) || Input.GetMouseButtonDown(2)) && frame != null
+                    && RectTransformUtility.ScreenPointToLocalPointInRectangle(frame, p, null, out panGrabLocal))
+                {
+                    panning = true;
+                    panPane = b;
+                    panGrabScreen = p;
+                    panGrabCentre = ViewOf(b).centre;
+                }
+            }
         }
 
-        if (panning)
+        if (!panning) return;
+        if ((!Input.GetMouseButton(0) && !Input.GetMouseButton(2)) || !PaneShown(panPane))
         {
-            if (!Input.GetMouseButton(0) && !Input.GetMouseButton(2)) { panning = false; return; }
-
-            Vector2 delta = (Vector2)Input.mousePosition - panGrabScreen;
-            if (!panDragged && delta.sqrMagnitude < DragThreshold * DragThreshold) return;
-
-            panDragged = true;
-            mapPan = panGrabOffset + delta;
-            ClampPan();
+            panning = false; panPane = null;
+            return;
         }
+
+        var f = FrameOf(panPane);
+        var content = ContentOf(panPane);
+        if (f == null || content == null) { panning = false; panPane = null; return; }
+        if (!panDragged && ((Vector2)Input.mousePosition - panGrabScreen).sqrMagnitude < DragThreshold * DragThreshold) return;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(f, Input.mousePosition, null, out Vector2 now)) return;
+
+        panDragged = true;
+        Vector2 size = content.sizeDelta;
+        if (size.x < 1f || size.y < 1f) return;
+        Vector2 delta = now - panGrabLocal;
+        ViewOf(panPane).centre = panGrabCentre - new Vector2(delta.x / size.x, delta.y / size.y);
+        ApplyView(panPane);
     }
 
     /// Pixels of movement before a press stops being a click and becomes a drag.
@@ -7715,7 +8195,7 @@ public class PlanetViewWindow : MonoBehaviour
     // decisions instead of one, and would make the power-pole chain (the control this is modelled on)
     // pointless, since its entire purpose is covering distance in a single motion.
     //
-    // Left-drag is free to mean this because PollMapPan turns left-panning OFF while a piece is held
+    // Left-drag is free to mean this because PollPanePan turns left-panning OFF while a piece is held
     // (`leftPans`), so there is no gesture conflict to resolve.
     // ============================================================================================
 
@@ -7771,10 +8251,15 @@ public class PlanetViewWindow : MonoBehaviour
         {
             if (!Input.GetMouseButtonDown(0)) return;
             if (!HasHoverCell) return;                   // not over the host map
-            if (OverFloatingMapControl()) return;        // the zoom bar / Confirm panel float over the map
+            if (OverFloatingMapControl()) return;        // the pane controls / Confirm panel float over the map
 
             drawing = true;
             drawAnchor = hoverCell;
+            // A press on a tile that will not take paint gets a sound as well as the label Paint puts up,
+            // so a refused click never passes in silence. Only on the PRESS: dragging along a coastline
+            // must not chatter once per wet tile.
+            if (!box && !BuildPlacement.HasCell(hoverCell) && !BuildPlacement.CanPaint(hoverCell, out _))
+                SimpleAudio.Instance?.PlayTick();
             Brush(info, box);
             return;
         }
@@ -7911,12 +8396,25 @@ public class PlanetViewWindow : MonoBehaviour
             else firstWhy = firstWhy ?? why;
         }
 
-        if (queued > 0) { lastSig = null; SimpleAudio.Instance?.PlayComplete(); }
+        if (queued > 0)
+        {
+            lastSig = null;
+            SimpleAudio.Instance?.PlayComplete();
+            // Some masts were skipped (water, occupied ground, the money ran out): say so at the first
+            // one, so a chain that stops short is not a mystery.
+            if (queued < cells.Count && !string.IsNullOrEmpty(firstWhy))
+                BuildPlacement.Flash(cells[0], $"{queued} of {cells.Count} pylons queued — {firstWhy}");
+        }
         else
         {
             SimpleAudio.Instance?.PlayTick();
+            // At the tile, where the player is looking — the notification alone was a corner of the
+            // screen away from the drag that caused it.
             if (!string.IsNullOrEmpty(firstWhy))
+            {
+                BuildPlacement.Flash(cells[0], firstWhy);
                 NotificationManager.Instance?.Push("Can't run pylons there", firstWhy, null, NotifKind.Danger);
+            }
         }
     }
 
@@ -7975,7 +8473,7 @@ public class PlanetViewWindow : MonoBehaviour
     // showing this world?
     bool PointerOverHostMap()
     {
-        if (!HostOpen || hostViewport == null) return false;
+        if (!HostShown || hostViewport == null) return false;
         return RectTransformUtility.RectangleContainsScreenPoint(hostViewport, Input.mousePosition, null);
     }
 
@@ -8008,6 +8506,7 @@ public class PlanetViewWindow : MonoBehaviour
         // The building card (BuildingGridPopup) likewise: no tile readout, hover frame or area of effect
         // for the ground hidden under it.
         if (IndexIconBar.PointerOverAny(Input.mousePosition) || PointerOverShortcuts(Input.mousePosition)
+            || OverPaneControls(Input.mousePosition)
             || (gridPopup != null && gridPopup.Covers(Input.mousePosition)))
         {
             ClearHostHover();
@@ -8020,11 +8519,10 @@ public class PlanetViewWindow : MonoBehaviour
         // the planet's. Each moon has its own framed pane now, so this just tests each frame in turn.
         foreach (var m in openMaps)
         {
-            if (m == body) continue;
+            if (m == body || !PaneShown(m)) continue;
             if (!moonFrame.TryGetValue(m, out var frame) || frame == null) continue;
             if (!moonImg.TryGetValue(m, out var img) || img == null || m.surface == null) continue;
             if (!RectTransformUtility.RectangleContainsScreenPoint(frame, Input.mousePosition, null)) continue;
-            activePane = m;
             ClearHostHover();   // over a MOON's pane: the host map is not under this cursor
             if (ScreenToCellIn(img.rectTransform, m, Input.mousePosition, null, out int mx, out int my))
                 MapHoverPanel.Instance.ShowAtCursor(
@@ -8039,13 +8537,12 @@ public class PlanetViewWindow : MonoBehaviour
         // screen, including everything the side panel is sitting on top of.
         if (PointerOverHostMap() && ScreenToCell(Input.mousePosition, null, out int x, out int y))
         {
-            activePane = body;
             if (x != hoverCell.x || y != hoverCell.y)
             {
                 hoverCell = new Vector2Int(x, y);
                 RecomputeHoverValidity();
             }
-            // Suppressed over the zoom bar / confirm dialog: they float over the same part of the map the
+            // Suppressed over the pane controls / confirm dialog: they float over the same part of the map the
             // tooltip targets, and covering their own buttons and text would be worse than no tooltip
             // there. Re-shown every frame (not just on cell change) so it tracks the mouse WITHIN a cell.
             //
@@ -8070,27 +8567,9 @@ public class PlanetViewWindow : MonoBehaviour
         }
     }
 
-    // Is the cursor over one of the small floating controls that sit ON TOP of the map (the zoom bar, the
-    // Build confirm dialog)? Neither owns a tooltip of its own, unlike the moon-tab strip (handled
-    // separately, see PollHover), so simply hiding the tile panel over them is correct.
-    bool OverFloatingMapControl()
-    {
-        var p = Input.mousePosition;
-        if (zoomBar != null && RectTransformUtility.RectangleContainsScreenPoint(zoomBar, p, null)) return true;
-        if (IndexIconBar.PointerOverAny(p) || PointerOverShortcuts(p)) return true;
-        // The selected building's card (BuildingGridPopup): a press on it is the card's, not a brush stroke.
-        if (gridPopup != null && gridPopup.Covers(p)) return true;
-        if (confirmPanel != null && confirmPanel.gameObject.activeInHierarchy &&
-            RectTransformUtility.RectangleContainsScreenPoint(confirmPanel, p, null)) return true;
-        // Placement Mode's Confirm/Cancel panel sits ON the map, directly under the shape it is asking
-        // about — so without this, pressing Confirm would also paint a tile on the cell behind the
-        // button, and the building would grow by one on the way to being confirmed.
-        if (placePanel != null && placePanel.gameObject.activeInHierarchy &&
-            RectTransformUtility.RectangleContainsScreenPoint(placePanel, p, null)) return true;
-        if (demolishPanel != null && demolishPanel.gameObject.activeInHierarchy &&
-            RectTransformUtility.RectangleContainsScreenPoint(demolishPanel, p, null)) return true;
-        return false;
-    }
+    // Is the cursor over one of the controls that float ON TOP of the map? The tile panel hides there, and
+    // neither brush starts there. See OverMapChrome for the list.
+    bool OverFloatingMapControl() => OverMapChrome(Input.mousePosition);
 
     // Tile type (coloured like the tile), its ore if one has been discovered here, and this spot's
     // temperature (coloured on PlanetTemperature's global gradient) — every field fetched from data the
@@ -8239,8 +8718,83 @@ public class PlanetViewWindow : MonoBehaviour
 
     void RecomputeHoverValidity()
     {
-        hoverValid = selected.HasValue && HasHoverCell &&
-                     SurfaceBuildManager.CanPlace(body, selected.Value, hoverCell.x, hoverCell.y, rotation, out _);
+        hoverRecheckIn = 0.25f;
+        hoverWhy = null;
+        if (!selected.HasValue || !HasHoverCell) { hoverValid = false; return; }
+        hoverValid = PlacementCheck(selected.Value, hoverCell, out hoverWhy);
+        if (hoverValid) hoverWhy = null;
+    }
+
+    /// Can the held structure go on this cell — the ONE question every placement readout asks.
+    ///
+    /// A fixed structure is asked about its authored footprint at this origin and rotation (CanPlace). A
+    /// drawn one is asked about THIS CELL (CanStartAt): its authored shape is only a thumbnail, and testing
+    /// that — a farm's 2x3 — used to turn a perfectly good tile red whenever the six-tile block beside it
+    /// clipped water, and then quote the water as the reason.
+    bool PlacementCheck(SurfaceBuildingType t, Vector2Int cell, out string why)
+    {
+        var info = SurfaceBuildingDatabase.Get(t);
+        if (IsDrawn(info)) return SurfaceBuildManager.CanStartAt(body, t, cell, out why);
+        return SurfaceBuildManager.CanPlace(body, t, cell.x, cell.y, rotation, out why);
+    }
+
+    /// The verdict line for the cursor window: green when the held structure can go here, otherwise the
+    /// reason in red. While a free-drawn shape is being painted it answers for the NEXT tile instead,
+    /// which is the decision actually in front of the player.
+    string HoverVerdict(int x, int y)
+    {
+        if (!selected.HasValue) return "";
+        var info = SurfaceBuildingDatabase.Get(selected.Value);
+        var cell = new Vector2Int(x, y);
+        string good = ColorUtility.ToHtmlStringRGB(UITheme.Good), bad = ColorUtility.ToHtmlStringRGB(UITheme.Bad);
+
+        bool ok; string why;
+        if (BuildPlacement.IsFor(body) && BuildPlacement.Tiles > 0)
+        {
+            // A box is re-dragged whole rather than added to, so a per-tile answer means nothing here; the
+            // Confirm panel under the box carries its verdict.
+            if (info.drawMode == BuildDrawMode.Square || info.drawMode == BuildDrawMode.Rectangle) return "";
+            if (BuildPlacement.HasCell(cell)) return "\n<size=10><color=#9FB4C8>part of the shape</color></size>";
+            ok = BuildPlacement.CanPaint(cell, out why);
+            return ok ? $"\n<color=#{good}>Drag here to add this tile</color>"
+                      : $"\n<color=#{bad}><b>Can't add this tile:</b> {why}</color>";
+        }
+
+        if (cell == hoverCell) { ok = hoverValid; why = hoverWhy; }
+        else ok = PlacementCheck(selected.Value, cell, out why);
+
+        if (!ok) return $"\n<color=#{bad}><b>Can't build here:</b> {why}</color>";
+        string verb = info.drawMode == BuildDrawMode.Fixed ? "Click to place"
+                    : info.drawMode == BuildDrawMode.NodeChain ? "Click, or drag to lay a run of pylons"
+                    : "Click or drag to start drawing";
+        return $"\n<color=#{good}>{verb}</color>";
+    }
+
+    /// The controls for the held structure, in one short line — shown in the status bar, the cursor
+    /// window and the Confirm panel so the player never has to remember which verb this class uses.
+    string ControlsHint(SurfaceBuildingInfo info)
+    {
+        if (info == null) return "";
+        string cancel = "right-click or Esc puts it down";
+        switch (info.drawMode)
+        {
+            case BuildDrawMode.Fixed:
+            {
+                // R only when it changes anything. Every fixed footprint in the game is a square today,
+                // and advertising a rotate key that visibly does nothing reads as a broken control.
+                var a = new HashSet<Vector2Int>(SurfaceBuildingDatabase.CellsOf(info.type, 0));
+                bool turns = !a.SetEquals(SurfaceBuildingDatabase.CellsOf(info.type, 1));
+                return $"click to place, then Build to confirm{(turns ? " · R rotates" : "")} · {cancel}";
+            }
+            case BuildDrawMode.NodeChain:
+                return $"click for one pylon, drag to lay a spaced run · {cancel}";
+            case BuildDrawMode.Square:
+                return $"drag out a square from a corner · Confirm builds · Esc clears the shape · {cancel}";
+            case BuildDrawMode.Rectangle:
+                return $"drag out a rectangle, 2+ wide · Confirm builds · Esc clears the shape · {cancel}";
+            default:
+                return $"click or drag to paint tiles edge to edge · Confirm builds · Esc clears the shape · {cancel}";
+        }
     }
 
     public void OnGridClick(int x, int y)
@@ -8268,7 +8822,16 @@ public class PlanetViewWindow : MonoBehaviour
             // which is the whole of their placement.
             if (IsDrawn(SurfaceBuildingDatabase.Get(selected.Value))) return;
 
-            if (!SurfaceBuildManager.CanPlace(body, selected.Value, x, y, rotation, out _)) return;
+            // A REFUSED CLICK SAYS WHY, AT THE TILE. It used to return silently, so a click on the wrong
+            // ground did nothing at all and the only explanation was a status line at the far edge of the
+            // window. Same floating label the drawing brush uses (BuildPlacement.Flash), so "no" looks
+            // the same whatever is being placed.
+            if (!SurfaceBuildManager.CanPlace(body, selected.Value, x, y, rotation, out string refusal))
+            {
+                BuildPlacement.Flash(new Vector2Int(x, y), refusal);
+                SimpleAudio.Instance?.PlayTick();
+                return;
+            }
             AskPlace(x, y);
             return;
         }
@@ -8290,11 +8853,14 @@ public class PlanetViewWindow : MonoBehaviour
 
     // ============================================================================================
     // MAP PANES — the planet and each of its moons are toggleable tabs (the planet's a touch bigger). Any
-    // mix of up to five open panes TILES the whole map area with no gaps, sized only by how many are open;
-    // closing a tab reflows the rest to fill the freed space. Each pane zooms its CONTENTS inside a fixed
-    // frame — cover-fit at the fullest-out end, so a map fills its frame rather than floating in letterbox.
-    // With nothing open the area shows a hint. The host planet keeps its own tilePx/mapPan/mapRT and all its
-    // placement machinery; each moon carries its own frame, zoom and pan.
+    // mix of up to five open panes TILES the whole map area, sized only by how many are open and the View
+    // format; closing a tab reflows the rest. Any one pane can be MAXIMISED over the whole area — its
+    // corner button or a double-click on its tab; the button again, or Esc, restores the tiling.
+    //
+    // A pane's FRAME is set by that layout and by nothing else: zooming never resizes it. Each frame has
+    // its own dark backing and a hairline border in its tab's colour, so it reads as a fixed screen
+    // whatever the map inside is doing, and the ACTIVE pane's border is brighter. Zoom and pan are the
+    // PANE VIEWS section's; the planet's pane also carries all the placement machinery.
     // ============================================================================================
     const float MoonTabSize = 34f;            // square moon tab — big enough to read its terrain thumbnail
     const float PlanetTabSize = 46f;          // the planet's own tab, a touch bigger so it reads as the host
@@ -8315,29 +8881,37 @@ public class PlanetViewWindow : MonoBehaviour
     {
         openMaps.Clear();
         ClearMoonPanes();
-        moonTilePx.Clear(); moonPan.Clear(); moonPanDrag = null; activePane = null;
+        panning = false; panPane = null;
+        activePane = null; maximised = null;
+        scrollHoldPane = null; scrollHoldDir = 0f;
         if (body != null) openMaps.Add(body);   // the planet map is open by default
         BuildMapTabStrip();
         LayoutPanes();
     }
+
+    // The tab buttons by world, so opening and closing a map only RETINTS them. Rebuilding the strip on
+    // every toggle (as it used to) re-rendered every thumbnail per click, and destroyed the button under
+    // the cursor — which is what made a double-click impossible to detect: the input module counts the
+    // second click only against the SAME object as the first.
+    readonly Dictionary<CelestialBody, Button> mapTabs = new Dictionary<CelestialBody, Button>();
 
     void BuildMapTabStrip()
     {
         if (moonTabStrip == null) return;
         foreach (var tx in moonTabThumbTextures) if (tx != null) Destroy(tx);
         moonTabThumbTextures.Clear();
+        mapTabs.Clear();
         for (int i = moonTabStrip.childCount - 1; i >= 0; i--) Destroy(moonTabStrip.GetChild(i).gameObject);
 
         moonTabStrip.gameObject.SetActive(true);
         if (body != null) BuildMapTab(body, PlanetTabSize);           // the planet's own (bigger) tab first
         foreach (var m in MoonsClosestFirst()) BuildMapTab(m, MoonTabSize);
 
-        // The View button sits under this strip, so it moves whenever the strip's height does. The
-        // ContentSizeFitter has not run yet at this point in the frame — it resolves at the end of the
-        // layout pass — so the height is computed from the tabs we just built rather than read back.
-        int tabs = moonTabStrip.childCount;
-        pendingTabStripHeight = tabs <= 0 ? 0f
-                              : PlanetTabSize + (tabs - 1) * (MoonTabSize + 7f) + (tabs - 1) * 0f;
+        // The View button sits beside this strip. The ContentSizeFitter has not run yet at this point in
+        // the frame, so the height is computed from the tabs just built rather than read back — and
+        // counted from mapTabs, not childCount, which still includes the old tabs (Destroy is deferred).
+        int tabs = mapTabs.Count;
+        pendingTabStripHeight = tabs <= 0 ? 0f : PlanetTabSize + (tabs - 1) * (MoonTabSize + 7f);
         PositionViewFormatButton();
     }
 
@@ -8346,23 +8920,18 @@ public class PlanetViewWindow : MonoBehaviour
     float pendingTabStripHeight;
 
     // One tab: a square terrain thumbnail of the body it opens, tinted when that map is open, with a hover
-    // survey card. Used for both the planet (bigger) and each moon.
+    // survey card. Used for both the planet (bigger) and each moon. Click shows or hides the map;
+    // double-click FOCUSES it — opens it if need be and maximises it.
     void BuildMapTab(CelestialBody target, float size)
     {
         var captured = target;
-        bool open = openMaps.Contains(target);
-        var btn = UIFactory.Button(moonTabStrip, "", () => ToggleMap(captured), size);
+        var btn = UIFactory.Button(moonTabStrip, "", null, size);   // clicks come through MapTabClicks
         var le = UIFactory.Ensure<LayoutElement>(btn.gameObject);
         le.preferredWidth = size; le.minWidth = size;
         le.preferredHeight = size; le.minHeight = size;
         le.flexibleWidth = 0; le.flexibleHeight = 0;
-
-        // Active-tab tint like the main strip: an open map reads as the selected one.
-        var colors = btn.colors;
-        colors.normalColor = open ? UITheme.ButtonActive : UITheme.ButtonBg;
-        colors.highlightedColor = colors.normalColor;
-        colors.selectedColor = colors.normalColor;
-        btn.colors = colors;
+        mapTabs[target] = btn;
+        TintMapTab(btn, openMaps.Contains(target));
 
         // A downscaled image of the body itself, from the same renderer the open maps use.
         var thumbGO = UIFactory.NewUI(btn.transform, "Thumb");
@@ -8375,35 +8944,109 @@ public class PlanetViewWindow : MonoBehaviour
 
         var hover = btn.gameObject.AddComponent<MoonTabHover>();
         hover.Configure(target);
+
+        var clicks = btn.gameObject.AddComponent<MapTabClicks>();
+        clicks.onClick = n => OnMapTabClick(captured, n);
+    }
+
+    // Active-tab tint like the main strip: an open map reads as the selected one.
+    static void TintMapTab(Button btn, bool open)
+    {
+        if (btn == null) return;
+        var colors = btn.colors;
+        colors.normalColor = open ? UITheme.ButtonActive : UITheme.ButtonBg;
+        colors.highlightedColor = colors.normalColor;
+        colors.selectedColor = colors.normalColor;
+        btn.colors = colors;
+    }
+
+    void RefreshMapTabTints()
+    {
+        foreach (var kv in mapTabs) TintMapTab(kv.Value, openMaps.Contains(kv.Key));
+    }
+
+    void OnMapTabClick(CelestialBody b, int clickCount)
+    {
+        if (b == null) return;
+        if (clickCount >= 2) FocusMap(b);   // the first click of the pair already toggled; this settles it
+        else ToggleMap(b);
     }
 
     bool HostOpen => body != null && openMaps.Contains(body);
 
-    // Open or close a body's map (planet or moon). Opening a sixth pushes out the oldest, so at most five
-    // show at once. Closing a tab reflows the rest to fill the freed space (LayoutPanes).
+    /// Add a map to the open set. A sixth pushes out the oldest MOON — never the planet, which stays the
+    /// primary pane however many moons come and go.
+    void OpenMap(CelestialBody m)
+    {
+        if (m == null || openMaps.Contains(m)) return;
+        if (openMaps.Count >= MaxOpenMaps)
+        {
+            int drop = openMaps.FindIndex(x => x != body);
+            openMaps.RemoveAt(drop < 0 ? 0 : drop);
+        }
+        openMaps.Add(m);
+    }
+
+    // Open or close a body's map (planet or moon). Closing reflows the rest to fill the freed space; opening
+    // makes the new pane the active one, and brings back the tiling if a pane was maximised so it shows.
     void ToggleMap(CelestialBody m)
     {
+        if (m == null) return;
         if (openMaps.Contains(m))
         {
             openMaps.Remove(m);
-            moonTilePx.Remove(m); moonPan.Remove(m);
             if (activePane == m) activePane = null;
+            if (maximised == m) maximised = null;
         }
         else
         {
-            if (openMaps.Count >= MaxOpenMaps)
-            {
-                var dropped = openMaps[0];
-                openMaps.RemoveAt(0);   // drop the oldest to make room
-                moonTilePx.Remove(dropped); moonPan.Remove(dropped);
-            }
-            openMaps.Add(m);
+            OpenMap(m);
+            maximised = null;
+            activePane = m;
         }
-        moonPanDrag = null;    // the open set just changed — any in-flight drag no longer means anything
+        panning = false; panPane = null;    // the open set just changed — an in-flight drag means nothing now
+        if (scrollHoldPane != null && !openMaps.Contains(scrollHoldPane)) { scrollHoldPane = null; scrollHoldDir = 0f; }
         SimpleAudio.Instance?.PlayTick();
-        BuildMapTabStrip();    // refresh the highlights
+        RefreshMapTabTints();
         LayoutPanes();
     }
+
+    /// Open a map if need be, maximise it and make it active: "show me this one".
+    void FocusMap(CelestialBody b)
+    {
+        if (b == null) return;
+        OpenMap(b);
+        maximised = b;
+        activePane = b;
+        RefreshMapTabTints();
+        LayoutPanes();
+    }
+
+    void ClosePane(CelestialBody b)
+    {
+        if (b != null && openMaps.Contains(b)) ToggleMap(b);
+    }
+
+    void ToggleMaximise(CelestialBody b)
+    {
+        if (b == null || !openMaps.Contains(b)) return;
+        maximised = maximised == b ? null : b;
+        activePane = b;
+        SimpleAudio.Instance?.PlayTick();
+        LayoutPanes();
+    }
+
+    /// Escape restoring a maximised pane must not ALSO open the pause menu. EscapeMenu asks this, the same
+    /// way it asks NamePrompt; Unity does not order the two Updates, so it covers both orders — the frame
+    /// this window used the key on, and the frame it is about to.
+    public static bool SwallowsEscape
+        => Instance != null && Instance.IsOpen
+           && (Instance.escSwallowedOnFrame == Time.frameCount
+               || (Instance.maximised != null && Input.GetKeyDown(KeyCode.Escape)
+                   // ...but never the Esc that closes an open pause menu, or the menu could not be shut.
+                   && !(EscapeMenu.Instance != null && EscapeMenu.Instance.IsOpen)));
+
+    int escSwallowedOnFrame = -1;
 
     // Fractions used by the map-view formats.
     const float MoonRowFrac = 0.42f;    // a single moon row's share of the height (planet takes the rest)
@@ -8478,21 +9121,21 @@ public class PlanetViewWindow : MonoBehaviour
     }
 
     // Arrange the open panes according to the current map-view FORMAT (cycled by the Change Map View
-    // button). Every format keeps the planet as the large map and lays the moons out around it; each pane
-    // cover-fits its own fixed frame, so any mix of planet/moon sizes and counts fits — some maps just
-    // shrink more than others. The frames only ever CHANGE SIZE; zoom happens inside each fixed frame.
+    // button), or give the maximised one the whole area. Every format keeps the planet as the large map and
+    // lays the moons out around it. This is the ONLY thing that sizes a pane's frame; each pane's view is
+    // relative to its frame (PANE VIEWS), so a reflow keeps what every pane was showing.
     void LayoutPanes()
     {
         if (gridHolder == null) return;
+        if (maximised != null && !openMaps.Contains(maximised)) maximised = null;
         RebuildMoonPanes();
 
         int k = openMaps.Count;
         bool hostOpen = HostOpen;
-        if (hostViewport != null) hostViewport.gameObject.SetActive(hostOpen);
+        if (hostViewport != null) hostViewport.gameObject.SetActive(HostShown);
         if (emptyHint != null) emptyHint.gameObject.SetActive(k == 0);
-        if (zoomBar != null) zoomBar.gameObject.SetActive(k > 0);
-        if (viewFormatBtn != null) viewFormatBtn.gameObject.SetActive(k > 0);
-        if (k == 0) { KeepControlsOnTop(); return; }
+        if (viewFormatBtn != null) viewFormatBtn.gameObject.SetActive(k > 0 && maximised == null);
+        if (k == 0) { RefreshPaneChrome(); KeepControlsOnTop(); return; }
 
         var area = gridHolder.rect;
         float W = area.width, H = area.height;
@@ -8503,7 +9146,15 @@ public class PlanetViewWindow : MonoBehaviour
         foreach (var b in openMaps) if (b != body) moons.Add(b);
         int n = moons.Count;
 
-        if (!hostOpen) LayoutMoonsNoPlanet(moons, W, H);
+        if (maximised != null)
+        {
+            foreach (var kv in moonFrame)
+                if (kv.Value != null && kv.Key != maximised) kv.Value.gameObject.SetActive(false);
+            var full = new Rect(0f, 0f, W, H);
+            if (maximised == body) PlaceHost(full);
+            else if (moonFrame.TryGetValue(maximised, out var mf) && mf != null) { PlaceFrame(mf, full); ApplyView(maximised); }
+        }
+        else if (!hostOpen) LayoutMoonsNoPlanet(moons, W, H);
         else if (n == 0) PlaceHost(new Rect(0f, 0f, W, H));   // planet only — fills the area
         else switch (mapLayout)
         {
@@ -8545,6 +9196,7 @@ public class PlanetViewWindow : MonoBehaviour
         }
 
         DrawSelectionMarker();
+        RefreshPaneChrome();
         KeepControlsOnTop();
     }
 
@@ -8578,7 +9230,7 @@ public class PlanetViewWindow : MonoBehaviour
         }
     }
 
-    void PlaceHost(Rect r) { PlaceFrame(hostViewport, r); ApplyMapSize(); }
+    void PlaceHost(Rect r) { PlaceFrame(hostViewport, r); ApplyView(body); }
 
     // Moons side by side across a region, column widths proportional to each moon's aspect (w/h) so a wide
     // moon gets a wider column; the row fills the region exactly (last column absorbs rounding).
@@ -8598,7 +9250,7 @@ public class PlanetViewWindow : MonoBehaviour
             if (moonFrame.TryGetValue(m, out var f) && f != null)
             {
                 PlaceFrame(f, new Rect(x, region.y, cw, region.height));
-                ApplyMoonSize(m);
+                ApplyView(m);
             }
             x += cw;
         }
@@ -8623,7 +9275,7 @@ public class PlanetViewWindow : MonoBehaviour
             if (moonFrame.TryGetValue(m, out var f) && f != null)
             {
                 PlaceFrame(f, new Rect(region.x, y, region.width, ch));
-                ApplyMoonSize(m);
+                ApplyView(m);
             }
             used += ch;
         }
@@ -8637,7 +9289,7 @@ public class PlanetViewWindow : MonoBehaviour
         return Mathf.Clamp(b.surface.width / (float)b.surface.height, 0.5f, 3f);
     }
 
-    // The floating controls (zoom bar, view-format button, tab strip) have to stay above the panes, which
+    // The floating controls (index bar, shortcut column, view-format button, tab strip) have to stay above the panes, which
     // are (re)ordered as tabs open and close.
     void KeepControlsOnTop()
     {
@@ -8645,23 +9297,30 @@ public class PlanetViewWindow : MonoBehaviour
         // pane, including moon panes laid out after them.
         if (hostIndexBar != null) hostIndexBar.transform.SetAsLastSibling();
         if (shortcutBar != null) shortcutBar.SetAsLastSibling();
-        if (zoomBar != null) zoomBar.SetAsLastSibling();
         if (viewFormatBtn != null) viewFormatBtn.SetAsLastSibling();
         if (moonTabStrip != null) moonTabStrip.SetAsLastSibling();
     }
 
-    // Is the cursor over one of the floating map controls (zoom bar, view-format button, tab strip, Build
-    // confirm)? The moon zoom/pan uses geometry, not raycasts, so it must skip these the way the host does —
-    // otherwise scrolling the zoom bar or pressing a tab that overlays a moon frame would also move that map.
+    // Is the point over one of the controls that float ON TOP of the maps — the tab strip, the View button,
+    // a pane's corner controls, the index bar, the shortcut column, the building card, or a confirm panel?
+    // The panes' zoom, pan, hover and both brushes go by geometry rather than raycasts, so every one of
+    // them asks this first; otherwise pressing a button that overlays a map would also move or paint it.
+    // ONE list, where there used to be two that had drifted apart (the wheel zoomed the planet through
+    // the index bar; a press on a confirm panel could start a moon drag).
     bool OverMapChrome(Vector2 p)
     {
-        if (zoomBar != null && zoomBar.gameObject.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(zoomBar, p, null)) return true;
-        if (viewFormatBtn != null && viewFormatBtn.gameObject.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(viewFormatBtn, p, null)) return true;
-        if (moonTabStrip != null && RectTransformUtility.RectangleContainsScreenPoint(moonTabStrip, p, null)) return true;
-        if (confirmPanel != null && confirmPanel.gameObject.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(confirmPanel, p, null)) return true;
+        if (Showing(viewFormatBtn, p) || Showing(moonTabStrip, p)) return true;
+        if (OverPaneControls(p)) return true;
         if (IndexIconBar.PointerOverAny(p) || PointerOverShortcuts(p)) return true;
+        if (gridPopup != null && gridPopup.Covers(p)) return true;
+        // Placement Mode's Confirm/Cancel panel sits ON the map, directly under the shape it is asking
+        // about — without this, pressing Confirm would also paint the cell behind the button.
+        if (Showing(confirmPanel, p) || Showing(placePanel, p) || Showing(demolishPanel, p)) return true;
         return false;
     }
+
+    static bool Showing(RectTransform rt, Vector2 p)
+        => rt != null && rt.gameObject.activeInHierarchy && RectTransformUtility.RectangleContainsScreenPoint(rt, p, null);
 
     // Place a frame into a grid cell, inset by the hairline gap so the themed background reads as thin grout
     // rather than dead space. Cells are gridHolder-local, origin bottom-left; the frame is centre-pivoted so
@@ -8696,6 +9355,7 @@ public class PlanetViewWindow : MonoBehaviour
                 moonFrame.Remove(m); moonImg.Remove(m); moonTex.Remove(m);
                 moonFog.Remove(m); moonFogTex.Remove(m);
                 moonOverlay.Remove(m); moonOverlayTex.Remove(m); moonOverlayPx.Remove(m);
+                moonChrome.Remove(m);
             }
 
         foreach (var m in openMaps)
@@ -8704,6 +9364,7 @@ public class PlanetViewWindow : MonoBehaviour
 
             var frame = UIFactory.NewUI(moonLayer, "MoonFrame").GetComponent<RectTransform>();
             frame.gameObject.AddComponent<RectMask2D>();
+            AddPaneBackdrop(frame);   // first, so the map draws over it
 
             var contentGO = UIFactory.NewUI(frame, "MoonMap");
             var img = contentGO.AddComponent<RawImage>();
@@ -8756,6 +9417,10 @@ public class PlanetViewWindow : MonoBehaviour
             // window toggles every index on the planet and all its moons together (IndexIconBar).
 
             moonFrame[m] = frame; moonImg[m] = img; moonTex[m] = tex; moonFog[m] = mfog;
+            // Border and corner controls last, over the map. The view itself survives the pane: it lives
+            // in `views`, so a moon closed and reopened comes back as it was left.
+            var paneBody = m;
+            moonChrome[m] = BuildPaneChrome(frame, () => paneBody);
             addedPane = true;
         }
         // A freshly built pane starts blank; paint its highlights now rather than waiting for the next
@@ -8774,6 +9439,7 @@ public class PlanetViewWindow : MonoBehaviour
         moonFrame.Clear(); moonImg.Clear(); moonTex.Clear();
         moonFog.Clear(); moonFogTex.Clear();
         moonOverlay.Clear(); moonOverlayTex.Clear(); moonOverlayPx.Clear();
+        moonChrome.Clear();
     }
 
     // ---- Moon index overlays ----
@@ -8817,72 +9483,6 @@ public class PlanetViewWindow : MonoBehaviour
         }
     }
 
-    // Fit a moon map inside its fixed frame and apply its own zoom (px per cell), clipped by the frame's
-    // mask. The DEFAULT view is cover (fills the frame, no dead space); you can zoom OUT to contain (the
-    // whole moon map visible inside the frame, letterboxed) or IN past cover to fewer, larger cells.
-    // Mirrors the host's ApplyMapSize / ClampPan.
-    void ApplyMoonSize(CelestialBody m)
-    {
-        if (m?.surface == null) return;
-        if (!moonFrame.TryGetValue(m, out var frame) || frame == null) return;
-        if (!moonImg.TryGetValue(m, out var img) || img == null) return;
-
-        Rect fr = frame.rect;
-        float floor = ContainFit(fr, m);                        // fully out = whole map fits
-        float cover = CoverFit(fr, m);                          // default view = fills the frame
-        float max = Mathf.Max(cover, CeilTilePx(fr));
-        float tpx = moonTilePx.TryGetValue(m, out float z) ? z : 0f;
-        tpx = Mathf.Clamp(tpx <= 0f ? cover : tpx, floor, max);
-        moonTilePx[m] = tpx;
-
-        img.rectTransform.sizeDelta = new Vector2(m.surface.width * tpx, m.surface.height * tpx);
-        Vector2 pan = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
-        ClampPanePan(fr, img.rectTransform, ref pan);
-        moonPan[m] = pan;
-        SyncMoonMirrors(img, fr);
-    }
-
-    // Pixels per cell at which a map exactly COVERS a frame (fills it, cropping the proportionally longer
-    // axis) — the framed DEFAULT view, so there's no dead space around a map until you zoom out to fit.
-    float CoverFit(Rect frame, CelestialBody b)
-    {
-        if (b?.surface == null || frame.width < 1f || frame.height < 1f) return 4f;
-        return Mathf.Max(frame.width / b.surface.width, frame.height / b.surface.height);
-    }
-
-    // Pixels per cell at which the WHOLE map fits inside a frame (letterboxed on the shorter axis) — the
-    // zoom-out floor, so you can always pull back to see the entire map within its fixed window.
-    float ContainFit(Rect frame, CelestialBody b)
-    {
-        if (b?.surface == null || frame.width < 1f || frame.height < 1f) return 4f;
-        return Mathf.Min(frame.width / b.surface.width, frame.height / b.surface.height);
-    }
-
-    // Pixels per cell at the zoomed-all-the-way-IN end (~MaxVisibleTiles cells fill the frame).
-    float CeilTilePx(Rect frame) => Mathf.Sqrt(Mathf.Max(1f, frame.width * frame.height) / MaxVisibleTiles);
-
-    // Keep content covering its frame: clamp the pan so you can never drag past the map's own edge into
-    // letterbox. When the map is exactly frame-sized on an axis there's no slack, so it stays centred.
-    void ClampPanePan(Rect frame, RectTransform content, ref Vector2 pan)
-    {
-        Vector2 size = content.sizeDelta;
-
-        // Longitude wraps here exactly as it does on the host map: a moon is a cylinder too, its terrain
-        // is generated to join at the seam by the same sampler, and a moon map that stops dead at its edge
-        // while the planet's loops would just look like one of them is broken.
-        if (PaneWrapEnabled(frame, size) )
-            pan.x = Mathf.Repeat(pan.x + size.x * 0.5f, size.x) - size.x * 0.5f;
-        else
-        {
-            float sx = Mathf.Max(0f, (size.x - frame.width) * 0.5f);
-            pan.x = Mathf.Clamp(pan.x, -sx, sx);
-        }
-
-        float sy = Mathf.Max(0f, (size.y - frame.height) * 0.5f);
-        pan.y = Mathf.Clamp(pan.y, -sy, sy);
-        content.anchoredPosition = pan;
-    }
-
     /// Same rule as the host map: wrapping only means something once the map is at least as wide as the
     /// frame showing it. Below that the whole moon already fits and there is no edge to run off.
     static bool PaneWrapEnabled(Rect frame, Vector2 size)
@@ -8892,7 +9492,7 @@ public class PlanetViewWindow : MonoBehaviour
     ///
     /// Terrain only — a moon pane draws no structures, ghost or markers, so unlike the host there is
     /// nothing else to mirror. Idempotent: it creates the mirrors on first call and thereafter just
-    /// re-syncs them, so ApplyMoonSize can call it unconditionally.
+    /// re-syncs them, so ApplyView can call it unconditionally.
     void SyncMoonMirrors(RawImage img, Rect frame)
     {
         if (img == null) return;
@@ -8950,80 +9550,6 @@ public class PlanetViewWindow : MonoBehaviour
         dst.texture = src.texture;
         dst.color = src.color;
         dst.uvRect = src.uvRect;
-    }
-
-    // Is the cursor over an open moon frame? Keeps PollMapPan from starting a host pan at a shared edge.
-    bool OverAnyMoonFrame(Vector2 screenPos)
-    {
-        foreach (var kv in moonFrame)
-            if (kv.Value != null && RectTransformUtility.RectangleContainsScreenPoint(kv.Value, screenPos, null))
-                return true;
-        return false;
-    }
-
-    // Scroll to zoom the cells inside a moon's fixed frame, drag to pan — independently per open moon, the
-    // same gestures and cursor-anchored zoom the host map answers to. The content is centre-anchored in its
-    // own frame, so the cursor pin is measured against the frame, exactly like the host's hostViewport.
-    void PollMoonZoomPan()
-    {
-        if (moonFrame.Count == 0) { moonPanDrag = null; return; }
-
-        float scroll = Input.GetAxis("Mouse ScrollWheel");
-        if (!Mathf.Approximately(scroll, 0f) && !UIScroll.PointerOverScroller() && !OverMapChrome(Input.mousePosition))
-        {
-            foreach (var m in openMaps)
-            {
-                if (m == body) continue;
-                if (!moonFrame.TryGetValue(m, out var frame) || frame == null) continue;
-                if (!RectTransformUtility.RectangleContainsScreenPoint(frame, Input.mousePosition, null)) continue;
-
-                Rect fr = frame.rect;
-                float floor = ContainFit(fr, m);                    // zoom-out floor = whole map fits
-                float cover = CoverFit(fr, m);                      // default view = fills the frame
-                float max = Mathf.Max(cover, CeilTilePx(fr));
-                float cur = moonTilePx.TryGetValue(m, out float z) ? z : cover;
-                float next = Mathf.Clamp(cur * Mathf.Pow(ZoomStep, scroll * 10f), floor, max);
-                if (!Mathf.Approximately(next, cur))
-                {
-                    Vector2 pan0 = moonPan.TryGetValue(m, out Vector2 pv0) ? pv0 : Vector2.zero;
-                    if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                            frame, Input.mousePosition, null, out Vector2 framePoint))
-                    {
-                        Vector2 mapPoint = framePoint - pan0;                    // cursor in map space, pre-zoom
-                        moonPan[m] = framePoint - mapPoint * (next / cur);       // ...still under the cursor after
-                    }
-                    moonTilePx[m] = next;
-                    ApplyMoonSize(m);
-                }
-                activePane = m;
-                break;   // only the map under the cursor zooms
-            }
-        }
-
-        if (Input.GetMouseButtonDown(0) && !OverMapChrome(Input.mousePosition))
-        {
-            foreach (var m in openMaps)
-            {
-                if (m == body) continue;
-                if (!moonFrame.TryGetValue(m, out var frame) || frame == null) continue;
-                if (!RectTransformUtility.RectangleContainsScreenPoint(frame, Input.mousePosition, null)) continue;
-                moonPanDrag = m;
-                moonPanGrabScreen = Input.mousePosition;
-                moonPanGrabOffset = moonPan.TryGetValue(m, out Vector2 pv) ? pv : Vector2.zero;
-                break;
-            }
-        }
-
-        if (moonPanDrag != null)
-        {
-            if (!Input.GetMouseButton(0)) moonPanDrag = null;
-            else if (moonFrame.ContainsKey(moonPanDrag))
-            {
-                Vector2 delta = (Vector2)Input.mousePosition - moonPanGrabScreen;
-                moonPan[moonPanDrag] = moonPanGrabOffset + delta;
-                ApplyMoonSize(moonPanDrag);
-            }
-        }
     }
 
     // ---- Small helpers, matching the Inspector's vocabulary ----
@@ -9086,6 +9612,20 @@ public class SurfaceGridProbe : MonoBehaviour, IPointerClickHandler
     }
 }
 
+// A map tab's clicks, with the click COUNT, so a double-click (focus) can be told from a click (show or
+// hide). The input module only counts a second click against the same object as the first, which is why
+// the window retints its tabs on a toggle instead of rebuilding them.
+public class MapTabClicks : MonoBehaviour, IPointerClickHandler
+{
+    public System.Action<int> onClick;
+
+    public void OnPointerClick(PointerEventData e)
+    {
+        if (e.button != PointerEventData.InputButton.Left) return;
+        onClick?.Invoke(e.clickCount);
+    }
+}
+
 // Hovering a moon tab shows its name and a description of the kind of moon it is, anchored the same way
 // as the tile hover-info window (Raptok's follow-up request). `CelestialBodyType` has no moon sub-types
 // (a moon is just `Moon`), so the "kind" is read off the moon's own generated terrain — its most common
@@ -9130,16 +9670,24 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
     public void Configure(CelestialBody m)
     {
         moon = m;
+        t = Frac(Seed(m) * 0.37f + 0.13f);            // this tab's light starts at a different point
+        if (outline != null) outline.effectColor = HueFor(m);
+    }
+
+    static float Seed(CelestialBody m)
+    {
         float seed = m != null ? Mathf.Abs(m.terrainSeed) : 0f;
         if (seed <= 0.0001f && m != null && m.name != null) seed = Mathf.Abs(m.name.GetHashCode() % 9973);
-        float hue = Frac(seed * 0.6180339887f);       // golden-ratio scatter -> well-separated hues
-        t = Frac(seed * 0.37f + 0.13f);               // this tab's light starts at a different point
-        if (outline != null)
-        {
-            var c = Color.HSVToRGB(hue, 0.6f, 1f);
-            c.a = 0.95f;
-            outline.effectColor = c;
-        }
+        return seed;
+    }
+
+    /// This world's tab colour — a stable, well-spread hue per world (golden-ratio scatter). Public so the
+    /// world's map PANE can wear the same colour on its border, and the two read as one thing.
+    public static Color HueFor(CelestialBody m)
+    {
+        var c = Color.HSVToRGB(Frac(Seed(m) * 0.6180339887f), 0.6f, 1f);
+        c.a = 0.95f;
+        return c;
     }
 
     static float Frac(float v) => v - Mathf.Floor(v);
@@ -9179,7 +9727,9 @@ public class MoonTabHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHan
     public void OnPointerEnter(PointerEventData e)
     {
         hover = true;
-        if (moon != null) MapHoverPanel.Instance.ShowAtCursor(Tooltip(moon));
+        if (moon != null)
+            MapHoverPanel.Instance.ShowAtCursor(Tooltip(moon)
+                + "\n<size=10><color=#7E93A8>Click to show or hide \u00B7 double-click to focus</color></size>");
     }
 
     // Everything worth knowing about a world at a glance, so hovering its tab reads like a survey card:

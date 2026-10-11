@@ -47,6 +47,15 @@ public class SurfaceBuildJob
     /// otherwise merge into a corpse — so a stale one degrades to "build it as a new structure".
     public PlacedBuilding mergeInto;
 
+    // ---- A FIXED structure (spaceport, shipyard) ----
+    //
+    // Set when this job is an authored footprint rather than a painted one. Such a building must come up
+    // as an ordinary rotated record, NOT as a drawn shape: a drawn shape carries SizeMult, which would
+    // multiply a spaceport's whole-structure output by its tile count the moment it finished.
+    public bool fixedFootprint;
+    public Vector2Int origin;
+    public int rotation;
+
     public int Tiles => cells != null ? cells.Count : 0;
     public float Progress => duration > 0f ? Mathf.Clamp01(elapsed / duration) : 1f;
     public float Remaining => Mathf.Max(0f, duration - elapsed);
@@ -83,6 +92,17 @@ public static class SurfaceBuildQueue
         => b != null && queues.TryGetValue(b, out var list) ? list : null;
 
     public static int Count(CelestialBody b) => Peek(b)?.Count ?? 0;
+
+    /// How many jobs of this class are under construction on this world. The uniqueness rule asks it, so
+    /// a one-per-world structure that is still going up counts as already having one.
+    public static int CountQueued(CelestialBody b, SurfaceBuildingType t)
+    {
+        var list = Peek(b);
+        if (list == null) return 0;
+        int n = 0;
+        foreach (var job in list) if (job != null && job.type == t) n++;
+        return n;
+    }
 
     /// Ground already claimed by jobs that have not finished yet.
     ///
@@ -221,6 +241,55 @@ public static class SurfaceBuildQueue
             metalPaid = GameMode.DevMode ? 0 : cm,
             energyPaid = GameMode.DevMode ? 0 : ce,
             labor = BuildScaling.LaborFor(t, tiles)
+        };
+
+        For(b).Add(job);
+        OnChanged?.Invoke();
+        return job;
+    }
+
+    // ============================================================================================
+    // A FIXED STRUCTURE GOES THROUGH THE QUEUE TOO
+    //
+    // The spaceport and the shipyard were the last structures that appeared the instant the confirm was
+    // clicked — the exact thing this queue exists to stop, and the one way left to get a building with no
+    // time or Labor attached. They now build like everything else. (The two placements that SETTLE a
+    // world — the founding capitol and a colony ship's landing — stay instant: they are what turns the
+    // world into a place where anything can be built at all, and both callers place them directly.)
+    //
+    // PRICED PER STRUCTURE, NOT PER TILE. A fixed structure's authored cost, build time and output are
+    // for the whole thing, which is why SurfaceBuildManager.Place charged its list price once. Its Labor
+    // follows the same rule — one structure's worth (LaborPerTile) rather than nine tiles' worth, which
+    // would have put a fresh colony's first shipyard at a sixth of its speed.
+    // ============================================================================================
+    public static SurfaceBuildJob EnqueueFixed(CelestialBody b, SurfaceBuildingType t, int x, int y, int rotation,
+                                               out string why)
+    {
+        why = null;
+        var info = SurfaceBuildingDatabase.Get(t);
+        if (b == null || info == null) { why = "nothing to build"; return null; }
+
+        // Every gate, at this origin and rotation: type, ground, pending sites, the price.
+        if (!SurfaceBuildManager.CanPlace(b, t, x, y, rotation, out why)) return null;
+
+        int cm = ColonyManager.DiscCost(info.costMetal), ce = ColonyManager.DiscCost(info.costEnergy);
+        if (!GameMode.DevMode && !PlayerEconomy.Spend(cm, ce))
+        {
+            why = SurfaceBuildManager.ShortfallText(cm, ce) ?? $"not enough resources — {cm} metal and {ce} energy";
+            return null;
+        }
+
+        var job = new SurfaceBuildJob
+        {
+            type = t,
+            cells = SurfaceBuildingDatabase.Footprint(t, x, y, rotation),
+            fixedFootprint = true,
+            origin = new Vector2Int(x, y),
+            rotation = rotation,
+            duration = Mathf.Max(0.5f, info.buildTime * TechEffects.BuildTimeMult),
+            metalPaid = GameMode.DevMode ? 0 : cm,
+            energyPaid = GameMode.DevMode ? 0 : ce,
+            labor = BuildScaling.LaborPerTile(t)
         };
 
         For(b).Add(job);
@@ -380,6 +449,25 @@ public static class SurfaceBuildQueue
                     $"{absorbed.efficiency * 100f:F0}% sited.", null, NotifKind.Info);
                 return;
             }
+        }
+
+        // A FIXED structure comes up as an ordinary rotated record at its origin (see `fixedFootprint`).
+        // ForcePlace re-checks the ground and the occupancy and charges nothing — the cost was taken when
+        // the job was queued.
+        if (job.fixedFootprint)
+        {
+            bool ok = SurfaceBuildManager.ForcePlace(b, job.type, job.origin.x, job.origin.y, job.rotation);
+            SurfaceLabor.Invalidate();
+            if (ok)
+            {
+                NotificationManager.Instance?.Push($"{name} complete", $"Built on {b.name}.", null, NotifKind.Info);
+                return;
+            }
+            PlayerEconomy.Add(ResourceType.Metal, job.metalPaid);
+            PlayerEconomy.Add(ResourceType.Energy, job.energyPaid);
+            NotificationManager.Instance?.Push($"{name} could not be completed",
+                $"The site on {b.name} is no longer buildable. Materials refunded.", null, NotifKind.Danger);
+            return;
         }
 
         // Placed free: the cost was taken when the job was queued. Paying again at completion would

@@ -113,6 +113,15 @@ public static class BuildPlacement
 
     public static void ClearRefusal() { RefusalText = null; }
 
+    /// Put a refusal up at a tile from OUTSIDE a drawing session — a fixed structure's click, or a pylon
+    /// run that laid nothing. One label, one place on the map, whatever was being placed: a second
+    /// floating-message system for the fixed path would be two things saying "no" in two styles.
+    public static void Flash(Vector2Int at, string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        Refuse(at, Capitalise(text.TrimEnd('.', '!')) + "!");
+    }
+
     // ---- Guidance ----
     // The translucent highlight over every cell that could legally be painted next. Recomputed only when
     // the footprint changes: it is read every frame by the drawing code, and a flood of set operations
@@ -185,47 +194,11 @@ public static class BuildPlacement
         // mistake, and a label for it would strobe the whole time the button is held.
         if (set.Contains(cell)) return false;
 
-        var info = Info;
-
         if (!InBounds(cell)) return false;      // off the map entirely; nothing to point a label at
 
-        // ---- Connectivity, before ground ----
-        // A tile that is both disconnected AND underwater should read as disconnected: the player is
-        // being told the SHAPE rule, which is the one they are currently learning, and the water is
-        // obvious from the map anyway.
-        if (!IsConnectedCandidate(cell))
-        {
-            Refuse(cell, Tiles == 0 && Expanding != null
-                ? "Must touch the existing building!"
-                : "Must connect edge-to-edge!");
-            return false;
-        }
-
-        // ---- Ground ----
-        if (!SurfaceBuildManager.CellBuildable(Body, info, cell.x, cell.y, out string why))
+        if (!CanPaint(cell, out string why))
         {
             Refuse(cell, Capitalise(why) + "!");
-            return false;
-        }
-
-        if (SurfaceBuildManager.At(Body, cell.x, cell.y) != null)
-        {
-            Refuse(cell, "Something is already built here!");
-            return false;
-        }
-
-        if (SurfaceBuildQueue.PendingCells(Body).Contains(cell))
-        {
-            Refuse(cell, "Another project is going up here!");
-            return false;
-        }
-
-        // ---- Affordability, last, because it is the only one that is about the BUILDING rather than
-        // about this tile. Quoted as the shortfall for the tile being attempted, which is the number the
-        // player needs: "Need 34 metal!" tells them how far off they are, "not enough resources" does not.
-        if (!CanAffordTiles(Tiles + 1, out int shortMetal, out int shortEnergy))
-        {
-            Refuse(cell, Shortfall(shortMetal, shortEnergy));
             return false;
         }
 
@@ -245,6 +218,46 @@ public static class BuildPlacement
         cells.Add(cell);
         set.Add(cell);
         guidanceStale = true;
+        return true;
+    }
+
+    /// Could this cell be painted next, and if not, why? Paint's checks without the painting — the cursor
+    /// readout asks it every time the hover moves, so the reason is on screen BEFORE the click rather
+    /// than only after it. Paint calls this too, so the two can never give different answers.
+    ///
+    /// The ORDER is the order the reasons matter in: a tile under the sea is not "unaffordable", it is
+    /// wet, and saying the wrong one sends the player to fix the wrong thing. Connectivity comes before
+    /// ground because a tile that is both disconnected AND underwater should read as disconnected — the
+    /// shape rule is the one being learned, and the water is obvious from the map.
+    public static bool CanPaint(Vector2Int cell, out string why)
+    {
+        why = null;
+        if (!Active || Body?.surface == null) { why = "not placing anything"; return false; }
+        if (set.Contains(cell)) { why = "already part of the shape"; return false; }
+        if (!InBounds(cell)) { why = "off the edge of the map"; return false; }
+
+        if (!IsConnectedCandidate(cell))
+        {
+            why = Tiles == 0 && Expanding != null
+                ? "must touch the existing building"
+                : "must connect edge-to-edge with the tiles already drawn";
+            return false;
+        }
+
+        if (!SurfaceBuildManager.CanPlaceType(Body, Type, out why)) return false;
+        if (!SurfaceBuildManager.CellBuildable(Body, Info, cell.x, cell.y, out why)) return false;
+
+        if (SurfaceBuildManager.At(Body, cell.x, cell.y) != null) { why = "something is already built here"; return false; }
+        if (SurfaceBuildQueue.JobAt(Body, cell.x, cell.y) != null) { why = "another project is going up here"; return false; }
+
+        // Affordability, last, because it is the only one that is about the BUILDING rather than about
+        // this tile — quoted as have-versus-need for the footprint WITH this tile, which is the number the
+        // player needs.
+        if (!CanAffordTiles(Tiles + 1, out _, out _))
+        {
+            why = ShortfallFor(Tiles + 1);
+            return false;
+        }
         return true;
     }
 
@@ -372,13 +385,13 @@ public static class BuildPlacement
     /// The UI reads this to turn the cursor and the resource figures red BEFORE the player tries.
     public static bool AtResourceCeiling => Active && !CanAffordTiles(Tiles + 1, out _, out _);
 
-    /// "Need 34 metal!" / "Need 34 metal, 12 energy!"
-    static string Shortfall(int metal, int energy)
+    /// "need 120 metal (have 86)" for a footprint of `tiles` — have-versus-need, and a warning when the
+    /// price is over the storage ceiling. One wording for every refusal about money (SurfaceBuildManager.
+    /// ShortfallText), so the brush, the Confirm panel and the build cards all say it the same way.
+    public static string ShortfallFor(int tiles)
     {
-        if (metal > 0 && energy > 0) return $"Need {metal} metal, {energy} energy!";
-        if (metal > 0) return $"Need {metal} metal!";
-        if (energy > 0) return $"Need {energy} energy!";
-        return "Not enough resources!";       // unreachable; a shortfall with no shortfall is a bug
+        CostOf(tiles, out int m, out int e);
+        return SurfaceBuildManager.ShortfallText(m, e) ?? "not enough resources";
     }
 
     // ============================================================================================
@@ -539,7 +552,7 @@ public static class BuildPlacement
             if (pending.Contains(c)) { why = "another project is already going up there"; return false; }
         }
 
-        if (!CanAffordTiles(Tiles, out int sm, out int se)) { why = Shortfall(sm, se); return false; }
+        if (!CanAffordTiles(Tiles, out _, out _)) { why = ShortfallFor(Tiles); return false; }
 
         return true;
     }

@@ -66,7 +66,15 @@ public static class SurfaceBuildManager
 
         var tile = b.surface.tiles[x, y];
         if (tile == null) { why = "no ground here"; return false; }
-        if (!info.allowsWater && PlanetTerrainGenerator.IsWater(tile.type)) { why = "can't build on water"; return false; }
+        if (!info.allowsWater && PlanetTerrainGenerator.IsWater(tile.type))
+        {
+            // The two water-reading plants are the ones a player most often tries to drop INTO the sea,
+            // because the Hydro Index reads 100 there — so they get the sentence that says where to go.
+            why = info.index == SurfaceIndexKind.Water
+                ? "this stands beside the water, not in it — pick dry ground on the highlighted shore"
+                : "can't build on open water — pick dry ground";
+            return false;
+        }
 
         // ============================================================================================
         // A STRUCTURE THAT READS AN INDEX MAY ONLY STAND ON THAT INDEX'S GROUND
@@ -98,7 +106,16 @@ public static class SurfaceBuildManager
             }
             if (!SurfaceIndex.Shown(b, info.index, x, y, out _))
             {
-                why = $"need valid {SurfaceIndex.ShortName(info.index)} ground — build on the highlighted patches";
+                // THE NUMBERS, not just the rule: what this tile reads, what it needs, and — when the
+                // whole world falls short — that moving the cursor will not help. "Mineral Index here
+                // 34%, needs 70%" tells the player how far off they are and which map to look at.
+                float floor = SurfaceIndex.Floor(info.index);
+                float best = SurfaceIndex.Best(b, info.index);
+                why = best < floor
+                    ? $"{SurfaceIndex.Name(info.index)} tops out at {best * 100f:F0}% on this world and a " +
+                      $"{info.name} needs {floor * 100f:F0}% — nowhere here will take one"
+                    : $"{SurfaceIndex.Name(info.index)} here {SurfaceIndex.Get(b, info.index, x, y) * 100f:F0}%, " +
+                      $"needs {floor * 100f:F0}% — try the highlighted ground";
                 return false;
             }
         }
@@ -152,6 +169,12 @@ public static class SurfaceBuildManager
         if (info.uniquePerWorld && CountOf(b, t) > 0)
         { why = $"this world already has a {info.name.ToLower()}"; return false; }
 
+        // ...and one that is still GOING UP counts. Fixed structures are queued like everything else, so
+        // without this a second shipyard could be confirmed while the first was under construction, and
+        // the second to finish would be refused at completion after the player had paid for both.
+        if (info.uniquePerWorld && SurfaceBuildQueue.CountQueued(b, t) > 0)
+        { why = $"a {info.name.ToLower()} is already under construction here"; return false; }
+
         // SOLAR IS OFF THE MENU UNDER A THICK SKY.
         //
         // Each atmosphere above Earth-normal costs 20% of a panel's output, so at 5 the number is zero —
@@ -204,58 +227,16 @@ public static class SurfaceBuildManager
         why = null;
         var info = SurfaceBuildingDatabase.Get(t);
 
-        if (b == null) { why = "no world"; return false; }
-        if (b.owner != FactionManager.Player) { why = "this world isn't yours — claim it first"; return false; }
-        if (!b.Surveyed) { why = "survey this world first"; return false; }
+        // EVERY "may this kind of thing be built on this world at all" gate — ownership, survey,
+        // settlement (with the landing and founding exceptions), tech, uniqueness (queued jobs included),
+        // the grown and upgraded-into classes, a second shipyard, solar under a thick sky — lives in
+        // CanPlaceType, and is asked from here rather than copied. This method used to carry its own copy
+        // of all of them, and the copy had already drifted: it lacked the solar gate, so a fixed-footprint
+        // path and a drawn one could give the same player two different answers about the same building.
+        if (!CanPlaceType(b, t, out why)) return false;
 
-        // The landing exception, exactly as in CanPlaceType above — see the note there. Both methods
-        // carry the same gates, so both need it; a landing legal in one and refused by the other would
-        // show the player a placeable ghost that the click then silently declines to place.
-        bool landing = ColonyLanding.AwaitingOn(b) && t == SurfaceBuildingType.ColonyShipBase;
+        // Still needed below: the founding capitol is free.
         bool founding = Founding(b, t);
-
-        // SETTLED, not merely owned. Infrastructure needs people to build and run it, and a claim is a
-        // flag on a rock — the home world's moons are yours from turn one and have nobody on them.
-        // Checking ownership alone let you cover an airless moon in farms and factories staffed by
-        // nobody, which is the same hole that gave those moons free cities.
-        if (!b.settled && !landing && !founding && !GameMode.DevMode)
-        {
-            why = b.habitability >= Colony.FoundThreshold
-                ? "nobody lives here yet — settle it with a colony ship"
-                : $"nobody lives here — terraform to {Colony.FoundThreshold:F0}% (now {b.habitability:F0}%), then settle it";
-            return false;
-        }
-
-        // TECH. The one gate that isn't about this world at all — a fusion reactor is unbuildable
-        // everywhere until somebody works out fusion. Mirrors TerraformManager's check, down to naming
-        // the technology rather than its id, because "research F2 first" is not a sentence.
-        if (!string.IsNullOrEmpty(info.requiredTech) && !GameMode.DevMode && !TechManager.IsResearched(info.requiredTech))
-        {
-            var tech = TechDatabase.Get(info.requiredTech);
-            why = $"research {(tech != null ? tech.name : info.requiredTech)} first";
-            return false;
-        }
-
-        // Only the genuinely unique classes are capped — see the note at the top of this file on why the
-        // blanket one-of-each rule is gone.
-        if (info.uniquePerWorld && CountOf(b, t) > 0)
-        { why = $"this world already has a {info.name.ToLower()}"; return false; }
-
-        // A Planet Capitol isn't built from scratch: it's what a Colony Ship Base becomes. Placing one
-        // directly would leave the grounded ship sitting next to it with nothing to do.
-        if (t == SurfaceBuildingType.PlanetCapitol && !founding)
-        { why = "upgrade this world's Colony Ship Base into a capitol instead"; return false; }
-        if (t == SurfaceBuildingType.ColonyShipBase && !landing && !GameMode.DevMode)
-        { why = "a colony ship becomes this when it settles a world"; return false; }
-
-        // Settlements/towns/cities are GROWN by the population (CityGrowth), never placed. You get one
-        // capital; the rest is people housing themselves.
-        if (CityGrowth.IsSettlement(t) && !GameMode.DevMode)
-        { why = "settlements grow on their own as the colony's population rises"; return false; }
-
-        // A world's shipyard already exists (the capital's birthright yard, say) — don't allow a second.
-        if (t == SurfaceBuildingType.SurfaceShipyard && b.shipyardLevel >= 1)
-        { why = "this world already has a shipyard — upgrade its tier from the Production tab"; return false; }
 
         // A RELAY HAS TO START FROM POWER. Checked here, per placement, rather than in CanPlaceType,
         // because unlike every other gate in that method this one is about the SPOT rather than about
@@ -304,8 +285,93 @@ public static class SurfaceBuildManager
         }
 
         int m = ColonyManager.DiscCost(info.costMetal), e = ColonyManager.DiscCost(info.costEnergy);
-        if (!GameMode.DevMode && !founding && !PlayerEconomy.CanAfford(m, e)) { why = $"need {m} metal, {e} energy"; return false; }
+        if (!GameMode.DevMode && !founding && !PlayerEconomy.CanAfford(m, e)) { why = ShortfallText(m, e); return false; }
         return true;
+    }
+
+    // ============================================================================================
+    // THE ANSWERS THE BUILD UI ASKS BEFORE ANYTHING IS DRAWN
+    //
+    // CanPlace tests a type's AUTHORED footprint at an origin, which is the right question for a fixed
+    // structure and the wrong one for everything the player draws: a farm's authored shape is a 2x3, so
+    // asking CanPlace about a farm at the cursor refused a perfectly good single tile whenever the 2x3
+    // beside it clipped water — and quoted that refusal as the reason. These answer for the cell the
+    // cursor is actually on, with the cost of the SMALLEST legal building of the class.
+    // ============================================================================================
+
+    /// What the smallest legal building of this class costs. A fixed structure's authored cost is for the
+    /// whole structure; a drawn class pays for its minimum tile count on the BuildScaling curve, so a
+    /// square reactor's card quotes the 2x2 it must be, not the price of one tile it can never be.
+    public static void MinimumCost(SurfaceBuildingInfo info, out int metal, out int energy)
+    {
+        metal = energy = 0;
+        if (info == null) return;
+        float mult = info.drawMode == BuildDrawMode.Fixed ? 1f : BuildScaling.CostMultiplier(Mathf.Max(1, info.minTiles));
+        metal = Mathf.RoundToInt(ColonyManager.DiscCost(info.costMetal) * mult);
+        energy = Mathf.RoundToInt(ColonyManager.DiscCost(info.costEnergy) * mult);
+    }
+
+    /// Could a drawn building of this class START on this cell? The cursor's question while one is held.
+    public static bool CanStartAt(CelestialBody b, SurfaceBuildingType t, Vector2Int c, out string why)
+    {
+        if (!CanPlaceType(b, t, out why)) return false;
+        var info = SurfaceBuildingDatabase.Get(t);
+        if (!CellBuildable(b, info, c.x, c.y, out why)) return false;
+        if (At(b, c.x, c.y) != null) { why = "something is already built here"; return false; }
+        if (SurfaceBuildQueue.JobAt(b, c.x, c.y) != null) { why = "another project is already going up here"; return false; }
+
+        // The relay rule is about the spot, exactly as in CanPlace.
+        if (t == SurfaceBuildingType.PowerNode && !GameMode.DevMode &&
+            !PowerGrid.CanPlantNodeAt(b, new[] { c }, out why))
+            return false;
+
+        if (!GameMode.DevMode && !Founding(b, t))
+        {
+            MinimumCost(info, out int m, out int e);
+            string short_ = ShortfallText(m, e);
+            if (short_ != null) { why = short_; return false; }
+        }
+        return true;
+    }
+
+    /// "need 120 metal (have 86)" — the shortfall as have-versus-need, or null when the empire can pay.
+    ///
+    /// Only the resources actually short are named, and a price above the storage CEILING says so: no
+    /// amount of waiting reaches a number the warehouses cannot hold, and "need 3,400 metal" alone would
+    /// send the player off to wait for it.
+    public static string ShortfallText(int metal, int energy)
+    {
+        if (GameMode.DevMode) return null;
+        int hm = Mathf.FloorToInt(PlayerEconomy.Get(ResourceType.Metal));
+        int he = Mathf.FloorToInt(PlayerEconomy.Get(ResourceType.Energy));
+        bool shortM = metal > hm, shortE = energy > he;
+        if (!shortM && !shortE) return null;
+
+        string s = shortM && shortE ? $"need {metal} metal (have {hm}) and {energy} energy (have {he})"
+                 : shortM ? $"need {metal} metal (have {hm})"
+                 : $"need {energy} energy (have {he})";
+
+        float capM = PlayerEconomy.Capacity(ResourceType.Metal), capE = PlayerEconomy.Capacity(ResourceType.Energy);
+        if (metal > capM || energy > capE)
+            s += $" — more than your storage holds ({Mathf.FloorToInt(metal > capM ? capM : capE)}); build Storage Depots first";
+        return s;
+    }
+
+    /// What the grid will do to a building that needs it, sited on these cells — or null when there is
+    /// nothing to warn about. Not a refusal: an off-grid consumer is a poor building, not an illegal one
+    /// (PowerGrid.UnpoweredFactor), so this is said beside the verdict rather than instead of it.
+    public static string PowerWarning(CelestialBody b, SurfaceBuildingInfo info, IEnumerable<Vector2Int> cells)
+    {
+        if (b == null || info == null || cells == null) return null;
+        if (info.powerDraw <= 0f && info.powerStorage <= 0f) return null;
+        var net = PowerGrid.NetForCells(b, cells);
+        if (net == null)
+            return info.powerDraw > 0f
+                ? $"no power reaches here — it runs at {PowerGrid.UnpoweredFactor * 100f:F0}% until a grid does (build a plant nearby, or chain Power Nodes to it)"
+                : "no power reaches here — it banks nothing until a grid does";
+        if (net.Dead)
+            return $"Grid {net.index} here has no plant on it — build one, or it runs at {PowerGrid.UnpoweredFactor * 100f:F0}%";
+        return null;
     }
 
     /// What a structure would actually PRODUCE at this spot, per second, at tech level 1 — the number
@@ -1141,7 +1207,7 @@ public static class SurfaceBuildManager
         why = null;
         if (p == null || !p.Info.upgradesTo.HasValue) { why = "nothing to upgrade into"; return false; }
         int m = ColonyManager.DiscCost(p.Info.upgradeMetal), e = ColonyManager.DiscCost(p.Info.upgradeEnergy);
-        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = $"need {m} metal, {e} energy"; return false; }
+        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = ShortfallText(m, e) ?? $"need {m} metal, {e} energy"; return false; }
         return true;
     }
 
@@ -1205,7 +1271,7 @@ public static class SurfaceBuildManager
         if (p.health >= 0.999f) { why = "undamaged"; return false; }
         if (b == null || b.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
         RepairCost(p, out int m, out int e);
-        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = $"need {m} metal, {e} energy"; return false; }
+        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = ShortfallText(m, e) ?? $"need {m} metal, {e} energy"; return false; }
         return true;
     }
 
@@ -1264,7 +1330,7 @@ public static class SurfaceBuildManager
         if (!p.CanUpgrade) { why = "already at max tech level"; return false; }
         if (b == null || b.owner != FactionManager.Player) { why = "this world isn't yours"; return false; }
         LevelUpCost(p, out int m, out int e);
-        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = $"need {m} metal, {e} energy"; return false; }
+        if (!GameMode.DevMode && !PlayerEconomy.CanAfford(m, e)) { why = ShortfallText(m, e) ?? $"need {m} metal, {e} energy"; return false; }
         return true;
     }
 

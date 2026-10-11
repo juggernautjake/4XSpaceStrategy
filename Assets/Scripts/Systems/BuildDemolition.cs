@@ -78,21 +78,44 @@ public static class BuildDemolition
     {
         if (!Active || Body?.surface == null) return false;
         if (cells.Contains(cell)) return false;
-        if (SurfaceBuildManager.At(Body, cell.x, cell.y) == null) return false;
+        var hit = SurfaceBuildManager.At(Body, cell.x, cell.y);
+        if (hit == null) return false;
 
         // A change to what is selected invalidates a split question that was asked about the old
         // selection. Without this, painting one more tile while the second confirm was up would leave
         // the panel asking about a split that the new selection might not even cause.
         AwaitingSplitConfirm = false;
 
+        // A FIXED STRUCTURE COMES DOWN WHOLE. A spaceport, a shipyard or a capitol has no smaller version
+        // of itself — its cost and output are authored for the whole footprint — and a partial teardown
+        // used to leave three tiles of capitol behind as a drawn shape, which then picked up the drawn
+        // size multiplier and produced MORE than the intact building had.
+        if (ComesDownWhole(hit))
+        {
+            foreach (var c in SurfaceBuildingDatabase.Footprint(hit)) cells.Add(c);
+            return true;
+        }
+
         cells.Add(cell);
         return true;
     }
 
+    /// Does this building only ever come down as a whole? True for the fixed-footprint classes.
+    public static bool ComesDownWhole(PlacedBuilding p)
+        => p != null && p.Info != null && p.Info.drawMode == BuildDrawMode.Fixed;
+
     /// Take one cell back out of the selection — the eraser, for a drag that went one tile too far.
     public static bool Unpaint(Vector2Int cell)
     {
-        if (!Active || !cells.Remove(cell)) return false;
+        if (!Active || !cells.Contains(cell)) return false;
+
+        // The eraser's half of the rule above: un-selecting part of a fixed structure un-selects all of it,
+        // or the selection could still end up holding a piece of one.
+        var hit = SurfaceBuildManager.At(Body, cell.x, cell.y);
+        if (ComesDownWhole(hit))
+            foreach (var c in SurfaceBuildingDatabase.Footprint(hit)) cells.Remove(c);
+        else cells.Remove(cell);
+
         AwaitingSplitConfirm = false;
         return true;
     }

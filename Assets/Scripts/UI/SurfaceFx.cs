@@ -782,5 +782,96 @@ public class SurfaceFx : MonoBehaviour
         TickAnimations(dt, t);
         TickArea(t);
         TickFlow(dt, t);
+        TickSeam();
+    }
+
+    // ==============================================================================================
+    // ACROSS THE SEAM (2026-10-11)
+    //
+    // The map wraps in longitude: once it is wider than its pane, the Planet View shows a mirror of the
+    // world one map-width to either side. The terrain, overlays and buildings are mirrored there — the
+    // effects were not, so smoke, blades, reach and power pulses vanished at the seam and a building on the
+    // far side of it stood dead. Rather than teach every effect to draw itself twice, this pass runs after
+    // all of them: every effect drawn this frame gets a TWIN one map-width away on the side the mirror is,
+    // a copy of its graphic, size, pivot, rotation and colour. Twins that land outside the pane are culled
+    // by its RectMask2D, so the only real cost is the copy.
+    //
+    // Every effect is a direct child of one of the three layers, centre-anchored (Sprite, Dot, AddSpan),
+    // which is what lets one generic pass cover them all. Twins live on their own layer so the passes
+    // above never see them, and are pooled.
+    // ==============================================================================================
+
+    /// Is the map wrapping (wider than its pane, mirrors up)? Wired by the Planet View.
+    public System.Func<bool> Wraps;
+
+    RectTransform seamLayer;
+    readonly List<Graphic> seamTwins = new List<Graphic>();
+
+    void TickSeam()
+    {
+        bool on = Wraps != null && Wraps();
+        if (seamLayer == null)
+        {
+            if (!on) return;
+            seamLayer = Layer("SeamTwins");
+        }
+        int used = 0;
+        if (on)
+        {
+            float w = root.rect.width;
+            used = TwinLayer(aoeLayer, w, used);
+            used = TwinLayer(flowLayer, w, used);
+            used = TwinLayer(animLayer, w, used);
+        }
+        for (int i = used; i < seamTwins.Count; i++)
+            if (seamTwins[i] != null && seamTwins[i].gameObject.activeSelf) seamTwins[i].gameObject.SetActive(false);
+    }
+
+    int TwinLayer(RectTransform layer, float mapW, int used)
+    {
+        if (layer == null) return used;
+        for (int i = 0; i < layer.childCount; i++)
+        {
+            var src = layer.GetChild(i).GetComponent<Graphic>();
+            if (src == null || !src.enabled || !src.gameObject.activeSelf) continue;
+            var srt = src.rectTransform;
+            // The twin goes on the side the nearer mirror is: an effect in the west half shows again past
+            // the east edge, and vice versa. A pane is never wider than the map while it wraps, so one twin
+            // per effect covers every seam that can be on screen.
+            float dx = srt.anchoredPosition.x < 0f ? mapW : -mapW;
+
+            var twin = TwinAt(used, src);
+            if (twin == null) continue;
+            used++;
+            var trt = twin.rectTransform;
+            trt.pivot = srt.pivot;
+            trt.sizeDelta = srt.sizeDelta;
+            trt.localRotation = srt.localRotation;
+            trt.anchoredPosition = srt.anchoredPosition + new Vector2(dx, 0f);
+            twin.color = src.color;
+            if (src is RawImage sr && twin is RawImage tr) { tr.texture = sr.texture; tr.uvRect = sr.uvRect; }
+            else if (src is Image si && twin is Image ti) { ti.sprite = si.sprite; ti.type = si.type; }
+        }
+        return used;
+    }
+
+    /// The pooled twin in slot `i`, of the same graphic type as `src` (rebuilt if the slot holds the other).
+    Graphic TwinAt(int i, Graphic src)
+    {
+        bool raw = src is RawImage;
+        while (seamTwins.Count <= i) seamTwins.Add(null);
+        var g = seamTwins[i];
+        if (g != null && (g is RawImage) != raw) { Destroy(g.gameObject); g = null; }
+        if (g == null)
+        {
+            var go = UIFactory.NewUI(seamLayer, "twin");
+            g = raw ? (Graphic)go.AddComponent<RawImage>() : go.AddComponent<Image>();
+            g.raycastTarget = false;
+            var rt = g.rectTransform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            seamTwins[i] = g;
+        }
+        if (!g.gameObject.activeSelf) g.gameObject.SetActive(true);
+        return g;
     }
 }
