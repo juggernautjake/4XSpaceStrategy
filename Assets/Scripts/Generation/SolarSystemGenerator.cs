@@ -313,6 +313,7 @@ public class SolarSystemGenerator : MonoBehaviour
                 }
                 budget -= body.mass; spendable -= body.mass;
 
+                GenProfiler.Doing = $"{body.name}: pipeline + resources";
                 ApplyWorldPipeline(body, rel, isMoon: false);
                 ResourceGenerator.GenerateResources(body);   // type is settled, so resources match it
                 // A step of its own: the pipeline and the resource roll are tens of ms on a big world,
@@ -322,6 +323,7 @@ public class SolarSystemGenerator : MonoBehaviour
                 // built in one go it was a single frame lasting as long as generating an entire planet.
                 // Now it yields every few milliseconds from inside its own loop, so one enormous frame
                 // becomes dozens of ordinary ones and the loading screen animates at a normal rate.
+                GenProfiler.Doing = $"{body.name}: terrain";
                 {
                     var surf = PlanetTerrainGenerator.BuildStepped(body, body.terrainParams,
                                                                   PlanetTerrainGenerator.Octaves,
@@ -331,6 +333,7 @@ public class SolarSystemGenerator : MonoBehaviour
                 yield return null;
                 // Ore is populated against the REAL baked surface, here — not earlier, when there is no
                 // surface to seed it into yet.
+                GenProfiler.Doing = $"{body.name}: ore, orbit, habitability, POIs";
                 OreGenerator.Populate(body);
                 body.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(currentStar, currentRadius);
                 body.orbitPhase = Random.Range(0f, 360f);
@@ -410,8 +413,10 @@ public class SolarSystemGenerator : MonoBehaviour
                     // planet would. That is the spec's headline: a big moon of a gas giant in the
                     // habitable zone can be a Terran world.
                     float moonRel = moon.distanceFromStar / Mathf.Max(0.5f, TempReference(currentStar));
+                    GenProfiler.Doing = $"moon of {body.name}: pipeline";
                     ApplyWorldPipeline(moon, moonRel, isMoon: true);
                     yield return null;
+                    GenProfiler.Doing = $"moon of {body.name}: terrain";
                     {
                         var msurf = PlanetTerrainGenerator.BuildStepped(moon, moon.terrainParams,
                                                                        PlanetTerrainGenerator.Octaves,
@@ -419,6 +424,7 @@ public class SolarSystemGenerator : MonoBehaviour
                         while (msurf.MoveNext()) yield return msurf.Current;
                     }
                     yield return null;
+                    GenProfiler.Doing = $"moon of {body.name}: ore, resources, orbit, POIs";
                     OreGenerator.Populate(moon);
                     ResourceGenerator.GenerateResources(moon);
 
@@ -459,7 +465,9 @@ public class SolarSystemGenerator : MonoBehaviour
         }
 
         // Lean towards a living world: make sure at least one planet sits in the habitable zone.
+        GenProfiler.Doing = $"{currentSystemName}: ensuring a habitable world";
         { var eh = EnsureHabitableWorld(system); while (eh.MoveNext()) yield return eh.Current; }
+        GenProfiler.Doing = $"{currentSystemName}: orbit spacing";
 
         // THE BACKSTOP. Everything above tries to lay bodies out with room to spare, but any of it can
         // be wrong — and EnsureHabitableWorld deliberately moves a planet after the fact. This pass is
@@ -477,6 +485,7 @@ public class SolarSystemGenerator : MonoBehaviour
             foreach (var b in moved)
             {
                 if (b == null) continue;
+                GenProfiler.Doing = $"{b.name}: re-derived after orbit spacing moved it";
                 { var rd = RederiveStepped(b, currentStar); while (rd.MoveNext()) yield return rd.Current; }
                 ApplyHabitability(b);
                 yield return null;

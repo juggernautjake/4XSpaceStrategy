@@ -44,6 +44,11 @@ public static class GenProfiler
     /// The inner iterator is driven exactly as the caller would have driven it and its `Current` is
     /// passed straight through, so a `WaitForSecondsRealtime` yielded from inside still behaves — this
     /// measures the chain without changing it.
+    /// What the generator said it was doing most recently — set at each heavy call (a world's pipeline,
+    /// its terrain, its ore and POIs, a re-derive), so a slow step names the world and the work instead
+    /// of only a step number that shifts whenever a yield is added anywhere before it.
+    public static string Doing;
+
     public static IEnumerator Watch(string label, IEnumerator inner)
     {
         if (inner == null) yield break;
@@ -57,7 +62,8 @@ public static class GenProfiler
             double ms = clock.Elapsed.TotalMilliseconds;
 
             if (ms >= WarnMs)
-                Debug.LogWarning($"[GenProfile] {label}: step {step} ran {ms:F0} ms without yielding.");
+                Debug.LogWarning($"[GenProfile] {label}: step {step} ran {ms:F0} ms without yielding" +
+                                 (string.IsNullOrEmpty(Doing) ? "." : $" (last: {Doing})."));
 
             if (!more) yield break;
             step++;
