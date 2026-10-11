@@ -316,7 +316,7 @@
       "10-Colony-Ship": "a SEA TURTLE carrying a habitat dome fused into its shell, with landing legs",
       "11-Mining-Barge": "a HERMIT CRAB whose shell is an ore hopper, with cutting claws and a refinery drum",
       "12-Transport": "a BLUE WHALE freighter, cargo pods slung along its flanks and a baleen intake at the bow",
-      "13-Terraformer": "a colossal JELLYFISH, its bell a seeding vessel and its trailing tendrils venting glittering spore vapour",
+      "13-Terraformer": "a colossal JELLYFISH (a domed bell, NOT a fish): its bell a seeding vessel, trailing tendrils venting glittering spore vapour",
       "14-Fighter": "a REEF SHARK: simple, fast, a cannon in the jaw and one thruster tail",
       "15-Fighter-MkII": "a HAMMERHEAD SHARK, the same fighter up-armoured: plated head, four cannons, twin thruster tails",
       "16-Fighter-MkIII": "a MEGALODON, fully armoured and bristling: cannon batteries, missile rails, a bank of thrusters",
@@ -393,8 +393,8 @@
       "25-Multi-Role-Station": "a great FOUNDRY COMPLEX: stacked smelter terraces, dishes, docking arms, turrets, everything venting heat",
       "26-Terraforming-Station": "a colossal RING OF VOLCANIC VENTS around a molten reactor core. Broad patches of ghastly SULPHUR-GREEN #D8E84F staining the black plate.",
       "27-Deep-Space-Station": "a compact BASALT CORE wrapped in enormous black heat-radiator wings",
-      "28-Mega-Station": "a FORGE-CITY the size of a small moon: nested smelter rings, chimneys, docking bays, a molten heart. A single great burning EYE at its summit.",
-      "29-Hyper-Speed-Relay": "a colossal RING of basalt emitter pylons around a blazing white aperture"
+      "28-Mega-Station": "a towering stepped ZIGGURAT forge-city, taller than wide: tier upon tier of smelter terraces and chimney stacks rising to a black spire crowned by a single great burning EYE",
+      "29-Hyper-Speed-Relay": "a colossal UPRIGHT GATE standing on edge: a thin vertical ring of barbed basalt emitter pylons framing a blazing white jump aperture, seen side-on like a doorway, not a disc"
     },
     "Cryithn": {
       "01-Scout": "a small faceted ICE SHARD: a single sliver of frosted crystal with one cold drive slot and a sensor needle. Sections of the hull are TRANSLUCENT GLASS-ICE, lit blue from within.",
@@ -416,7 +416,7 @@
       "17-Frigate": "a lean CRYSTAL LANCE: faceted armour, recessed turret ports, long drive slots along the flanks",
       "18-Cruiser": "a heavy MONOLITH: thick faceted armour over a pale core, weapon ports arrayed down the spine",
       "19-Carrier": "a broad ICE SHELF: a flat faceted slab with launch clefts along its underside. Sections of the hull are TRANSLUCENT GLASS-ICE, lit blue from within.",
-      "20-Dreadnought": "a colossal OBELISK: immense layered crystal armour, a spinal weapon channel glowing cold, a bank of drive slots. Great CLEAR CRYSTAL shards grow from the hull, catching the light.",
+      "20-Dreadnought": "a colossal OBELISK: immense layered crystal armour, a spinal weapon channel glowing cold, a bank of drive slots. A VIOLET crystal spine runs its length",
       "21-Battle-Station": "a faceted CRYSTAL FORTRESS: an angular drum ringed with recessed weapon ports",
       "22-Research-Station": "an OBSERVATORY RING: a torus of lens galleries and telescopes around a crystal core. Great CLEAR CRYSTAL shards grow from the hull, catching the light.",
       "23-Relay-Station": "a SPIRE: a tall crystal needle carrying a great mirror dish and antenna shards",
@@ -424,7 +424,7 @@
       "25-Multi-Role-Station": "a CRYSTAL CATHEDRAL COMPLEX: stacked faceted rings, lens galleries, docking arms, weapon ports",
       "26-Terraforming-Station": "a vast RING OF CONDENSER FINS around a pale glowing core. Sections of the hull are TRANSLUCENT GLASS-ICE, lit blue from within.",
       "27-Deep-Space-Station": "a compact crystal CORE wrapped in enormous mirrored collector panes",
-      "28-Mega-Station": "a CRYSTAL CITY the size of a small moon: nested faceted rings, spires, docking clefts, a cold glowing heart. Great CLEAR CRYSTAL shards grow from the hull, catching the light.",
+      "28-Mega-Station": "a CRYSTAL CITY the size of a small moon: nested faceted rings, spires, docking clefts, a cold glowing heart. VIOLET-banded rings",
       "29-Hyper-Speed-Relay": "a colossal RING of crystal emitter shards around a blazing pale aperture. Sections of the hull are TRANSLUCENT GLASS-ICE, lit blue from within."
     },
     "Sylvan": {

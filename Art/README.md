@@ -51,7 +51,7 @@ simplifies and writes a three-level LOD chain per hull (see
 
 A level that would come out within 30% of the base is skipped (mostly fragmented stations).
 
-**Measured 2026-10-11: 145 hulls, 408 `.glb` files, ~289 MB** (Ships 193 MB, Stations 98 MB) — about
+**Measured 2026-10-11, after the second re-roll pass: 145 hulls, 409 `.glb` files, ~297 MB** (Ships 193 MB, Stations 104 MB) — about
 2 MB per hull. The old "12 MB" figure was the pre-LOD pipeline (12k tris, 512/256 textures). That includes
 Cryithn and Sylvan, added 2026-10-11. The files are tracked by Git LFS
 (`Assets/Resources/SpaceAssets/**/*.glb` in `.gitattributes`), and the importer is byte-deterministic,
@@ -120,20 +120,20 @@ being assigned to a wingtip instead of the point.
 
 ## Fleet status and Meshy credits
 
-*Last updated 2026-10-11.*
+*Last updated 2026-10-11, after the second re-roll pass (see "Re-roll pass 2" below).* `verify-textures`: **ok 85, weak 60, FAIL 0**. Before the pass it was ok 75, weak 68, FAIL 2.
 
 | civ | hulls with art | notes |
 |---|---:|---|
 | Terran | 29/29 | |
-| Aquarii | 29/29 | 19-Carrier, 26-Terraforming-Station, 28-Mega-Station re-rolled 2026-10-11; all three now pass (primary WEAK, 3.7-6.8%) |
-| Pyrothian | 29/29 | the six pre-"Mordor" hulls (05, 12, 13, 27, 28, 29) regenerated, and 01-Scout and 14-Fighter re-rolled, 2026-10-11. Every Pyrothian hull now passes; Ember Crimson lands at 4-15% |
-| Cryithn | 29/29 | generated 2026-10-11. 27 "FAIL" `verify-textures` with *secondary swamped* — that is a **palette conflict, not bad art**: see below |
-| Sylvan | 29/29 | generated 2026-10-11. All pass (6 WEAK primary); 18, 22, 23 and 26 are second draws, the first draws failed on Blossom Violet and are kept in `Alternatives/` |
+| Aquarii | 29/29 | 19, 26 and 28 re-rolled 2026-10-11. Second pass: 12, 13, 16, 21, 25 and 27 replaced. Amber now reads 5.9-28% on those. Amber is still the fleet-wide weak point: 13 hulls are still WEAK on it |
+| Pyrothian | 29/29 | the six pre-"Mordor" hulls (05, 12, 13, 27, 28, 29) regenerated, and 01-Scout and 14-Fighter re-rolled, 2026-10-11. Every Pyrothian hull passes. Second pass: 28-Mega-Station is now a stepped ziggurat and 29-Hyper-Speed-Relay an upright gate. They are no longer two look-alike spiked discs |
+| Cryithn | 29/29 | generated 2026-10-11. Second pass: the two real FAILs were re-rolled and now pass. 20-Dreadnought went from 1.2% violet to 10.6%, and 28-Mega-Station from 0.7% to 10.2%. 11, 12 and 13 were also replaced. No hull reads *secondary swamped* any more: Glacier Light is now also keyed on brightness (`keyMinValue`) |
+| Sylvan | 29/29 | generated 2026-10-11. 18, 22, 23 and 26 are second draws. The first draws failed on Blossom Violet and are kept in `Alternatives/`. Second pass: 10, 17, 28 and 29 replaced. Only 14 and 19 are still WEAK |
 
 `verify-textures` rewrites `tools/retexture-worklist.json` on every run (it used to skip the write when
-nothing failed, which left a fixed fleet listed as broken). Today it lists only the 27 Cryithn hulls.
+nothing failed, which left a fixed fleet listed as broken). After the second pass it is empty.
 
-**The Cryithn palette conflict.** The Cryithn hull is glacier blue (`baseHue` 205) and its secondary,
+**The Cryithn palette conflict** (history: it is resolved now, because `keyMinValue: 0.85` keys Glacier Light on brightness as well as hue). The Cryithn hull is glacier blue (`baseHue` 205) and its secondary,
 Glacier Light, keys at hue 190: 15 degrees apart, inside the 28-degree key tolerance. So every blue hull
 pixel counts as "secondary", and the hulls read 46-90% secondary however good the art is. The art is
 what was asked for (blue light inside blue ice), so re-rolling can't fix it. The mask extractor will
@@ -160,7 +160,74 @@ bands and riveted plates (blood-red, not orange)", and every hull generated with
 | Sylvan, full fleet | 29 | 1,131 |
 | Sylvan re-rolls of four FAILs: 18, 22, 23, 26 | 4 | 156 |
 
-**Still to generate:** nothing. 38 credits remain until the monthly reset.
+**Still to generate:** nothing.
+
+### Re-roll pass 2 (2026-10-11)
+
+Balance **1,038 -> 63**: 25 hulls at 39 credits each, 975 credits, run as two batches (12, then 13).
+Each draw was checked with `verify-textures --dir Art/Incoming --verbose` and on a sheet of new and old
+thumbnails side by side. A draw was kept only if it verified better **and** looked at least as good.
+**17 were kept and 8 were not used.**
+
+- Replaced models: `Alternatives/<Civ>/<Unit>/superseded-2026-10-11b` (batch 1) or `superseded-2026-10-11c`
+  (batch 2).
+- Rejected draws: `.../reroll-2026-10-11b-not-used` or `reroll-2026-10-11c-not-used`. Their state entries
+  carry the same `#tag`.
+- The replaced hulls' state entries are tagged `#pre-reroll-2026-10-11b` or `#pre-reroll-2026-10-11c`.
+
+| hull | main accent, before -> after | result |
+|---|---|---|
+| Cryithn 20-Dreadnought | 1.2% FAIL -> 10.6% ok | kept |
+| Cryithn 28-Mega-Station | 0.7% FAIL -> 10.2% ok | kept |
+| Cryithn 11-Mining-Barge | 4.7% -> 10.1% ok | kept |
+| Cryithn 12-Transport | 3.3% -> 7.4% WEAK | kept |
+| Cryithn 13-Terraformer | 4.6% -> 8.1% ok | kept |
+| Cryithn 25-Multi-Role-Station | 5.4% -> 5.1% | not used (worse) |
+| Cryithn 29-Hyper-Speed-Relay | 5.4% -> 2.7% | not used (worse) |
+| Pyrothian 28-Mega-Station | ok -> ok | kept: now a stepped ziggurat with the eye on its spire |
+| Pyrothian 29-Hyper-Speed-Relay | ok -> ok | kept: now an upright gate, not a disc |
+| Aquarii 12-Transport | 5.0% -> 7.6% WEAK | kept |
+| Aquarii 13-Terraformer | 3.8% -> 18.7% ok | kept. This was the second draw; the first came back as a fish (not used) |
+| Aquarii 16-Fighter-MkIII | 2.9% -> 28.1% ok | kept |
+| Aquarii 21-Battle-Station | 3.4% -> 5.9% WEAK | kept |
+| Aquarii 25-Multi-Role-Station | 3.8% -> 7.9% WEAK | kept |
+| Aquarii 27-Deep-Space-Station | 4.5% -> 7.6% WEAK | kept: a truer glass-sponge lattice |
+| Aquarii 28-Mega-Station | 3.7% -> 12.5%, but magenta 8.3% -> 0.67% | not used: one flat gold block, and it lost its lights |
+| Aquarii 05-Probe | 4.0% -> 16.7% | not used: came back as a fish, not a nautilus |
+| Aquarii 10-Colony-Ship | 5.2% -> 5.5% | not used: no real gain, and it lost the habitat dome |
+| Aquarii 15-Fighter-MkII | 3.4% -> 13.1% | not used: no hammerhead, and 16 was refitted from the old 15 |
+| Aquarii 29-Hyper-Speed-Relay | 5.4% -> 8.9% | not used: a flat starfish, weaker than the curled arms |
+| Sylvan 10-Colony-Ship | 3.3% -> 18.7% ok | kept |
+| Sylvan 17-Frigate | 5.4% -> 17.0% ok | kept |
+| Sylvan 28-Mega-Station | 3.7% -> 6.1% WEAK | kept |
+| Sylvan 29-Hyper-Speed-Relay | 5.3% -> 10.9% ok | kept |
+
+What changed in the prompts. Every change was kept short, because a longer accent `role` pushes the
+civ signature out of the 800-character cap.
+
+- **`civ-colors.json` roles.** These primary roles changed:
+  - Aquarii: "BRIGHT AMBER-GOLD armour plates over the back, flanks and dorsal fin".
+  - Cryithn: "VIOLET facet inlays and the violet dorsal spine".
+  - Sylvan: "the broad VIOLET leaf-sail and canopy panels".
+
+  The Cryithn secondary, the blue light in the ice, is unchanged.
+- **`ship-design.json` creatures.**
+  - Cryithn 20 and 28 no longer say "Great CLEAR CRYSTAL shards", which pulled the hull away from
+    violet. They now say "A VIOLET crystal spine runs its length" and "VIOLET-banded rings".
+  - Pyrothian 28 is now "a towering stepped ZIGGURAT forge-city", and 29 is "a colossal UPRIGHT GATE
+    standing on edge".
+  - The Aquarii 13 jellyfish now says "(a domed bell, NOT a fish)".
+
+**Two new stations would not simplify.** Their meshes are too fragmented, like the Terran Carrier's, so
+the importer wrote no `_hi` or `_lo` level for either:
+
+- Pyrothian 29-Hyper-Speed-Relay ships as one 121,000-triangle level (6.9 MB).
+- Pyrothian 28-Mega-Station ships as one 60,000-triangle level (3.9 MB).
+
+Each is a single static station. If one shows up in profiling, move `superseded-2026-10-11b` back into
+`Active/` for that hull.
+
+63 credits remain, all permanent; the monthly allowance is used up.
 
 ### Running the pipeline with the API key (the way it works now)
 

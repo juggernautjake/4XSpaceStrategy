@@ -55,10 +55,10 @@ Aquarii_ScienceVessel             0   90    0    # nautilus, head on -X, spiral 
 Aquarii_ColonyShip                0    0    0    # sea turtle — LENGTH IS Z, flipper span is X
 Aquarii_Miner                     0   90    0    # hermit crab, cutting claws on -X
 Aquarii_Transport                 0   90    0    # blue whale, baleen intake on -X, flukes on +X
-Aquarii_Terraformer               0   90    0    # jellyfish, bell on -X, spore tendrils trailing +X
+Aquarii_Terraformer               0    0    0    # jellyfish (2026-10-11 draw), LENGTH IS Z: bell on +Z, tendrils trailing -Z
 Aquarii_Fighter                   0   90    0    # reef shark, nose on -X
 Aquarii_FighterII                 0   90    0    # hammerhead, head on -X
-Aquarii_FighterIII                0   90    0    # megalodon, nose on -X
+Aquarii_FighterIII                0   90    0    # megalodon (2026-10-11 draw), broad armoured head on -X, engine bank +X
 Aquarii_Frigate                   0    0    0    # lobster — length IS Z, claws already on +Z
 Aquarii_Cruiser                   0   90    0    # sawfish, the saw ram on -X
 Aquarii_Carrier                   0    0    0    # manta ray (re-rolled 2026-10-11) — WINGSPAN IS X, length is Z,
@@ -73,7 +73,7 @@ Aquarii_RelayStation              0    0    0  1.0  spin   # sea urchin, spines 
 Aquarii_SupplyStation             0    0    0  1.0  spin   # barnacle cluster
 Aquarii_MultiStation              0    0    0  1.0  spin   # crab fortress-city
 Aquarii_TerraformStation          0    0    0  1.0  spin   # anemone processor ring, 1.90 x 0.35 x 1.90
-Aquarii_DeepSpaceStation          0    0    0  1.0  spin   # glass-sponge lattice tower
+Aquarii_DeepSpaceStation          0    0    0  1.0  spin   # glass-sponge lattice pod (2026-10-11 draw)
 Aquarii_MegaStation               0    0    0  1.0  spin   # reef metropolis, a flat ring city
 # The one station that holds a fixed attitude. A jump gate that slowly rotates reads as adrift rather
 # than as installed, and its aperture faces +Y — ships pass UP through it — which a spin would smear.
@@ -159,8 +159,8 @@ Pyrothian_SupplyStation           0    0    0  1.0  spin   # clamped fuel crucib
 Pyrothian_MultiStation            0    0    0  1.0  spin   # foundry complex
 Pyrothian_TerraformStation        0    0    0  1.0  spin   # ring of volcanic vents
 Pyrothian_DeepSpaceStation        0    0    0  1.0  spin   # basalt core, four heat-radiator arms in an X, flat on Y
-Pyrothian_MegaStation             0    0    0  1.0  spin   # forge-city, the great eye at its summit
-Pyrothian_HyperRelay              0    0    0  1.0  nospin # a gate holds its attitude, as the others do
+Pyrothian_MegaStation             0    0    0  1.0  spin   # stepped ziggurat forge-city (2026-10-11), eye on the spire, +Y up
+Pyrothian_HyperRelay              0    0    0  1.0  nospin # UPRIGHT gate (2026-10-11): ring stands in X-Y, aperture faces +/-Z. CHECK in editor
 
 # ---- Cryithn (generated 2026-10-11, public API) ---------------------------------------------
 # Same export frame as the other three fleets: measure-bow reads "bulk +X, point -X" for 20 of the
@@ -179,8 +179,7 @@ Cryithn_ResearchShipIII           0  -90    0    # DISSENTER: the lens end measu
 Cryithn_ScienceVessel             0   90    0    # cathedral of lenses, telescope ring amidships
 Cryithn_ColonyShip                0   90    0    # cryo-ark, landing spines beneath
 Cryithn_Miner                     0   90    0    # ice-borer, segmented cutting head on -X
-Cryithn_Transport                 0    0    0    # T-shaped, LENGTH IS Z; bridge block measured on +Z. CHECK in
-                                                 # the editor — the least certain line in this fleet
+Cryithn_Transport                 0   90    0    # cargo spine (2026-10-11 draw), length on X, pointed bridge on -X
 Cryithn_Terraformer               0   90    0    # climate engine, condenser tower aft
 Cryithn_Fighter                   0   90    0    # crystal blade, point on -X, drive slot aft
 Cryithn_FighterII                 0  -90    0    # DISSENTER: the blade point is on +X (measure-bow 0.15),
@@ -189,7 +188,7 @@ Cryithn_FighterIII                0  -90    0    # glaive, point on +X like the 
 Cryithn_Frigate                   0   90    0    # crystal lance, point on -X
 Cryithn_Cruiser                   0   90    0    # monolith, rounded prow on -X, drive notches aft
 Cryithn_Carrier                   0   90    0    # ice shelf, point on -X, launch clefts under the slab
-Cryithn_Dreadnought               0   90    0    # obelisk, spinal channel, crystal growths, prow on -X
+Cryithn_Dreadnought               0   90    0    # obelisk (2026-10-11 draw), violet spine, prow on -X
 
 # Cryithn stations. All lie flat on Y except the relay spire, which stands upright like Terran's mast.
 Cryithn_BattleStation             0    0    0  1.0  spin   # faceted crystal fortress drum
@@ -219,7 +218,7 @@ Sylvan_ResearchShipII             0    0    0    # LENGTH IS Z (as wide as it is
                                                  # CHECK in the editor — if it flies tail-first use 0 180 0
 Sylvan_ResearchShipIII            0   90    0    # lens-flower disc on -X
 Sylvan_ScienceVessel              0   90    0    # flowering laboratory, dish-blossom on -X
-Sylvan_ColonyShip                 0   90    0    # woven seed pod, root-legs beneath
+Sylvan_ColonyShip                 0   90    0    # seed pod (2026-10-11 draw), rounded bow -X, violet leaf-wings swept to +X
 Sylvan_Miner                      0   90    0    # root-borer, boring head on -X, ore sacs aft
 Sylvan_Transport                  0   90    0    # vine freighter, bark cab on -X, cargo bulbs aft
 Sylvan_Terraformer                0   90    0    # seeding bloom, petals and spore vents aft

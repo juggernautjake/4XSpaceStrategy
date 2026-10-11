@@ -68,7 +68,7 @@
         "name": "Amber",
         "hex": "#F2A81E",
         "keyHue": 40,
-        "role": "the armour plates over the back, flanks and dorsal fin"
+        "role": "BRIGHT AMBER-GOLD armour plates over the back, flanks and dorsal fin"
       },
       "secondary": {
         "name": "Magenta",
@@ -107,7 +107,7 @@
         "name": "Aurora Violet",
         "hex": "#C64FD8",
         "keyHue": 292,
-        "role": "faceted panel inlays and the dorsal spine"
+        "role": "VIOLET facet inlays and the violet dorsal spine"
       },
       "secondary": {
         "name": "Glacier Light",
@@ -128,7 +128,7 @@
         "name": "Blossom Violet",
         "hex": "#A24FD8",
         "keyHue": 285,
-        "role": "the broad leaf-sail and canopy panels"
+        "role": "the broad VIOLET leaf-sail and canopy panels"
       },
       "secondary": {
         "name": "Sap Amber",
