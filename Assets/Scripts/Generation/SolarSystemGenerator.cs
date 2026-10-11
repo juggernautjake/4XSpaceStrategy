@@ -315,6 +315,9 @@ public class SolarSystemGenerator : MonoBehaviour
 
                 ApplyWorldPipeline(body, rel, isMoon: false);
                 ResourceGenerator.GenerateResources(body);   // type is settled, so resources match it
+                // A step of its own: the pipeline and the resource roll are tens of ms on a big world,
+                // and sharing a step with the first terrain slice put them over the profiler's line.
+                yield return null;
                 // STEPPED. A world's terrain is by far the most expensive step in the whole load, and
                 // built in one go it was a single frame lasting as long as generating an entire planet.
                 // Now it yields every few milliseconds from inside its own loop, so one enormous frame
@@ -342,6 +345,7 @@ public class SolarSystemGenerator : MonoBehaviour
 
                 ApplyHabitability(body);
                 POIGenerator.Populate(body);
+                yield return null;   // ore + POIs done; the first moon's pipeline gets a step of its own
 
                 // ---- Moons, out of this planet's own allowance ----
                 //
@@ -407,6 +411,7 @@ public class SolarSystemGenerator : MonoBehaviour
                     // habitable zone can be a Terran world.
                     float moonRel = moon.distanceFromStar / Mathf.Max(0.5f, TempReference(currentStar));
                     ApplyWorldPipeline(moon, moonRel, isMoon: true);
+                    yield return null;
                     {
                         var msurf = PlanetTerrainGenerator.BuildStepped(moon, moon.terrainParams,
                                                                        PlanetTerrainGenerator.Octaves,
@@ -428,6 +433,7 @@ public class SolarSystemGenerator : MonoBehaviour
                     moon.eccentricity = Random.Range(0f, 0.2f);
                     ApplyHabitability(moon);
                     POIGenerator.Populate(moon);
+                    yield return null;
 
                     body.moons.Add(moon);
                     // Consecutive moons must clear each other's discs, not just be "some distance" apart.
@@ -471,14 +477,14 @@ public class SolarSystemGenerator : MonoBehaviour
             foreach (var b in moved)
             {
                 if (b == null) continue;
-                Rederive(b, currentStar);
+                { var rd = RederiveStepped(b, currentStar); while (rd.MoveNext()) yield return rd.Current; }
                 ApplyHabitability(b);
                 yield return null;
                 if (b.moons == null) continue;
                 foreach (var m in b.moons)
                 {
                     if (m == null) continue;
-                    Rederive(m, currentStar);
+                    { var rm = RederiveStepped(m, currentStar); while (rm.MoveNext()) yield return rm.Current; }
                     ApplyHabitability(m);
                     yield return null;
                 }
@@ -790,7 +796,7 @@ public class SolarSystemGenerator : MonoBehaviour
         {
             bool moved = Mathf.Abs(m.distanceFromStar - best.distanceFromStar) > 0.001f;
             m.distanceFromStar = best.distanceFromStar;
-            if (moved) ReconcileClimate(m, currentStar);
+            if (moved) { var rc = ReconcileClimateStepped(m, currentStar); while (rc.MoveNext()) yield return rc.Current; }
             ApplyHabitability(m);
         }
     }
@@ -901,22 +907,60 @@ public class SolarSystemGenerator : MonoBehaviour
 
     static void Rederive(CelestialBody b, StarData star)
     {
-        if (b.habitabilityLocked || HomeworldOnboarding.IsOption(b))
-        {
-            var p = b.terrainParams;
-            p.heat = InsolationRules.ClampToOrbit(p.heat, star, b.distanceFromStar);
-            b.terrainParams = p;
-            TerraformVisuals.CaptureNatural(b);
-            b.biosphereActive = BiosphereRules.GeneratesWithBiosphere(b);
-            b.surface = PlanetTerrainGenerator.GenerateSurface(b);
-            return;
-        }
+        if (IsForced(b)) { ClampForced(b, star); b.surface = PlanetTerrainGenerator.GenerateSurface(b); return; }
         ReconcileClimate(b, star);
+    }
+
+    /// Rederive, with the surface built in steps (PlanetTerrainGenerator.BuildStepped). A whole surface in
+    /// one go is the single most expensive thing generation does — a large world ran ~500 ms without
+    /// yielding ("[GenProfile] system 2/5: step 175 ran 497 ms").
+    static System.Collections.IEnumerator RederiveStepped(CelestialBody b, StarData star)
+    {
+        if (b == null || star == null || star.isBlackHole) yield break;
+        if (IsForced(b))
+        {
+            ClampForced(b, star);
+            var s = PlanetTerrainGenerator.BuildStepped(b, b.terrainParams, PlanetTerrainGenerator.Octaves, x => b.surface = x);
+            while (s.MoveNext()) yield return s.Current;
+            yield break;
+        }
+        var r = ReconcileClimateStepped(b, star);
+        while (r.MoveNext()) yield return r.Current;
+    }
+
+    static bool IsForced(CelestialBody b) => b.habitabilityLocked || HomeworldOnboarding.IsOption(b);
+
+    static void ClampForced(CelestialBody b, StarData star)
+    {
+        var p = b.terrainParams;
+        p.heat = InsolationRules.ClampToOrbit(p.heat, star, b.distanceFromStar);
+        b.terrainParams = p;
+        TerraformVisuals.CaptureNatural(b);
+        b.biosphereActive = BiosphereRules.GeneratesWithBiosphere(b);
     }
 
     public static void ReconcileClimate(CelestialBody body, StarData star)
     {
         if (body == null || star == null || star.isBlackHole) return;
+        ReconcileClimateOnly(body, star);
+        body.surface = PlanetTerrainGenerator.GenerateSurface(body);
+        FinishReconcile(body);
+    }
+
+    /// ReconcileClimate with the surface built in steps, for the generation coroutines.
+    static System.Collections.IEnumerator ReconcileClimateStepped(CelestialBody body, StarData star)
+    {
+        if (body == null || star == null || star.isBlackHole) yield break;
+        ReconcileClimateOnly(body, star);
+        var s = PlanetTerrainGenerator.BuildStepped(body, body.terrainParams, PlanetTerrainGenerator.Octaves, x => body.surface = x);
+        while (s.MoveNext()) yield return s.Current;
+        yield return null;
+        FinishReconcile(body);
+    }
+
+    /// Everything ReconcileClimate decides BEFORE the surface is baked: heat, water, air, type, biome.
+    static void ReconcileClimateOnly(CelestialBody body, StarData star)
+    {
         bool isMoon = body.parentBody != null;
         float rel = InsolationRules.RelOf(star, body.distanceFromStar);
 
@@ -943,7 +987,11 @@ public class SolarSystemGenerator : MonoBehaviour
 
         GeothermalMap.Invalidate(body);
         TectonicsMap.Invalidate(body);
-        body.surface = PlanetTerrainGenerator.GenerateSurface(body);
+    }
+
+    /// What follows the bake: ores against the real surface, then resources.
+    static void FinishReconcile(CelestialBody body)
+    {
         OreGenerator.Populate(body);
         body.resources = new ResourceDeposit();
         ResourceGenerator.GenerateResources(body);

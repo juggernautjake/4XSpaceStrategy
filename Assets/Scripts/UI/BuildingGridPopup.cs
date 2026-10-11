@@ -278,13 +278,36 @@ public class BuildingGridPopup : MonoBehaviour
         if (labor > 0.005f) outs.Add($"<color=#4DFF6E>+{labor:0.0} labor</color>");
         if (info != null && info.powerRange > 0f && info.energyPerSec <= 0f) outs.Add("<color=#9FB4C8>carries power</color>");
 
-        sb.Append("\n<color=#9FB4C8>Output</color>  ");
-        sb.Append(outs.Count > 0 ? string.Join("<color=#5A6A7A>  ·  </color>", outs) : "<color=#7C8CA0>none</color>");
+        // A PYLON'S HEADLINE IS ITS GRID (2026-10-11): "When selecting a power node, have its info window
+        // display the Grid power total instead of an output, and show power draw for the grid instead of
+        // upkeep." A node makes nothing and costs nothing, so Output/Upkeep read "carries power" / "none"
+        // — true and useless. What a player clicking a pylon wants is the grid it carries.
+        bool pylon = info != null && PowerGrid.Projects(info) && info.energyPerSec <= 0f;
+        if (pylon)
+        {
+            if (net != null)
+            {
+                sb.Append($"\n<color=#9FB4C8>Grid power</color>  <color=#4DFF6E>+{net.generation:0.0} energy/s</color> " +
+                          $"<color=#7C8CA0>from {net.generators.Count} plant{(net.generators.Count == 1 ? "" : "s")}</color>");
+                sb.Append($"\n<color=#9FB4C8>Grid draw</color>  <color=#FF6659>-{net.draw:0.0} energy/s</color> " +
+                          $"<color=#7C8CA0>by {net.consumers.Count} building{(net.consumers.Count == 1 ? "" : "s")}</color>");
+            }
+            else
+            {
+                sb.Append("\n<color=#9FB4C8>Grid power</color>  <color=#FFBF4D>none, not connected to a plant</color>");
+                sb.Append("\n<color=#9FB4C8>Grid draw</color>  <color=#7C8CA0>none</color>");
+            }
+        }
+        else
+        {
+            sb.Append("\n<color=#9FB4C8>Output</color>  ");
+            sb.Append(outs.Count > 0 ? string.Join("<color=#5A6A7A>  ·  </color>", outs) : "<color=#7C8CA0>none</color>");
 
-        sb.Append("\n<color=#9FB4C8>Upkeep</color>  ");
-        if (draw > 0.005f) sb.Append($"<color=#FF6659>-{draw:0.0} energy/s</color>");
-        else if (info != null && info.powerDraw > 0f) sb.Append("<color=#FFBF4D>needs power — no grid reaches it</color>");
-        else sb.Append("<color=#7C8CA0>none</color>");
+            sb.Append("\n<color=#9FB4C8>Upkeep</color>  ");
+            if (draw > 0.005f) sb.Append($"<color=#FF6659>-{draw:0.0} energy/s</color>");
+            else if (info != null && info.powerDraw > 0f) sb.Append("<color=#FFBF4D>needs power — no grid reaches it</color>");
+            else sb.Append("<color=#7C8CA0>none</color>");
+        }
 
         AppendPower(sb, b, sel, net);
 
@@ -322,10 +345,15 @@ public class BuildingGridPopup : MonoBehaviour
         foreach (var p in net.projectors) if (p.Info != null && p.Info.energyPerSec <= 0f) pylons++;
 
         sb.Append($"\n<color=#{hex}><b>GRID {net.index}</b> · {PowerGrid.SupplyLabel(net)}</color>");
-        sb.Append($"\n<color=#9FB4C8>Supply</color>  <color=#4DFF6E>+{net.generation:0.0}/s</color> " +
-                  $"<color=#7C8CA0>from {net.generators.Count} plant{(net.generators.Count == 1 ? "" : "s")}</color>");
-        sb.Append($"\n<color=#9FB4C8>Demand</color>  <color=#FF6659>-{net.draw:0.0}/s</color> " +
-                  $"<color=#7C8CA0>by {net.consumers.Count} building{(net.consumers.Count == 1 ? "" : "s")}</color>");
+        // A pylon's headline lines above already ARE the grid's supply and demand; don't say it twice.
+        bool pylon = PowerGrid.Projects(info) && info.energyPerSec <= 0f;
+        if (!pylon)
+        {
+            sb.Append($"\n<color=#9FB4C8>Supply</color>  <color=#4DFF6E>+{net.generation:0.0}/s</color> " +
+                      $"<color=#7C8CA0>from {net.generators.Count} plant{(net.generators.Count == 1 ? "" : "s")}</color>");
+            sb.Append($"\n<color=#9FB4C8>Demand</color>  <color=#FF6659>-{net.draw:0.0}/s</color> " +
+                      $"<color=#7C8CA0>by {net.consumers.Count} building{(net.consumers.Count == 1 ? "" : "s")}</color>");
+        }
 
         float bal = net.generation - net.draw;
         if (bal >= 0f)
