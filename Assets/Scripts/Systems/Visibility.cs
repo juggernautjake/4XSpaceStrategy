@@ -596,6 +596,23 @@ public static class VisibilityService
     public static bool FoggedAt(Vector3 point)
         => !GameMode.DevMode && UnexploredSystemAt(point) != null && !PlayerSensorsSee(point);
 
+    /// Is this ship drawn for the player right now — the question every EFFECT a ship makes has to ask
+    /// (its shots, muzzle flashes, the impacts on it, its death). Answered from what is actually on
+    /// screen when the ship has a visual, so an effect can never disagree with the hull it belongs to;
+    /// from the rules (any concealment reason, or the system fog) when it has none. A null ship — a
+    /// round whose shooter has since died — counts as shown.
+    public static bool ShownToPlayer(Unit u)
+    {
+        if (u == null) return true;
+        var t = UnitVisuals.TransformOf(u);
+        if (t != null)
+        {
+            var bind = t.GetComponent<ConcealBinding>();
+            return bind == null || !bind.Concealed;
+        }
+        return !IsHidden(u) && !FoggedForPlayer(u);
+    }
+
     /// Is this ship hidden from the player by the system fog?
     ///   * the player's own ships: never (they are the thing that explores);
     ///   * docked at a world: goes with that world, so never left floating over a hidden planet;

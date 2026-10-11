@@ -504,8 +504,13 @@ public class UnitManager : MonoBehaviour
             ? u.location.visualObject.transform.position + Vector3.up * 1.2f
             : Vector3.Lerp(u.travelFrom, u.travelTo, u.TravelProgress);
 
-        UnitTokenRenderer.Instance?.FlashDestroy(pos);
-        SimpleAudio.Instance?.PlayUnitDestroyed();
+        // Not for a ship the player is not shown (system fog of war, or any concealment): the red X would
+        // mark exactly where the hidden ship was.
+        if (VisibilityService.ShownToPlayer(u))
+        {
+            UnitTokenRenderer.Instance?.FlashDestroy(pos);
+            SimpleAudio.Instance?.PlayUnitDestroyed();
+        }
 
         if (scrap && CanScrap(u))
         {

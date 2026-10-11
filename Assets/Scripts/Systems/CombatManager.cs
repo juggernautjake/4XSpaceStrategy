@@ -452,10 +452,16 @@ public class CombatManager : MonoBehaviour
 
         target.Health -= dealt;
 
-        ExplosionRenderer.Instance?.Impact(at, w.colour);
-        // Scaled by what actually got through the armour, not by what was fired — a round that barely
-        // scratches a dreadnought should not land with the same weight as one that hurts it.
-        SimpleAudio.Instance?.PlayImpact(at, dealt);
+        // Keyed on the TARGET, not the shooter (system fog of war): a visible ship hit by one the player
+        // cannot see still visibly takes the hit — the round itself was never drawn, so the flash on the
+        // hull is how the player learns something unseen is firing. A hit on a hidden ship shows nothing.
+        if (VisibilityService.ShownToPlayer(target))
+        {
+            ExplosionRenderer.Instance?.Impact(at, w.colour);
+            // Scaled by what actually got through the armour, not by what was fired — a round that barely
+            // scratches a dreadnought should not land with the same weight as one that hurts it.
+            SimpleAudio.Instance?.PlayImpact(at, dealt);
+        }
 
         // Experience for landing it. `battles` is incremented on the KILL rather than per hit, in
         // Destroy below — a ship that fires a thousand rounds into one dreadnought fought one battle.
@@ -476,8 +482,12 @@ public class CombatManager : MonoBehaviour
         Vector3 at = PosOf(victim);
         float size = HullScale(victim);
 
-        ExplosionRenderer.Instance?.Death(at, size);
-        SimpleAudio.Instance?.PlayShipDestroyed(size);
+        // A ship the player cannot see dies unseen and unheard (system fog of war, or any concealment).
+        if (VisibilityService.ShownToPlayer(victim))
+        {
+            ExplosionRenderer.Instance?.Death(at, size);
+            SimpleAudio.Instance?.PlayShipDestroyed(size);
+        }
 
         if (killer != null)
         {

@@ -70,6 +70,13 @@ public class ProjectileRenderer : MonoBehaviour
         /// RaceVfx.WeaponColour). Resolved once at Fire and carried, because the shooter can die
         /// mid-flight and a round must not change colour when it does.
         public Color colour;
+
+        /// Fired by a ship the player is not shown (system fog, cloak, any concealment). The round is
+        /// SIMULATED exactly as any other — it flies, it is caught by point defence, it hits and does
+        /// damage — but it is never DRAWN: no bolt, no beam, no light, no muzzle flash, no launch sound,
+        /// no intercept burst. What the player does see is the damage arriving on a visible target (the
+        /// impact flash is CombatManager's, keyed on the target), so something unseen is clearly firing.
+        public bool hidden;
     }
 
     readonly List<Shot> shots = new List<Shot>();
@@ -143,6 +150,7 @@ public class ProjectileRenderer : MonoBehaviour
         // object carrying one stale field from its last flight is the classic way this goes wrong, and
         // it would show up as a round that inherited the previous round's lock or lifetime.
         s.tr = null; s.beam = null; s.light = null;
+        s.hidden = !VisibilityService.ShownToPlayer(shooter);
 
         if (s.instant) { FireInstant(s, from, aimPoint); }
         else           { FireTravelling(s, w, from, aimPoint); }
@@ -150,7 +158,7 @@ public class ProjectileRenderer : MonoBehaviour
         // A real light on the round, so a shot actually illuminates what it passes and what it hits.
         // Range is tied to the weapon's own glow and width, so a heavy plasma bolt throws light and a
         // point-defence needle barely does — one number per weapon, no extra table.
-        s.light = RentLight();
+        s.light = s.hidden ? null : RentLight();
         if (s.light != null)
         {
             s.light.color = s.colour;
@@ -161,6 +169,7 @@ public class ProjectileRenderer : MonoBehaviour
         }
 
         shots.Add(s);
+        if (s.hidden) return;   // nothing below is anything but appearance — see Shot.hidden
         SimpleAudio.Instance?.PlayWeapon(w.cls, from);
 
         // The muzzle lights up on the SAME call that creates the round, so the flash and the shot can
@@ -193,11 +202,14 @@ public class ProjectileRenderer : MonoBehaviour
         Vector3 end = hit ? hullPos : from + (aimPoint - from) * 1.12f;
         s.aimPoint = end;
 
-        s.beam = RentBeam();
-        s.beam.startColor = s.beam.endColor = s.colour * w.glow;
-        s.beam.widthMultiplier = w.width;
-        s.beam.SetPosition(0, from);
-        s.beam.SetPosition(1, end);
+        if (!s.hidden)
+        {
+            s.beam = RentBeam();
+            s.beam.startColor = s.beam.endColor = s.colour * w.glow;
+            s.beam.widthMultiplier = w.width;
+            s.beam.SetPosition(0, from);
+            s.beam.SetPosition(1, end);
+        }
 
         if (hit) CombatManager.Instance?.ResolveHit(s.shooter, s.target, w, s.damage, hullPos);
         else     CombatManager.Instance?.ReportMiss(s.shooter);
@@ -242,6 +254,7 @@ public class ProjectileRenderer : MonoBehaviour
         s.vel = dir * Ballistics.SpeedAt(w, 0f);
         s.maxLife = w.Lifetime;
 
+        if (s.hidden) return;   // flown, never drawn (DrawTravelling already tolerates a null quad)
         s.tr = RentQuad();
         var mr = s.tr.GetComponent<MeshRenderer>();
         mr.material.color = s.colour * w.glow;
@@ -467,7 +480,7 @@ public class ProjectileRenderer : MonoBehaviour
             if (owner == null || s.target.owner != owner.owner) continue;
             if (Vector3.Distance(s.pos, screenCentre) > escortRadius) continue;
 
-            ExplosionRenderer.Instance?.Burst(s.pos, 0.35f, s.colour);
+            if (!s.hidden) ExplosionRenderer.Instance?.Burst(s.pos, 0.35f, s.colour);
             Retire(s); shots.RemoveAt(i); killed++;
         }
         return killed;
@@ -483,7 +496,7 @@ public class ProjectileRenderer : MonoBehaviour
             if (s.target != protectedUnit) continue;
             if (Vector3.Distance(s.pos, centre) > radius) continue;
 
-            ExplosionRenderer.Instance?.Burst(s.pos, 0.35f, s.colour);
+            if (!s.hidden) ExplosionRenderer.Instance?.Burst(s.pos, 0.35f, s.colour);
             Retire(s); shots.RemoveAt(i); killed++;
         }
         return killed;

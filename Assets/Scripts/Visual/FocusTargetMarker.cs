@@ -94,6 +94,9 @@ public class FocusTargetMarker : MonoBehaviour
         {
             var t = CombatOrders.FocusFor(sel[i]);
             if (t == null || t.IsDestroyed) continue;
+            // A target the player is not being shown (it slipped into the system fog, or cloaked) gets
+            // no ring: a ring round empty space marks exactly where the hidden hull is.
+            if (!VisibilityService.ShownToPlayer(t)) continue;
             if (!wanted.Contains(t)) wanted.Add(t);
             // A selection spanning more than four separate orders is not a picture anyone can read,
             // and drawing forty rings would be worse than drawing none.
