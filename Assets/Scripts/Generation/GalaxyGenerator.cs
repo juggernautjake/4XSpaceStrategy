@@ -286,10 +286,8 @@ public static class GalaxyGenerator
         LinkBodies(home);
 
         if (home.bodies.Count == 0) home.bodies.Add(new CelestialBody(CelestialBodyType.RockyPlanet));
-        // The overlap of the species' band and the star's drawn one — see Habitability.PlacementZone —
-        // reaching inward to the species' own edge when its climate is hotter than that overlap can give
-        // (Habitability.CradleZone: a Pyrothian cradle goes on ring 3, not clamped cold on ring 4).
-        Habitability.CradleZone(home.combinedStar, species, out float inner, out float outer);
+        // The overlap of the species' band and the star's drawn one — see Habitability.PlacementZone.
+        Habitability.PlacementZone(home.combinedStar, species, out float inner, out float outer);
         float center = (inner + outer) * 0.5f;
 
         // Promote the planet ALREADY nearest the habitable zone, and convert it where it stands.

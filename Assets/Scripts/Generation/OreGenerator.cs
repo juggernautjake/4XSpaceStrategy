@@ -84,7 +84,9 @@ public static class OreGenerator
     /// world's Mineral Index came out speckled. The Mineral Index still reads the crust itself. Flip this
     /// back on once ores are seeded as coherent deposits. With it off, Populate CLEARS any ore a tile
     /// carries and the save loader drops saved ones, so old saves lose their speckle too.
-    public const bool Enabled = false;
+    /// static readonly, not const: a const false makes every `if (!Enabled) return;` leave the code after
+    /// it "unreachable" (CS0162), here and in PlanetViewWindow.
+    public static readonly bool Enabled = false;
 
     public static void Populate(CelestialBody body)
     {
