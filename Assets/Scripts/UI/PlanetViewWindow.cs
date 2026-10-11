@@ -1690,6 +1690,11 @@ public class PlanetViewWindow : MonoBehaviour
         // one — a failure that only appears at the seam, which is where nobody is looking during a test.
         // The call is a handful of property writes and early-outs entirely when wrapping is off.
         SyncWrapMirrors();
+        // The moon panes' mirrors too, every frame, so an index switched on (or a survey lifting the fog)
+        // reaches the far side of the seam at once rather than at the next pan or zoom.
+        foreach (var kv in moonImg)
+            if (kv.Value != null && moonFrame.TryGetValue(kv.Key, out var mf) && mf != null)
+                SyncMoonMirrors(kv.Value, mf.rect);
 
         string sig = Signature();
         if (sig != lastSig) { lastSig = sig; Rebuild(); }
@@ -8894,6 +8899,14 @@ public class PlanetViewWindow : MonoBehaviour
         var rt = img.rectTransform;
         bool on = PaneWrapEnabled(frame, rt.sizeDelta);
 
+        // THE WHOLE STACK, NOT JUST THE GROUND (2026-10-11). A mirror used to copy only the terrain, so
+        // scrolling a moon across its seam showed the index highlights vanishing off one side and
+        // popping in on the other ("there is a visible seam"), and an unsurveyed moon's coastlines
+        // showed through on the mirrored half because the fog was not copied either. Each mirror now
+        // carries the same three layers as the real map, in the same order: ground, index, fog.
+        var srcIndex = rt.Find("MoonIndex")?.GetComponent<RawImage>();
+        var srcFog = rt.Find("MoonFog")?.GetComponent<RawImage>();
+
         for (int i = 0; i < 2; i++)
         {
             string nm = i == 0 ? "WrapL" : "WrapR";
@@ -8905,6 +8918,13 @@ public class PlanetViewWindow : MonoBehaviour
                 UIFactory.Stretch(child);
                 var ri = child.gameObject.AddComponent<RawImage>();
                 ri.raycastTarget = false;                // moon panes are viewers, not build surfaces
+                foreach (var layer in new[] { "Index", "Fog" })
+                {
+                    var l = UIFactory.NewUI(child, layer).AddComponent<RawImage>();
+                    UIFactory.Stretch(l.rectTransform);
+                    l.raycastTarget = false;
+                    l.gameObject.SetActive(false);
+                }
             }
 
             var mi = child.GetComponent<RawImage>();
@@ -8915,7 +8935,21 @@ public class PlanetViewWindow : MonoBehaviour
             child.offsetMin = new Vector2(dx, 0f);
             child.offsetMax = new Vector2(dx, 0f);
             if (mi != null) { mi.texture = img.texture; mi.color = img.color; }
+            CopyLayer(child.Find("Index")?.GetComponent<RawImage>(), srcIndex);
+            CopyLayer(child.Find("Fog")?.GetComponent<RawImage>(), srcFog);
         }
+    }
+
+    /// Make a mirror layer show exactly what its source shows, or nothing when the source is hidden.
+    static void CopyLayer(RawImage dst, RawImage src)
+    {
+        if (dst == null) return;
+        bool show = src != null && src.gameObject.activeSelf && src.texture != null;
+        if (dst.gameObject.activeSelf != show) dst.gameObject.SetActive(show);
+        if (!show) return;
+        dst.texture = src.texture;
+        dst.color = src.color;
+        dst.uvRect = src.uvRect;
     }
 
     // Is the cursor over an open moon frame? Keeps PollMapPan from starting a host pan at a shared edge.
