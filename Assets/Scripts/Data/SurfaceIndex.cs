@@ -699,7 +699,10 @@ public static class SurfaceIndex
         // on ground where nothing could grow.
         if (b == null || !b.biosphereActive) return 0f;
 
-        if (f.water) return 0.02f;
+        // Open water is no farmland — unless the farmer lives in it. An aquatic species (the Aquarii)
+        // farms the sea as kelp beds and may build a farm there (SurfaceBuildManager.WaterAllowed), so for
+        // them water reads by its own warmth and biome: reefs and warm shallows richest, a frozen sea poor.
+        if (f.water) return SurfaceBuildManager.AquaticBuilder(b) ? KelpFertile(f) : 0.02f;
 
         // A temperate optimum: too cold OR too hot both kill it.
         float warmth = 1f - Mathf.Abs(f.temperature - 0.62f) / 0.62f;
@@ -710,6 +713,18 @@ public static class SurfaceIndex
 
         float v = warmth * 0.45f + wet * 0.35f + flat * 0.2f;
         v *= Mathf.Lerp(0.35f, 1f, BiomeFertile(f.terrain));      // the biome confirms or vetoes it
+        return Mathf.Clamp01(v * 1.35f);
+    }
+
+    /// The Fertile Index of a WATER tile for an aquatic species: kelp, not crops (2026-10-11). Water is
+    /// never short out there and there is no slope to plough, so it is warmth and the biome — the same
+    /// BiomeFertile table that already ranks a reef as the most productive water there is and an open
+    /// ocean as a fishery. Lands a little under the best land, so a coast is still worth farming.
+    static float KelpFertile(PlanetTerrainGenerator.Sample f)
+    {
+        float warmth = Mathf.Clamp01(1f - Mathf.Abs(f.temperature - 0.55f) / 0.6f);
+        float v = warmth * 0.5f + 0.3f;
+        v *= Mathf.Lerp(0.35f, 1f, BiomeFertile(f.terrain));
         return Mathf.Clamp01(v * 1.35f);
     }
 

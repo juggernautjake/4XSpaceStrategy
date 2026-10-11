@@ -2270,7 +2270,7 @@ public class PlanetViewWindow : MonoBehaviour
                             int cm = Mathf.RoundToInt(ColonyManager.DiscCost(info.costMetal) * mult);
                             int ce = Mathf.RoundToInt(ColonyManager.DiscCost(info.costEnergy) * mult);
                             sb.Append($"<b>{info.name}</b> — <b>{tiles}</b> tile{(tiles == 1 ? "" : "s")}");
-                            sb.Append($"  <color=#9FB4C8>{cm}m {ce}e · {GameCalendar.Duration(info.buildTime * mult * TechEffects.BuildTimeMult)}</color>");
+                            sb.Append($"  <color=#9FB4C8>{cm}m {ce}e · {GameMode.BuildTimeText(info.buildTime * mult * TechEffects.BuildTimeMult)}</color>");
                             sb.Append($"  <color=#8FD0FF>x{BuildScaling.OutputMultiplier(tiles):0.0} output</color>");
                         }
 
@@ -2322,6 +2322,8 @@ public class PlanetViewWindow : MonoBehaviour
                         // a hot spot visibly out-earns hovering cold rock, on every world.
                         sb.Append($"\n<color=#9FB4C8>({hoverCell.x},{hoverCell.y})</color> ");
                         sb.Append($"<b>{SurfaceBuildManager.PredictedYield(body, selected.Value, hoverCell.x, hoverCell.y, rotation)}</b>");
+                        string under = UnderwaterNote(new[] { hoverCell }, info);
+                        if (under != null) sb.Append($"\n{under}");
 
                         if (info.index != SurfaceIndexKind.None)
                         {
@@ -3093,7 +3095,7 @@ public class PlanetViewWindow : MonoBehaviour
             live.Button(cityBtn, () =>
             {
                 bool can = mgr.CanEstablishCity(b, out string why);
-                return (can, can ? $"Establish City ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {GameCalendar.Duration(ColonyManager.CityBuildTime)})"
+                return (can, can ? $"Establish City ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {GameMode.BuildTimeText(ColonyManager.CityBuildTime)})"
                                  : $"Establish City — {why}");
             });
         }
@@ -3194,7 +3196,7 @@ public class PlanetViewWindow : MonoBehaviour
             {
                 bool can = mgr.CanUpgradeLab(body, out string why, out _);
                 return (can, can
-                    ? $"Upgrade -> Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {GameCalendar.Duration(ColonyManager.LabUpgradeTime(next))}) -> {ResearchCapacity.ForLevel(next)} capacity"
+                    ? $"Upgrade -> Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {GameMode.BuildTimeText(ColonyManager.LabUpgradeTime(next))}) -> {ResearchCapacity.ForLevel(next)} capacity"
                     : $"Upgrade -> Lv{next} — {why}");
             });
         }
@@ -3268,7 +3270,7 @@ public class PlanetViewWindow : MonoBehaviour
                     {
                         bool can = mgr.CanUpgradeShipyard(body, out string why, out _);
                         return (can, can
-                            ? $"Upgrade -> Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {GameCalendar.Duration(ColonyManager.ShipyardUpgradeTime(next))}) -> {BuildPower.ForLevel(next)} build power"
+                            ? $"Upgrade -> Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {GameMode.BuildTimeText(ColonyManager.ShipyardUpgradeTime(next))}) -> {BuildPower.ForLevel(next)} build power"
                             : $"Upgrade -> Lv{next} — {why}");
                     });
                 }
@@ -3766,6 +3768,11 @@ public class PlanetViewWindow : MonoBehaviour
             if (want.HasValue && want.Value == t) AlertMarker.Attach(titleRow.transform as RectTransform);
 
             Note(card, info.description);
+            // An aquatic species may put this one on water — said on the card, so the sea is not a
+            // surprise discovered by hovering it (SurfaceBuildManager.WaterAllowed).
+            string wetNote = SurfaceBuildManager.WaterBuildNote(body, info);
+            if (wetNote != null)
+                UIFactory.WrapText(card, $"<color=#{UnderwaterHex}>{wetNote}.</color>", UITheme.SmallSize, UITheme.Text);
 
             var meta = UIFactory.WrapText(card, "", UITheme.SmallSize, UITheme.SubText);
             live.Text(meta, () =>
@@ -6714,11 +6721,16 @@ public class PlanetViewWindow : MonoBehaviour
         // decision is made with them rather than discovered after.
         csb.Append(settles
             ? "\n<size=10><color=#9FB4C8>goes up at once and settles this world</color></size>"
-            : $"\n<size=10><color=#9FB4C8>builds in {GameCalendar.Duration(info.buildTime * TechEffects.BuildTimeMult)} · " +
-              $"{BuildScaling.LaborPerTile(pendingType.Value):0.#} Labor</color></size>");
+            : GameMode.DevMode
+                ? $"\n<size=10><color=#9FB4C8>{GameMode.InstantBuildLabel}</color></size>"
+                : $"\n<size=10><color=#9FB4C8>builds in {GameCalendar.Duration(info.buildTime * TechEffects.BuildTimeMult)} · " +
+                  $"{BuildScaling.LaborPerTile(pendingType.Value):0.#} Labor</color></size>");
         string pw = SurfaceBuildManager.PowerWarning(body, info,
             SurfaceBuildingDatabase.Footprint(pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation));
         if (pw != null) csb.Append($"\n<size=10><color=#{ColorUtility.ToHtmlStringRGB(UITheme.Warn)}>{pw}</color></size>");
+        string underFixed = UnderwaterNote(
+            SurfaceBuildingDatabase.Footprint(pendingType.Value, pendingCell.x, pendingCell.y, pendingRotation), info);
+        if (underFixed != null) csb.Append($"\n<size=10>{underFixed}</size>");
         confirmText.text = csb.ToString();
         FitPanelToText(confirmPanel, confirmText, 212f);
 
@@ -7554,8 +7566,10 @@ public class PlanetViewWindow : MonoBehaviour
         else
             sb.Append($"<color=#{hex}>•</color> <b>{info.name}</b> — {tiles} tile{(tiles == 1 ? "" : "s")}\n");
         sb.Append($"<size=10><color=#9FB4C8>{m} metal · {e} energy · " +
-                  $"{GameCalendar.Duration(info.buildTime * mult * TechEffects.BuildTimeMult)} · " +
+                  $"{GameMode.BuildTimeText(info.buildTime * mult * TechEffects.BuildTimeMult)} · " +
                   $"x{BuildScaling.OutputMultiplier(tiles):0.0} output</color></size>");
+        string underDrawn = UnderwaterNote(BuildPlacement.Cells, info);
+        if (underDrawn != null) sb.Append($"\n<size=10>{underDrawn}</size>");
         if (!string.IsNullOrEmpty(placePlan)) sb.Append($"\n<size=10>{placePlan}</size>");
         // The refusal leads with "Can't build:" so it reads as the reason Confirm is greyed, not as one
         // more figure in the list above it.
@@ -7975,6 +7989,31 @@ public class PlanetViewWindow : MonoBehaviour
         }
     }
 
+    // ---- Underwater structures (the aquatic species, 2026-10-11) ----
+
+    /// The sea-blue wash on a structure's art where it stands on water. Subtle on purpose: the art and
+    /// the owner's livery still read through it.
+    static readonly Color UnderwaterTint = new Color(0.70f, 0.90f, 1.00f);
+    const string UnderwaterHex = "5FD3E0";
+
+    /// "Underwater · Aquarii can build on water", when any of these cells is water and this class may
+    /// stand there for this world's builder; null otherwise.
+    string UnderwaterNote(IEnumerable<Vector2Int> cells, SurfaceBuildingInfo info)
+    {
+        if (body == null || cells == null || info == null) return null;
+        string note = SurfaceBuildManager.WaterBuildNote(body, info);
+        if (note == null) return null;
+        int wet = 0, all = 0;
+        foreach (var c in cells)
+        {
+            all++;
+            if (SurfaceBuildManager.IsWaterCell(body, c.x, c.y)) wet++;
+        }
+        if (wet == 0) return null;
+        string where = wet == all ? "Underwater" : $"{wet} of {all} tiles underwater";
+        return $"<color=#{UnderwaterHex}>{where} \u00b7 {note}</color>";
+    }
+
     /// A structure's footprint, drawn with its pixel art: one RawImage per cell showing that cell's slice
     /// of the art (BuildingArt.CellArt), anchored exactly as AddCellQuad anchors a flat quad.
     ///
@@ -7992,6 +8031,9 @@ public class PlanetViewWindow : MonoBehaviour
         var info = SurfaceBuildingDatabase.Get(t);
         if (info != null && info.drawMode == BuildDrawMode.Rectangle && !(cells is HashSet<Vector2Int>))
             cells = new HashSet<Vector2Int>(cells);
+        // UNDERWATER, a structure an aquatic species built on the sea reads as submerged: its cells are
+        // washed a cool sea-blue (UnderwaterTint) so the map shows at a glance what stands in the water.
+        var wetTint = new Color(UnderwaterTint.r, UnderwaterTint.g, UnderwaterTint.b, alpha);
         foreach (var cell in cells)
         {
             var tex = BuildingArt.CellArt(t, cells, cell, out Rect uv, livery);
@@ -7999,7 +8041,7 @@ public class PlanetViewWindow : MonoBehaviour
             collect?.Add(img);
             img.texture = tex;
             img.uvRect = uv;
-            img.color = tint;
+            img.color = SurfaceBuildManager.IsWaterCell(body, cell.x, cell.y) ? wetTint : tint;
             img.raycastTarget = false;
             var rt = img.rectTransform;
             rt.anchorMin = new Vector2(cell.x / (float)w, cell.y / (float)h);

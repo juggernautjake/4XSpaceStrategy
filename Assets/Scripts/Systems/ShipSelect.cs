@@ -14,10 +14,15 @@ using UnityEngine;
 //   double-click     select every one of YOUR ships of the same class on screen
 //   click a stack    select the stack (your ships in it; a rival stack shows its first ship)
 //
-// A click no longer flies the camera. It used to (FocusUnit on every token click), which made Shift-
+// A click never flies the camera. It used to (FocusUnit on every token click), which made Shift-
 // clicking a second ship impossible — the first click had already moved it out from under the cursor —
 // and made a double-click land on empty space. Focusing is its own gesture: F (or Q) frames the
-// selection, Tab walks your ships and frames each one, and every list row frames what it selects.
+// selection (CameraController), Tab walks your ships and frames each one, and an explicit "Focus
+// Camera" button does what it says.
+//
+// LIST ROWS SELECT ONLY TOO (2026-10-11). A row in the Fleet window or an Orbit tab used to select AND
+// frame; "clicking on a ship should not focus it, but pressing F will", so a row is now a click like any
+// other (SelectRow) and F frames it. The camera stays where the player put it while they read a list.
 //
 // ONE CLICK PER FRAME. A marker click can be seen both by ShipMarkers' own poll and by a planet's
 // OnMouseDown that defers to it (ClickPriority). Whichever arrives second is told "already handled",
@@ -81,8 +86,10 @@ public static class ShipSelect
         return true;
     }
 
-    /// Select one ship and fly the camera to it — what a list row and the Tab key do.
-    public static void SelectAndFocus(Unit u)
+    /// Select one ship from a list row — the Fleet window, either Orbit tab. Shift adds it to the
+    /// selection. Does NOT move the camera: F (or Q) frames whatever is selected, wherever it was
+    /// selected from.
+    public static void SelectRow(Unit u)
     {
         if (u == null) return;
         bool additive = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
@@ -90,7 +97,15 @@ public static class ShipSelect
         UnitSelection.SelectOnly(u);
         SimpleAudio.Instance?.PlayUnitSelect(u.type);
         UnitInfoPanel.Instance?.Show(u);
-        Focus(u);
+    }
+
+    /// Select one ship and fly the camera to it — for an explicit "focus" control only. No click on a
+    /// ship or a row does this any more; see the note at the top.
+    public static void SelectAndFocus(Unit u)
+    {
+        if (u == null) return;
+        SelectRow(u);
+        if (!(Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))) Focus(u);
     }
 
     /// Fly the camera to a ship and follow it. Ships are followed by identity (see CameraController).

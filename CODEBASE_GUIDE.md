@@ -104,6 +104,17 @@ Enum `OreType` (None + 14 ores from Ferralite → Xenocryst).
   attributes (`iq, longevity, fertility, durability, adaptability`), `idealTemp`, `tolerance`,
   per-body-type `Affinity`. `AttributeLine()` formats the stats.
 - **`SpeciesDatabase.All` / `Get(index)`** — the 5 species (Terrans, Aquarii, Pyrothians, Cryithn, Sylvans).
+- **`aquatic`** (2026-10-11, Aquarii only) — the species builds on water: `SurfaceBuildManager.WaterAllowed` lets
+  every class flagged `SurfaceBuildingInfo.aquaticWater` (capitol, housing and grown settlements, depots, labs,
+  factory/refinery, spaceport/shipyard, grid relays/banks/reactors, steam turbine, geothermal, farm) stand on water
+  tiles; `SurfaceIndex` reads open water as Fertile for them (kelp beds, `KelpFertile`). Mines, combustion,
+  solar, wind and hydro still need land, and every other species still needs dry ground. The builder is always
+  `SpeciesManager.Current` (only the player places structures); `SpeciesManager.Select` invalidates the index
+  caches. Their cradle is a true ocean world (`GalaxyGenerator.SettleOceanCradle`: water level 0.86-0.93, the
+  baked map 85%+ sea with a few percent of islands for the mines), named "ocean world" by `WorldClassifier`
+  (the Ocean class is "ocean world" from 85%, its physics line) and explained by `WorldExplanation.AquaticNote`.
+  Placement says so: card note, cursor/confirm "Underwater · Aquarii can build on water", and a sea-blue wash
+  on art standing on water (`PlanetViewWindow.AddBuildingArt`).
 - **`SpeciesManager`** — `Current`, `CurrentIndex`, event `OnSpeciesChanged`.
   - **`Select(index)`** — switch species, recompute the world, fire the event.
   - **`RecomputeWorld()`** — re-score every body's habitability for the current species + refresh the zone.
@@ -325,7 +336,10 @@ but no longer claims, settles or builds on it. **`BeginNewGame(home)`** → `Cho
 species zone on via `HabitableZoneVisualizer.SetSpeciesMode`) → **`Claim(b, name)`** (owned, level-2 survey,
 economy + starting fleet re-homed with `UnitManager.SetHomePlanet`) → `PlaceCapitol` (the capitol is placeable
 and free only here — `SurfaceBuildManager.Founding`) → **`CapitolPlaced`** settles it → Farm → Combustion →
-Mine → 2 Habitat Blocks (`Tick` advances when the job is built or queued). Runtime-only; `BlocksSaving` gates
+Mine → 2 Habitat Blocks (`Tick` advances when the job is built or queued; `Possible` asks the placement rule itself,
+species-aware and cached, so an Aquarii kelp farm on water counts; on a world with no mineral ground the power step
+asks for the first plant that fits — steam turbine, geothermal, wind, solar, hydro — instead of the Combustion
+Plant, and a step nothing can satisfy is skipped). Runtime-only; `BlocksSaving` gates
 `SaveLoadMenu` until the capitol is down. UI in `HomeworldOnboardingUI.cs` (banner, "Are you sure?", naming
 window) and `AlertMarker` (the flashing "!" on the Build category tab and structure card).
 
@@ -574,7 +588,9 @@ barycentre), with the player's crest or a rival's colour swatch on the left. Scr
   treats a marker as a collider, so clicking one does not clear the selection.
 - **`ShipSelect`** (Systems/ShipSelect.cs) — one click path for tokens, hulls, markers and list rows. Click selects,
   Shift toggles, double-click selects all your ships of that class on screen, a stack click selects your ships in it.
-  **A map click no longer moves the camera.** F/Q frame the selection. `SelectAndFocus` (list rows, Tab) does both.
+  **No click moves the camera** — map clicks and, since 2026-10-11, list rows too (`SelectRow`: Fleet window, both
+  Orbit tabs, the Fleet window's place headers). F/Q frame the selection whatever it came from; Tab frames each ship
+  it steps to; the Inspector ship "Focus Camera" button goes through `ShipSelect.Focus` (identity follow, as F).
   One click per frame (`handledFrame`), so a click seen by two handlers is not read as a double-click.
 - **`ShipHotkeys`** — Tab / Shift+Tab cycle your ships (build order) and frame each one; "." jumps to the next idle ship.
 - **`ShipRoster`** (Systems/ShipRoster.cs) — **`CollectAt(body)`**: every visible ship docked at a world or one of its
@@ -877,6 +893,11 @@ they cost nothing to save and survive a reload untouched (the same guarantee ter
   `PredictedYield` adds the synergy and power-route preview for the piece in hand.
 - `requiredTech` — gates a structure on research (`TerraformProjectInfo.requiredTech`'s twin). Checked in
   `CanPlace`; Fission needs F1, Fusion needs F2.
+- **Dev Mode builds instantly** (2026-10-11), on top of being free: `SurfaceBuildQueue.FinishNow` on enqueue/unpause,
+  `UnitManager.CompleteDevBuilds`, `TerraformManager.CompleteDevProjects` and `ColonyManager.CompleteDevConstruction`
+  (city founding, yard/lab tiers), each through its normal completion path; `GameMode.SetDev(true)` finishes
+  everything already queued (`FinishAllConstruction`). Paused jobs stay paused. Build-time readouts go through
+  `GameMode.BuildTimeText`, which says "Dev: instant build".
 - `allowMultiple` — opts out of `OneOfEachPerWorld`. Power infrastructure only: a grid you may build one
   relay for is not a grid. `uniquePerWorld` still wins over it.
 

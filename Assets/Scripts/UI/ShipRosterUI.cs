@@ -115,7 +115,7 @@ public static class ShipRosterUI
             UIFactory.Tooltip(send.gameObject, $"Pick a destination for {cap.name} from the list of known places.");
         }
 
-        // ---- the row itself: select (and focus) ----
+        // ---- the row itself: select (F focuses — see ShipSelect) ----
         var btn = row.AddComponent<Button>();
         btn.targetGraphic = bg;
         btn.navigation = new Navigation { mode = Navigation.Mode.None };
@@ -126,7 +126,7 @@ public static class ShipRosterUI
         btn.onClick.AddListener(() =>
         {
             if (onSelect != null) onSelect();
-            else ShipSelect.SelectAndFocus(cap);
+            else ShipSelect.SelectRow(cap);
         });
 
         // Selected ships are lit, so the list shows what the map's brackets show.
@@ -138,7 +138,7 @@ public static class ShipRosterUI
         });
 
         UIFactory.Tooltip(row, $"{cap.HoverText()}\n{ShipRoster.StatusLine(cap)}\n\n" +
-                               "Click to select and focus the camera on it.\nShift-click adds it to the selection.");
+                               "Click to select it; press F to focus the camera on it.\nShift-click adds it to the selection.");
         return row;
     }
 

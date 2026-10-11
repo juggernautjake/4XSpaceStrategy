@@ -256,7 +256,20 @@ public class UnitManager : MonoBehaviour
         });
         Schedule();
         OnBuildChanged?.Invoke();
+        if (GameMode.DevMode) CompleteDevBuilds();   // Dev Mode builds instantly
         return true;
+    }
+
+    /// DEV MODE BUILDS INSTANTLY (2026-10-11): every unpaused order rolls out now, through AdvanceBuild's
+    /// own completion path (the yard it was queued at, the squadron and rally point it was stamped for,
+    /// the "built" notification), so a Dev hull is indistinguishable from one that waited. Build power
+    /// does not hold anything back — waiting for power is waiting, and Dev Mode removes waiting — but a
+    /// PAUSED order stays paused: that is the player's decision, and unpausing it completes it at once.
+    /// Called on queue and unpause in Dev Mode, and by GameMode when Dev Mode is switched on.
+    public void CompleteDevBuilds()
+    {
+        if (!GameMode.DevMode || buildQueue.Count == 0) return;
+        AdvanceBuild(0f);
     }
 
     // ---- Queue editing ----
@@ -268,6 +281,7 @@ public class UnitManager : MonoBehaviour
         o.paused = paused;
         Schedule();
         OnBuildChanged?.Invoke();
+        if (!paused && GameMode.DevMode) CompleteDevBuilds();
     }
 
     // Cancel a queued or half-built ship. Its resources come straight back — an unfinished hull is
@@ -366,12 +380,16 @@ public class UnitManager : MonoBehaviour
         // and every completion frees power that the ships behind it should pick up immediately.
         Schedule();
 
+        // Dev Mode: everything not paused completes this tick, whatever power it is waiting on.
+        bool instant = GameMode.DevMode;
+
         bool completed = false;
         for (int i = buildQueue.Count - 1; i >= 0; i--)
         {
             var o = buildQueue[i];
-            if (!o.Active) continue;               // paused, waiting for power, or unbuildable: frozen
-            o.elapsed += dt;
+            if (instant ? o.paused : !o.Active) continue;   // paused, waiting for power, or unbuildable: frozen
+            if (instant) o.elapsed = o.duration;
+            else o.elapsed += dt;
             if (o.elapsed < o.duration) continue;
 
             buildQueue.RemoveAt(i);

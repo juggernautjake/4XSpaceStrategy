@@ -374,7 +374,7 @@ public class ShipyardWindow : MonoBehaviour
             string costHex = ColorUtility.ToHtmlStringRGB(affordable ? UITheme.SubText : UITheme.Bad);
             string costText = $"<color=#{costHex}>{cm} metal · {ce} energy</color>   " +
                               $"<color=#8FD0FF>{info.buildPower} build power</color>   " +
-                              $"<color=#9FB4C8>{GameCalendar.Duration(info.buildTime * TechEffects.BuildTimeMult)}</color>";
+                              $"<color=#9FB4C8>{GameMode.BuildTimeText(info.buildTime * TechEffects.BuildTimeMult)}</color>";
             if (costText != c.lastCostText)
             {
                 c.lastCostText = costText;

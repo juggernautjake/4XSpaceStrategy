@@ -243,8 +243,11 @@ public static class WorldExplanation
 
             case CelestialBodyType.OceanPlanet:
             {
-                string sea = water >= 0.95f ? "almost all of its surface is open sea" : "most of its surface is sea, broken only by island chains";
-                return $"{orbit}, where starlight and its air keep water liquid — and {sea}. {LifeSentence(b, star)}";
+                string sea = water >= 0.95f ? "almost all of its surface is open sea"
+                           : water >= WorldClassifier.OceanWater ? "nearly all of its surface is sea, with only scattered islands"
+                           : "most of its surface is sea, broken only by island chains";
+                return $"{orbit}, where starlight and its air keep water liquid — and {sea}. {LifeSentence(b, star)}" +
+                       AquaticNote(b, water);
             }
 
             case CelestialBodyType.BarrenPlanet:
@@ -295,12 +298,24 @@ public static class WorldExplanation
                     case "desert world": return s + " With little surface water and a hot climate, most of its land is desert.";
                     case "savanna world": return s + " Dry but mild, its land is grassland and scrub more than forest.";
                     case "continental world": return s + " Broad continents are well watered by the seas between them.";
-                    case "ocean world": return s + " Nearly all of its surface is sea.";
+                    case "ocean world": return s + " Nearly all of its surface is sea." + AquaticNote(b, water);
                     case "archipelago world": return s + " Most of its surface is sea, broken by chains of islands.";
                     default: return s + " Land and sea are in balance.";
                 }
             }
         }
+    }
+
+    /// Why an aquatic species can found and build on a drowned world (2026-10-11): they build on water
+    /// (SurfaceBuildManager.WaterAllowed), so the land other species would need is not what they need.
+    /// Said for the viewing species, on any world that is mostly sea.
+    static string AquaticNote(CelestialBody b, float water)
+    {
+        var s = SpeciesManager.Current;
+        if (s == null || !s.aquatic || water < WorldClassifier.OceanWater) return "";
+        string home = b.birthrightClaim || HomeworldOnboarding.Cradle == b ? " It is the world they evolved in." : "";
+        return $" The {s.name} live in that sea and build on water — their capitol, housing, industry and kelp farms " +
+               $"can all stand on it, so a world with almost no land is home to them; only mines, combustion plants, wind farms and solar arrays need the islands.{home}";
     }
 
     static string LifeSentence(CelestialBody b, StarData star)

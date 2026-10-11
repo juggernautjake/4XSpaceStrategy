@@ -281,7 +281,7 @@ public class TerraformWindow : MonoBehaviour
                     int m = TerraformProjects.MetalCost(p, body), e = TerraformProjects.EnergyCost(p, body), w = TerraformProjects.WaterCost(p, body);
                     float dur = TerraformProjects.Duration(p, body);
                     costLine.text = $"<color=#9FB4C8>{m} metal · {e} energy" + (w > 0 ? $" · {w} water" : "") +
-                                    $" · {GameCalendar.Duration(dur)} · <color=#4DFF6E>+{p.ceilingGain:F0}% ceiling</color></color>";
+                                    $" · {GameMode.BuildTimeText(dur)} · <color=#4DFF6E>+{p.ceilingGain:F0}% ceiling</color></color>";
 
                     var tm = TerraformManager.Instance;
                     if (tm == null) return (false, "unavailable");

@@ -139,7 +139,7 @@ public partial class InspectorWindow
             {
                 bool can = mgr.CanUpgradeShipyard(b, out string why, out _);
                 return (can, can
-                    ? $"Upgrade -> Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {GameCalendar.Duration(ColonyManager.ShipyardUpgradeTime(next))}) -> {BuildPower.ForLevel(next)} build power"
+                    ? $"Upgrade -> Lv{next} ({ColonyManager.ShipyardUpgradeMetal(next)}m {ColonyManager.ShipyardUpgradeEnergy(next)}e, {GameMode.BuildTimeText(ColonyManager.ShipyardUpgradeTime(next))}) -> {BuildPower.ForLevel(next)} build power"
                     : $"Upgrade -> Lv{next} — {why}");
             });
             Note(p, $"Level {next}: {Colony.ShipyardPerk(next)}.");
@@ -203,7 +203,7 @@ public partial class InspectorWindow
                 bool afford = GameMode.DevMode || PlayerEconomy.CanAfford(m, e);
                 string hex = ColorUtility.ToHtmlStringRGB(afford ? UITheme.SubText : UITheme.Bad);
                 return $"<color=#{hex}>{m} metal · {e} energy</color>   <color=#8FD0FF>{info.buildPower} build power</color>   " +
-                       $"<color=#9FB4C8>{GameCalendar.Duration(info.buildTime * TechEffects.BuildTimeMult)}</color>";
+                       $"<color=#9FB4C8>{GameMode.BuildTimeText(info.buildTime * TechEffects.BuildTimeMult)}</color>";
             });
 
             // Queued AT this world, so the hull rolls out into this planet's orbital field.
@@ -364,7 +364,7 @@ public partial class InspectorWindow
             {
                 bool can = mgr.CanUpgradeLab(b, out string why, out _);
                 return (can, can
-                    ? $"Upgrade -> Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {GameCalendar.Duration(ColonyManager.LabUpgradeTime(next))}) -> {ResearchCapacity.ForLevel(next)} capacity"
+                    ? $"Upgrade -> Lv{next} ({ColonyManager.LabUpgradeMetal(next)}m {ColonyManager.LabUpgradeEnergy(next)}e, {GameMode.BuildTimeText(ColonyManager.LabUpgradeTime(next))}) -> {ResearchCapacity.ForLevel(next)} capacity"
                     : $"Upgrade -> Lv{next} — {why}");
             });
         }

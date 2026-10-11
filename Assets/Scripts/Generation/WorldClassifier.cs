@@ -273,8 +273,12 @@ public static class WorldClassifier
                 return "frozen world";
 
             case CelestialBodyType.OceanPlanet:
-                // Fully drowned is an ocean; high-but-broken water reads as island chains.
-                return water >= 0.95f ? "ocean world" : "archipelago world";
+                // 85%+ water is an ocean world (OceanWater), the same line the physics class is drawn at,
+                // so the name and the type agree (2026-10-11). It used to wait for 95%, so every natural
+                // ocean world between the two — and the Aquarii cradle — was named an "archipelago world"
+                // while being typed an ocean. Below 85% (a world forced or terraformed to Ocean with less
+                // water than that) high-but-broken water still reads as island chains.
+                return water >= OceanWater ? "ocean world" : "archipelago world";
 
             case CelestialBodyType.BarrenPlanet:
                 // Venus proper: a runaway greenhouse, tens of atmospheres deep, over a dry baked crust

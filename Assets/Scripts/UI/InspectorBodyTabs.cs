@@ -696,7 +696,7 @@ public partial class InspectorWindow
             live.Button(cityBtn, () =>
             {
                 bool can = mgr.CanEstablishCity(b, out string why);
-                return (can, can ? $"Establish City ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {GameCalendar.Duration(ColonyManager.CityBuildTime)})"
+                return (can, can ? $"Establish City ({ColonyManager.CityMetal}m {ColonyManager.CityEnergy}e, {GameMode.BuildTimeText(ColonyManager.CityBuildTime)})"
                                  : $"Establish City — {why}");
             });
         }
@@ -739,12 +739,13 @@ public partial class InspectorWindow
         // orbital field — yours first, then any rival the fog lets you see. One list, built by ShipRoster,
         // shared with the Planet View's Orbit tab (2026-10-11).
         //
-        // Clicking a row selects the ship (which re-targets this window to it) and frames it; the planet
-        // is pushed onto the breadcrumb so Back returns here instead of the trail being wiped.
+        // Clicking a row selects the ship (which re-targets this window to it) — it does not move the
+        // camera; F does (ShipSelect). The planet is pushed onto the breadcrumb so Back returns here
+        // instead of the trail being wiped.
         ShipRosterUI.OrbitSections(p, b, live, Header, Note, u =>
         {
             var back = target;
-            ShipSelect.SelectAndFocus(u);
+            ShipSelect.SelectRow(u);
             if (target.kind == InspectorKind.Unit && back.kind == InspectorKind.Body && !trail.Contains(back))
             {
                 trail.Add(back);

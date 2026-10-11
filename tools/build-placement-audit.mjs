@@ -201,5 +201,30 @@ console.log(pad('', 18), worlds.map((w, i) => `W${i + 1}`).join('  '));
 for (const r of rows) if (r.where && r.b.index !== 'None') console.log(pad(r.b.type, 18), r.where.map(x => pad(x, 3)).join(' '));
 worlds.forEach((w, i) => console.log(`  W${i + 1} ${w.name}`));
 
+// ---- An aquatic species on an ocean world (2026-10-11) ----------------------------------------
+// The Aquarii build on water (SurfaceBuildingInfo.aquaticWater, set from one list in SurfaceBuilding.cs).
+// Their cradle is 85%+ sea, so the opening (HomeworldOnboarding: capitol, farm, power, mine, housing,
+// shipyard) must be buildable with the water allowance alone, apart from the mine, which needs mineral
+// ground and is asked for on the islands. Asserted against the list itself, so dropping a class from it
+// is caught here rather than by an opening that stalls in play.
+{
+  const list = src.match(/foreach \(var t in new\[\]\s*\{([\s\S]*?)\}\)\s*if \(_all\[\(int\)t\] != null\) _all\[\(int\)t\]\.aquaticWater = true;/);
+  if (!list) FAIL('aquatic: could not find the aquaticWater list in SurfaceBuilding.cs');
+  else {
+    const aquatic = new Set([...list[1].matchAll(/SurfaceBuildingType\.(\w+)/g)].map(m => m[1]));
+    for (const t of aquatic) if (!B[t]) FAIL(`aquatic: ${t} is in the water list but is not a structure`);
+    // A class may only be on the list if the water itself can carry it: nothing reading Mineral (you
+    // cannot sink a shaft into an ocean), Solar or Wind.
+    for (const t of aquatic)
+      if (B[t] && ['Mineral', 'Solar', 'Wind'].includes(B[t].index)) FAIL(`aquatic: ${t} reads ${B[t].index} but is allowed on water`);
+    const opening = ['PlanetCapitol', 'Farm', 'Habitat', 'SurfaceShipyard'];
+    for (const t of opening) if (!aquatic.has(t)) FAIL(`aquatic: the opening's ${t} cannot go on water, so an ocean cradle can stall`);
+    const power = ['SteamTurbine', 'GeothermalPlant'].filter(t => aquatic.has(t));
+    if (power.length === 0) FAIL('aquatic: no power plant may go on water, so the opening has no power step on an ocean world');
+    console.log(`\nAquatic (Aquarii) on water: ${[...aquatic].join(', ')}`);
+    console.log(`  opening on water: ${opening.join(', ')} + power via ${power.join(' / ')} (Combustion Plant and Mine need island ground)`);
+  }
+}
+
 console.log(`\n${fails ? `${fails} FAIL` : 'No blockers'}${warns ? `, ${warns} warnings` : ''}.`);
 process.exit(fails ? 1 : 0);

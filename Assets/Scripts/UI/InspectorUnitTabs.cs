@@ -57,13 +57,12 @@ public partial class InspectorWindow
         Header(p, "ACTIONS");
 
         // Same Focus offered on right-click, here for a ship you already have selected.
-        var focusBtn = UIFactory.Button(p, "Focus Camera", () =>
-        {
-            var t = UnitVisuals.TransformOf(u);
-            if (t != null) CameraController.Instance?.FocusAndZoom(t, 3f, true);
-        }, 26);
+        // The explicit focus control (a click on the ship itself never moves the camera — see
+        // ShipSelect). Through ShipSelect.Focus, the same identity-follow F uses, so the camera stays on
+        // the ship when its token is rebuilt rather than losing it.
+        var focusBtn = UIFactory.Button(p, "Focus Camera", () => ShipSelect.Focus(u), 26);
         live.Button(focusBtn, () => UnitVisuals.TransformOf(u) != null
-            ? (true, $"Focus on {u.name}")
+            ? (true, $"Focus on {u.name}  (F)")
             : (false, "Focus — this ship isn't on screen"));
 
         var surveyBtn = UIFactory.Button(p, "", () =>
@@ -249,7 +248,7 @@ public partial class InspectorWindow
         var cls = Card(p);
         Stat(cls, "Build cost", () => $"{ColonyManager.DiscCost(info.costMetal)} metal · {ColonyManager.DiscCost(info.costEnergy)} energy");
         Stat(cls, "Build power", () => $"{info.buildPower}");
-        Stat(cls, "Build time", () => $"{GameCalendar.Duration(info.buildTime * TechEffects.BuildTimeMult)}");
+        Stat(cls, "Build time", () => $"{GameMode.BuildTimeText(info.buildTime * TechEffects.BuildTimeMult)}");
         Note(cls, info.description);
     }
 

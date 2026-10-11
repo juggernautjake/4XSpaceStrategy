@@ -141,6 +141,7 @@ public class TerraformManager : MonoBehaviour
 
         NotificationManager.Instance?.Push($"{p.name} begun on {b.name}", p.description, Fly(b), NotifKind.Info);
         OnChanged?.Invoke();
+        if (GameMode.DevMode) CompleteDevProjects();   // Dev Mode: instant, like every other build
         return true;
     }
 
@@ -149,6 +150,31 @@ public class TerraformManager : MonoBehaviour
         if (j == null || j.paused == paused) return;
         j.paused = paused;
         OnChanged?.Invoke();
+        if (!paused && GameMode.DevMode) CompleteDevProjects();
+    }
+
+    /// DEV MODE FINISHES TERRAFORMING PROJECTS AT ONCE (2026-10-11). A project is a timed build like a
+    /// building or a hull — a cost, a duration and a completion — so Dev Mode, which already makes it
+    /// free, now makes it immediate as well. Each goes through Complete, the same finalisation a project
+    /// that ran its course gets: an orbit migration snaps to its pre-clamped target, a remodel converts
+    /// the type, the world is re-scored and regenerated. Paused projects stay paused (unpausing one in
+    /// Dev Mode completes it). What a terraformer SHIP does — grinding habitability toward the ceiling —
+    /// is not a build and is untouched.
+    public void CompleteDevProjects()
+    {
+        if (!GameMode.DevMode || jobs.Count == 0) return;
+        bool changed = false;
+        for (int i = jobs.Count - 1; i >= 0; i--)
+        {
+            if (i >= jobs.Count) continue;   // a completion may have dropped more than one job
+            var j = jobs[i];
+            if (j == null || j.paused) continue;
+            j.elapsed = j.duration;
+            jobs.RemoveAt(i);
+            Complete(j);
+            changed = true;
+        }
+        if (changed) OnChanged?.Invoke();
     }
 
     // Abandoning an unfinished project returns everything that was poured into it.
@@ -209,7 +235,7 @@ public class TerraformManager : MonoBehaviour
         {
             var j = jobs[i];
             if (j.paused) continue;
-            j.elapsed += dt;
+            j.elapsed = GameMode.DevMode ? j.duration : j.elapsed + dt;
             if (j.elapsed < j.duration) continue;
 
             jobs.RemoveAt(i);

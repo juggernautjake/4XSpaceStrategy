@@ -220,6 +220,7 @@ public class ColonyManager : MonoBehaviour
         if (!CanEstablishCity(b, out _)) return false;
         if (!GameMode.DevMode && !PlayerEconomy.Spend(CityMetal, CityEnergy)) return false;
         building.Add(new Construction { body = b, type = BuildingType.City, establishCity = true, duration = CityBuildTime, Label = "Founding city" });
+        CompleteDevConstruction();
         return true;
     }
 
@@ -259,6 +260,7 @@ public class ColonyManager : MonoBehaviour
         int m = ShipyardUpgradeMetal(next), e = ShipyardUpgradeEnergy(next);
         if (!GameMode.DevMode && !PlayerEconomy.Spend(m, e)) return false;
         building.Add(new Construction { body = b, shipyardUpgrade = true, duration = ShipyardUpgradeTime(next), Label = $"Upgrading shipyard to Lv{next}" });
+        CompleteDevConstruction();
         return true;
     }
 
@@ -298,6 +300,7 @@ public class ColonyManager : MonoBehaviour
         int m = LabUpgradeMetal(next), e = LabUpgradeEnergy(next);
         if (!GameMode.DevMode && !PlayerEconomy.Spend(m, e)) return false;
         building.Add(new Construction { body = b, labUpgrade = true, duration = LabUpgradeTime(next), Label = $"Upgrading research centre to Lv{next}" });
+        CompleteDevConstruction();
         return true;
     }
 
@@ -344,13 +347,26 @@ public class ColonyManager : MonoBehaviour
         }
     }
 
+    /// DEV MODE BUILDS INSTANTLY (2026-10-11): a city founding or a facility tier upgrade completes the
+    /// moment it is started, through AdvanceConstruction's own completion branches. Called on start and
+    /// by GameMode when Dev Mode is switched on. Nothing here can be paused, so everything completes.
+    public void CompleteDevConstruction()
+    {
+        if (!GameMode.DevMode || building.Count == 0) return;
+        AdvanceConstruction(0f);
+    }
+
     void AdvanceConstruction(float dt)
     {
+        bool instant = GameMode.DevMode;
         for (int i = building.Count - 1; i >= 0; i--)
         {
+            if (i >= building.Count) continue;
             var c = building[i];
-            if (!IsActive(c)) continue;   // queued behind another build on this world — wait its turn
-            c.elapsed += dt;
+            // Queued behind another build on this world — wait its turn. Not in Dev Mode: nothing waits.
+            if (!instant && !IsActive(c)) continue;
+            if (instant) c.elapsed = c.duration;
+            else c.elapsed += dt;
             if (c.elapsed < c.duration) continue;
             building.RemoveAt(i);
 

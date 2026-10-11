@@ -112,9 +112,17 @@ public static class HomeworldOnboarding
         // the system is for later.
         if (Options.Count > 0 && !Options.Contains(b))
         { why = "your people can't live there — choose a world with a green ring"; return false; }
-        // There has to be dry ground the capitol fits on, or the opening could never get past it.
+        // There has to be ground the capitol fits on, or the opening could never get past it. FindSpot
+        // asks CellBuildable, which is SPECIES-AWARE: an aquatic species may put the capitol on water
+        // (SurfaceBuildManager.WaterAllowed), so for the Aquarii an ocean world qualifies and for everyone
+        // else it still takes dry land.
         if (!SurfaceBuildManager.FindSpot(b, SurfaceBuildingType.PlanetCapitol, out _, out _))
-        { why = "there is no dry ground big enough for a capitol"; return false; }
+        {
+            why = SurfaceBuildManager.AquaticBuilder(b)
+                ? "there is no open ground or water big enough for a capitol"
+                : "there is no dry ground big enough for a capitol";
+            return false;
+        }
         return true;
     }
 
@@ -205,7 +213,7 @@ public static class HomeworldOnboarding
             {
                 case OnboardingStep.PlaceCapitol: return SurfaceBuildingType.PlanetCapitol;
                 case OnboardingStep.Farm: return SurfaceBuildingType.Farm;
-                case OnboardingStep.Combustion: return SurfaceBuildingType.CombustionPlant;
+                case OnboardingStep.Combustion: return PowerStepType(World);
                 case OnboardingStep.Mine: return SurfaceBuildingType.Mine;
                 case OnboardingStep.Housing: return SurfaceBuildingType.Habitat;
                 case OnboardingStep.Shipyard: return SurfaceBuildingType.SurfaceShipyard;
@@ -231,13 +239,68 @@ public static class HomeworldOnboarding
         return n;
     }
 
-    /// Does any ground on this world clear the structure's index floor?
+    /// Can this structure be built anywhere on this world at all?
+    ///
+    /// It used to ask only whether some ground cleared the index floor, which said yes to a farm on a
+    /// world whose only fertile tiles were under the sea and a mine whose only seam was offshore, and
+    /// for a species that cannot build on water the step then waited forever. Now it asks the placement
+    /// rule itself (SurfaceBuildManager.CellBuildable: index, water and the aquatic allowance), so an
+    /// Aquarii kelp farm on open water counts and a Terran farm on the same water does not.
+    ///
+    /// Scanning a world is not free (the index is sampled per tile), and the UI asks every frame through
+    /// Target, so the answer is cached per world and class for a few seconds.
     static bool Possible(CelestialBody b, SurfaceBuildingType t)
     {
         var info = SurfaceBuildingDatabase.Get(t);
-        if (info == null) return false;
-        if (info.index == SurfaceIndexKind.None) return true;
-        return SurfaceIndex.Best(b, info.index) >= SurfaceIndex.Floor(info.index);
+        if (b?.surface == null || info == null) return false;
+        if (info.index != SurfaceIndexKind.None && !GameMode.DevMode &&
+            SurfaceIndex.Best(b, info.index) < SurfaceIndex.Floor(info.index)) return false;
+
+        var key = (b, t);
+        if (possibleCache.TryGetValue(key, out var hit) && Time.unscaledTime < hit.until) return hit.ok;
+
+        bool ok;
+        if (info.drawMode == BuildDrawMode.Fixed)
+            ok = SurfaceBuildManager.FindSpot(b, t, out _, out _);
+        else
+        {
+            var taken = SurfaceBuildManager.Occupied(b);
+            int need = Mathf.Max(1, info.minTiles), found = 0;
+            for (int x = 0; x < b.surface.width && found < need; x++)
+                for (int y = 0; y < b.surface.height && found < need; y++)
+                    if (!taken.Contains(new Vector2Int(x, y)) && SurfaceBuildManager.CellBuildable(b, info, x, y, out _))
+                        found++;
+            ok = found >= need;
+        }
+        possibleCache[key] = (Time.unscaledTime + PossibleCacheSeconds, ok);
+        return ok;
+    }
+
+    const float PossibleCacheSeconds = 8f;
+    static readonly Dictionary<(CelestialBody, SurfaceBuildingType), (float until, bool ok)> possibleCache =
+        new Dictionary<(CelestialBody, SurfaceBuildingType), (float, bool)>();
+
+    // ---- The power step ----
+    //
+    // The opening asks for a Combustion Plant because it lights a young grid on almost any ground. Not on
+    // a world with no mineral ground to burn, and an ocean world can be one: the Aquarii cradle is open
+    // sea with a scatter of islands. Skipping the step there would leave a new player with no power and
+    // no word about it, so instead the step asks for the first plant this world CAN take, in the order a
+    // new colony would want them: a steam turbine (an aquatic species may moor one at sea), a seafloor or
+    // land geothermal plant, then wind, sun and a dam. Only a world that can site none of them skips it.
+    static readonly SurfaceBuildingType[] PowerFallbacks =
+    {
+        SurfaceBuildingType.SteamTurbine, SurfaceBuildingType.GeothermalPlant, SurfaceBuildingType.WindFarm,
+        SurfaceBuildingType.SolarArray, SurfaceBuildingType.HydroPlant,
+    };
+
+    /// The plant the power step asks for on this world: the Combustion Plant wherever one can stand.
+    static SurfaceBuildingType PowerStepType(CelestialBody b)
+    {
+        if (b == null || Possible(b, SurfaceBuildingType.CombustionPlant)) return SurfaceBuildingType.CombustionPlant;
+        foreach (var t in PowerFallbacks)
+            if (SurfaceBuildManager.CanPlaceType(b, t, out _) && Possible(b, t)) return t;
+        return SurfaceBuildingType.CombustionPlant;   // nothing fits: Tick skips the step
     }
 
     static float nextCheck;
@@ -287,10 +350,28 @@ public static class HomeworldOnboarding
                 return Options.Count > 1
                     ? $"Choose your starting world: click one of the {Options.Count} worlds with a green ring."
                     : "Your starting world has a green ring: click it to begin.";
-            case OnboardingStep.PlaceCapitol: return $"Choose where to place your capital on {w}: pick the Planet Capitol from the Civil tab.";
-            case OnboardingStep.Farm: return "Place a Farm (Agriculture tab) — paint as many tiles as you like.";
-            case OnboardingStep.Combustion: return "Place a Combustion Plant (Electrical tab).";
-            case OnboardingStep.Mine: return "Place a Mine (Industry tab) on bright Mineral ground.";
+            case OnboardingStep.PlaceCapitol:
+                return World != null && SurfaceBuildManager.AquaticBuilder(World)
+                    ? $"Choose where to place your capital on {w}: pick the Planet Capitol from the Civil tab. " +
+                      $"The {SurfaceBuildManager.BuilderName(World)} can build on water, so open sea is fine."
+                    : $"Choose where to place your capital on {w}: pick the Planet Capitol from the Civil tab.";
+            case OnboardingStep.Farm:
+                return World != null && SurfaceBuildManager.AquaticBuilder(World)
+                    ? "Place a Farm (Agriculture tab) — paint as many tiles as you like. On water it is a kelp bed."
+                    : "Place a Farm (Agriculture tab) — paint as many tiles as you like.";
+            case OnboardingStep.Combustion:
+            {
+                var plant = PowerStepType(World);
+                if (plant == SurfaceBuildingType.CombustionPlant) return "Place a Combustion Plant (Electrical tab).";
+                string pn = SurfaceBuildingDatabase.Get(plant).name;
+                return $"Place a {pn} (Electrical tab) — there is no mineral ground here to fuel a Combustion Plant" +
+                       (World != null && SurfaceBuildManager.WaterAllowed(World, SurfaceBuildingDatabase.Get(plant))
+                           ? $"; the {SurfaceBuildManager.BuilderName(World)} can build it on water." : ".");
+            }
+            case OnboardingStep.Mine:
+                return World != null && SurfaceBuildManager.AquaticBuilder(World)
+                    ? "Place a Mine (Industry tab) on bright Mineral ground — mines need land, so look to the islands."
+                    : "Place a Mine (Industry tab) on bright Mineral ground.";
             case OnboardingStep.Housing:
                 int have = World != null ? Have(World, SurfaceBuildingType.Habitat) : 0;
                 return $"Place {HousingWanted} Habitat Blocks for your city (Civil tab) — {have}/{HousingWanted}.";
@@ -302,6 +383,7 @@ public static class HomeworldOnboarding
     /// A new galaxy or a loaded save ends any opening in progress.
     public static void Reset()
     {
+        possibleCache.Clear();
         Step = OnboardingStep.None;
         World = null;
         needsFraming = false;

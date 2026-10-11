@@ -134,7 +134,7 @@ public class CityGrowth : MonoBehaviour
         int n = 0;
         for (int x = 0; x < b.surface.width; x++)
             for (int y = 0; y < b.surface.height; y++)
-                if (!PlanetTerrainGenerator.IsWater(b.surface.tiles[x, y].type)) n++;
+                if (SurfaceBuildManager.BuildableGround(b, b.surface.tiles[x, y])) n++;   // the Aquarii build on water
         return n;
     }
 

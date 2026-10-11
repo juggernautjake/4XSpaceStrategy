@@ -190,6 +190,16 @@ public class SurfaceBuildingInfo
 
     public bool allowsWater = false;   // most structures need dry ground
 
+    /// May an AQUATIC species (Species.aquatic — the Aquarii) build this on water tiles? Set for the
+    /// structures that are about people, administration and machinery rather than the ground under them:
+    /// the capitol and the landed colony hull, housing and grown settlements, depots, labs, factories,
+    /// the spaceport and shipyard, the grid's relays, banks and reactors, steam turbines and seafloor
+    /// geothermal vents, and farms (kelp beds — SurfaceIndex reads open water as fertile for them). NOT
+    /// set for what must stand on land: a mine or a combustion plant needs mineral ground, panels and
+    /// turbines need air and sun, a dam needs relief. Other species still need dry ground for all of it
+    /// (SurfaceBuildManager.WaterAllowed). `allowsWater` stays the everyone-may flag.
+    public bool aquaticWater = false;
+
     // Hit points at level 1. Bigger, heavier structures are tougher.
     public int baseHealth = 100;
 
@@ -592,6 +602,21 @@ public static class SurfaceBuildingDatabase
         fusion.energyPerSec = 4.0f;
         fusion.requiredTech = "F2";
         _all[(int)SurfaceBuildingType.FusionReactor] = fusion;
+
+        // ---- What an aquatic species may build on water (see SurfaceBuildingInfo.aquaticWater) ----
+        foreach (var t in new[]
+        {
+            SurfaceBuildingType.PlanetCapitol, SurfaceBuildingType.ColonyShipBase,
+            SurfaceBuildingType.Habitat, SurfaceBuildingType.Settlement, SurfaceBuildingType.Town, SurfaceBuildingType.City,
+            SurfaceBuildingType.StorageDepot, SurfaceBuildingType.ResearchOutpost, SurfaceBuildingType.ResearchCenter,
+            SurfaceBuildingType.Factory, SurfaceBuildingType.Refinery,
+            SurfaceBuildingType.Spaceport, SurfaceBuildingType.SurfaceShipyard,
+            SurfaceBuildingType.PowerNode, SurfaceBuildingType.Capacitor, SurfaceBuildingType.PowerDistribution,
+            SurfaceBuildingType.FissionReactor, SurfaceBuildingType.FusionReactor,
+            SurfaceBuildingType.SteamTurbine, SurfaceBuildingType.GeothermalPlant,
+            SurfaceBuildingType.Farm,
+        })
+            if (_all[(int)t] != null) _all[(int)t].aquaticWater = true;
 
         // ============================================================================================
         // POWER: WHO MAKES IT, WHO MOVES IT, WHO EATS IT

@@ -245,6 +245,7 @@ public static class SurfaceBuildQueue
 
         For(b).Add(job);
         OnChanged?.Invoke();
+        if (GameMode.DevMode) FinishNow(b);   // Dev Mode builds instantly — see FinishNow
         return job;
     }
 
@@ -294,6 +295,7 @@ public static class SurfaceBuildQueue
 
         For(b).Add(job);
         OnChanged?.Invoke();
+        if (GameMode.DevMode) FinishNow(b);   // Dev Mode builds instantly — see FinishNow
         return job;
     }
 
@@ -343,6 +345,7 @@ public static class SurfaceBuildQueue
         job.paused = paused;
         SurfaceLabor.Invalidate();
         OnChanged?.Invoke();
+        if (!paused && GameMode.DevMode) FinishNow(b);
     }
 
     /// Cancel and refund exactly what was paid.
@@ -496,6 +499,50 @@ public static class SurfaceBuildQueue
         PlayerEconomy.Add(ResourceType.Energy, job.energyPaid);
         NotificationManager.Instance?.Push($"{name} could not be completed",
             $"The site on {b.name} is no longer buildable. Materials refunded.", null, NotifKind.Danger);
+    }
+
+    // ============================================================================================
+    // DEV MODE BUILDS INSTANTLY (2026-10-11)
+    //
+    // Dev Mode already makes construction free; it now makes it immediate too, so a sandbox colony can
+    // be laid out without waiting on the calendar. It goes through the SAME completion path as a timed
+    // job (Tick's Complete): the merge into a touching building, ForcePlace for a fixed structure, the
+    // power-grid invalidation inside PlaceDrawn/ForcePlace, the Labor release, the "complete"
+    // notification, and the onboarding step polling the standing buildings. Nothing downstream can tell
+    // a Dev build from one that waited.
+    //
+    // PAUSED JOBS STAY PAUSED. A pause is an explicit "not yet" from the player, and Dev Mode is about
+    // removing waiting, not about overriding a decision; unpausing one in Dev Mode completes it at once.
+    // ============================================================================================
+
+    /// Complete every unpaused job on this world now, in queue order. Called on enqueue and unpause in
+    /// Dev Mode, and for every world when Dev Mode is switched on (FinishAllNow).
+    public static void FinishNow(CelestialBody b)
+    {
+        var list = Peek(b);
+        if (list == null || list.Count == 0) return;
+
+        List<SurfaceBuildJob> due = null;
+        foreach (var job in list)
+            if (job != null && !job.paused) { if (due == null) due = new List<SurfaceBuildJob>(); due.Add(job); }
+        if (due == null) return;
+
+        foreach (var job in due)
+        {
+            if (!list.Remove(job)) continue;   // a completion before it may have changed the queue
+            job.elapsed = job.duration;
+            Complete(b, job);
+        }
+        OnChanged?.Invoke();
+    }
+
+    /// Dev Mode was switched on: finish what every world has under construction.
+    public static void FinishAllNow()
+    {
+        if (queues.Count == 0) return;
+        // A snapshot of the keys: completing a job never adds a world, but a notification subscriber
+        // could, and modifying a dictionary mid-enumeration throws.
+        foreach (var b in new List<CelestialBody>(queues.Keys)) FinishNow(b);
     }
 
     /// A new galaxy or a loaded save replaces every world these jobs referred to.

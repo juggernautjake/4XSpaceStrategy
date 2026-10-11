@@ -351,7 +351,7 @@ function describe(b, mode) {
   switch (b.type) {
     case 'Volcanic': return bodyAvgC(b) >= MAGMA_MIN_C ? 'molten world' : 'volcanic world';
     case 'Ice': return 'frozen world';
-    case 'Ocean': return water >= 0.95 ? 'ocean world' : 'archipelago world';
+    case 'Ocean': return water >= OCEAN_WATER ? 'ocean world' : 'archipelago world';   // 2026-10-11: was 0.95
     case 'Barren':
       if (b.atm >= GH_THRESHOLD) return 'greenhouse world';
       if (thickAir && c > 60) return 'toxic world';

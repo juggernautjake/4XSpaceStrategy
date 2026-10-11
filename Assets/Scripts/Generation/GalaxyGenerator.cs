@@ -411,6 +411,14 @@ public static class GalaxyGenerator
         // cradle takes the nearest climate its sun can actually give it, not one its orbit contradicts.
         var htp = planet.terrainParams;
         htp.heat = InsolationRules.ClampToOrbit(CradleHeat(species, planet), home.combinedStar, planet.distanceFromStar);
+        // AN AQUATIC SPECIES' CRADLE IS A TRUE OCEAN WORLD (2026-10-11). It used to keep TerrainVariance's
+        // 36-62% water roll so there was dry land for the capitol, and so read as an "archipelago world" —
+        // the wrong home for a people who live in the sea. The Aquarii build on water now
+        // (SurfaceBuildManager.WaterAllowed), so the capitol never needs land, and the cradle is 85%+ sea:
+        // an ocean world by the classifier (WorldClassifier.OceanWater) and by its explanation. Set here,
+        // before CaptureNatural, so the drowned world is its NATURAL state and terraforming does not drift
+        // it back. SettleOceanCradle below keeps a scatter of islands for the mines.
+        if (species != null && species.aquatic) htp.seaLevel = AquaticCradleWater;
         planet.terrainParams = htp;
         // Re-capture AFTER the override: this is the home world's natural climate, not what SeedTerrain
         // rolled a moment ago. It's already the species' ideal — a cradle needs no terraforming — and
@@ -422,6 +430,7 @@ public static class GalaxyGenerator
         // terrain reflects it immediately rather than shipping sterile-looking on turn one.
         planet.biosphereActive = BiosphereRules.GeneratesWithBiosphere(planet);
         planet.surface = PlanetTerrainGenerator.GenerateSurface(planet);
+        if (species != null && species.aquatic) SettleOceanCradle(planet);
         OreGenerator.Populate(planet);
         planet.resources = new ResourceDeposit();
         ResourceGenerator.GenerateResources(planet);
@@ -837,6 +846,58 @@ public static class GalaxyGenerator
         }
         b.terrainSeed = bestSeed;
         GeothermalMap.Invalidate(b);
+    }
+
+    // ============================================================================================
+    // THE OCEAN CRADLE (2026-10-11)
+    //
+    // An aquatic species' homeworld is an ocean world: its water level starts at AquaticCradleWater, inside
+    // the ocean band (WorldClassifier.OceanWater, 85%) and short of the fully drowned end. What the map
+    // actually shows also depends on the world's relief, so after the first bake the level is nudged, a
+    // couple of points at a time and never out of AquaticCradleWaterMin..Max, until the baked surface is
+    // at least 85% sea AND keeps a few percent of islands. The islands are not for the capitol — the
+    // Aquarii build that on water — but for what still needs land: a mine and a combustion plant dig
+    // mineral ground, and an opening that can always ask for them is the better opening. A world whose
+    // relief cannot give both within the band keeps the closest it got; HomeworldOnboarding asks the
+    // placement rule what is possible, so no step can wait forever either way.
+    // ============================================================================================
+    public const float AquaticCradleWater = 0.88f;
+    const float AquaticCradleWaterMin = 0.86f, AquaticCradleWaterMax = 0.93f;
+    const float AquaticCradleLandMin = 0.03f;
+    const float AquaticCradleWaterStep = 0.02f;
+    const int AquaticCradleRebakes = 4;
+
+    static void SettleOceanCradle(CelestialBody b)
+    {
+        if (b?.surface == null) return;
+        for (int i = 0; i < AquaticCradleRebakes; i++)
+        {
+            float land = LandShare(b.surface);
+            var p = b.terrainParams;
+            float sea = p.SeaLevelOrNeutral, next = sea;
+            if (land < AquaticCradleLandMin) next = sea - AquaticCradleWaterStep;                 // no islands
+            else if (land > 1f - WorldClassifier.OceanWater) next = sea + AquaticCradleWaterStep;  // not an ocean yet
+            next = Mathf.Clamp(next, AquaticCradleWaterMin, AquaticCradleWaterMax);
+            if (Mathf.Abs(next - sea) < 0.001f) return;
+
+            p.seaLevel = next;
+            b.terrainParams = p;
+            TerraformVisuals.CaptureNatural(b);   // still the world's natural state, as at the first bake
+            SurfaceIndex.InvalidateStats(b);
+            b.biosphereActive = BiosphereRules.GeneratesWithBiosphere(b);
+            b.surface = PlanetTerrainGenerator.GenerateSurface(b);
+        }
+    }
+
+    /// The share of a baked surface that is not water.
+    static float LandShare(PlanetSurface s)
+    {
+        if (s?.tiles == null || s.width <= 0 || s.height <= 0) return 0f;
+        int land = 0;
+        for (int x = 0; x < s.width; x++)
+            for (int y = 0; y < s.height; y++)
+                if (s.tiles[x, y] != null && !PlanetTerrainGenerator.IsWater(s.tiles[x, y].type)) land++;
+        return land / (float)(s.width * s.height);
     }
 
     /// Is this species' own cradle one that is MEANT to be alive — a Rocky or Ocean world?

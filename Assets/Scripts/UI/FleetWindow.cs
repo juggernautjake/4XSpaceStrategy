@@ -291,14 +291,12 @@ public class FleetWindow : MonoBehaviour
         btn.navigation = new Navigation { mode = Navigation.Mode.None };
         btn.onClick.AddListener(() =>
         {
+            // Selects only — F frames the selection (ShipSelect), so the camera is not yanked away
+            // from wherever the player was looking while they read down the list.
             UnitSelection.Set(captured);
-            if (captured.Count > 0)
-            {
-                SimpleAudio.Instance?.PlayUnitSelect(captured[0].type);
-                ShipSelect.Focus(captured[0]);
-            }
+            if (captured.Count > 0) SimpleAudio.Instance?.PlayUnitSelect(captured[0].type);
         });
-        UIFactory.Tooltip(bg.gameObject, $"Select all {ships.Count} ship(s) here.");
+        UIFactory.Tooltip(bg.gameObject, $"Select all {ships.Count} ship(s) here. Press F to focus the camera on them.");
     }
 
     void OnDestroy()

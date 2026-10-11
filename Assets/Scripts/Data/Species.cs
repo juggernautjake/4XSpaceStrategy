@@ -59,6 +59,15 @@ public class Species
     /// thing it is a fact about and a sixth species can opt in without editing generation code.
     public bool solHomeStar = false;
 
+    /// This species lives IN the water, not beside it, and builds there.
+    ///
+    /// True only for the Aquarii. It is what lets them put their capitol, their housing and most civil
+    /// and industrial structures on shallow or open-ocean tiles (SurfaceBuildingInfo.aquaticWater), farm
+    /// the sea as kelp beds (SurfaceIndex's Fertile Index reads water for them), and found on a true ocean
+    /// world — their cradle is one (GalaxyGenerator.ForceHomeWorld). Every other species still needs dry
+    /// ground. A flag on the species rather than a name comparison, for the same reason as solHomeStar.
+    public bool aquatic = false;
+
     /// How well this world's air suits this species: 1 inside the band, falling off outside it.
     ///
     /// The falloff is scaled by `tolerance`, so the adaptable Sylvans and the armoured Pyrothians are
@@ -165,7 +174,9 @@ public static class SpeciesDatabase
             // they are shallow-water dwellers rather than deep-ocean ones.
             minAtmospheres = 1f, maxAtmospheres = 3f,
             // A shade heavier than Earth: more water to hold, and more gravity holding it.
-            cradleMass = 1.2f
+            cradleMass = 1.2f,
+            // They build underwater, and their homeworld is an ocean world.
+            aquatic = true
         };
         SetAff(aquarii, rocky: 0.6f, ocean: 1.0f, ice: 0.7f, volcanic: 0.2f, barren: 0.2f, gas: 0.1f, moon: 0.4f, ast: 0.15f);
 
@@ -258,6 +269,9 @@ public static class SpeciesManager
     public static void Select(int index)
     {
         CurrentIndex = Mathf.Clamp(index, 0, SpeciesDatabase.All.Count - 1);
+        // The Fertile Index reads open water as kelp beds for an aquatic species and as nothing for the
+        // rest (SurfaceIndex.Fertile), so every cached index band was drawn for the previous species.
+        SurfaceIndex.InvalidateAll();
         RecomputeWorld();
         OnSpeciesChanged?.Invoke();
     }

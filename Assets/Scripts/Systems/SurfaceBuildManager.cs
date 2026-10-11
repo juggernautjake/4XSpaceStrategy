@@ -66,13 +66,17 @@ public static class SurfaceBuildManager
 
         var tile = b.surface.tiles[x, y];
         if (tile == null) { why = "no ground here"; return false; }
-        if (!info.allowsWater && PlanetTerrainGenerator.IsWater(tile.type))
+        if (PlanetTerrainGenerator.IsWater(tile.type) && !WaterAllowed(b, info))
         {
             // The two water-reading plants are the ones a player most often tries to drop INTO the sea,
             // because the Hydro Index reads 100 there — so they get the sentence that says where to go.
+            // An aquatic species is told it is THIS class that needs land, not that water is off-limits:
+            // most of what they build goes on it.
             why = info.index == SurfaceIndexKind.Water
                 ? "this stands beside the water, not in it — pick dry ground on the highlighted shore"
-                : "can't build on open water — pick dry ground";
+                : AquaticBuilder(b)
+                    ? $"even the {BuilderName(b)} can't build a {info.name} on open water — {LandReason(info)}"
+                    : "can't build on open water — pick dry ground";
             return false;
         }
 
@@ -121,6 +125,75 @@ public static class SurfaceBuildManager
         }
 
         return true;
+    }
+
+    // ============================================================================================
+    // BUILDING ON WATER — the aquatic species (2026-10-11)
+    //
+    // The Aquarii live in the sea, so for them most structures may stand on shallow or open-ocean
+    // tiles: the capitol, housing, labs, industry, the grid, the spaceport and shipyard, and farms as kelp
+    // beds (SurfaceBuildingInfo.aquaticWater says which; SurfaceIndex reads open water as Fertile for
+    // them). Everything that needs LAND still needs it — a mine or a combustion plant digs mineral
+    // ground — and every other species needs dry ground for all of it, exactly as before.
+    //
+    // THE BUILDER IS THE PLAYER'S SPECIES. Only the player places surface structures (CanPlaceType
+    // refuses any world that is not theirs), and the founding capitol is placed on a world nobody owns
+    // yet, so the species asked is always SpeciesManager.Current — which also keeps the Fertile Index's
+    // cache valid across a change of owner (it is invalidated on a change of species).
+    // ============================================================================================
+
+    /// The species whose rules apply to building on this world.
+    public static Species BuilderOf(CelestialBody b) => SpeciesManager.Current;
+
+    /// Does the species building here build on water?
+    public static bool AquaticBuilder(CelestialBody b)
+    {
+        var s = BuilderOf(b);
+        return s != null && s.aquatic;
+    }
+
+    /// The builder's name for messages ("Aquarii").
+    public static string BuilderName(CelestialBody b)
+    {
+        var s = BuilderOf(b);
+        return s != null ? s.name : "your people";
+    }
+
+    /// May this class stand on a water tile on this world? Everyone's `allowsWater`, or the aquatic
+    /// allowance for an aquatic builder.
+    public static bool WaterAllowed(CelestialBody b, SurfaceBuildingInfo info)
+        => info != null && (info.allowsWater || (info.aquaticWater && AquaticBuilder(b)));
+
+    /// Is this cell water (shallow or open ocean, lake, river, reef, frozen sea)?
+    public static bool IsWaterCell(CelestialBody b, int x, int y)
+        => InBounds(b, x, y) && b.surface.tiles[x, y] != null && PlanetTerrainGenerator.IsWater(b.surface.tiles[x, y].type);
+
+    /// Could this tile hold a building at all, for this world's builder — dry ground for most species,
+    /// any ground for an aquatic one? Used where "how much of the world is buildable" is counted.
+    public static bool BuildableGround(CelestialBody b, TerrainTile t)
+        => t != null && (!PlanetTerrainGenerator.IsWater(t.type) || AquaticBuilder(b));
+
+    /// The visible note on a card, a cursor readout or a placement message: "Aquarii can build on
+    /// water" (and, for a farm, that it is a kelp bed there). Null when it does not apply.
+    public static string WaterBuildNote(CelestialBody b, SurfaceBuildingInfo info)
+    {
+        if (info == null || info.allowsWater || !info.aquaticWater || !AquaticBuilder(b)) return null;
+        string who = BuilderName(b);
+        return info.type == SurfaceBuildingType.Farm
+            ? $"{who} can build on water — out at sea a farm is a kelp bed, and the Fertile Index reads the shallows"
+            : $"{who} can build on water";
+    }
+
+    /// Why a class an aquatic builder may NOT put on water needs land, for the refusal.
+    static string LandReason(SurfaceBuildingInfo info)
+    {
+        switch (info.index)
+        {
+            case SurfaceIndexKind.Mineral: return "it needs mineral ground, so look for an island the Mineral Index lights";
+            case SurfaceIndexKind.Solar: return "panels need dry ground under open sky";
+            case SurfaceIndexKind.Wind: return "turbines need dry, exposed ground";
+            default: return "it needs dry ground";
+        }
     }
 
     /// Can the whole footprint go down here?
@@ -1670,7 +1743,7 @@ public static class SurfaceBuildManager
         int buildable = 0;
         for (int x = 0; x < b.surface.width; x++)
             for (int y = 0; y < b.surface.height; y++)
-                if (!PlanetTerrainGenerator.IsWater(b.surface.tiles[x, y].type)) buildable++;
+                if (BuildableGround(b, b.surface.tiles[x, y])) buildable++;   // water counts for an aquatic builder
         if (buildable == 0) return 0f;
         return Mathf.Clamp01(Occupied(b).Count / (float)buildable);
     }
