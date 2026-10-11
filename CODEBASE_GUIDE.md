@@ -186,6 +186,7 @@ near 240, ring 1 near 440. Beyond the outer edge it is a **snowball**: `Snowball
 `OuterCeilingC` (−66 °C, so the warmest tile under the thickest air is still frozen). `BiasHeat`'s old
 0.45..1.85 clamp — the reason a world a ring inside the zone had a 55 °C archipelago — is gone; heat
 now runs ~0.08..6 and `PlanetTemperature.HeatForKelvin` is the inverse it is stored through.
+- **A black hole gives no starlight** (2026-10-11): `RollHeat` returns `BlackHoleKelvin` (40 K, accretion glow) ±jitter.
 - **`KelvinAt(rel)` / `KelvinAt(star, distance)`** (pure) and **`RollHeat(star, distance)`** (±5% jitter,
   guarantee re-imposed).
 - **`HeatBand(rel)` / `ClampToOrbit` / `OrbitMismatch` / `RelOf`** (2026-10-10, pure) — the range of heat
@@ -305,6 +306,19 @@ WASD pan + mouse-wheel height, fixed 55° pitch, ignores input over UI.
 
 ## Systems (`Assets/Scripts/Systems/`)
 
+### WorldExplanation.cs  *(why is this world like this? 2026-10-11)*
+One builder for every body's explanation, gated by `Survey.LevelOf` and the fog (`SystemPresence.Revealed`):
+- **`ForDisplay(b)`** — the whole rich-text explanation, cached per body against a signature of every field it reads.
+  **`Basic(b)`** (always): kind + main reasons in plain words (orbit band, mass, air, plates, belt, host planet,
+  homeworld). **`Measured(b)`** (level 1): temperature split starlight / air / surface (`PlanetTemperature.TypeModifierC`)
+  / internal heat, the regime floor or ceiling, equator-pole swing, tidal day/night; air built up from mass, field,
+  outgassing, stellar wind and heat (`AtmosphereRules`); magnetic field and why; water and its state; plates and their
+  odds (`TectonicsRules.Chance`); tidal lock and the tide that caused it. **`Deep(b)`** (level 2): geology and hotspots,
+  mineral modifiers and why, life (`BiosphereRules` gates in order), storm drivers, terraforming outlook.
+- Reads `WorldClassifier.Physics(.., out ClassCause)` — the branch that decided the type — so the words and the rule agree.
+- UI: `UI/WorldExplanationPanel.cs` (`Build` = one live label; `TooltipOnLastRow` = basic text on the Type row), used by
+  the Planet View Overview (under Climate & Weather) and the Inspector planet Overview.
+
 ### HomeworldOnboarding.cs  *(the new-game opening, 2026-10-09)*
 A new game owns nothing. `GalaxyGenerator.ForceHomeWorld` still builds the species' CRADLE (≥85%, locked)
 but no longer claims, settles or builds on it. **`BeginNewGame(home)`** → `ChooseWorld` (home system framed,
@@ -349,6 +363,12 @@ Global handle to the current system.
 ### ResearchManager.cs
 - **`NewGame()`**, `IsDiscovered/IsResearched`, **`Discover(ore)`**, **`CanResearch/Research(ore)`**,
   `AwardExploration`, `AddPoints`, `ResearchPoints`, event `OnChanged`.
+- **Surveys feed research (2026-10-11):** a level-1 survey pays `PointsPerExploration` (25 RP,
+  `AwardExploration`, which nothing used to call), a deep survey `PointsPerIndexRead` (12) per index the
+  world has (`AwardDeepSurvey`). **`IncomePerSecond()`** — labs on settled worlds + deployed research auras
+  (`StationEffects.ResearchAuraTotal`) x `ResearchRateMult`, memoised 1 s; the HUD shows it as "(+x/day)".
+- Survey speed tech: `Tech.surveySpeed` → `TechEffects.SurveySpeedMult` (Deep Sensors +15%, Autonomous
+  Survey Drones +35%), folded into `Survey.TechSpeedMultiplier` with the Empire Tech level's +20%/tier.
 - `ExportDiscovered/ExportResearched/Import` — save/load bridge.
 
 ### FacilityPower.cs  *(the two parallelism pools)*
@@ -404,6 +424,40 @@ Concealment is a **game mechanic** with a dev tool on top, not a boolean.
   `OrbitController.SetRingConcealed` (the ring hangs off the system container, not the body),
   `GalaxyStarProxy.SetAlpha` and `GalaxyLOD.ApplyProxies` (galaxy zoom replaces a system with a proxy —
   without this you hide a system, zoom out, and there it is).
+- **THE SYSTEM FOG OF WAR (2026-10-11)** — `VisibilityService.Unexplored(sys | body)`: in player mode a system
+  `SystemPresence.Known` says nobody has visited is drawn as its star only — worlds, moons, orbit lines,
+  belts, owner rings, ships parked there, nameplates, gravity wells and the system grid all concealed. A
+  DERIVED concealment folded into `Apply(body)` / `Apply(unit)` on top of any stored reason; NOT in
+  `IsHidden`/`ReasonFor` (FactionAI and the clues ask those about the world, not the player's view) and never
+  saved. **`SystemFog`** (Systems/SystemFog.cs) polls 4×/s and re-applies a system the moment its answer flips
+  (a ship crosses the detection circle; Dev Mode toggles) — no reload. **`CameraController.EnforceFogFloor`**
+  holds the zoom just above `GalaxyLOD.SystemViewCeiling` whenever the look-at point is inside an unexplored
+  system's circle, which covers every way in (wheel, Focus, F, zoom lock, Go-to, ViewSystem, notifications,
+  loads); `JumpTo` applies it up front. The ROOT CAUSE of "I can zoom into unvisited systems" was
+  `SystemPresence.Scan` counting ANY settled world as the player's presence — FactionAI settles every rival
+  capital, so every rival system was stamped `visited` (sticky, saved). Now only the player's own (or an
+  ownerless legacy colony) counts.
+  - **Things in open space** — `FoggedAt(point)` = inside an unexplored circle (`UnexploredSystemAt`, deepest
+    circle wins) and outside the player's sensors (`PlayerSensorsSee`: `SquadronAI.SensorRange` or a probe's
+    `visionRange`). `FoggedForPlayer(unit)`: never the player's own; docked goes with its world; in space,
+    `FoggedAt` its position — `SystemFog.PollShips` re-applies a ship when that answer changes. Comets use
+    `FoggedAt` (CometManager), derelicts their system's `Unexplored` (DerelictRenderer.ConcealedSystem).
+  - **Effects of hidden ships** — `VisibilityService.ShownToPlayer(unit)` (the hull's actual ConcealBinding
+    state if it has a visual, else the rules). A round fired by a hidden ship is simulated but never drawn
+    (`ProjectileRenderer` `Shot.hidden`: no bolt, beam, light, muzzle flash, launch sound or intercept burst).
+    Impacts and death explosions are keyed on the TARGET (`CombatManager.ResolveHit/Destroy`), so a visible
+    ship shot by an unseen one still visibly takes the hits. Scrap flash (`UnitManager.DestroyUnit`) and the
+    focus-fire ring (`FocusTargetMarker`) skip hidden ships. Engine plumes and nav lights are children of
+    the hull (`ShipLights`) and are concealed with it.
+  - The habitable-zone band never moves to an unexplored system (`StarOverview.Open` skips the Retarget;
+    `VisualizeGalaxyStepped` falls back to the home system).
+  - **Saves before format 2** run `SystemPresence.RepairLegacyVisited`: only systems holding a rival-settled
+    world are re-examined, and one stays visited if anything saved shows the player there (a player-owned
+    or player-claimed world, any survey/deep-survey progress, a player ship there now). Otherwise it
+    returns to the fog. Format 2 saves are never touched.
+  - **Panning** at close zoom toward an unexplored system meets soft resistance at its circle
+    (`CameraController.ResistPanIntoFog`: the inward part of the move fades to zero across a band outside
+    the edge, the along-edge part is kept) with a throttled hint, instead of crossing and being lifted out.
 - Generation seeds a **rare undiscovered world** (`GalaxyGenerator.SeedUndiscoveredWorlds`, ~1.2% of
   unclaimed non-home planets), concealed as `Undiscovered` so a later discovery event can reveal
   exactly those and nothing a developer hid by hand.
@@ -480,12 +534,56 @@ nothing ticks it, and the save no longer carries it.
 moon's orbit (`Radius`). It is the camera's zoom-lock zone (`CameraController.TryAutoLock`, which also
 locks onto the player's undocked ships), the planet's orbit (`ParkedIn` adds parked ships to the Orbit
 tabs), and where new hulls wait (`BuildOrder.yardBodyId` / `UnitManager.YardFor`). `ZoomFieldRenderer`
-draws it (circle + grid, 50% alpha) in Dev Mode, from the Orbit tab toggle, or for 8 s after a station is
-queued (`FocusForConstruction`). Per-planet colour / grid / size are Dev sliders in `OrbitControlPanel`, saved.
+draws it (circle + grid, 50% alpha) for every planet while the **Gravity Wells** switch is on (`MapGrids.Show`,
+default on, PlayerPrefs — this replaced "always in Dev Mode"), and otherwise from the Orbit tab toggle or for
+8 s after a station is queued (`FocusForConstruction`). Never in an unexplored system. Fields are kept across
+the galaxy/system switch and only hidden (they used to be destroyed and rebuilt every crossing). Render queue
+`ZoomFieldRenderer.Queue` (3000). Per-planet colour / grid / size are Dev sliders in `OrbitControlPanel`, saved.
+
+### SystemGridVisual.cs  *(the solar-system grid, 2026-10-11)*
+One per system, child of `sys.pivot` (built beside `DetectionRingVisual` in `VisualizeGalaxyStepped`): a faint
+line-only grid centred on the star out to `SystemPresence.DetectionRadius`, plus a stronger 2 px edge ring on
+that circle. `MeshTopology.Lines` (1 px, pixel-art friendly, nothing to alias); major lines fade out and a minor
+subdivision fades in by ON-SCREEN spacing, so it never moirés. Drawn UNDER the gravity wells by render queue
+(`Queue` = wells − 10; both ZWrite Off, so no z-fighting whatever the orbital inclination). Rebuilt only when
+the radius changes. Same switch as the wells; hidden in unexplored / concealed systems and during the intro.
+
+### MapGridToggle.cs  *(UI — the Gravity Wells switch)*
+`MapGrids` — `Show` / `Set` / `Toggle` / `OnChanged`, persisted as `MapGrids.GravityWells`. `MapGridToggle` — the
+38 px button in the bottom-right corner of the main canvas (`PixelIcons.Grid` at exactly 2x, black plate, the
+shortcut column's bright square "on" frame). Nothing else anchors to that corner; it is built before the windows
+so they draw over it.
 
 ### NameplateManager.cs  *(UI)*
 Bordered name plates over every surveyed body and every discovered system (anchored to `sys.pivot`, the
 barycentre), with the player's crest or a rival's colour swatch on the left. Screen-space, no raycasts.
+
+### Seeing, selecting and finding ships  *(2026-10-11)*
+- **`ShipMarkers`** (Visual/ShipMarkers.cs) — a screen-space marker for every ship `VisibilityService.ShownToPlayer`
+  allows, in system view only: a 9x9 pixel-art role glyph (`ShipGlyphs`: warship, scout, science, colony,
+  terraformer, worker, station, probe) in the owner's colour, drawn at an integer pixel scale. It fades out as
+  the hull grows past 22-44 px on screen. Ships docked at one world (per owner) that would overlap collapse into one
+  badge with a count, set just beside the world so the world stays clickable; overlapping ships in open space
+  collapse where they are. Selected ships get pulsing corner brackets (around the hull once it is big). Hover
+  shows name, class and status. No GraphicRaycaster: **`Pick(screen, out Hit)`** picks by distance (14 px, a 7 px
+  "core"), so markers never count as UI to the click guards.
+- **Selection priority** (`ClickPriority`): a marker under the cursor wins first. Off the world's drawn disc, anywhere
+  in its 14 px radius wins; on the disc, only its 7 px core does. Then the old rule: the body's drawn disc beats a
+  ship collider, and a ship collider in the inflated pick halo beats the body. `UnitUnderCursor` (right-click targets,
+  T) asks the markers first too. `ShipMarkers.Update` handles marker clicks over open space; `BoxSelectController`
+  treats a marker as a collider, so clicking one does not clear the selection.
+- **`ShipSelect`** (Systems/ShipSelect.cs) — one click path for tokens, hulls, markers and list rows. Click selects,
+  Shift toggles, double-click selects all your ships of that class on screen, a stack click selects your ships in it.
+  **A map click no longer moves the camera.** F/Q frame the selection. `SelectAndFocus` (list rows, Tab) does both.
+  One click per frame (`handledFrame`), so a click seen by two handlers is not read as a double-click.
+- **`ShipHotkeys`** — Tab / Shift+Tab cycle your ships (build order) and frame each one; "." jumps to the next idle ship.
+- **`ShipRoster`** (Systems/ShipRoster.cs) — **`CollectAt(body)`**: every visible ship docked at a world or one of its
+  moons, or parked inside its orbital field, any owner, yours first. `StatusWord / StatusLine / StatusColor`,
+  `PlaceOf / SystemOf / IsIdle / PlayerShips`, and `Signature(body)` for window rebuilds.
+- **`ShipRosterUI`** (UI/ShipRosterUI.cs) — the one ship row (glyph, name, squadron, class, owner, status, hull bar,
+  "Send to…") and **`OrbitSections`**, the body of both Orbit tabs (Inspector + Planet View). The Inspector keeps the
+  planet on its breadcrumb when a row is clicked. **`FleetWindow`** (HUD "Fleet") is the player's ships grouped by
+  system, then place, with All / Idle / Moving / Working filters.
 
 ### HabitableZoneVisualizer.cs
 - **`Build(star, starT, bodies)`** — build the green band for the current species' zone.
@@ -640,9 +738,19 @@ Seven tabs over one shared surface grid:
 - **Info** — name, type, size class, climate/weather prose, development density, survey state.
 - **Sites** — the points of interest on this world (what the retired detailed-map window used to hang).
 - **Build** — click a structure to pick it up; it rides the mouse as a loose ghost, then SNAPS to the
-  grid over the map (green = fits, red = doesn't). **Right-click rotates** at any point; left-click
-  commits; Esc drops it. Footprints are tetromino-like, so packing a dense city is a real puzzle.
-  Grouped by category — Government · Harvesting · Industry · Military · **Electrical Engineering**.
+  grid over the map (its art = fits, red = doesn't). Controls (2026-10-11): left-click places a fixed
+  structure (then Build confirms) or starts a drawn one (drag paints / drags the box, Confirm builds);
+  **R rotates** (fixed only, and only advertised when the shape isn't square); **right-click puts the
+  piece down** in one step, **Esc** backs out one step (confirm → shape → piece); **X toggles
+  demolition** (fixed structures come down whole). Categories: Civil · Electrical · Agriculture ·
+  Science · Industry · Military.
+  **Refusals are always said where the player is looking** — one path for every reason: the cursor
+  window's verdict line ("Can't build here: Mineral Index here 34%, needs 70% — try the highlighted
+  ground"), the red ghost, a floating label at the tile on a refused click (`BuildPlacement.Flash`,
+  shared by the brush, fixed clicks and pylon runs), the Confirm panels' "Can't build:" line, and the
+  card's red/amber line (`CanPlaceType` reason, have-vs-need shortfall, index not surveyed / world's
+  best below the floor). The hover verdict is `PlacementCheck`: CanPlace for fixed classes,
+  `SurfaceBuildManager.CanStartAt` (this cell + the minimum footprint's cost) for drawn ones.
 - **Infrastructure** — everything standing here: tier, condition, siting, and its grid.
 - **Power** — the grid overlay (yellow = reach, blue = plants and relays, dull = dark) plus a balance per
   grid and a list of what's in the dark. Diagnostic only; the plants are placed from **Build**, since a
@@ -656,6 +764,47 @@ say what's missing is a dead end. Milestones: visited → surveyed → deep-surv
 Drawing: overlays are ONE point-filtered texture the size of the grid (a texel per cell), not a
 GameObject per tile — a 40×20 world is 800 cells. Structures and the ghost are a few quads on top.
 Hover is POLLED (`ScreenToCell`), not `IPointerMoveHandler`, whose dispatch depends on the input module.
+
+### Survey.cs — the two survey levels  *(rules + readouts, 2026-10-11)*
+- **Level 1 (Survey)**: any `canExplore` hull at the world (docked in orbit). **Level 2 (Deep Survey)**:
+  `canResearch` hulls only; a research hull ordered to deep-survey an UNMAPPED world maps it first (the
+  Research order stays at the front while it runs level 1). Progress lives on the WORLD
+  (`explorationProgress` + `surveyRows`, `deepProgress`), so a ship leaving or dying pauses it and any
+  ship resumes it. Only the player has fleets, so nothing leaks through rival surveys.
+- **`CanSurvey / CanDeepSurvey(b, u, out why)`** — the one order rule (ship panel, Inspector, right-click
+  menu). The old three-tier `DeepResearch` ladder (Empire Tech 4/7 gates on a "tier" that no longer
+  unlocked anything) is deleted.
+- Readouts: `Active(b, out deep)`, `Progress`, `RatePerSecond`, `EtaSeconds`, `LeadShip`, `JobName`.
+- **`Grant(b, level, discoverOres)`** — silent granted surveys (cradle moons level 2 at generation, the
+  chosen homeworld level 2 with ores into the Codex). Charts every site, which the old hand-set grants
+  did not (the home sites could never be commissioned).
+- **Completions are one path each**: `UnitManager.CompleteGround(u, b)` / `CompleteDeep(u, b)` (u may be
+  null) — rows filled, RP paid, ruins announced, sites charted, ores discovered, Vael clue revealed,
+  Planet View refreshed. A research hull with nothing queued carries on from level 1 into level 2.
+  **`UnitManager.DevCompleteSurvey(b)`** (Dev Mode only): Planet View Survey card button, Inspector
+  overview button, hotkey **Ctrl+Shift+U** (Planet View world, else the selected world).
+- `BandRank` is the COMPACT order (= index in `BandOrder`); the old formula left a gap on even band
+  counts, so the level-2 pass never reached one latitude until it completed. `RowBlocks` uses `BandY`.
+- Front geometry for effects: `FrontOf(b, u, out row01, out along01)`, `DeepFrontBlocks(b, into)`,
+  `SweepRevealOf` (the sweep without the owned/Dev visibility shortcut).
+- Save format 3: `deepProgress` is authoritative; the "surveyed shows the Mineral index" inference runs
+  only for format < 3 saves (it used to re-grant part of the Mineral index on every load).
+
+### Survey rendering  *(UI/SurveyProgressUI.cs, UI/SurveyMapScan.cs, UI/SurveyShipBars.cs, Visual/SurveyScanFx.cs)*
+- **`SurveyProgressUI.BuildSection`** — the SURVEY card at the top of the Planet View's Survey tab (world +
+  moons with a survey running/part-done; live bar, ETA, ship; Dev button). `StatusLine(b)` is shared
+  with the Inspector overview.
+- **`SurveyPaneStrip`** — compact bar top-left of every map pane (host + each moon), visible from any tab,
+  "complete" note for 5 s.
+- **`SurveyMapScan`** — on each map content rect (map-normalised anchors): a scan line + shimmer trail at
+  the level-1 front (moon panes get the block frame too), and the deep-survey front framed in the colour
+  of the index being read (it had no marker unless that overlay was on).
+- **`SurveyShipBars`** — pooled screen-space bars over surveying ships (10 pixel cells, cyan Survey / green
+  Deep), hidden at galaxy zoom, during the intro, and when the hull is concealed.
+- **`SurveyScanFx`** — pooled LineRenderers per surveying ship: a sweep ring at the working latitude
+  (coarse 24-gon for level 1, fine 64-gon pair in the index colour for level 2) and a scan fan from the
+  hull; per type (gas giants probe above the cloud tops with two rings, runaway greenhouses scan through
+  haze, ice/ocean/volcanic tints). Brightness steps on `FleetClock`.
 
 ### SurfaceIndex.cs
 Per-tile survey overlays, **derived not stored** — a stable hash of the terrain seed + position means
@@ -695,7 +844,12 @@ they cost nothing to save and survive a reload untouched (the same guarantee ter
 - **Tidal lock is rolled WITH ROTATION** in `SolarSystemGenerator.ApplyWorldPipeline` (spin 0 → no
   dynamo → no field), planets only, likelier close in. `OrbitController.FaceParent` keeps the map's
   centre meridian (the vertex with UV nearest 0.5,0.5) toward what it orbits. Spin Up breaks the lock.
+- **Since 2026-10-11 the lock chance reads the star's TIDE** (`TideStrength` = solar masses / AU³, `TidalLockChance`):
+  none under `TidalLockMinTide`, so red-dwarf habitable worlds lock more and far outer worlds never.
 - The rest are rolled in **`GalaxyGenerator.Finish`** (`WorldModifiers.Roll`) once every surface exists.
+  The odds come from the world now: High Quality Minerals 9% on an active crust / 3% quiet, Vast Mineral Deposits
+  10% with plates / 4.5% without (and granted to every starting world), Extreme Weather 4% plus its `WeatherDrivers`
+  (tidal lock, fast spin, warm seas, deep sky). Same draws in the same order.
 - **`WorldModifierBadges`** — self-updating row of 22px framed icons, border = the index colour the
   modifier bends. Nothing before a survey, "?" at level 1, the real icon + description at level 2.
   Shown across the top of the Inspector Overview globe and under the Planet View map's bottom-right
@@ -707,32 +861,76 @@ they cost nothing to save and survive a reload untouched (the same guarantee ter
 - `SurfaceBuildingType` / `SurfaceBuildingInfo` — footprint `shape`, driving `index`, cost, output.
   Mine = L, Farm = 2×3, Geothermal = O, Solar = I, Wind = T, Habitat = S, Factory/Spaceport = blocks.
 - **`Rotated / CellsOf / Footprint`** — 90° rotation, re-normalized so the piece stays under the cursor.
-- **`CanPlace / Place / Demolish`** (60% refund), `Occupied`, `Density`.
+- **`CanPlace / Place / Demolish`** (60% refund), `Occupied`, `Density`. `CanPlace` asks `CanPlaceType`
+  for every world/empire gate (one copy, 2026-10-11) and adds the footprint, pending sites and price.
+  `Place` is now only the two placements that settle a world (founding capitol, colony landing);
+  spaceports and shipyards queue via **`SurfaceBuildQueue.EnqueueFixed`** (list price once, one
+  structure's Labor, completes through `ForcePlace` as a rotated record, never a drawn shape).
+  Unique classes count queued jobs (`SurfaceBuildQueue.CountQueued`). `ShortfallText` is the one
+  have-vs-need wording (and flags a price over the storage ceiling); `MinimumCost` prices the smallest
+  legal building; `PowerWarning` is the amber off-grid note. `tools/build-placement-audit.mjs` sweeps
+  every class against these rules.
 - **`EfficiencyAt`** — the average of the driving index across the footprint, **locked in at placement**.
   A mine on a seam pays forever; one on dead rock is a permanent mistake. `TickOutput` scales by it.
+- `TickOutput` / `ResearchPerSec` pay through `SurfaceOutput` (siting × size × tech × condition × power ×
+  synergy), then feed the factories (`Industry.Tick`). `AdjacencyBonus` = `SurfaceSynergy.Bonus`.
+  `PredictedYield` adds the synergy and power-route preview for the piece in hand.
 - `requiredTech` — gates a structure on research (`TerraformProjectInfo.requiredTech`'s twin). Checked in
   `CanPlace`; Fission needs F1, Fusion needs F2.
 - `allowMultiple` — opts out of `OneOfEachPerWorld`. Power infrastructure only: a grid you may build one
   relay for is not a grid. `uniquePerWorld` still wins over it.
 
-### PowerGrid.cs
-**Electricity as a place rather than a number.** A grid is a **connected component of projectors**, where
-a projector is anything with `powerRange > 0` (a plant lights its footprint + the 8-ring; a Power Node is
-a 1×1 relay reaching 7; the capitol's founding reactor reaches `ColonyReactorRange`). Two projectors are
-one grid **iff the ground they light overlaps** — that single rule is the whole system.
-- **Derived, never maintained.** No merge code, no split code: `Compute` union-finds every grid on a world
-  from the buildings standing on it, memoized per (world, frame). Chain nodes between two cities and they
-  *were never two grids*; lose the middle node and they are two again. Every mutation calls `Invalidate()`.
-- `PowerFactor(b, p)` — `1` if it draws nothing, `UnpoweredFactor` (0.35) if no grid reaches it, else
-  `Lerp(0.35, 1, served)`. `TickOutput` ticks the grid **first**, then scales every output by this.
-- `served` vs `SteadyServed` — `Tick` runs on ColonyManager's ~1s step, the UI reads every frame, so
-  `served` is **derived from state** rather than left as a tick artifact. Otherwise 59 frames in 60 would
-  show a number computed without the capacitors in it.
-- `Dead` — a grid with no plant on it. Relays with nothing behind them; distinct from having no grid.
-- Capacitor charge lives on `PlacedBuilding.stored`, so merging grids needs no reconciliation.
-- **Consumers are industry only** (mine/factory/refinery/lab/spaceport/shipyard). Housing and farms draw
-  nothing, deliberately — see the comment in `SurfaceBuilding.cs`; hanging power on population would
-  strangle every pre-existing colony and feed back on the growth that would fix it.
+### PowerGrid.cs  *(adjacency power with a hop limit, 2026-10-11)*
+**Electricity as a place rather than a number.** Plants project a disc (2-4 tiles × tier); a Power Node
+projects 7 once it is itself energised (a repeater); every other building **conducts by contact, up to
+`MaxContactHops` (3) buildings**. Hop 0 = a plant, a live pylon, or anything with a tile in their disc;
+hop k = touching a hop-(k-1) building. Past the limit a building is **too far**: off-grid, tagged and
+listed as such. A grid = a connected component of energised buildings (every one contains a plant).
+- **Derived, memoised across frames.** `Build` runs rounds of BFS (pylons switch on as they are reached),
+  then union-find. The topology is cached per world and rebuilt only when the buildings' structural
+  signature changes (records, types, tiers, cells) or `Invalidate()` is called; the numbers (generation,
+  draw, served) are refreshed once a frame without allocating. Every mutation still calls `Invalidate()`.
+- **Draw scales with size**: `DrawOf(p)` = powerDraw × LevelMult × `BuildScaling.CostMultiplier(tiles)` for
+  a drawn footprint. Per-tile draws were cut to match (Mine 0.4, Farm 0.15, Factory 0.8, Refinery 0.6, Lab
+  0.5, Centre 1.0; Shipyard 1.5 and Spaceport 1.5 are whole fixed structures).
+- **Shortfall is shared NEAREST FIRST** (`Allocate`): hop-0 consumers are served in full before hop 1 gets
+  anything, and so on — a short grid browns out from the ends of its chains. `ServedOf(b, p)` is a
+  consumer's own share; `PowerFactor` = `Lerp(UnpoweredFactor, 1, ServedOf)`.
+- `UnpoweredFactor` is the **emergency backup, 0.15** (was 0.35) — the same floor off-grid and on a starved
+  grid, so connecting is never worse than not, and a collapsed colony still trickles metal.
+- Queries: `NetOf`, `LinkOf` / `HopOf` / `TooFar` (hop, the neighbour it is fed through, the disc that
+  lights it), `NeighboursOf` / `OwnerAt` (the cached contact graph SurfaceSynergy also uses),
+  **`ProspectFor` / `ProspectText`** (the placement preview: lit directly, via N buildings with K hops left,
+  or too far), `CanPlantNodeAt` (respects the limit), `ReachText` (the card's words), `GridColor(index)`.
+- `served` vs `SteadyServed` — Tick runs ~1/s, the UI every frame, so served is derived from state.
+- `Dead` — nothing generating; `Failed` — dead and the bank is empty. Charge lives on `PlacedBuilding.stored`.
+- `PowerNet.projectors` is now only plants + live relays (it used to hold every member, so "pylon" counts
+  counted farms); `members` is everything on the grid; `consumers` is sorted nearest first.
+
+### Industry.cs + SurfaceSynergy.cs  *(the industrial chain and placement synergies, 2026-10-11)*
+- **Mine** extracts metal (Mineral Index). **Refinery** reads no index any more: it smelts the ore of the mines
+  it touches (+25% each, cap +50%, one refinery tile covers 2 mine tiles shared across them) and gets +25% per
+  touching mine itself; 0.4 metal/s of its own. **Factory** makes no metal: it makes **Industry** = 1 × its
+  output multiplier, worth +15% construction speed on its world per point (cap +100%), eating 0.25 metal/s per
+  useful point only while the world's build queue has a running job (`Industry.Tick` from `TickOutput`;
+  `SurfaceBuildQueue.Tick`/`Eta` multiply by `Industry.SpeedMult`).
+- **`SurfaceOutput`** is the one set of production formulas (Metal/Water/Research/Energy/Storage) — the tick,
+  `WorldEconomy`, the card all read it. `Storage` scales a depot drawn bigger than its authored shape.
+- **`SurfaceSynergy.Bonus(b, p)`** is the one adjacency function (`SurfaceBuildManager.AdjacencyBonus` now
+  forwards to it). Rules: Refinery→Mine, Mine→Refinery, Refinery→Factory, Depot→industry +10%, housing→
+  industry +5% each (cap 15%), Lab↔Centre +10% (cap 30%), Power Distribution→plants +30%; total cap +75%;
+  a source contributes in proportion to its own power factor and condition. `Parts`/`Gives` itemise it for
+  the card; `PreviewText`/`PlacementSummary` say it under the ghost and on the confirm panel.
+- `tools/industry-power-check.mjs` ports the hop rule, the sharing, the synergy caps, the opening balance and
+  Industry, reading every constant from the C#.
+
+### PowerGridBadges.cs  *(UI — which grid is everything on)*
+While the power overlay is up: a tag on every building in its grid's colour (`2` direct, `2+1` fed through one
+building, red `x4` too far — its tiles washed red — and `!` unreached), and a **grid list** in the map's
+bottom-left corner (health, supply/demand, plants/pylons/users/caps). Clicking a row highlights that grid's
+buildings. Wired in PlanetViewWindow next to the building card; `Covers()` is part of `OverMapChrome`.
+SurfaceFx's power flow draws a thin **adjacency link** from each contact-fed building to the neighbour it takes
+power from.
 
 ### InspectorWindow.cs + InspectorBodyTabs / InspectorUnitTabs / InspectorFacilityTabs / InspectorStarTabs
 **One tabbed window for everything you can click on.** `partial class InspectorWindow`.
@@ -950,6 +1148,12 @@ forced worlds go and what climate they get. Since 2026-10-11 it also pushes a sh
 after their climate is rolled (OrbitSafety's backstop) and asserts they were re-derived — the Mirfak Eta
 II bug it used to miss — holds every species' cradle to its own band at its ideal, and (section 4) gives
 the runaway-greenhouse distribution by ring.
+
+**`world-causes-check.mjs`** (2026-10-11) — the whole natural-world pipeline ported (rings, lanes, ApplyWorldPipeline,
+classifier, biosphere, AmplifyBiome, EnsureHabitableWorld, modifiers), run OLD and NEW over the same seeds: share of
+every world class per ring and per star class, tidal lock by zone band and star, modifier rates, the CAUSE of every
+paradoxical-sounding world (frozen inside the zone, hot giants, sterile water worlds) and the flags — worlds no rule
+explains. Fails if the NEW pipeline produces any.
 
 **`habitability-audit.mjs`** (2026-10-11) — every species × star class, BEFORE and AFTER the one zone
 rule: band in xR and units, rings covered, cradle ring, type, °C and own-species rating; then the

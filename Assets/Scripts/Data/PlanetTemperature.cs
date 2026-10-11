@@ -306,7 +306,9 @@ public static class PlanetTemperature
     // everywhere (high albedo, no greenhouse) — independent of where they happen to orbit. This is what
     // makes "a volcanic world will likely never read white/blue, an ice world will likely never read
     // red/orange" hold even though both are ultimately built from the same distance-driven heat value.
-    static float TypeModifierC(CelestialBodyType t)
+    // Public since 2026-10-11 so WorldExplanation can show it as its own line of a world's temperature
+    // (ice albedo, lava, cloud tops) rather than folding it silently into "starlight".
+    public static float TypeModifierC(CelestialBodyType t)
     {
         switch (t)
         {

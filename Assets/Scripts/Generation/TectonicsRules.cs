@@ -63,23 +63,23 @@ public static class TectonicsRules
     public static bool Roll(CelestialBodyType type, float mass)
     {
         if (!Possible(type, mass)) return false;
+        return Random.value < Chance(type, mass);
+    }
 
-        switch (type)
-        {
-            case CelestialBodyType.Moon:
-                // Large moons get a modest, mass-scaled chance rather than terrestrial planets' full odds.
-                return Random.value < Mathf.Lerp(0.10f, 0.30f, Mathf.InverseLerp(LargeMoonMass, 4f, mass));
-
-            default:
-                // Spec §2: tectonics on terrestrial worlds ~1/5 of the time, "more likely for the larger
-                // planets". Recalibrated to the Earth-relative scale: ~0.20 at an Earth mass — which IS
-                // the spec's one-in-five, now stated at the world it was meant to describe — climbing
-                // toward 0.55 at the 4-Earth ceiling, so bigger worlds really are more likely without
-                // small ones ever being impossible.
-                float sizeFactor = Mathf.InverseLerp(MassRules.TerrestrialDefault, MassRules.TerrestrialMax, mass);
-                float chance = Mathf.Lerp(0.20f, 0.55f, sizeFactor);
-                return Random.value < chance;
-        }
+    /// The odds Roll draws against — pure, so the world explanation can quote them ("about 30% of worlds
+    /// this size have plates") from the same numbers rather than a copy. 0 where plates are impossible.
+    ///
+    ///   Moon     a modest, mass-scaled chance (10% at 1.5 Earths, 30% at 4) rather than a planet's odds.
+    ///   default  Spec §2: tectonics on terrestrial worlds ~1/5 of the time, "more likely for the larger
+    ///            planets". ~0.20 at an Earth mass climbing toward 0.55 at the 4-Earth ceiling, so bigger
+    ///            worlds really are more likely without small ones ever being impossible.
+    public static float Chance(CelestialBodyType type, float mass)
+    {
+        if (!Possible(type, mass)) return 0f;
+        if (type == CelestialBodyType.Moon)
+            return Mathf.Lerp(0.10f, 0.30f, Mathf.InverseLerp(LargeMoonMass, 4f, mass));
+        float sizeFactor = Mathf.InverseLerp(MassRules.TerrestrialDefault, MassRules.TerrestrialMax, mass);
+        return Mathf.Lerp(0.20f, 0.55f, sizeFactor);
     }
 
     // `BoostRidge` USED TO LIVE HERE and is deleted rather than left dead.

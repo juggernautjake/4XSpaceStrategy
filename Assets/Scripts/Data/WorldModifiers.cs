@@ -37,9 +37,7 @@ public static class WorldModifiers
     //
     // Per world, independent. On a galaxy of ~50 solid worlds that is two or three of each rolled kind,
     // which is "uncommon, worth looking for" rather than "every other planet".
-    const float HighQualityMineralChance = 0.06f;
-    const float VastMineralChance = 0.06f;
-    const float ExtremeWeatherChance = 0.08f;
+    // (The flat 6% / 6% / 8% mineral and weather chances are gone — see WHAT A MODIFIER COMES FROM.)
     /// Of the worlds that already meet the Fertile World climate, how many actually are one. The climate
     /// window is narrow on its own, so this is high.
     const float FertileWorldChance = 0.65f;
@@ -59,28 +57,105 @@ public static class WorldModifiers
     // later would leave a magnetosphere standing on a world that cannot have one.
     //
     // Planets only: the request is about facing the star, and a moon locked to its planet would face
-    // the wrong thing. Closer worlds lock far more readily, which is the real physics of it.
-    public static bool RollTidalLock(CelestialBodyType provisionalType, float rel, bool isMoon)
+    // the wrong thing.
+    //
+    // BY THE STAR'S TIDE, NOT BY THE ZONE BAND (2026-10-11). It used to be 10% inside the habitable zone,
+    // 3% in it and 1% beyond, whatever the star — so a world at five AU from a Sun-like star could lock
+    // (nothing there raises a tide strong enough) and a red dwarf's habitable world locked no more often
+    // than Earth would. The tide a star raises goes as its mass over the cube of the distance, so that is
+    // what the chance reads now: TideStrength, 1 for the Sun on Earth. Too weak (TidalLockMinTide) and
+    // nothing locks at all; otherwise TidalLockEarthChance x sqrt(tide), capped. A red dwarf's habitable
+    // ring is close in and locks several times more often than a Sun-like one, which is the real picture.
+    // tools/world-causes-check.mjs prints the before and after.
+    public const float TidalLockEarthChance = 0.03f;
+    public const float TidalLockMinTide = 0.15f;
+    public const float TidalLockMaxChance = 0.35f;
+
+    /// The tide `star` raises on a world `distance` units out, relative to the Sun's on Earth: solar
+    /// masses over AU cubed. The game's ruler is StarDatabase.AU. Pure.
+    public static float TideStrength(StarData star, float distance)
     {
-        if (isMoon) return false;
-        if (provisionalType == CelestialBodyType.GasGiant || provisionalType == CelestialBodyType.Asteroid) return false;
-        float chance = rel < StarDatabase.HzInnerRel ? 0.10f
-                     : rel <= StarDatabase.HzOuterRel ? 0.03f
-                     : 0.01f;
-        return Random.value < chance;
+        if (star == null) return 0f;
+        float au = Mathf.Max(0.05f, distance / StarDatabase.AU);
+        return Mathf.Max(0f, star.mass) / (au * au * au);
+    }
+
+    /// The chance a planet at this distance is tidally locked to its star. Pure.
+    public static float TidalLockChance(CelestialBodyType provisionalType, bool isMoon, StarData star, float distance)
+    {
+        if (isMoon) return 0f;
+        if (provisionalType == CelestialBodyType.GasGiant || provisionalType == CelestialBodyType.Asteroid) return 0f;
+        float tide = TideStrength(star, distance);
+        if (tide < TidalLockMinTide) return 0f;
+        return Mathf.Min(TidalLockMaxChance, TidalLockEarthChance * Mathf.Sqrt(tide));
+    }
+
+    /// One draw from the generation stream, whatever the chance — so every world after it rolls as before.
+    public static bool RollTidalLock(CelestialBodyType provisionalType, bool isMoon, StarData star, float distance)
+        => Random.value < TidalLockChance(provisionalType, isMoon, star, distance);
+
+    // ---- WHAT A MODIFIER COMES FROM (2026-10-11) -------------------------------------------------
+    //
+    // These were flat dice — 6%, 6% and 8% on every solid world — so nothing about a world explained why
+    // it had one. They are still uncommon and still rolled, but the odds now come from the world:
+    //
+    //   HIGH QUALITY MINERALS   hot fluids circulating through an ACTIVE crust (plates, or hotspots at
+    //                           GeologyActiveIntensity and up) concentrate metals into rich seams. 9% on an
+    //                           active world, 3% on a quiet one.
+    //   VAST MINERAL DEPOSITS   plate collisions push ore-bearing rock up across wide areas. 10% with
+    //                           plates, 4.5% without. Every starting world is granted it outright
+    //                           (GalaxyGenerator.Finish) — it was settled for its mineral ground.
+    //   EXTREME WEATHER         storms need energy and contrast: a day side that never cools (tidal lock),
+    //                           a fast spin's strong jets, warm seas feeding moisture, a deep sky. 4% from
+    //                           the ordinary equator-to-pole contrast alone, more for each driver present
+    //                           (WeatherDrivers lists them; WorldExplanation names them).
+    public const float GeologyActiveIntensity = 0.35f;
+    public const float FastSpin = 30f;
+    public const float WarmSeaWater = 0.5f, WarmSeaC = 15f;
+    public const float DeepSkyAtmospheres = 3f;
+
+    /// Is this world's crust active enough to concentrate ores — plates, or strong hotspots?
+    public static bool GeologicallyActive(CelestialBody b)
+        => b != null && (b.hasTectonics || GeothermalMap.HotspotIntensity(b) >= GeologyActiveIntensity);
+
+    [System.Flags]
+    public enum WeatherDriver { None = 0, TidalLock = 1, FastSpin = 2, WarmSeas = 4, DeepSky = 8 }
+
+    /// What, beyond the plain equator-to-pole contrast every world with air has, drives storms here.
+    public static WeatherDriver WeatherDrivers(CelestialBody b)
+    {
+        var d = WeatherDriver.None;
+        if (b == null) return d;
+        if (b.tidallyLocked) d |= WeatherDriver.TidalLock;
+        if (b.spinSpeed >= FastSpin) d |= WeatherDriver.FastSpin;
+        if (WaterLevel(b) >= WarmSeaWater && PlanetTemperature.BodyAverageCelsius(b) >= WarmSeaC) d |= WeatherDriver.WarmSeas;
+        if (b.atmospheres >= DeepSkyAtmospheres) d |= WeatherDriver.DeepSky;
+        return d;
+    }
+
+    public static float ExtremeWeatherChanceFor(CelestialBody b)
+    {
+        var d = WeatherDrivers(b);
+        float c = 0.04f;
+        if ((d & WeatherDriver.TidalLock) != 0) c += 0.10f;
+        if ((d & WeatherDriver.FastSpin) != 0) c += 0.03f;
+        if ((d & WeatherDriver.WarmSeas) != 0) c += 0.05f;
+        if ((d & WeatherDriver.DeepSky) != 0) c += 0.03f;
+        return Mathf.Min(0.25f, c);
     }
 
     /// The rest, rolled once the surface exists — Fertile World needs the finished climate to judge.
-    /// Draws from UnityEngine.Random inside the generation stream, like every other generation roll.
+    /// Draws from UnityEngine.Random inside the generation stream, like every other generation roll —
+    /// the same draws in the same order as before; only the odds come from the world now.
     public static void Roll(CelestialBody b)
     {
         if (b == null) return;
         b.worldModifierFlags = 0;
         if (!Solid(b)) return;
 
-        if (Random.value < HighQualityMineralChance) Set(b, WorldModifier.HighQualityMinerals);
-        if (Random.value < VastMineralChance) Set(b, WorldModifier.VastMineralDeposits);
-        if (b.atmospheres >= ExtremeWeatherMinAtmospheres && Random.value < ExtremeWeatherChance)
+        if (Random.value < (GeologicallyActive(b) ? 0.09f : 0.03f)) Set(b, WorldModifier.HighQualityMinerals);
+        if (Random.value < (b.hasTectonics ? 0.10f : 0.045f)) Set(b, WorldModifier.VastMineralDeposits);
+        if (b.atmospheres >= ExtremeWeatherMinAtmospheres && Random.value < ExtremeWeatherChanceFor(b))
             Set(b, WorldModifier.ExtremeWeather);
         if (MeetsFertileClimate(b) && Random.value < FertileWorldChance) Set(b, WorldModifier.FertileWorld);
     }

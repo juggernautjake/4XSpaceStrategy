@@ -115,21 +115,57 @@ public static class WorldClassifier
         => b == null ? 15f : PlanetTemperature.BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, CelestialBodyType.RockyPlanet)
                              + PlanetTemperature.DeepGreenhouseC(b.atmospheres, b.type);
 
+    /// The temperature below which this world's water is ice: the pressure-dependent freezing point
+    /// where the air can hold liquid water at all, and plain 0 °C where it cannot (BiosphereRules.FreezingC
+    /// returns its "no liquid window" sentinel there, which no temperature is below).
+    public static float FrozenLineC(CelestialBody b)
+        => b == null || b.atmospheres < AtmosphereRules.LifeFloor ? 0f : BiosphereRules.FreezingC(b.atmospheres);
+
     static float Water(CelestialBody b)
         => b == null ? 0f : PlanetTerrainGenerator.WaterLevelFromSeaLevel(b.terrainParams.SeaLevelOrNeutral);
 
     // ---- The physics class ---------------------------------------------------------------------
 
+    /// WHICH RULE decided a world's physics class — the branch Physics took. WorldExplanation reads this
+    /// rather than re-deriving the reasoning, so the words a player reads and the rule that built the
+    /// world cannot disagree. (2026-10-11)
+    public enum ClassCause
+    {
+        GiantMass,          // 7+ Earths: a gas giant, whatever its orbit
+        AsteroidMass,       // 0.5 Earths or less, not orbiting a planet
+        SmallMoon,          // 0.5 Earths or less, orbiting a planet
+        InnerPlates,        // inside the zone's inner edge, with plates: magma vents -> Volcanic
+        InnerNoPlates,      // inside the zone's inner edge, no plates: a baked rock -> Barren
+        ZoneFrozenWater,    // in the zone, below freezing, with real water -> Ice
+        ZoneFrozenDry,      // in the zone, below freezing, too little water for an ice world -> Barren
+        ZoneOcean,          // in the zone, liquid, 85%+ water -> Ocean
+        ZoneTemperate,      // in the zone, liquid, 35-85% water -> Rocky
+        ZoneDry,            // in the zone, liquid-warm but under 35% water, with air -> Rocky (desert)
+        ZoneTooHot,         // in the zone, past this pressure's boiling point, with air -> Rocky
+        ZoneAirless,        // in the zone, but too little air to hold liquid water -> Barren
+        OuterIce,           // beyond the zone, with real water -> Ice
+        OuterRock,          // beyond the zone, too little water -> Barren (or a Moon)
+    }
+
     /// The CelestialBodyType a set of attributes amounts to. `rel` is distance / the star's
     /// Earth-warmth distance; `isMoon` keeps a tiny cold moon a Moon rather than an Asteroid.
     public static CelestialBodyType Physics(CelestialBody b, float rel, bool isMoon)
+        => Physics(b, rel, isMoon, out _);
+
+    /// The same, and which rule decided it.
+    public static CelestialBodyType Physics(CelestialBody b, float rel, bool isMoon, out ClassCause cause)
     {
+        cause = ClassCause.InnerNoPlates;
         if (b == null) return CelestialBodyType.BarrenPlanet;
 
         // Size decides the extremes outright, before anything else. The asteroid test is <=, not <: the
         // request draws the line at "0.5 and below", and a body sitting exactly on it is an asteroid.
-        if (b.mass >= GasGiantMassFloor) return CelestialBodyType.GasGiant;
-        if (b.mass <= AsteroidMassCeil) return isMoon ? CelestialBodyType.Moon : CelestialBodyType.Asteroid;
+        if (b.mass >= GasGiantMassFloor) { cause = ClassCause.GiantMass; return CelestialBodyType.GasGiant; }
+        if (b.mass <= AsteroidMassCeil)
+        {
+            cause = isMoon ? ClassCause.SmallMoon : ClassCause.AsteroidMass;
+            return isMoon ? CelestialBodyType.Moon : CelestialBodyType.Asteroid;
+        }
 
         float c = ClassifyC(b);
         float water = Water(b);
@@ -143,7 +179,8 @@ public static class WorldClassifier
         // than merely a baked rock. Without plates a hot world is barren, however close it sits.
         if (rel < HotRel)
         {
-            if (b.hasTectonics) return CelestialBodyType.VolcanicPlanet;
+            if (b.hasTectonics) { cause = ClassCause.InnerPlates; return CelestialBodyType.VolcanicPlanet; }
+            cause = ClassCause.InnerNoPlates;
             return CelestialBodyType.BarrenPlanet;
         }
 
@@ -153,24 +190,36 @@ public static class WorldClassifier
             // Frozen despite sitting in the band — a thin-aired world here still runs cold, and its
             // water is ice. Needs real water to be an ICE world rather than a bare cold rock.
             if (c < freezeC)
-                return water >= LandWater ? CelestialBodyType.IcePlanet : CelestialBodyType.BarrenPlanet;
+            {
+                if (water >= LandWater) { cause = ClassCause.ZoneFrozenWater; return CelestialBodyType.IcePlanet; }
+                cause = ClassCause.ZoneFrozenDry;
+                return CelestialBodyType.BarrenPlanet;
+            }
 
             if (warmEnoughForLiquid)
             {
-                if (water >= OceanWater) return CelestialBodyType.OceanPlanet;
-                if (water >= LandWater) return CelestialBodyType.RockyPlanet;   // Terran-family
+                if (water >= OceanWater) { cause = ClassCause.ZoneOcean; return CelestialBodyType.OceanPlanet; }
+                if (water >= LandWater) { cause = ClassCause.ZoneTemperate; return CelestialBodyType.RockyPlanet; }   // Terran-family
             }
             // Warm but bone dry, or too hot for liquid: a desert-rock world, mechanically Rocky if it
             // has any air to speak of, Barren if not.
-            return b.atmospheres >= AtmosphereRules.LifeFloor ? CelestialBodyType.RockyPlanet
-                                                              : CelestialBodyType.BarrenPlanet;
+            if (b.atmospheres >= AtmosphereRules.LifeFloor)
+            {
+                cause = warmEnoughForLiquid ? ClassCause.ZoneDry : ClassCause.ZoneTooHot;
+                return CelestialBodyType.RockyPlanet;
+            }
+            cause = ClassCause.ZoneAirless;
+            return CelestialBodyType.BarrenPlanet;
         }
 
         // --- Cool / cold: the outer system ---
         // Water freezes out here; a body with water is an ice world, one without is a bare rock (or, for
         // a moon, the airless Moon default the old generator always produced out here).
-        if (water >= LandWater) return CelestialBodyType.IcePlanet;
-        return isMoon ? CelestialBodyType.Moon : CelestialBodyType.BarrenPlanet;
+        if (water >= LandWater) { cause = ClassCause.OuterIce; return CelestialBodyType.IcePlanet; }
+        cause = ClassCause.OuterRock;
+        // ...but only an AIRLESS moon is the Moon class: that class is drawn and named as airless rock,
+        // and a big outer moon holding real air used to be filed under it anyway (2026-10-11).
+        return isMoon && b.atmospheres < AtmosphereRules.LifeFloor ? CelestialBodyType.Moon : CelestialBodyType.BarrenPlanet;
     }
 
     // ---- The descriptive name ------------------------------------------------------------------
@@ -235,8 +284,19 @@ public static class WorldClassifier
                 // A thick, poisoned sky over a baked surface, short of a runaway.
                 if (thickAir && c > 60f) return "toxic world";
                 if (c > 90f) return "scorched world";
-                if (c < BiosphereRules.FreezingC(b.atmospheres)) return "frozen rock";
+                // FrozenLineC, not FreezingC: under the life floor FreezingC is the "no liquid window"
+                // sentinel (-270), so a -180 °C airless rock used to read "barren world" (2026-10-11).
+                if (c < FrozenLineC(b)) return "frozen rock";
                 return "barren world";
+
+            case CelestialBodyType.Moon:
+                // A SMALL MOON IS NAMED FOR WHAT IT IS (2026-10-11). It used to fall through to the
+                // temperate branch below and come out a "desert moon" or "barren rocky moon" — words for
+                // dry land under air, on a body too small to hold any. TerraformDiagnosis.Pretty turns
+                // "<x> world" into "<x> moon".
+                if (c > 90f) return "scorched world";
+                if (c < 0f && water >= LandWater) return "icy world";
+                return "airless world";
 
             case CelestialBodyType.RockyPlanet:
             default:

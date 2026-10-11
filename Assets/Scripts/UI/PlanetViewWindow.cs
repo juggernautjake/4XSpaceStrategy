@@ -2828,6 +2828,7 @@ public class PlanetViewWindow : MonoBehaviour
         var card = Card();
         Stat(card, "Name", () => body.name);
         Stat(card, "Type", () => TerraformDiagnosis.Pretty(body));
+        WorldExplanationPanel.TooltipOnLastRow(card, body);
         // The conditionals MUST be parenthesised: inside an interpolation hole a bare ':' is parsed as
         // the start of a format specifier, not as part of a ternary.
         Stat(card, "Surface", () => $"{(body.surface != null ? body.surface.width : 0)} × {(body.surface != null ? body.surface.height : 0)} tiles");
@@ -2867,6 +2868,10 @@ public class PlanetViewWindow : MonoBehaviour
         var w = Card();
         var t = UIFactory.WrapText(w, "", UITheme.SmallSize, UITheme.Text);
         live.Text(t, () => WeatherProse(body));
+
+        // Why this world is the way it is — basic always, more with each survey level (WorldExplanation).
+        Header(WorldExplanationPanel.Title);
+        WorldExplanationPanel.Build(Card(), () => body, live);
 
         Header("DEVELOPMENT");
         var d = Card();

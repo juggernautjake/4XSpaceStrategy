@@ -123,6 +123,7 @@ public partial class InspectorWindow
         // TYPE is the one thing a telescope gives you. That a world is frozen, or an ocean, or a gas
         // giant is legible from across a solar system the moment there is something in it to look with.
         Stat(card, "Type", () => seen ? TerraformDiagnosis.Pretty(b) : "<color=#7E8B9C>Unknown</color>");
+        if (seen) WorldExplanationPanel.TooltipOnLastRow(card, b);
 
         // EVERYTHING ELSE IS A MEASUREMENT, and a measurement needs a ship on station. Air pressure, who
         // holds the ground, whether anyone is living on it — none of these are readable from a
@@ -193,6 +194,15 @@ public partial class InspectorWindow
             Stat(detail, "Moons", () => b.moons != null ? b.moons.Count.ToString() : "0");
             Stat(detail, "Ships here", () => b.units != null ? b.units.Count.ToString() : "0");
             Stat(detail, "Points of interest", () => b.pointsOfInterest != null ? b.pointsOfInterest.Count.ToString() : "0");
+        }
+
+        // WHY IT IS LIKE THIS — a basic description on sight, more with each survey level. Behind the same
+        // fog gate as Type: a world nobody can see has nothing to explain.
+        if (seen)
+        {
+            var why = Card(p);
+            Header(why, WorldExplanationPanel.Title);
+            WorldExplanationPanel.Build(why, () => b, Live);
         }
 
         // SURVEY STATUS, both levels — the same line and numbers as the Planet View's Survey card

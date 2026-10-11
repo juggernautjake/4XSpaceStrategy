@@ -499,6 +499,11 @@ public static class GalaxyGenerator
                 moon.type, moon.mass, moon.hasMagneticField,
                 AtmosphereRules.TectonicBonus(moon), moon.terrainParams.heat);
             AtmosphereRules.ApplyWaterLoss(moon);
+            // CLASSIFIED LIKE EVERY OTHER MOON (2026-10-11). These kept the Moon type they were built
+            // with whatever they rolled, so a heavier one could hold real air while being drawn and named
+            // as an airless rock. WorldClassifier names it from what it actually is, at its planet's orbit.
+            moon.type = WorldClassifier.Physics(moon, InsolationRules.RelOf(home.combinedStar, planet.distanceFromStar), isMoon: true);
+            moon.biosphereActive = BiosphereRules.GeneratesWithBiosphere(moon);
             // BEFORE GenerateSurface. The grid size is capped at half the host's (MapMetrics.SurfW), and
             // that cap reads parentBody — so setting it afterwards meant the moon was BUILT at its
             // uncapped size and then RENDERED and reported at the capped one. Two grids that disagree,

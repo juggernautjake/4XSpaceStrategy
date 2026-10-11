@@ -848,8 +848,9 @@ public class SolarSystemGenerator : MonoBehaviour
         body.spinSpeed = RotationRules.Roll(body.mass, isMoon);
         // TIDAL LOCK — a world modifier, rolled HERE because it is a fact about rotation: a locked world
         // does not turn, so it runs no dynamo, and the field line below then correctly denies it one.
-        // Close-in worlds lock far more often. See WorldModifiers.RollTidalLock.
-        body.tidallyLocked = WorldModifiers.RollTidalLock(body.type, rel, isMoon);
+        // Read from the tide the star actually raises at this distance — a red dwarf's close habitable
+        // ring locks often, a Sun-like star's outer system never. See WorldModifiers.TidalLockChance.
+        body.tidallyLocked = WorldModifiers.RollTidalLock(body.type, isMoon, currentStar, body.distanceFromStar);
         if (body.tidallyLocked) body.spinSpeed = 0f;
         // PROVISIONAL. The orbit has not been rolled yet at this point, and the direction is set to
         // match it once it has (see the planet, moon and belt branches of GenerateSystemStepped).
@@ -883,7 +884,7 @@ public class SolarSystemGenerator : MonoBehaviour
         // default false, every temperate world read as a lifeless desert/barren and only the desert
         // amplification ever ran. CaptureNatural then has to come LAST, because AmplifyBiome moves heat and
         // moisture and the natural climate terraforming lerps from must be the amplified one.
-        body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body);
+        body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body) && StarAllowsLife(currentStar);
         WorldClassifier.AmplifyBiome(body, rel);               // make a flavoured world look like itself
         TerraformVisuals.CaptureNatural(body);                 // the real natural climate, post-amplify
     }
@@ -939,6 +940,14 @@ public class SolarSystemGenerator : MonoBehaviour
 
     static bool IsForced(CelestialBody b) => b.habitabilityLocked || HomeworldOnboarding.IsOption(b);
 
+    /// Can life START around this star at all? (2026-10-11.) An O or B giant has no stable habitable zone
+    /// (StarDatabase.ApplyZone) — it burns out in a few hundred million years and floods its worlds with
+    /// ultraviolet, too short and too fierce for a biosphere to begin — and a black hole gives no light.
+    /// Water can still be liquid at the right distance from an O or B star, so a temperate world can
+    /// form there; it is simply sterile. Generation only: terraforming (Microbial Seeding) is unaffected.
+    public static bool StarAllowsLife(StarData star)
+        => star != null && !star.isBlackHole && star.hasHabitableZone;
+
     static void ClampForced(CelestialBody b, StarData star)
     {
         var p = b.terrainParams;
@@ -990,7 +999,7 @@ public class SolarSystemGenerator : MonoBehaviour
         AtmosphereRules.ApplyWaterLoss(body);
 
         body.type = WorldClassifier.Physics(body, rel, isMoon);
-        body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body);
+        body.biosphereActive = BiosphereRules.GeneratesWithBiosphere(body) && StarAllowsLife(star);
         WorldClassifier.AmplifyBiome(body, rel);
         TerraformVisuals.CaptureNatural(body);
 

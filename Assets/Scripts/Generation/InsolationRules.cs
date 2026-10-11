@@ -62,6 +62,10 @@ public static class InsolationRules
     /// floor or ceiling re-imposed, so the roll can never carry a world across a guarantee.
     public const float Jitter = 0.05f;
 
+    /// What a world orbiting a BLACK HOLE gets instead of starlight, in Kelvin: the faint glow of its
+    /// accretion disc, the same at every orbit (-233 °C). See RollHeat.
+    public const float BlackHoleKelvin = 40f;
+
     /// The plain equilibrium law: Earth-normal at the reference distance, falling as the inverse
     /// square root.
     static float PlainKelvin(float rel) => PlanetTemperature.ReferenceKelvin / Mathf.Sqrt(Mathf.Max(0.01f, rel));
@@ -112,6 +116,12 @@ public static class InsolationRules
     /// generation, so it belongs in the generation stream and nowhere else.
     public static float RollHeat(StarData star, float distance)
     {
+        // A BLACK HOLE GIVES NO STARLIGHT (2026-10-11). It used to fall through to the law below with a
+        // luminosity of zero — which FluxScale floors to a red dwarf's — so its worlds were warmed as if
+        // by a dim sun and temperate, even living, worlds orbited something that emits no light at all.
+        // Its worlds now get only the faint glow of the accretion disc, wherever they orbit.
+        if (star != null && star.isBlackHole)
+            return PlanetTemperature.HeatForKelvin(BlackHoleKelvin * Random.Range(1f - Jitter, 1f + Jitter));
         float rel = RelOf(star, distance);
         float k = KelvinAt(rel) * Random.Range(1f - Jitter, 1f + Jitter);
         if (rel < StarDatabase.HzInnerRel) k = Mathf.Max(k, InnerFloorC + 273.15f);
