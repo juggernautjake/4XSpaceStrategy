@@ -565,7 +565,11 @@ public static class GalaxyGenerator
         // ForceHomeWorld resizes the home world and rebuilds its moon system AFTER the system was laid
         // out, so its band is a different shape than the layout reserved for it. Re-enforce, or a big
         // home world with three moons quietly reaches into its neighbour.
-        OrbitSafety.EnforceSystem(home.bodies, home.combinedStar);
+        var moved = new List<CelestialBody>();
+        OrbitSafety.EnforceSystem(home.bodies, home.combinedStar, moved);
+        // Anything it pushed carries the climate of where it was; re-derive it for where it is. The
+        // cradle and the second option keep their type and are clamped (SolarSystemGenerator.Rederive).
+        SolarSystemGenerator.RederiveMoved(moved, home.combinedStar);
 
         if (!OrbitSafety.Validate(home.bodies, out string problem))
             Debug.LogWarning($"[OrbitSafety] home system {home.name}: {problem}");

@@ -460,7 +460,15 @@ public class SolarSystemGenerator : MonoBehaviour
         // what actually guarantees no two orbits ever intersect: it walks the system outward and pushes
         // anything overlapping until nothing does. Idempotent, so a correct layout passes through it
         // untouched.
-        OrbitSafety.EnforceSystem(system, currentStar);
+        var moved = new List<CelestialBody>();
+        OrbitSafety.EnforceSystem(system, currentStar, moved);
+        // A world the backstop pushed is now somewhere else, and its climate must say so.
+        RederiveMoved(moved, currentStar);
+        foreach (var b in moved)
+        {
+            ApplyHabitability(b);
+            if (b.moons != null) foreach (var m in b.moons) if (m != null) ApplyHabitability(m);
+        }
 
         if (!OrbitSafety.Validate(system, out string problem))
             Debug.LogWarning($"[OrbitSafety] {currentSystemName}: {problem}");
@@ -858,6 +866,36 @@ public class SolarSystemGenerator : MonoBehaviour
     /// the natural climate recaptured and the surface, ores and resources rebuilt to match.
     ///
     /// Draws from UnityEngine.Random, so — like RollHeat — it belongs to generation only.
+    /// Re-derive the climate of every world OrbitSafety moved (and their moons, which share the planet's
+    /// distance from the star), so heat, air, water and type all match the orbit the world actually ended
+    /// up on. A world chosen FOR its climate — the species' cradle, a starting option — keeps its type
+    /// and has its heat clamped into what the new orbit gives instead, exactly as WorldConsistency would.
+    public static void RederiveMoved(List<CelestialBody> moved, StarData star)
+    {
+        if (moved == null || star == null || star.isBlackHole) return;
+        foreach (var b in moved)
+        {
+            if (b == null) continue;
+            Rederive(b, star);
+            if (b.moons != null) foreach (var m in b.moons) if (m != null) Rederive(m, star);
+        }
+    }
+
+    static void Rederive(CelestialBody b, StarData star)
+    {
+        if (b.habitabilityLocked || HomeworldOnboarding.IsOption(b))
+        {
+            var p = b.terrainParams;
+            p.heat = InsolationRules.ClampToOrbit(p.heat, star, b.distanceFromStar);
+            b.terrainParams = p;
+            TerraformVisuals.CaptureNatural(b);
+            b.biosphereActive = BiosphereRules.GeneratesWithBiosphere(b);
+            b.surface = PlanetTerrainGenerator.GenerateSurface(b);
+            return;
+        }
+        ReconcileClimate(b, star);
+    }
+
     public static void ReconcileClimate(CelestialBody body, StarData star)
     {
         if (body == null || star == null || star.isBlackHole) return;

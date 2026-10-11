@@ -147,6 +147,30 @@ public class SurfaceFx : MonoBehaviour
         return squareTex;
     }
 
+    // Particles and pulses are short-lived and constant (a smoke puff every half second per stack, a
+    // pulse per span several times a second), so their images are pooled rather than created and
+    // destroyed each time: a GameObject per puff was steady garbage and a canvas rebuild per spawn.
+    readonly Stack<RawImage> animPool = new Stack<RawImage>(), flowPool = new Stack<RawImage>();
+
+    RawImage Dot(RectTransform layer, Stack<RawImage> pool, Color c)
+    {
+        while (pool.Count > 0)
+        {
+            var r = pool.Pop();
+            if (r == null) continue;
+            r.color = c; r.enabled = true;
+            return r;
+        }
+        return Sprite(layer, SoftDot(), c);
+    }
+
+    static void Recycle(RawImage img, Stack<RawImage> pool)
+    {
+        if (img == null) return;
+        img.enabled = false;
+        pool.Push(img);
+    }
+
     RawImage Sprite(RectTransform parent, Texture2D tex, Color c)
     {
         var img = UIFactory.NewUI(parent, "fx").AddComponent<RawImage>();
@@ -201,7 +225,11 @@ public class SurfaceFx : MonoBehaviour
         var sb = new System.Text.StringBuilder();
         sb.Append(b != null ? b.GetHashCode() : 0).Append('|');
         if (b != null)
-            foreach (var p in SurfaceBuildManager.On(b)) sb.Append(p.type).Append(',').Append(p.x).Append(',').Append(p.y).Append(',').Append(p.rotation).Append(';');
+            // TileCount too: a drawn building (a farm painted four tiles bigger) keeps its origin and
+            // rotation, and without it the emitters would stay on the old footprint.
+            foreach (var p in SurfaceBuildManager.On(b))
+                sb.Append(p.type).Append(',').Append(p.x).Append(',').Append(p.y).Append(',').Append(p.rotation)
+                  .Append(',').Append(p.TileCount).Append(';');
         return sb.ToString();
     }
 
@@ -209,7 +237,7 @@ public class SurfaceFx : MonoBehaviour
     {
         foreach (var e in emitters) if (e.img != null) Destroy(e.img.gameObject);
         emitters.Clear();
-        foreach (var pt in particles) if (pt.img != null) Destroy(pt.img.gameObject);
+        foreach (var pt in particles) Recycle(pt.img, animPool);
         particles.Clear();
         if (b?.surface == null) return;
 
@@ -411,7 +439,7 @@ public class SurfaceFx : MonoBehaviour
             pt.age += dt;
             if (pt.age >= pt.life || pt.img == null)
             {
-                if (pt.img != null) Destroy(pt.img.gameObject);
+                Recycle(pt.img, animPool);
                 particles.RemoveAt(i);
                 continue;
             }
@@ -424,7 +452,7 @@ public class SurfaceFx : MonoBehaviour
     void Emit(Vector2 at, Vector2 vel, float life, float s0, float s1, Color c)
     {
         if (particles.Count >= MaxParticles) return;
-        particles.Add(new Particle { img = Sprite(animLayer, SoftDot(), c), at = at, vel = vel, life = life, size0 = s0, size1 = s1, color = c });
+        particles.Add(new Particle { img = Dot(animLayer, animPool, c), at = at, vel = vel, life = life, size0 = s0, size1 = s1, color = c });
     }
 
     void Place(RawImage img, Vector2 gridAt, float sizePx, Color c, float alpha)
@@ -442,7 +470,16 @@ public class SurfaceFx : MonoBehaviour
     // AREA OF EFFECT
     // ==============================================================================================
 
-    string aoeSig;
+    // What the area was last built for. Compared field by field each frame, because resolving the
+    // hovered building (SurfaceBuildManager.At walks every footprint) and formatting a key string every
+    // frame were the two allocations this view made per frame while the cursor sat still.
+    bool aoeDirty = true;
+    int aoeHeld = -1, aoeRot;                                               // last frame's inputs...
+    Vector2Int aoeHover = new Vector2Int(int.MinValue, int.MinValue);
+    PlacedBuilding aoeSel, aoeTarget;
+    int builtHeld = -1, builtRot, builtLevel;                               // ...and what the tiles show
+    Vector2Int builtHover;
+    PlacedBuilding builtTarget;
     readonly List<RawImage> aoeTiles = new List<RawImage>();
     readonly List<Vector2Int> aoeCells = new List<Vector2Int>();
     Color aoeColor;
@@ -496,35 +533,52 @@ public class SurfaceFx : MonoBehaviour
     void TickArea(float t)
     {
         // What to show: the structure in hand at the cursor, else the hovered building, else the selection.
-        string sig = "none";
-        SurfaceBuildingType? type = null;
-        List<Vector2Int> footprint = null;
-        PlacedBuilding placed = null;
-
         var held = Held != null ? Held() : null;
         var hover = Hover != null ? Hover() : null;
-        if (held.HasValue && hover.HasValue)
+        int heldKey = held.HasValue && hover.HasValue ? (int)held.Value : -1;
+        var hoverKey = hover ?? new Vector2Int(int.MinValue, int.MinValue);
+        int rot = HeldRotation != null ? HeldRotation() : 0;
+        var selNow = SurfaceSelection.Body == cur ? SurfaceSelection.Selected : null;
+
+        bool inputsChanged = aoeDirty || heldKey != aoeHeld || hoverKey != aoeHover || selNow != aoeSel
+                          || (heldKey >= 0 && rot != aoeRot);
+        if (inputsChanged)
         {
-            type = held.Value;
-            footprint = SurfaceBuildingDatabase.Footprint(held.Value, hover.Value.x, hover.Value.y, HeldRotation != null ? HeldRotation() : 0);
-            sig = $"h{(int)held.Value}:{hover.Value.x},{hover.Value.y}";
-        }
-        else
-        {
-            PlacedBuilding target = null;
-            if (hover.HasValue) target = SurfaceBuildManager.At(cur, hover.Value.x, hover.Value.y);
-            if (target == null && SurfaceSelection.Body == cur) target = SurfaceSelection.Selected;
-            if (target != null)
+            aoeHeld = heldKey; aoeHover = hoverKey; aoeSel = selNow; aoeRot = rot;
+            aoeTarget = null;
+            if (heldKey < 0)
             {
-                placed = target; type = target.Type;
-                footprint = SurfaceBuildingDatabase.Footprint(target);
-                sig = $"p{target.GetHashCode()}:{target.level}";
+                if (hover.HasValue) aoeTarget = SurfaceBuildManager.At(cur, hover.Value.x, hover.Value.y);
+                if (aoeTarget == null) aoeTarget = selNow;
             }
         }
+        // An upgrade grows a projector's reach without moving anything else.
+        int level = aoeTarget != null ? aoeTarget.level : 0;
 
-        if (sig != aoeSig)
+        // Rebuilt only when what is SHOWN changes: the cursor crossing cells of the same building, or
+        // bare ground with the same selection behind it, keeps the tiles it has.
+        bool rebuild = aoeDirty || heldKey != builtHeld
+                    || (heldKey >= 0 ? hoverKey != builtHover || rot != builtRot
+                                     : aoeTarget != builtTarget || level != builtLevel);
+        if (rebuild)
         {
-            aoeSig = sig;
+            aoeDirty = false;
+            builtHeld = heldKey; builtHover = hoverKey; builtRot = rot; builtTarget = aoeTarget; builtLevel = level;
+
+            SurfaceBuildingType? type = null;
+            List<Vector2Int> footprint = null;
+            PlacedBuilding placed = null;
+            if (heldKey >= 0)
+            {
+                type = held.Value;
+                footprint = SurfaceBuildingDatabase.Footprint(held.Value, hover.Value.x, hover.Value.y, rot);
+            }
+            else if (aoeTarget != null)
+            {
+                placed = aoeTarget; type = aoeTarget.Type;
+                footprint = SurfaceBuildingDatabase.Footprint(aoeTarget);
+            }
+
             foreach (var q in aoeTiles) if (q != null) Destroy(q.gameObject);
             aoeTiles.Clear(); aoeCells.Clear();
             if (type.HasValue && footprint != null)
@@ -561,7 +615,9 @@ public class SurfaceFx : MonoBehaviour
     readonly List<Span> spans = new List<Span>();
     readonly List<Image> spanLines = new List<Image>();
     readonly List<Particle> pulses = new List<Particle>();
-    string flowSig;
+    const int MaxPulses = 400;
+    bool flowDirty = true;
+    int flowIndex = -1, flowProj, flowCons, flowCaps, flowBuildings;
     PowerNet flowNet;
     float pulseTimer;
 
@@ -569,11 +625,15 @@ public class SurfaceFx : MonoBehaviour
     {
         PlacedBuilding sel = SurfaceSelection.Body == cur ? SurfaceSelection.Selected : null;
         PowerNet net = sel != null ? PowerGrid.NetOf(cur, sel) : null;
-        string sig = net == null ? "none" : $"{net.index}:{net.projectors.Count}:{net.consumers.Count}:{net.capacitors.Count}:{SurfaceBuildManager.On(cur).Count}";
-
-        if (sig != flowSig)
+        // What the wiring depends on, compared field by field: a formatted string here was garbage
+        // every frame for as long as anything was selected.
+        int idx = net != null ? net.index : -1;
+        int np = net != null ? net.projectors.Count : 0, nc = net != null ? net.consumers.Count : 0;
+        int ncap = net != null ? net.capacitors.Count : 0, nb = SurfaceBuildManager.On(cur).Count;
+        if (flowDirty || idx != flowIndex || np != flowProj || nc != flowCons || ncap != flowCaps || nb != flowBuildings)
         {
-            flowSig = sig;
+            flowDirty = false;
+            flowIndex = idx; flowProj = np; flowCons = nc; flowCaps = ncap; flowBuildings = nb;
             flowNet = net;
             BuildSpans(net);
         }
@@ -601,7 +661,9 @@ public class SurfaceFx : MonoBehaviour
         if (live != null && !live.Failed)
         {
             pulseTimer -= dt;
-            if (pulseTimer <= 0f)
+            // Capped at the spawn rather than by culling live pulses: a wave that would push past the
+            // cap is skipped until the earlier ones have run their course.
+            if (pulseTimer <= 0f && pulses.Count + spans.Count <= MaxPulses)
             {
                 pulseTimer = Mathf.Lerp(0.9f, 0.35f, served);
                 foreach (var s in spans)
@@ -610,7 +672,7 @@ public class SurfaceFx : MonoBehaviour
                     float speed = Mathf.Lerp(2f, 6f, served);
                     pulses.Add(new Particle
                     {
-                        img = Sprite(flowLayer, SoftDot(), col), at = s.a,
+                        img = Dot(flowLayer, flowPool, col), at = s.a,
                         vel = (s.b - s.a) / Mathf.Max(0.01f, len) * speed,
                         life = len / speed, size0 = 0.45f, size1 = 0.3f, color = Color.Lerp(col, Color.white, 0.4f)
                     });
@@ -622,9 +684,9 @@ public class SurfaceFx : MonoBehaviour
         {
             var pt = pulses[i];
             pt.age += dt;
-            if (pt.age >= pt.life || pt.img == null || pulses.Count > 400)
+            if (pt.age >= pt.life || pt.img == null)
             {
-                if (pt.img != null) Destroy(pt.img.gameObject);
+                Recycle(pt.img, flowPool);
                 pulses.RemoveAt(i);
                 continue;
             }
@@ -640,7 +702,7 @@ public class SurfaceFx : MonoBehaviour
     {
         foreach (var l in spanLines) if (l != null) Destroy(l.gameObject);
         spanLines.Clear(); spans.Clear();
-        foreach (var pt in pulses) if (pt.img != null) Destroy(pt.img.gameObject);
+        foreach (var pt in pulses) Recycle(pt.img, flowPool);
         pulses.Clear();
         if (net == null || cur == null) return;
 
@@ -708,12 +770,12 @@ public class SurfaceFx : MonoBehaviour
         }
         if (!content.gameObject.activeSelf) content.gameObject.SetActive(true);
 
-        if (b != cur) { cur = b; animSig = null; aoeSig = null; flowSig = null; }
+        if (b != cur) { cur = b; animSig = null; aoeDirty = true; flowDirty = true; }
         if (Time.unscaledTime >= nextSigCheck)
         {
             nextSigCheck = Time.unscaledTime + 0.5f;
             string sig = BuildSignature(cur);
-            if (sig != animSig) { animSig = sig; RebuildEmitters(cur); aoeSig = null; flowSig = null; }
+            if (sig != animSig) { animSig = sig; RebuildEmitters(cur); aoeDirty = true; flowDirty = true; }
         }
 
         float dt = Time.unscaledDeltaTime, t = Time.unscaledTime;

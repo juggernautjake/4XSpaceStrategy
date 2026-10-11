@@ -7662,6 +7662,8 @@ public class PlanetViewWindow : MonoBehaviour
             // region too. Without this, pressing + or a moon tab and twitching would drag the map.
             !RectTransformUtility.RectangleContainsScreenPoint(zoomBar, Input.mousePosition, null) &&
             !RectTransformUtility.RectangleContainsScreenPoint(moonTabStrip, Input.mousePosition, null) &&
+            // The selected building's card floats over the map too; dragging on it must not pan.
+            !(gridPopup != null && gridPopup.Covers(Input.mousePosition)) &&
             // The host frame and the moon frames tile disjoint cells, but guard the seam anyway so a press
             // right on the boundary can't start a host pan while the cursor is over a moon frame.
             !OverAnyMoonFrame(Input.mousePosition))
@@ -7998,7 +8000,10 @@ public class PlanetViewWindow : MonoBehaviour
 
         // The index toggle icons float over the top-right of every map and show their own tooltip. The
         // tile behind them must not be read out (or clicked through to) while the cursor is on one.
-        if (IndexIconBar.PointerOverAny(Input.mousePosition) || PointerOverShortcuts(Input.mousePosition))
+        // The building card (BuildingGridPopup) likewise: no tile readout, hover frame or area of effect
+        // for the ground hidden under it.
+        if (IndexIconBar.PointerOverAny(Input.mousePosition) || PointerOverShortcuts(Input.mousePosition)
+            || (gridPopup != null && gridPopup.Covers(Input.mousePosition)))
         {
             ClearHostHover();
             MapHoverPanel.Instance.Hide();
@@ -8068,6 +8073,8 @@ public class PlanetViewWindow : MonoBehaviour
         var p = Input.mousePosition;
         if (zoomBar != null && RectTransformUtility.RectangleContainsScreenPoint(zoomBar, p, null)) return true;
         if (IndexIconBar.PointerOverAny(p) || PointerOverShortcuts(p)) return true;
+        // The selected building's card (BuildingGridPopup): a press on it is the card's, not a brush stroke.
+        if (gridPopup != null && gridPopup.Covers(p)) return true;
         if (confirmPanel != null && confirmPanel.gameObject.activeInHierarchy &&
             RectTransformUtility.RectangleContainsScreenPoint(confirmPanel, p, null)) return true;
         // Placement Mode's Confirm/Cancel panel sits ON the map, directly under the shape it is asking

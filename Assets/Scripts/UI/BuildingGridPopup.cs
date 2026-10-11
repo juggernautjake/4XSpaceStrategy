@@ -57,10 +57,27 @@ public class BuildingGridPopup : MonoBehaviour
 
     void OnDestroy() => SurfaceSelection.OnChanged -= OnSelectionChanged;
 
-    void OnSelectionChanged() { dismissedFor = null; nextRefresh = 0f; }
+    void OnSelectionChanged() { dismissedFor = null; nextRefresh = 0f; keepFrame = Time.frameCount; }
 
     /// Clicking the building that is already selected: bring its card back if it was closed.
-    public void Reopen() { dismissedFor = null; nextRefresh = 0f; }
+    public void Reopen() { dismissedFor = null; nextRefresh = 0f; keepFrame = Time.frameCount; }
+
+    /// Is this screen point on the open card? PlanetViewWindow asks before starting a map pan or a
+    /// build/demolish stroke, because those poll Input directly and would otherwise run under the card.
+    public bool Covers(Vector2 screen)
+        => card != null && card.gameObject.activeInHierarchy
+        && RectTransformUtility.RectangleContainsScreenPoint(card, screen, EventCam());
+
+    // The click that SELECTED something (or re-clicked the selection) is not a click-away: OnGridClick
+    // runs in the EventSystem's Update, before LateUpdate, and stamps the frame so the release that
+    // caused it cannot also close the card it just opened.
+    int keepFrame = -1;
+    Vector2 pressAt;
+    bool pressOnCard;
+
+    /// Pixels the pointer may travel between press and release and still count as a click — the same
+    /// threshold PlanetViewWindow's pan uses, so a drag of the map is never also a click-away.
+    const float ClickSlop = 5f;
 
     void BuildCard(RectTransform parent)
     {
@@ -117,16 +134,30 @@ public class BuildingGridPopup : MonoBehaviour
         card.gameObject.SetActive(false);
     }
 
-    void Update()
+    // LateUpdate, not Update: after the EventSystem has delivered this frame's click (so a re-click's
+    // Reopen is already in), and after PlanetViewWindow has moved the map (so the card does not trail
+    // one frame behind a pan).
+    void LateUpdate()
     {
         var b = Body != null ? Body() : null;
         var sel = SurfaceSelection.Body == b ? SurfaceSelection.Selected : null;
         bool open = sel != null && sel != dismissedFor && (Visible == null || Visible()) && b?.surface != null;
 
-        // Any click off the card closes it. Checked on the PRESS: the release is what selects (uGUI's
-        // OnPointerClick), so a click on another building closes this card and then opens that one's.
-        if (open && card.gameObject.activeSelf && (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1))
-            && !RectTransformUtility.RectangleContainsScreenPoint(card, Input.mousePosition, EventCam()))
+        // Any CLICK off the card closes it — judged on the release, and only when the pointer did not
+        // travel: a press that becomes a pan of the map is not a click, and closing on the press used to
+        // shut the card the moment the player grabbed the map to look around the building. The release
+        // is also when uGUI selects (OnPointerClick), so a click on another building, or on this one
+        // again, has already stamped keepFrame by now and wins.
+        bool down = Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1);
+        if (down)
+        {
+            pressAt = Input.mousePosition;
+            pressOnCard = Covers(Input.mousePosition);
+        }
+        bool up = Input.GetMouseButtonUp(0) || Input.GetMouseButtonUp(1);
+        if (open && card.gameObject.activeSelf && up && !pressOnCard && keepFrame != Time.frameCount
+            && ((Vector2)Input.mousePosition - pressAt).sqrMagnitude < ClickSlop * ClickSlop
+            && !Covers(Input.mousePosition))
         {
             dismissedFor = sel;
             open = false;
@@ -140,6 +171,10 @@ public class BuildingGridPopup : MonoBehaviour
             shownFor = sel;
             nextRefresh = Time.unscaledTime + 0.5f;
             Fill(b, sel);
+            // The ContentSizeFitter only resizes at the canvas's next layout pass, which is after this.
+            // Positioning against the stale height would put a just-opened (or just-grown) card a frame
+            // in the wrong place — overlapping the building, or hanging off the viewport's edge.
+            LayoutRebuilder.ForceRebuildLayoutImmediate(card);
         }
         Position(b, sel);
     }

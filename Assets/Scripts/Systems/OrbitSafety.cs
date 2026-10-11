@@ -119,7 +119,14 @@ public static class OrbitSafety
     ///
     /// Idempotent: running it on an already-safe system changes nothing. Call it after generation and
     /// after ANYTHING moves or resizes a body.
-    public static void EnforceSystem(List<CelestialBody> bodies, StarData star)
+    ///
+    /// `moved`, if given, collects every body whose distance from the star this changed. A world's climate
+    /// is derived from its orbit, so a world pushed outward here is still carrying the heat of the radius
+    /// it was rolled at — the generators re-derive each one (SolarSystemGenerator.RederiveMoved). Without
+    /// that, a planet rolled at 0.93x the Earth-warmth distance and pushed to 1.26x kept the warmth of
+    /// 0.93x, and WorldConsistency caught it after the fact ("starlight heat 1.07 is outside what its
+    /// orbit gives").
+    public static void EnforceSystem(List<CelestialBody> bodies, StarData star, List<CelestialBody> moved = null)
     {
         if (bodies == null || bodies.Count == 0) return;
 
@@ -155,6 +162,7 @@ public static class OrbitSafety
             // A later member of a belt already placed: copy, do not re-place.
             if (b.beltId != 0 && b.beltId == currentBelt)
             {
+                if (moved != null && Mathf.Abs(b.distanceFromStar - beltRadius) > 0.0001f && !moved.Contains(b)) moved.Add(b);
                 b.orbitRadius = beltRadius;
                 b.distanceFromStar = beltRadius;
                 b.orbitSpeed = beltSpeed;
@@ -166,6 +174,7 @@ public static class OrbitSafety
 
             if (b.orbitRadius < minRadius)
             {
+                if (moved != null && Mathf.Abs(b.distanceFromStar - minRadius) > 0.0001f && !moved.Contains(b)) moved.Add(b);
                 b.orbitRadius = minRadius;
                 b.distanceFromStar = minRadius;
                 if (star != null) b.orbitSpeed = OrbitalMechanics.PlanetAngularSpeed(star, minRadius);

@@ -224,6 +224,10 @@ public static class HomeworldOnboarding
         int n = SurfaceBuildManager.CountOf(b, t);
         var jobs = SurfaceBuildQueue.Peek(b);
         if (jobs != null) foreach (var j in jobs) if (j != null && j.type == t) n++;
+        // A world that already HAS a yard (shipyardLevel, from any path) cannot place a second one —
+        // SurfaceBuildManager.CanPlaceType refuses it — so without this the Shipyard step could never be
+        // met and the opening would sit on it forever.
+        if (t == SurfaceBuildingType.SurfaceShipyard && b.shipyardLevel >= 1) n = Mathf.Max(n, 1);
         return n;
     }
 
@@ -264,7 +268,7 @@ public static class HomeworldOnboarding
         SimpleAudio.Instance?.PlayNotify(NotifKind.Info);
         if (Step == OnboardingStep.Done)
             NotificationManager.Instance?.Push("Your capital is under way",
-                "That's the foundation: food, power, metal and housing. The rest of the galaxy is yours to find.",
+                "That's the foundation: food, power, metal, housing and a shipyard. The rest of the galaxy is yours to find.",
                 null, NotifKind.Victory);
         else
             NotificationManager.Instance?.Push("Next", Instruction(),

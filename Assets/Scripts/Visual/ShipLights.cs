@@ -243,10 +243,11 @@ public class ShipLights : MonoBehaviour
                 Vector4 e = m.GetVector(prop);
                 if (Mathf.Max(e.x, Mathf.Max(e.y, e.z)) <= 1e-4f) continue;
 
-                // URP/Lit only draws `_EmissionColor` while its keyword is on. The material is a shared
-                // fleet copy (HullMaterials), never the imported asset, so switching it on here touches
-                // nothing outside the fleet — and it is already on for any material that emits.
-                if (HullMaterials.NeedsEmissionKeyword(prop)) m.EnableKeyword("_EMISSION");
+                // URP/Lit only draws `_EmissionColor` while its keyword is on, so a URP material with the
+                // keyword OFF does not emit, whatever colour the property holds (a non-black value can sit
+                // there unused). Switching the keyword on would invent exactly the even,
+                // whole-hull glow the note above rules out, so such a material is left as the art has it.
+                if (HullMaterials.NeedsEmissionKeyword(prop) && !m.IsKeywordEnabled("_EMISSION")) continue;
 
                 glows.Add(new Glow { renderer = r, slot = i, property = prop, authored = e });
             }
