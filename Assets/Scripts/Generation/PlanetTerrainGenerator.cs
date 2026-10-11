@@ -956,9 +956,14 @@ public static class PlanetTerrainGenerator
         // shows the player — so the two always agree: a −70°C world's seas read as ice, and a 100°C world
         // grows no rainforest. Computed from the SAME heat/atmosphere/type/internal-heat the readout uses,
         // plus the standard ±15°C equator→pole swing and a small local-weather wobble from the heat noise.
+        // The five-argument form, so a runaway-greenhouse world's deep sky (PlanetTemperature.
+        // DeepGreenhouseC) bakes its map exactly as hard as the readout says it is.
         float baseC = PlanetTemperature.BaseCelsius(p.heat, body.atmosphereThickness, classifyType,
-                                                    GeothermalMap.WorldIntensity(body));
-        float tileC = baseC + Mathf.Lerp(15f, -15f, lat) + (heatNoise - 0.5f) * 12f - altDelta * AltitudeLapseC
+                                                    GeothermalMap.WorldIntensity(body), body.atmospheres);
+        // The equator-to-pole swing is the world's own: wide under thin air, narrow under thick
+        // (PlanetTemperature.LatitudeSwingC — the readout uses the same figure).
+        float swingC = PlanetTemperature.LatitudeSwingC(body.atmospheres);
+        float tileC = baseC + Mathf.Lerp(swingC, -swingC, lat) + (heatNoise - 0.5f) * 12f - altDelta * AltitudeLapseC
                     + tidalFullC;
 
         // THE LIQUID-WATER WINDOW IS THIS WORLD'S OWN, and it depends on its air: at one atmosphere water

@@ -27,7 +27,13 @@ using UnityEngine;
 //                is in the liquid band. That exception is recorded on the body (climateException) with
 //                the reason, so a warm world outside the green ring is always explained.
 //
-// And for the home system: every starting option must lie inside the star's habitable zone.
+//   THE RUNAWAY  a Venus-deep sky (AtmosphereRules.IsRunawayGreenhouse) belongs inside the zone's inner
+//                edge and nowhere else. There it is recorded as the world's climateException (its sky,
+//                not its starlight, is why it reads 300-750 °C); at or beyond the edge it is a problem
+//                and the world is re-derived from its orbit. (2026-10-10)
+//
+// And for the home system: every starting option must lie inside the star's habitable zone — or, for a
+// species whose climate is hotter than the zone gives, inside Habitability.CradleZone (2026-10-10).
 //
 // REPAIR, THEN LOG. A natural world that breaks a rule is re-derived from its orbit
 // (SolarSystemGenerator.ReconcileClimate); a forced one — the cradle, a second starting option — has its
@@ -64,6 +70,19 @@ public static class WorldConsistency
 
         if (!star.hasHabitableZone) return null;
         if (b.type == CelestialBodyType.GasGiant || b.type == CelestialBodyType.Asteroid) return null;
+
+        // A RUNAWAY GREENHOUSE (AtmosphereRules.RollRunawayGreenhouse) is a fact about the runaway
+        // regime: inside the zone's inner edge it is the recorded reason the world is hotter than its
+        // starlight, and anywhere else it is a sky no orbit there could have built.
+        if (AtmosphereRules.IsRunawayGreenhouse(b))
+        {
+            if (rel >= StarDatabase.HzInnerRel)
+                return $"a {b.atmospheres:0}-atmosphere runaway greenhouse at {rel:0.00}x the Earth-warmth distance, where no runaway happens";
+            exception = $"runaway greenhouse: {b.atmospheres:0} atmospheres add {PlanetTemperature.GreenhouseCelsius(b):0} °C " +
+                        $"to its starlight ({PlanetTemperature.BodyAverageCelsius(b):0} °C)";
+            return null;
+        }
+
         if (StarDatabase.InZone(star, b.distanceFromStar)) return null;
 
         bool temperateType = b.type == CelestialBodyType.RockyPlanet || b.type == CelestialBodyType.OceanPlanet;
@@ -76,7 +95,7 @@ public static class WorldConsistency
         {
             // Its starlight checked out above, so this warmth is physics, not paint: say whose.
             float internalC = PlanetTemperature.InternalCelsius(b);
-            float greenhouseC = b.atmosphereThickness * 45f;
+            float greenhouseC = PlanetTemperature.GreenhouseCelsius(b);
             exception = internalC >= greenhouseC
                 ? $"liquid at {c:0} °C outside the habitable zone: internal heat adds {internalC:0} °C"
                 : $"liquid at {c:0} °C outside the habitable zone: a {b.atmospheres:0.#}-atmosphere greenhouse adds {greenhouseC:0} °C";
@@ -136,7 +155,9 @@ public static class WorldConsistency
             {
                 if (o == null || o.system != sys) continue;
                 var star = o.hostStar != null ? o.hostStar : sys.combinedStar;
-                if (StarDatabase.InZone(star, o.distanceFromStar)) continue;
+                // The star's band, or — for a species whose climate is hotter than that band gives — the
+                // inner reach of its own band (Habitability.CradleZone: a Pyrothian cradle on ring 3).
+                if (Habitability.InCradleZone(star, species, o.distanceFromStar)) continue;
                 found++;
                 Log($"{sys.name}: starting option {o.name} lies outside the habitable zone ({o.distanceFromStar:0.0} against {star.hzInner:0.0}-{star.hzOuter:0.0}).");
             }

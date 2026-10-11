@@ -121,6 +121,15 @@ public static class TerraformVisuals
         if (GalaxyGenerator.CradleWantsLife(s) && pinnable)
             p.heat = PlanetTemperature.HeatForCelsius(
                 GalaxyGenerator.CradleTargetCelsius(s), b.atmosphereThickness, b.type);
+        // ...and every species on a world of ITS OWN kind (2026-10-11): a Pyrothian working a volcanic
+        // world, a Cryithn an ice world, is aimed at the same ideal their cradle is built at
+        // (GalaxyGenerator.CradleHeat, Habitability.IdealCelsius) — less the world's own venting, since
+        // that is heat terraforming does not move — rather than the raw curve above, which for them was
+        // a different climate from their homeworld's. The body gate's argument holds: it is their kind.
+        else if (b.type == GalaxyGenerator.BestTypeFor(s))
+            p.heat = PlanetTemperature.HeatForCelsius(
+                Habitability.IdealCelsius(s) - PlanetTemperature.InternalCelsius(b), b.atmosphereThickness, b.type,
+                b.atmospheres);
 
         return p;
     }

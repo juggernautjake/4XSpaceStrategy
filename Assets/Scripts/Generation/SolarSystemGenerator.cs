@@ -838,6 +838,10 @@ public class SolarSystemGenerator : MonoBehaviour
         body.atmospheres = AtmosphereRules.RollAtmospheres(
             body.type, body.mass, body.hasMagneticField,
             AtmosphereRules.TectonicBonus(body), body.terrainParams.heat, rel);
+        // ...or, inside the zone's inner edge, a world heavy enough may instead have RUN AWAY: its seas
+        // boiled into a Venus-deep sky (AtmosphereRules.RollRunawayGreenhouse). Before the classifier,
+        // which then names it a barren "greenhouse world" from the stagnant lid that leaves it.
+        AtmosphereRules.RollRunawayGreenhouse(body, rel);
         AtmosphereRules.ApplyWaterLoss(body);
 
         // THE TYPE, at last, from everything above.
@@ -913,6 +917,9 @@ public class SolarSystemGenerator : MonoBehaviour
         body.atmospheres = AtmosphereRules.RollAtmospheres(
             body.type, body.mass, body.hasMagneticField,
             AtmosphereRules.TectonicBonus(body), body.terrainParams.heat, rel);
+        // The same runaway chance a world born here would have had — and a world moved OUT to the zone
+        // or beyond loses a runaway sky it carried, because RollAtmospheres above has already replaced it.
+        AtmosphereRules.RollRunawayGreenhouse(body, rel);
         AtmosphereRules.ApplyWaterLoss(body);
 
         body.type = WorldClassifier.Physics(body, rel, isMoon);

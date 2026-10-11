@@ -217,6 +217,102 @@ public static class AtmosphereRules
         return Mathf.Lerp(0.12f, 1f, Mathf.Clamp01(rel / ZoneInner));
     }
 
+    // ============================================================================================
+    // THE RUNAWAY GREENHOUSE — why an inner world can have MORE air, not less (2026-10-10)
+    //
+    // "An inner planet that close to its sun should be a very hot world. Venus-like probably."
+    //
+    // Everything above thins an inner world's air: heat boils it off (HeatRetention), the stellar wind
+    // strips it (InnerOrbitRetention), and thin air loses its water (ApplyWaterLoss). That is Mercury,
+    // and it is right for most of them. But it made Mercury the ONLY thing inside the zone — every inner
+    // world came out scorched or volcanic, and the game only calls a sky toxic past four atmospheres,
+    // which no small hot world kept.
+    //
+    // Venus is the other outcome of the same orbit. A world big enough to hang on to its volatiles,
+    // inside the moist-greenhouse limit, boils its oceans into the sky; the water vapour traps more heat,
+    // which boils more water, and the loop only stops when the seas are gone — leaving the carbon dioxide
+    // that would otherwise have been locked back into rock by liquid water as a sky ninety atmospheres
+    // deep. So this is not a thicker version of the ceiling above: it is the world's whole carbon
+    // inventory in the air, which is why it is rolled OUTRIGHT, not through Ceiling.
+    //
+    //   WHERE    inside the zone's inner edge only (rel < HzInnerRel) — the runaway regime InsolationRules
+    //            already models. Rings 2-3 GreenhouseChance; ring 1 (inside ScorchingRel) far less,
+    //            because that close the young star's wind takes the steam before it can build a lid.
+    //            Never in or beyond the zone: there the oceans stay oceans and the carbon goes into rock.
+    //   WHO      a terrestrial body of at least GreenhouseMinMass: a small world loses the hydrogen AND
+    //            the heavier gases (Mars). Planets and large moons alike.
+    //   WHAT     30-90 atmospheres (PlanetTemperature.DeepGreenhouseC turns it into 300-750 °C), the
+    //            seas gone to space (a token of water at most, and it is steam), no biosphere, and NO
+    //            PLATE TECTONICS — with the water gone the crust has nothing to lubricate subduction, and
+    //            the world seizes into a stagnant lid, as Venus has. That is also why it classifies as a
+    //            BARREN world rather than a volcanic one, and is named "greenhouse world" (WorldClassifier).
+    //
+    // DERIVED, NEVER FLAGGED. IsRunawayGreenhouse reads the pressure, which is saved; there is no new
+    // field to migrate, and a world thinned below the line by terraforming simply stops being one.
+    // ============================================================================================
+
+    /// The least mass that can keep a runaway sky. Mars-class worlds lose it; Venus is 0.82.
+    public const float GreenhouseMinMass = 0.7f;
+
+    /// Chance of a runaway greenhouse for a qualifying world on rings 2-3 (ScorchingRel .. HzInnerRel).
+    public const float GreenhouseChance = 0.42f;
+
+    /// ...and right by the star (rel at or inside ScorchingRel, ring 1), falling to GreenhouseChanceFloor
+    /// at GreenhouseInnermostRel.
+    public const float GreenhouseChanceRingOne = 0.16f;
+    public const float GreenhouseChanceFloor = 0.06f;
+    public const float GreenhouseInnermostRel = 0.25f;
+
+    /// The pressure a runaway world is born with, atmospheres. Venus is the top.
+    public const float GreenhouseAtmospheresMin = 30f;
+    public const float GreenhouseAtmospheresMax = 90f;
+
+    /// At or above this a terrestrial world's sky IS a runaway greenhouse. Well clear of anything a mass
+    /// can hold (the Ceiling tops out near six) and of the Pyrothians' seven, and well under the 30 a
+    /// runaway is born with, so terraforming has to bleed off most of one before it stops counting.
+    public const float GreenhouseThresholdAtmospheres = 20f;
+
+    /// Does this body carry a runaway-greenhouse sky? Derived from its pressure; never a gas giant.
+    public static bool IsRunawayGreenhouse(CelestialBody b)
+        => b != null && b.type != CelestialBodyType.GasGiant && b.type != CelestialBodyType.Asteroid
+           && b.atmospheres >= GreenhouseThresholdAtmospheres;
+
+    /// The chance a world of `mass` at `rel` (distance / the star's Earth-warmth distance) runs away.
+    /// Zero at and beyond the zone's inner edge. Pure.
+    public static float RunawayGreenhouseChance(float mass, float rel)
+    {
+        if (mass < GreenhouseMinMass || rel >= StarDatabase.HzInnerRel) return 0f;
+        if (rel > WorldClassifier.ScorchingRel) return GreenhouseChance;
+        return Mathf.Lerp(GreenhouseChanceFloor, GreenhouseChanceRingOne,
+                          Mathf.InverseLerp(GreenhouseInnermostRel, WorldClassifier.ScorchingRel, rel));
+    }
+
+    /// Roll the runaway for a freshly generated (or re-derived) body and, if it happens, apply it: the
+    /// deep sky, the seas boiled off, no biosphere, a stagnant lid. Returns whether it happened.
+    ///
+    /// Call AFTER RollAtmospheres (it replaces that figure) and BEFORE the classifier, which then names
+    /// the world Barren from its lack of plates. Draws from UnityEngine.Random only for bodies that can
+    /// run away at all, so the generation stream of every other world is untouched.
+    public static bool RollRunawayGreenhouse(CelestialBody b, float rel)
+    {
+        if (b == null || b.type == CelestialBodyType.GasGiant || b.type == CelestialBodyType.Asteroid) return false;
+        float chance = RunawayGreenhouseChance(b.mass, rel);
+        if (chance <= 0f || Random.value >= chance) return false;
+
+        b.atmospheres = Quantize(Random.Range(GreenhouseAtmospheresMin, GreenhouseAtmospheresMax));
+
+        // The oceans went into the sky and then to space. A token at most, under BiosphereRules'
+        // MinWaterLevel so nothing can count it as a sea — and at these temperatures it is steam anyway
+        // (the deep greenhouse puts even ring 3 well over water's boiling point at this pressure).
+        var p = b.terrainParams;
+        p.seaLevel = Mathf.Min(p.SeaLevelOrNeutral, 0.04f);
+        b.terrainParams = p;
+
+        b.biosphereActive = false;
+        b.hasTectonics = false;     // the stagnant lid — see the header
+        return true;
+    }
+
     /// One decimal. Atmospheres are a headline statistic shown next to Mass, and "3.4 atmospheres" reads
     /// as a fact where "3.3871293" reads as a bug.
     public static float Quantize(float atmospheres) =>
@@ -284,6 +380,8 @@ public static class AtmosphereRules
         if (a < 3f) return "heavy";
         if (a < 5f) return "thick";
         if (a < 9f) return "crushing";
+        // Past anything a mass can hold, on a world with ground under it, the only way there is a runaway.
+        if (b.type != CelestialBodyType.GasGiant) return IsRunawayGreenhouse(b) ? "runaway greenhouse" : "crushing";
         return "gas-giant deep";
     }
 }

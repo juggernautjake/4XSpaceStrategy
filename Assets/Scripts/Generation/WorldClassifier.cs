@@ -107,8 +107,13 @@ public static class WorldClassifier
     /// modifier deliberately left out because the type is the very thing being decided. Classifying on
     /// the finished BodyAverageCelsius would be circular: a world would have to already be Volcanic to
     /// read hot enough to be classified Volcanic.
+    ///
+    /// The deep greenhouse of a runaway sky IS included: it depends on the pressure, not on the type (the
+    /// type only enters it to exclude gas giants), so counting it is not circular — and leaving it out
+    /// would name a 450 °C world by its 165 °C starlight-plus-thick-air figure.
     public static float ClassifyC(CelestialBody b)
-        => b == null ? 15f : PlanetTemperature.BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, CelestialBodyType.RockyPlanet);
+        => b == null ? 15f : PlanetTemperature.BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, CelestialBodyType.RockyPlanet)
+                             + PlanetTemperature.DeepGreenhouseC(b.atmospheres, b.type);
 
     static float Water(CelestialBody b)
         => b == null ? 0f : PlanetTerrainGenerator.WaterLevelFromSeaLevel(b.terrainParams.SeaLevelOrNeutral);
@@ -223,7 +228,11 @@ public static class WorldClassifier
                 return water >= 0.95f ? "ocean world" : "archipelago world";
 
             case CelestialBodyType.BarrenPlanet:
-                // Venus: a thick, poisoned sky over a baked surface.
+                // Venus proper: a runaway greenhouse, tens of atmospheres deep, over a dry baked crust
+                // (AtmosphereRules.IsRunawayGreenhouse). Named for the mechanism, because that is what
+                // the player needs to know about it — no shade or scrubber makes this one temperate.
+                if (AtmosphereRules.IsRunawayGreenhouse(b)) return "greenhouse world";
+                // A thick, poisoned sky over a baked surface, short of a runaway.
                 if (thickAir && c > 60f) return "toxic world";
                 if (c > 90f) return "scorched world";
                 if (c < BiosphereRules.FreezingC(b.atmospheres)) return "frozen rock";

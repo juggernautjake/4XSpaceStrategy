@@ -74,7 +74,17 @@ Enum `OreType` (None + 14 ores from Ferralite → Xenocryst).
   readout in the Dev editor keeps meaning what it meant.
 
 ### Habitability.cs  *(species-aware)*
-- **`GetZone(star, species, out inner, out outer)`** — the species' shifted/scaled Goldilocks band.
+- **`GetZone(star, species, out inner, out outer)`** — ONE RULE for every species and star (2026-10-11):
+  the orbits where a world of the species' OWN kind (its cradle's type and air — `CradleAtmospheres` —
+  plus a volcanic homeworld's venting, `PlanetTemperature.HomeworldVentingC`) sits within
+  `ZoneTolerance` × Rate's temperature width of `IdealCelsius`. Found by inverting
+  `InsolationRules.KelvinAt` (`ZoneRel`), so it is the same interval in multiples of R around every star:
+  Pyrothians ~0.53-0.99R (ring 3), Sylvans 0.85-1.21, Terrans 0.89-1.10, Aquarii 0.90-1.15 (ring 4),
+  Cryithn 0.91-1.55 (ring 5). It used to be the star's band shifted ±25% by idealTemp — positional, no
+  temperature in it, so a Terran band reached ring 5 (−20 °C) and no Pyrothian band held 360 °C.
+  `tools/habitability-audit.mjs` tabulates every species × star class, before and after.
+- **`CradleZone`** — where a cradle / second starting option may orbit: `GetZone`, intersected with the
+  star's band for liquid-water life. **`InCradleZone`** is what `WorldConsistency` checks options against.
 - **`InZone(star, species, distance)`** — is a body physically inside that band.
 - **`Rate(star, species, body)`** — 0..100 from the world AS IT IS (2026-10-04): average °C against the
   species' `IdealCelsius` (smooth falloff, width from tolerance), air (`AtmosphereSuitability`), liquid
@@ -515,6 +525,26 @@ barycentre), with the player's crest or a rival's colour swatch on the left. Scr
   `idealTemp` by a blind lerp, the greenhouse term pushed the result past the 50 °C liquid-water
   ceiling, and `BiosphereRules` then correctly refused — so two Terran homeworlds in three, and every
   Sylvan one, generated sterile. Bigger cradles now get a lower heat to offset their thicker air.
+- **`DeepGreenhouseC(atm, type)`** (2026-10-10) — a runaway sky's extra warming past the saturating 45 °C:
+  0 below 10 atm, logarithmic to +250 °C at 90 atm, never for gas giants. Read by `BodyAverageCelsius`,
+  the 5-argument `BaseCelsius` (the terrain generator), `WorldClassifier.ClassifyC` and
+  `TerraformFeasibility.HoldsWaterWarning`. `GreenhouseCelsius(b)` is the total.
+- **`LatitudeSwingC(atm)`** (2026-10-11) — equator-to-pole half-swing: ±25 airless, ±15 at 1 atm (as
+  before), ±8 at 4+. Readout and terrain generator share it.
+- **`HomeworldVentingC` / `HomeworldVenting(type)`** (2026-10-11) — the internal heat a volcanic homeworld
+  is built with (120 ± 20 °C); `GalaxyGenerator.TameHomeworldVents` re-rolls the cradle's seed (no plates)
+  to what its orbit needs. A plate world's venting is ~560 °C, which used to put a Pyrothian cradle
+  anywhere from 150 to 800 °C.
+
+### AtmosphereRules — the runaway greenhouse (2026-10-10)
+- **`RollRunawayGreenhouse(b, rel)`** — inside the zone's inner edge only, a terrestrial of mass ≥ 0.7
+  runs away with `RunawayGreenhouseChance` (42% on rings 2-3, ~11-16% on ring 1): 30-90 atm, seas boiled
+  off, sterile, no plates (a stagnant lid, so it classifies Barren). Called from `ApplyWorldPipeline` and
+  `ReconcileClimate`. **`IsRunawayGreenhouse(b)`** is derived from pressure (≥ 20 atm, not a gas giant),
+  so there is no new saved field. `WorldClassifier.Describe` names it "greenhouse world";
+  `TerraformDiagnosis` diagnoses Toxic + AtmosphereTooThick instead of "airless"; `WorldConsistency`
+  records it as the world's `climateException` inside the edge and repairs one anywhere else.
+  `tools/world-placement-check.mjs` section 4 gives the distribution by ring.
 
 ### SpaceBackground.cs  *(procedural sky)*
 - **`Create()`**, **`Rebuild()`**, **`Regenerate()`**, `SetEnabled/SetSolidMode/SetSolidColor/SetSeed`.
@@ -916,7 +946,15 @@ hotter inward and nothing inside the zone's inner edge is temperate; rebuilds Mi
 screenshots (Mirfak II's 35 °C is exactly a red dwarf's habitable ring, and 262-317 °C on the G sun it
 actually orbits); then sweeps thousands of home systems per species and difficulty, OLD pipeline against
 NEW. The layout is simplified — which rings fill is plain odds — because what it checks is where the
-forced worlds go and what climate they get.
+forced worlds go and what climate they get. Since 2026-10-11 it also pushes a share of worlds outward
+after their climate is rolled (OrbitSafety's backstop) and asserts they were re-derived — the Mirfak Eta
+II bug it used to miss — holds every species' cradle to its own band at its ideal, and (section 4) gives
+the runaway-greenhouse distribution by ring.
+
+**`habitability-audit.mjs`** (2026-10-11) — every species × star class, BEFORE and AFTER the one zone
+rule: band in xR and units, rings covered, cradle ring, type, °C and own-species rating; then the
+temperature chain (a rocky world on each ring under 0-60 atm: °C, liquid or not, pole swing). Fails if a
+cradle leaves its band, misses its ideal by more than its tolerance or rates under `ExcellentRating`.
 
 **`terrain-relief-check.mjs`** — how rough is a dead world from one tile to the next, and does a small
 moon read as a small moon?

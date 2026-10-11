@@ -398,7 +398,10 @@ public static class TerraformFeasibility
 
         // Type-independent, for the same reason WorldClassifier is: the type modifier would have a
         // volcanic world failing this on the strength of being volcanic rather than of being hot.
-        float c = PlanetTemperature.BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, CelestialBodyType.RockyPlanet);
+        // The deep greenhouse of a runaway sky counts (it is pressure, not type): without it a 450 °C
+        // greenhouse world would be quoted at its 165 °C starlight-plus-thick-air.
+        float c = PlanetTemperature.BaseCelsius(b.terrainParams.heat, b.atmosphereThickness, CelestialBodyType.RockyPlanet)
+                + PlanetTemperature.DeepGreenhouseC(b.atmospheres, b.type);
         if (c > BiosphereRules.MaxLiquidC)
             return $"the surface runs at {PlanetTemperature.Label(c)} — water arrives as steam and is gone. " +
                    "Cool the world first (orbital shades).";
@@ -589,7 +592,30 @@ public static class TerraformDiagnosis
             });
 
         // ---- Atmosphere ----
-        if (b.type == CelestialBodyType.BarrenPlanet || b.type == CelestialBodyType.Asteroid || b.type == CelestialBodyType.Moon)
+        //
+        // A RUNAWAY GREENHOUSE FIRST (AtmosphereRules.IsRunawayGreenhouse). It is a barren world by type
+        // — a dry stagnant lid — but the very opposite of airless, and diagnosing it "effectively
+        // airless" would offer Atmospheric Processors to a world drowning in ninety atmospheres of
+        // carbon dioxide. It is both faults the other branches name for other worlds: a poisoned sky AND
+        // a crushing one, and the second is the one that keeps it hot (PlanetTemperature.DeepGreenhouseC).
+        bool runaway = AtmosphereRules.IsRunawayGreenhouse(b);
+        if (runaway)
+        {
+            list.Add(new TerraformIssue
+            {
+                problem = TerraformProblem.ToxicAtmosphere,
+                severity = 1f,
+                detail = "A runaway greenhouse: a carbon-dioxide sky under sulphuric-acid cloud, with no oxygen and no water left in it."
+            });
+            list.Add(new TerraformIssue
+            {
+                problem = TerraformProblem.AtmosphereTooThick,
+                severity = Mathf.Clamp01(b.atmospheres / AtmosphereRules.GreenhouseAtmospheresMax + 0.4f),
+                detail = $"{b.atmospheres:0} atmospheres — a crushing sky that traps {PlanetTemperature.GreenhouseCelsius(b):0} °C " +
+                         "of heat. It has to be bled off before anything else about this world can be fixed."
+            });
+        }
+        else if (b.type == CelestialBodyType.BarrenPlanet || b.type == CelestialBodyType.Asteroid || b.type == CelestialBodyType.Moon)
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.NoAtmosphere,
@@ -604,7 +630,7 @@ public static class TerraformDiagnosis
                 detail = "A thin, frozen-out atmosphere; most of the volatiles are locked in the ice."
             });
 
-        if (b.type == CelestialBodyType.VolcanicPlanet)
+        if (!runaway && b.type == CelestialBodyType.VolcanicPlanet)   // a runaway already named its poison
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.ToxicAtmosphere,
@@ -614,7 +640,7 @@ public static class TerraformDiagnosis
 
         // A very large world holds onto a crushing envelope of gas — the opposite problem to an airless
         // rock, and it has to be bled off rather than built up.
-        if (b.surfaceSize >= 14 && b.type != CelestialBodyType.GasGiant)
+        if (!runaway && b.surfaceSize >= 14 && b.type != CelestialBodyType.GasGiant)
             list.Add(new TerraformIssue
             {
                 problem = TerraformProblem.AtmosphereTooThick,
@@ -806,6 +832,8 @@ public static class TerraformDiagnosis
             case TerraformProblem.NoWater: return "No water";
             case TerraformProblem.NoAtmosphere: return "No atmosphere";
             case TerraformProblem.ToxicAtmosphere: return "Toxic atmosphere";
+            // Every runaway-greenhouse world carries this one, so it reads as words, not an enum name.
+            case TerraformProblem.AtmosphereTooThick: return "Atmosphere too thick";
             case TerraformProblem.NoBiosphere: return "No biosphere";
             case TerraformProblem.NoMagnetosphere: return "No magnetic field";
             case TerraformProblem.DayTooLong: return "Rotates too slowly";

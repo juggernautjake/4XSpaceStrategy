@@ -115,7 +115,8 @@ public class CelestialBody
     public bool isHabitable = false;    // true if physically inside the Goldilocks zone
     public bool habitabilityLocked = false; // home world's difficulty-set rating won't be recomputed
     /// Why this world is allowed to break the habitable-zone rule (a liquid climate outside the zone,
-    /// from its greenhouse or internal heat), as WorldConsistency recorded it at generation. Null for
+    /// from its greenhouse or internal heat), or why it is far hotter than its starlight (a runaway
+    /// greenhouse inside the zone's inner edge), as WorldConsistency recorded it at generation. Null for
     /// the ordinary case. Runtime only, not saved.
     [System.NonSerialized] public string climateException;
 

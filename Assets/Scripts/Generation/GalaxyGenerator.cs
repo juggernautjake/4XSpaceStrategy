@@ -286,8 +286,10 @@ public static class GalaxyGenerator
         LinkBodies(home);
 
         if (home.bodies.Count == 0) home.bodies.Add(new CelestialBody(CelestialBodyType.RockyPlanet));
-        // The overlap of the species' band and the star's drawn one — see Habitability.PlacementZone.
-        Habitability.PlacementZone(home.combinedStar, species, out float inner, out float outer);
+        // The overlap of the species' band and the star's drawn one — see Habitability.PlacementZone —
+        // reaching inward to the species' own edge when its climate is hotter than that overlap can give
+        // (Habitability.CradleZone: a Pyrothian cradle goes on ring 3, not clamped cold on ring 4).
+        Habitability.CradleZone(home.combinedStar, species, out float inner, out float outer);
         float center = (inner + outer) * 0.5f;
 
         // Promote the planet ALREADY nearest the habitable zone, and convert it where it stands.
@@ -397,6 +399,9 @@ public static class GalaxyGenerator
             Mathf.Clamp(planet.mass, species.minAtmospheres, species.maxAtmospheres));
         planet.orbitPhase = Random.Range(0f, 360f);
         SeedTerrain(planet);
+        // A volcanic cradle vents what its orbit needs and no more (TameHomeworldVents) — before its
+        // heat is solved below, which reads that venting.
+        TameHomeworldVents(planet, species, home.combinedStar);
         // The home world's climate matches the species' preferred temperature, so a Pyrothian home
         // reads hot and a Cryithn home reads frozen — the race's biology visibly shapes its cradle.
         //
@@ -668,6 +673,7 @@ public static class GalaxyGenerator
         b.hasTectonics = TectonicsRules.Roll(b.type, b.mass);
         b.atmospheres = AtmosphereRules.Quantize(Mathf.Clamp(b.mass, species.minAtmospheres, species.maxAtmospheres));
         SeedTerrain(b);
+        TameHomeworldVents(b, species, home.combinedStar);   // as the cradle: a volcanic option vents to suit its orbit
         // The species' climate, clamped to what this orbit's starlight can give (InsolationRules) —
         // never a temperate world painted onto an orbit that contradicts it.
         var tp = b.terrainParams;
@@ -765,26 +771,65 @@ public static class GalaxyGenerator
     // particular world, through the same law everything else reads. Bigger home worlds now get a lower
     // heat to offset their thicker air, and all three sizes land on the same comfortable climate.
     // ============================================================================================
+    //
+    // EVERY SPECIES THE SAME WAY (2026-10-11). The furnace and ice species used to keep the raw
+    // `Lerp(0.55, 1.7, idealTemp)` curve — 199 °C plus whatever venting for a Pyrothian, −70 °C for a
+    // Cryithn — while Habitability.Rate scored them against 360 and −54. Now every cradle is solved for
+    // Habitability.IdealCelsius, the one ideal the rating, the species' band (Habitability.GetZone) and
+    // terraforming all read. For liquid-water life that IS CradleTargetCelsius, so their cradles are
+    // exactly what they were; the margin argument above is why that target sits inside the band.
+    //
+    // A volcanic cradle's venting counts: the starlight it is solved for is what is left of the ideal
+    // after its type, its air AND its internal heat (PlanetTemperature.HomeworldVentingC, which the
+    // cradle is built to carry — TameHomeworldVents).
     static float CradleHeat(Species species, CelestialBody planet)
-        => CradleHeat(species, planet.atmosphereThickness, planet.type);
+        => CradleHeat(species, planet.atmosphereThickness, planet.type, PlanetTemperature.InternalCelsius(planet));
 
     /// The same, from the air and type a world WILL have, so its orbit can be chosen for the climate
-    /// before it is converted (ForceHomeWorld, AddSecondOption). Public for the consistency tests.
+    /// before it is converted (ForceHomeWorld, AddSecondOption). Assumes a homeworld's venting for its
+    /// type. Public for the consistency tests.
     public static float CradleHeat(Species species, float atmosphereThickness, CelestialBodyType type)
+        => CradleHeat(species, atmosphereThickness, type, PlanetTemperature.HomeworldVenting(type));
+
+    public static float CradleHeat(Species species, float atmosphereThickness, CelestialBodyType type, float internalC)
+        => PlanetTemperature.HeatForCelsius(Habitability.IdealCelsius(species) - internalC, atmosphereThickness, type);
+
+    // ============================================================================================
+    // A VOLCANIC HOMEWORLD VENTS WHAT ITS ORBIT NEEDS (2026-10-11)
+    //
+    // A volcanic world's internal heat is 0-620 °C from its seed and plates — and with plates, nearly
+    // always ~560 (PlanetTemperature.HomeworldVentingC explains). That swing used to land a Pyrothian
+    // cradle anywhere from 150 to 800 °C. So the cradle has no plates (a stagnant lid with hotspot
+    // volcanism: Io's kind, not Earth's) and its terrain seed — which is all its hotspot intensity
+    // depends on — is re-rolled until its venting is what its ORBIT needs: the ideal, less what the
+    // middle of the orbit's starlight band, its type and its air already give, within
+    // HomeworldVentingSlackC. CradleHeat then solves the starlight for exactly what is left, which lies
+    // inside the band by construction. Bounded tries; the closest seed found is kept if none lands.
+    //
+    // A type with no internal heat (everything but Volcanic) is left alone and draws nothing.
+    // ============================================================================================
+    const int VentRerolls = 160;
+
+    static void TameHomeworldVents(CelestialBody b, Species species, StarData star)
     {
-        float ideal = Mathf.Clamp01(species.idealTemp);
+        if (b == null || species == null || PlanetTemperature.HomeworldVenting(b.type) <= 0f) return;
+        b.hasTectonics = false;
+        TectonicsMap.Invalidate(b);
+        GeothermalMap.Invalidate(b);
 
-        // Only the cradles that are MEANT to be alive are pinned to the liquid-water band. A Pyrothian
-        // furnace and a Cryithn ice world never generate with a biosphere whatever their temperature
-        // (GeneratesWithBiosphere gates on type), so forcing them into a temperate band would only strip
-        // the character out of their worlds for no gain — they keep the original curve.
-        if (!CradleWantsLife(species)) return Mathf.Lerp(0.55f, 1.7f, ideal);
+        InsolationRules.HeatBand(star, b.distanceFromStar, out float lo, out float hi);
+        float fromOrbit = PlanetTemperature.BaseCelsius((lo + hi) * 0.5f, b.atmosphereThickness, b.type);
+        float want = Mathf.Clamp(Habitability.IdealCelsius(species) - fromOrbit, 0f, PlanetTemperature.InternalMaxC);
 
-        // Inside the band with real margin at both ends, because heat is not frozen after generation:
-        // terraforming moves it, and the Dev sandbox moves it further. A cradle that started 1°C inside
-        // the ceiling would fall out of it the first time anything nudged the world.
-        return PlanetTemperature.HeatForCelsius(
-            CradleTargetCelsius(species), atmosphereThickness, type);
+        float bestSeed = b.terrainSeed, bestMiss = Mathf.Abs(PlanetTemperature.InternalCelsius(b) - want);
+        for (int i = 0; i < VentRerolls && bestMiss > PlanetTemperature.HomeworldVentingSlackC; i++)
+        {
+            b.terrainSeed = Random.Range(0f, 10000f);
+            float miss = Mathf.Abs(PlanetTemperature.InternalCelsius(b) - want);
+            if (miss < bestMiss) { bestMiss = miss; bestSeed = b.terrainSeed; }
+        }
+        b.terrainSeed = bestSeed;
+        GeothermalMap.Invalidate(b);
     }
 
     /// Is this species' own cradle one that is MEANT to be alive — a Rocky or Ocean world?
@@ -814,7 +859,10 @@ public static class GalaxyGenerator
     {
         CelestialBodyType[] candidates =
         {
-            CelestialBodyType.OceanPlanet, CelestialBodyType.RockyPlanet, CelestialBodyType.IcePlanet,
+            // Rocky BEFORE Ocean, the order Species.BestType (the remodelling target) walks, so a tie
+            // goes the same way in both. It used to list Ocean first, and the Sylvans' 0.9/0.9 tie made
+            // their cradle an ocean world while remodelling aimed them at rock (2026-10-11).
+            CelestialBodyType.RockyPlanet, CelestialBodyType.OceanPlanet, CelestialBodyType.IcePlanet,
             CelestialBodyType.VolcanicPlanet, CelestialBodyType.BarrenPlanet
         };
         CelestialBodyType best = CelestialBodyType.RockyPlanet;
