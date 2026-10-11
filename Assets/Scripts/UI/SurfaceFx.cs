@@ -447,7 +447,7 @@ public class SurfaceFx : MonoBehaviour
     readonly List<Vector2Int> aoeCells = new List<Vector2Int>();
     Color aoeColor;
 
-    static readonly Color PowerReach = new Color(1f, 0.9f, 0.35f, 1f);
+    static readonly Color PowerReach = new Color(0.25f, 0.72f, 1f, 1f);     // the power overlay's electric blue
     static readonly Color HubReach = new Color(0.45f, 0.85f, 1f, 1f);
 
     /// The tiles this structure affects, and the colour to draw them in. False if it has no area.

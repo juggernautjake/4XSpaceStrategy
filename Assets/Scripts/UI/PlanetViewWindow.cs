@@ -265,10 +265,15 @@ public class PlanetViewWindow : MonoBehaviour
         }
     }
 
-    /// The power overlay is up — either switched on from the Survey tab, or automatically because a
-    /// power piece is in hand on the Build tab.
+    /// The power overlay is up — either switched on (the map's bolt shortcut, or the Survey tab's menu),
+    /// or automatically because a power piece is in hand on the Build tab.
+    ///
+    /// ON EVERY TAB (2026-10-10): this used to require the Survey tab, which was right while the switch
+    /// lived only in the Survey menu — and silently wrong once the bolt shortcut put the same switch on
+    /// the map on every tab. Pressing it anywhere else lit its frame and drew nothing ("Power Grid toggle
+    /// icon does not seem to function").
     bool PowerOverlayActive =>
-        (tab == Tab.Survey && showPowerOverlay) || (tab == Tab.Build && CarryingPowerPiece);
+        showPowerOverlay || (tab == Tab.Build && CarryingPowerPiece);
 
     /// True while the player is carrying a piece whose siting is a question of ORE — a mine, a refinery,
     /// a combustion plant. Exactly the same bargain the power overlay makes: the one map that answers
@@ -347,7 +352,7 @@ public class PlanetViewWindow : MonoBehaviour
 
         demolishIcon = ShortcutButton(0, PixelIcons.Bulldozer, Color.white, ToggleDemolishShortcut,
             "<b>Demolish</b>\nClear buildings: paint the tiles, then confirm.", out demolishFrame);
-        ShortcutButton(1, PixelIcons.Bolt, new Color(0.96f, 0.96f, 0.55f), () => { showPowerOverlay = !showPowerOverlay; lastSig = null; },
+        ShortcutButton(1, PixelIcons.Bolt, new Color(0.45f, 0.82f, 1.00f), () => { showPowerOverlay = !showPowerOverlay; lastSig = null; },
             "<b>Power grid</b>\nShow where electricity reaches.", out powerFrame);
         ShortcutButton(2, PixelIcons.Heightmap, Color.white, ToggleContours,
             "<b>Terrain heightmap</b>\nShow or hide the elevation lines.", out contourFrame);
@@ -491,7 +496,7 @@ public class PlanetViewWindow : MonoBehaviour
         bool demo = BuildDemolition.IsFor(body);
         if (demolishIcon != null) demolishIcon.color = demo ? new Color(1f, 0.25f, 0.2f) : Color.white;
         SetShortcutFrame(demolishFrame, demo, new Color(1f, 0.3f, 0.25f));
-        SetShortcutFrame(powerFrame, showPowerOverlay, new Color(0.96f, 0.96f, 0.55f));
+        SetShortcutFrame(powerFrame, showPowerOverlay, new Color(0.45f, 0.82f, 1.00f));
         SetShortcutFrame(contourFrame, SurfaceTextureRenderer.ShowContours, new Color(0.85f, 0.88f, 0.92f));
     }
 
@@ -529,6 +534,8 @@ public class PlanetViewWindow : MonoBehaviour
     /// ground index stay legible underneath: the two are shown together far more often than not, and at
     /// full strength the grid simply erased whichever index the player had also asked for.
     const float PowerOverlayAlpha = 0.5f;
+    /// A fully served grid's coverage on the power overlay.
+    static readonly Color PowerLitBlue = new Color(0.15f, 0.62f, 1.00f, 0.44f);
 
     /// Texels a single open MOON pane may spend on its map. A quarter of the host's, because several
     /// moons can be open at once and each is a fraction of the window — a moon-sized grid still gets the
@@ -4703,7 +4710,7 @@ public class PlanetViewWindow : MonoBehaviour
     {
         var card = Card();
         var group = card.gameObject.AddComponent<CanvasGroup>();
-        Note(card, "<color=#F5F58C>■</color> grid   <color=#4DC8FF>■</color> plants & relays — where the electricity reaches.");
+        Note(card, "<color=#2E9EFF>■</color> grid   <color=#C7F5FF>■</color> plants & relays — where the electricity reaches.");
         var btn = UIFactory.Button(card, "", () =>
         {
             showPowerOverlay = !showPowerOverlay;
@@ -5477,7 +5484,10 @@ public class PlanetViewWindow : MonoBehaviour
                 ? new Color(0.38f, 0.40f, 0.45f, 0.34f)
                 : net.Dead
                     ? new Color(0.90f, 0.55f, 0.15f, 0.40f)
-                    : Color.Lerp(new Color(0.85f, 0.45f, 0.10f, 0.34f), new Color(1.00f, 0.95f, 0.20f, 0.42f), s);
+                    // ELECTRIC BLUE for a grid delivering in full (2026-10-10, was yellow); a short grid
+                    // stays amber, deepening toward orange the shorter it runs, so trouble still reads.
+                    : s >= 0.999f ? PowerLitBlue
+                    : Color.Lerp(new Color(0.85f, 0.45f, 0.10f, 0.34f), new Color(1.00f, 0.80f, 0.25f, 0.40f), s);
             foreach (var c in net.coverage)
             {
                 if (c.x < 0 || c.y < 0 || c.x >= w || c.y >= h) continue;
@@ -5488,7 +5498,9 @@ public class PlanetViewWindow : MonoBehaviour
 
         // Sources and relays go on before the rim so the rim can still draw over their own edge — they
         // are lit tiles like any other and a grid that ends on a relay should still show where it ends.
-        var electricBlue = new Color(0.25f, 0.72f, 1.00f, 0.85f);
+        // Pale, near-white cyan now the wash itself is electric blue — still "infrastructure", still
+        // standing out from the ground it lights.
+        var electricBlue = new Color(0.78f, 0.96f, 1.00f, 0.90f);
         foreach (var p in SurfaceBuildManager.On(body))
         {
             // The blue "this is infrastructure" mark goes on what MAKES or MOVES or BANKS power. Read
@@ -5550,7 +5562,7 @@ public class PlanetViewWindow : MonoBehaviour
 
                 Color rim = (openL || openR || openD || openU)
                     ? new Color(Mathf.Lerp(c.r, 1f, 0.55f), Mathf.Lerp(c.g, 1f, 0.6f),
-                                Mathf.Lerp(c.b, 0.55f, 0.5f), Mathf.Min(1f, c.a + 0.34f))
+                                Mathf.Lerp(c.b, 1f, 0.5f), Mathf.Min(1f, c.a + 0.34f))
                     : c;
 
                 for (int sy = 0; sy < sub; sy++)
