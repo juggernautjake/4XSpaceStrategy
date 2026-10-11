@@ -47,17 +47,28 @@ in-progress features stay local until done.
 - Fixed a compile error caused by pushing a half-finished edit.
 - OreGenerator.Enabled is now static readonly, which clears the two CS0162 warnings.
 
-## In progress (not pushed yet)
-- Planet and moon viewers:
-  - maps open fitted, and panes keep a fixed size
-  - cursor-anchored zoom
-  - per-pane zoom, fit and maximise controls
-  - keyboard zoom
-  - SurfaceFx across the seam
-- Placement and build controls audit: every building placeable, and every failure reason shown clearly.
-- Gravity Wells toggle (bottom-right pixel-art icon), the solar-system grid out to the detection circle,
-  and the fix for system fog of war in player mode.
-- Meshy, moved to the developer API key:
-  - finish the Pyrothian hulls
-  - re-roll the failed hulls
-  - generate the Cryithn and Sylvan fleets
+**Later the same day (all pushed)**
+- Power card: grid ledger and the building's role (2689626). A pylon shows Grid power and Grid draw
+  (db9145d).
+- Fog of war in player mode, the Gravity Wells toggle and the Solar System Grid (7a70d47). Rival ships,
+  derelicts, comets and effects from hidden ships are now hidden; the camera stops softly at an unexplored
+  system's edge (930d99b, 3a0f904).
+- Generation stalls: moved worlds are built in steps (db9145d), and GenProfile names the slow work
+  (db97e3a).
+- Planet and moon viewers rebuilt, and the placement controls and failure messages audited (393da6f).
+- Industry chain and placement synergies; power through adjacent buildings (3 hops), with the nearest
+  buildings served first when a grid runs short; grid tags and a grid list (e2fc20e).
+- Survey progress bars in the Planet View and above ships, scan effects, survey and research fixes,
+  Dev "survey fully now" (Ctrl+Shift+U); ship markers, selection, the fleet window and orbit lists
+  (5347f6a).
+- "Why is it like this?" explanations for every world; generation fixes for worlds with no valid cause
+  (980067c).
+- Full 29-hull fleets for every race via the Meshy API (6fdbe20); Cryithn texture check keyed on
+  brightness (5a4838f).
+
+## Open decisions for Jacob
+- Spaceports and shipyards are now queued builds (they were instant). Reverting is one line in DoPlace.
+- Clicking a ship no longer flies the camera to it (F, Tab and the lists do).
+- The Aquarii homeworld reads as an "archipelago world" (36-62% water).
+- Cryithn Dreadnought and Mega-Station need a re-roll after the Meshy credit reset (38 credits left; a
+  hull costs 39).
