@@ -10,31 +10,36 @@
 #   flying belly-first?   try  -90 0 0
 #   flying backwards?     add  180 to the yaw
 #
-# ---- VERIFIED BY SILHOUETTE, NOT GUESSED FROM A BOX ----------------------------------------
+# ---- glTFast MIRRORS X ON IMPORT, AND EVERY YAW BELOW ACCOUNTS FOR IT (2026-10-11) -------------
 #
-# These lines were read off `tools/ship-silhouettes.mjs`, which rasterises each mesh's own geometry
-# in the plane of its two longest axes — the top-down profile in which a bow is obvious — and marks
-# the +axis direction in the corner of every cell. The sheet is `Art/AllModels/_silhouettes.png`.
+# glTF is right-handed, Unity is left-handed, and com.unity.cloud.gltfast 6.10.1 converts by negating
+# X — Runtime/Scripts/Jobs.cs, ConvertVector3FloatToFloatInterleavedJob: `tmp.x *= -1;` for every
+# position and normal, and NodeExtension.GetTransform: `-node.translation[0]`. So a hull whose nose is
+# on glTF -X arrives in Unity with its nose on +X, and the yaw that carries it to +Z is -90, not +90.
 #
-# That mattered, because the previous generated pass had NEARLY THE WHOLE FLEET FLYING BACKWARDS.
-# The bounding-box heuristic settles which axis a hull is long on and cannot settle which END is the
-# bow — a box is symmetric. Measuring where the mass sits does not settle it either: a swordfish's
-# sharp end is its bill and a shrimp's is its tail, so "the pointed end" is the bow on one hull and
-# the stern on the next (`tools/measure-bow.mjs` reports both numbers and says so). The Aquarii
-# creatures are almost all modelled facing -X, so the -90 yaw the generator wrote pointed every one
-# of them tail-first along its course.
+# This file used to say +90 for exactly those hulls. The per-hull READINGS were right (they were taken
+# off the raw-glTF silhouette sheet); the conversion from reading to yaw ignored the mirror, so the
+# whole generated fleet was flying TAIL-FIRST. Every +-90 line was negated, and then all 145 hulls
+# were checked one at a time on `tools/ship-orientation-sheet.mjs`, which draws each hull the way
+# the game will — glTF x negated, then this file's rotation — with the bow at the top of every cell.
+# `tools/bake-ship-hardpoints.mjs` prints the same verdict as numbers.
 #
-# THREE HULLS WERE ORIENTED ACROSS THEIR OWN BEAM, which no amount of 180s would have fixed: a manta
-# ray carrier, a sea-turtle colony ship and a Terran scout aeroplane are all WIDER than they are
-# long, so "the longest axis" found the wingspan and flew them sideways. Their length is the second
-# axis, and their lines below say so.
+# THE AXES IN THE COMMENTS ARE RAW glTF AXES (what ship-silhouettes.mjs and measure-bow.mjs report):
 #
-# STATIONS DO NOT HAVE A BOW. Every one of them measures its shortest axis on Y, which means it is
-# already a disc lying flat with its axis of symmetry up — so they take the identity rotation and
-# are marked `spin`, which is what a radially symmetric structure with no facing should do.
+#   nose on raw -X   ->   0 -90 0        nose on raw +Z   ->   0   0 0
+#   nose on raw +X   ->   0  90 0        nose on raw -Z   ->   0 180 0
 #
-# Re-running tools/make-orientation-manifest.mjs OVERWRITES THIS FILE and will undo all of it. Run
-# the silhouette sheet again after it and re-read the verdicts.
+# THREE HULLS ARE LONG ACROSS THEIR OWN BEAM: a manta ray carrier, a sea-turtle colony ship and a
+# Terran scout aeroplane are all WIDER than they are long, so "the longest axis" finds the wingspan.
+# Their lines say so.
+#
+# STATIONS DO NOT HAVE A BOW. Every one sits with its axis of symmetry on Y (discs flat, the Terran,
+# Cryithn and Sylvan relay masts standing on end, the Pyrothian Hyper-Relay an upright gate), so they
+# take the identity rotation — Y is not touched by the mirror — and are marked `spin` or `nospin`.
+#
+# Re-running tools/make-orientation-manifest.mjs OVERWRITES THIS FILE and will undo all of it. Never
+# run it. After changing a line, re-run the orientation sheet AND tools/bake-ship-hardpoints.mjs —
+# the plumes and gun points are baked against these rotations, and a stale bake falls back to bounds.
 # ============================================================================================
 
 # ---- The three meshes that shipped with the project ----------------------------------------
@@ -42,28 +47,28 @@ LP Colony Ship              -90 0 0
 LP Science Ship               0 90 0
 
 # ---- Aquarii: hulls ------------------------------------------------------------------------
-# Modelled nose-toward--X, so +90 yaw puts the bow on +Z. Verified one at a time on the sheet.
-Aquarii_Scout                     0   90    0    # shrimp, thruster tail on +X
-Aquarii_ScoutII                   0   90    0    # lionfish, tail fins on +X
-Aquarii_ScoutIII                  0   90    0    # swordfish, bill on -X
-Aquarii_Explorer                  0   90    0    # sailfish, bill on -X; the sail IS the +Y up axis
-Aquarii_Probe                     0   90    0  1.0  spin   # nautilus shell, no meaningful facing
-Aquarii_ResearchShip              0   90    0    # cuttlefish, instrument tentacles on -X
-Aquarii_ResearchShipII            0   90    0    # octopus, arms on -X
-Aquarii_ResearchShipIII           0   90    0    # squid, arms on -X, tail fins on +X
-Aquarii_ScienceVessel             0   90    0    # nautilus, head on -X, spiral shell aft
+# Modelled nose-toward-raw--X, which glTFast mirrors to Unity +X, so -90 yaw puts the bow on +Z.
+Aquarii_Scout                     0  -90    0    # shrimp, thruster tail on +X
+Aquarii_ScoutII                   0  -90    0    # lionfish, tail fins on +X
+Aquarii_ScoutIII                  0  -90    0    # swordfish, bill on -X
+Aquarii_Explorer                  0  -90    0    # sailfish, bill on -X; the sail IS the +Y up axis
+Aquarii_Probe                     0  -90    0  1.0  spin   # nautilus shell, no meaningful facing
+Aquarii_ResearchShip              0  -90    0    # cuttlefish, instrument tentacles on -X
+Aquarii_ResearchShipII            0  -90    0    # octopus, arms on -X
+Aquarii_ResearchShipIII           0  -90    0    # squid, arms on -X, tail fins on +X
+Aquarii_ScienceVessel             0  -90    0    # nautilus, head on -X, spiral shell aft
 Aquarii_ColonyShip                0    0    0    # sea turtle — LENGTH IS Z, flipper span is X
-Aquarii_Miner                     0   90    0    # hermit crab, cutting claws on -X
-Aquarii_Transport                 0   90    0    # blue whale, baleen intake on -X, flukes on +X
+Aquarii_Miner                     0  -90    0    # hermit crab, cutting claws on -X
+Aquarii_Transport                 0  -90    0    # blue whale, baleen intake on -X, flukes on +X
 Aquarii_Terraformer               0    0    0    # jellyfish (2026-10-11 draw), LENGTH IS Z: bell on +Z, tendrils trailing -Z
-Aquarii_Fighter                   0   90    0    # reef shark, nose on -X
-Aquarii_FighterII                 0   90    0    # hammerhead, head on -X
-Aquarii_FighterIII                0   90    0    # megalodon (2026-10-11 draw), broad armoured head on -X, engine bank +X
+Aquarii_Fighter                   0  -90    0    # reef shark, nose on -X
+Aquarii_FighterII                 0  -90    0    # hammerhead, head on -X
+Aquarii_FighterIII                0  -90    0    # megalodon (2026-10-11 draw), broad armoured head on -X, engine bank +X
 Aquarii_Frigate                   0    0    0    # lobster — length IS Z, claws already on +Z
-Aquarii_Cruiser                   0   90    0    # sawfish, the saw ram on -X
+Aquarii_Cruiser                   0  -90    0    # sawfish, the saw ram on -X
 Aquarii_Carrier                   0    0    0    # manta ray (re-rolled 2026-10-11) — WINGSPAN IS X, length is Z,
                                                  # head and cephalic fins on +Z, tail on -Z
-Aquarii_Dreadnought               0   90    0    # leviathan, head on -X, spinal cannon along the back
+Aquarii_Dreadnought               0  -90    0    # leviathan, head on -X, spinal cannon along the back
 
 # ---- Aquarii: stations ---------------------------------------------------------------------
 # Discs already lying flat with Y up. No bow, so they turn instead of pointing.
@@ -80,35 +85,35 @@ Aquarii_MegaStation               0    0    0  1.0  spin   # reef metropolis, a 
 Aquarii_HyperRelay                0    0    0  1.0  nospin # basket-star gate framing the aperture
 
 # ---- Terran --------------------------------------------------------------------------------
-# Same convention as the Aquarii, and confirmed twice over: tools/measure-bow.mjs reports "bulk +X,
-# point -X" for thirteen Terran hulls with no dissent, and the silhouette sheet agrees on every one.
-# The pipeline exports nose-toward--X, so +90 yaw puts the bow on +Z.
-Terran_Scout                      0  -90    0    # aeroplane — LENGTH IS X, wingspan is Z; nose +X
-Terran_ScoutII                    0   90    0    # twin-engine jet, nose on -X, engines aft
-Terran_ScoutIII                   0   90    0    # hypersonic blackbird, the point on -X
-Terran_Explorer                   0  -90    0    # survey aircraft — LENGTH IS X, those huge wings are Z
-Terran_Probe                      0   90    0  1.0  spin   # an instrument bus; no meaningful facing
-Terran_ResearchShip               0   90    0    # lab cylinder. The least certain line here: the hull
-                                                 # is near enough symmetric that neither test is sure,
-                                                 # so it takes the fleet convention
-Terran_ResearchShipII             0   90    0    # twin lab cylinders, dish booms forward
-Terran_ResearchShipIII            0   90    0    # instrument ring amidships, scanning lens on -X
-Terran_ScienceVessel              0   90    0    # deep-survey ship, telescope ring forward
-Terran_ColonyShip                 0   90    0    # ark ship, habitat drums aft of a blunt nose
-Terran_Miner                      0   90    0    # dredger, cutting booms on -X
-Terran_Transport                  0   90    0    # container freighter, bridge tower aft
-Terran_Terraformer                0   90    0    # atmosphere processor, intakes forward
-Terran_Fighter                    0   90    0    # CORRECTED. This was 0 -90 0, guessed from an earlier
-                                                 # sheet and flagged at the time as the least certain
-                                                 # line in the file. Both tests now say nose -X, and a
-                                                 # jet is narrow at BOTH ends, which is what made the
-                                                 # first read a coin toss
-Terran_FighterII                  0   90    0    # up-armoured, four cannon ports on -X
-Terran_FighterIII                 0   90    0    # stealth striker, faceted nose on -X
-Terran_Frigate                    0   90    0    # corvette, missile cells and prow on -X
-Terran_Cruiser                    0   90    0    # missile cruiser, prow on -X, superstructure aft
-Terran_Carrier                    0   90    0    # fleet carrier, flight deck forward of the island
-Terran_Dreadnought                0   90    0    # battleship, spinal cannon forward
+# Same convention as the Aquarii: the pipeline exports nose-toward-raw--X, so -90 yaw puts the bow on
+# +Z. The two aircraft were the exceptions in the old file and are not now — see their lines.
+Terran_Scout                      0  -90    0    # aeroplane — LENGTH IS X, wingspan is Z. LOW CONFIDENCE: the old
+                                                 # reading said nose raw +X, but on the orientation sheet the
+                                                 # Explorer (same airframe family) has its glowing engines at
+                                                 # raw +X and a round sensor dome at raw -X, and this hull
+                                                 # carries the same dome at raw -X. Check in the editor
+Terran_ScoutII                    0  -90    0    # twin-engine jet, nose on -X, engines aft
+Terran_ScoutIII                   0  -90    0    # hypersonic blackbird, the point on -X
+Terran_Explorer                   0  -90    0    # survey aircraft — LENGTH IS X, wings are Z. The two emissive
+                                                 # engine bells are on raw +X (the stern), the dome on raw -X
+Terran_Probe                      0  -90    0  1.0  spin   # an instrument bus; no meaningful facing
+Terran_ResearchShip               0  -90    0    # lab cylinder. LOW CONFIDENCE: near enough symmetric that
+                                                 # neither test is sure; a small drive bell sits at the stern
+                                                 # on the orientation sheet, so it takes the fleet convention
+Terran_ResearchShipII             0  -90    0    # twin lab cylinders, dish booms forward
+Terran_ResearchShipIII            0  -90    0    # instrument ring amidships, scanning lens on -X
+Terran_ScienceVessel              0  -90    0    # deep-survey ship, telescope ring forward
+Terran_ColonyShip                 0  -90    0    # ark ship, habitat drums aft of a blunt nose
+Terran_Miner                      0  -90    0    # dredger, cutting booms on -X
+Terran_Transport                  0  -90    0    # container freighter, bridge tower aft
+Terran_Terraformer                0  -90    0    # atmosphere processor, intakes forward
+Terran_Fighter                    0  -90    0    # nose raw -X; engine glow at the stern on the orientation sheet
+Terran_FighterII                  0  -90    0    # up-armoured, four cannon ports on -X
+Terran_FighterIII                 0  -90    0    # stealth striker, faceted nose on -X
+Terran_Frigate                    0  -90    0    # corvette, missile cells and prow on -X
+Terran_Cruiser                    0  -90    0    # missile cruiser, prow on -X, superstructure aft
+Terran_Carrier                    0  -90    0    # fleet carrier, flight deck forward of the island
+Terran_Dreadnought                0  -90    0    # battleship, spinal cannon forward
 
 # Terran stations. Discs and rings lying flat, so identity rotation and spin — with one exception.
 Terran_BattleStation              0    0    0  1.0  spin   # armoured drum
@@ -127,29 +132,29 @@ Terran_HyperRelay                 0    0    0  1.0  nospin # a ring of arcing em
 Terran_RelayStation               0    0    0  1.0  spin   # comms mast and parabolic dish, upright
 
 # ---- Pyrothian -----------------------------------------------------------------------------
-# The third civilization to confirm the same export convention, which settles it: measure-bow
-# reports "bulk +X, point -X" for twenty of the twenty-one Pyrothian ships. The pipeline puts the
-# nose on -X regardless of civ, so +90 yaw carries it to +Z.
-Pyrothian_Scout                   0   90    0    # blast-furnace wedge (re-rolled 2026-10-11), sensor spines on -X
-Pyrothian_ScoutII                 0   90    0    # the same wedge up-armoured
-Pyrothian_ScoutIII                0   90    0    # smelter-racer, three exhaust throats aft
-Pyrothian_Explorer                0   90    0    # prospector rig, drilling head forward
-Pyrothian_Probe                   0   90    0    # cinder probe (2026-10-11): glowing eye on -X, exhaust tendrils on +X
-Pyrothian_ResearchShip            0   90    0    # assay laboratory, sample claws on -X
-Pyrothian_ResearchShipII          0   90    0
-Pyrothian_ResearchShipIII         0   90    0
-Pyrothian_ScienceVessel           0   90    0    # foundry-laboratory, analysis ring forward
-Pyrothian_ColonyShip              0   90    0    # foundry ark, landing sled beneath
-Pyrothian_Miner                   0   90    0    # drilling rig, boring head on -X
-Pyrothian_Transport               0   90    0    # slag hauler, shielded cab forward
-Pyrothian_Terraformer             0   90    0    # mobile caldera, vent nozzles
-Pyrothian_Fighter                 0   90    0    # obsidian wedge (re-rolled 2026-10-11): point on -X, exhausts on +X
-Pyrothian_FighterII               0   90    0
-Pyrothian_FighterIII              0   90    0    # forge-knight, cannon pods underslung
-Pyrothian_Frigate                 0   90    0    # furnace hull, glowing vent slots along the flanks
-Pyrothian_Cruiser                 0   90    0    # smelter cruiser, turret batteries down the spine
-Pyrothian_Carrier                 0   90    0    # foundry carrier, casting bays along the flanks
-Pyrothian_Dreadnought             0   90    0    # mobile volcano, spinal cannon and the great eye
+# The same export convention: measure-bow reports "bulk +X, point -X" (raw glTF) for twenty of the
+# twenty-one Pyrothian ships, so -90 yaw carries the nose to +Z. Lava exhausts sit at the stern of
+# every hull on the orientation sheet, which is the best check this fleet has.
+Pyrothian_Scout                   0  -90    0    # blast-furnace wedge (re-rolled 2026-10-11), sensor spines on -X
+Pyrothian_ScoutII                 0  -90    0    # the same wedge up-armoured
+Pyrothian_ScoutIII                0  -90    0    # smelter-racer, three exhaust throats aft
+Pyrothian_Explorer                0  -90    0    # prospector rig, drilling head forward
+Pyrothian_Probe                   0  -90    0    # cinder probe (2026-10-11): glowing eye on -X, exhaust tendrils on +X
+Pyrothian_ResearchShip            0  -90    0    # assay laboratory, sample claws on -X
+Pyrothian_ResearchShipII          0  -90    0
+Pyrothian_ResearchShipIII         0  -90    0
+Pyrothian_ScienceVessel           0  -90    0    # foundry-laboratory, analysis ring forward
+Pyrothian_ColonyShip              0  -90    0    # foundry ark, landing sled beneath
+Pyrothian_Miner                   0  -90    0    # drilling rig, boring head on -X
+Pyrothian_Transport               0  -90    0    # slag hauler, shielded cab forward
+Pyrothian_Terraformer             0  -90    0    # mobile caldera, vent nozzles
+Pyrothian_Fighter                 0  -90    0    # obsidian wedge (re-rolled 2026-10-11): point on -X, exhausts on +X
+Pyrothian_FighterII               0  -90    0
+Pyrothian_FighterIII              0  -90    0    # forge-knight, cannon pods underslung
+Pyrothian_Frigate                 0  -90    0    # furnace hull, glowing vent slots along the flanks
+Pyrothian_Cruiser                 0  -90    0    # smelter cruiser, turret batteries down the spine
+Pyrothian_Carrier                 0  -90    0    # foundry carrier, casting bays along the flanks
+Pyrothian_Dreadnought             0  -90    0    # mobile volcano, spinal cannon and the great eye
 
 # Pyrothian stations. Every one measures its shortest axis on Y, so they are discs already lying flat.
 Pyrothian_BattleStation           0    0    0  1.0  spin   # crucible fortress
@@ -164,31 +169,31 @@ Pyrothian_HyperRelay              0    0    0  1.0  nospin # UPRIGHT gate (2026-
 
 # ---- Cryithn (generated 2026-10-11, public API) ---------------------------------------------
 # Same export frame as the other three fleets: measure-bow reads "bulk +X, point -X" for 20 of the
-# 22 ships and the concept art draws every bow at the front-left, so the nose is on -X and +90 yaw
-# carries it to +Z. The exceptions are called out on their lines. Read off
+# 22 ships and the concept art draws every bow at the front-left, so the nose is on raw -X and -90
+# yaw carries it to +Z. The exceptions are called out on their lines. Read off
 # `node tools/ship-silhouettes.mjs --match "^Cryithn_"` and the concept sheet.
-Cryithn_Scout                     0   90    0    # ice shard, sensor needle on -X
-Cryithn_ScoutII                   0   90    0    # twin fused blades, needles on -X
-Cryithn_ScoutIII                  0   90    0    # splinter-lance, crystal shards along the spine
-Cryithn_Explorer                  0   90    0    # ice-cutter, faceted prow on -X, tanks aft
-Cryithn_Probe                     0   90    0    # crystal seed: lens dome on -X, tapered drive tail on +X
-Cryithn_ResearchShip              0   90    0    # observatory shard, lens on -X
-Cryithn_ResearchShipII            0   90    0
-Cryithn_ResearchShipIII           0  -90    0    # DISSENTER: the lens end measures sharper on +X (weakly, 0.05);
-                                                 # check by eye — if it flies ring-first, use 0 90 0
-Cryithn_ScienceVessel             0   90    0    # cathedral of lenses, telescope ring amidships
-Cryithn_ColonyShip                0   90    0    # cryo-ark, landing spines beneath
-Cryithn_Miner                     0   90    0    # ice-borer, segmented cutting head on -X
-Cryithn_Transport                 0   90    0    # cargo spine (2026-10-11 draw), length on X, pointed bridge on -X
-Cryithn_Terraformer               0   90    0    # climate engine, condenser tower aft
-Cryithn_Fighter                   0   90    0    # crystal blade, point on -X, drive slot aft
-Cryithn_FighterII                 0  -90    0    # DISSENTER: the blade point is on +X (measure-bow 0.15),
+Cryithn_Scout                     0  -90    0    # ice shard, sensor needle on -X
+Cryithn_ScoutII                   0  -90    0    # twin fused blades, needles on -X
+Cryithn_ScoutIII                  0  -90    0    # splinter-lance, crystal shards along the spine
+Cryithn_Explorer                  0  -90    0    # ice-cutter, faceted prow on -X, tanks aft
+Cryithn_Probe                     0  -90    0    # crystal seed: lens dome on -X, tapered drive tail on +X
+Cryithn_ResearchShip              0  -90    0    # observatory shard, lens on -X
+Cryithn_ResearchShipII            0  -90    0
+Cryithn_ResearchShipIII           0   90    0    # DISSENTER: the lens end measures sharper on raw +X (weakly,
+                                                 # 0.05); the sheet shows the lens leading. LOW CONFIDENCE
+Cryithn_ScienceVessel             0  -90    0    # cathedral of lenses, telescope ring amidships
+Cryithn_ColonyShip                0  -90    0    # cryo-ark, landing spines beneath
+Cryithn_Miner                     0  -90    0    # ice-borer, segmented cutting head on -X
+Cryithn_Transport                 0  -90    0    # cargo spine (2026-10-11 draw), length on X, pointed bridge on -X
+Cryithn_Terraformer               0  -90    0    # climate engine, condenser tower aft
+Cryithn_Fighter                   0  -90    0    # crystal blade, point on -X, drive slot aft
+Cryithn_FighterII                 0   90    0    # DISSENTER: the blade point is on +X (measure-bow 0.15),
                                                  # matching the concept, drive slot on -X
-Cryithn_FighterIII                0  -90    0    # glaive, point on +X like the Mk II
-Cryithn_Frigate                   0   90    0    # crystal lance, point on -X
-Cryithn_Cruiser                   0   90    0    # monolith, rounded prow on -X, drive notches aft
-Cryithn_Carrier                   0   90    0    # ice shelf, point on -X, launch clefts under the slab
-Cryithn_Dreadnought               0   90    0    # obelisk (2026-10-11 draw), violet spine, prow on -X
+Cryithn_FighterIII                0   90    0    # glaive, point on +X like the Mk II
+Cryithn_Frigate                   0  -90    0    # crystal lance, point on -X
+Cryithn_Cruiser                   0  -90    0    # monolith, rounded prow on -X, drive notches aft
+Cryithn_Carrier                   0  -90    0    # ice shelf, point on -X, launch clefts under the slab
+Cryithn_Dreadnought               0  -90    0    # obelisk (2026-10-11 draw), violet spine, prow on -X
 
 # Cryithn stations. All lie flat on Y except the relay spire, which stands upright like Terran's mast.
 Cryithn_BattleStation             0    0    0  1.0  spin   # faceted crystal fortress drum
@@ -204,31 +209,32 @@ Cryithn_HyperRelay                0    0    0  1.0  nospin # emitter ring around
 # ---- Sylvan (generated 2026-10-11, public API) ----------------------------------------------
 # Folder and mesh prefix are `Sylvan` (the species is shown as "Sylvans"). Same export frame again:
 # measure-bow reads "point -X" for 17 of the 20 ships and the concept art draws every bow at the
-# front-left, so the default is +90. The three that differ are the two seed scouts and the Mk II lab,
+# front-left, so the default is -90. The three that differ are the two seed scouts and the Mk II lab,
 # whose broad leaf-wings make the WINGSPAN the longest axis. Read off
 # `node tools/ship-silhouettes.mjs --match "^Sylvan_"` and the concept sheet.
-Sylvan_Scout                      0  -90    0    # winged seed. WINGSPAN IS Z, length is X: the eye-bud cluster
+Sylvan_Scout                      0   90    0    # winged seed. WINGSPAN IS Z, length is X: the eye-bud cluster
                                                  # (bow) is the rounded +X end, the tail tapers to -X behind the wing
-Sylvan_ScoutII                    0  -90    0    # the same seed grown, same frame as the Mk I
-Sylvan_ScoutIII                   0   90    0    # dart-pod, sharp nose on -X, wing-blades swept back
-Sylvan_Explorer                   0   90    0    # drift-seed, tendril sensors on -X, leaf-sail above
-Sylvan_Probe                      0   90    0    # spore pod: eye-bud and tendrils on -X, sap exhaust on +X
-Sylvan_ResearchShip               0   90    0    # laboratory pod, sensor tendrils on -X
+Sylvan_ScoutII                    0   90    0    # the same seed grown, same frame as the Mk I
+Sylvan_ScoutIII                   0  -90    0    # dart-pod, sharp nose on -X, wing-blades swept back
+Sylvan_Explorer                   0  -90    0    # drift-seed, tendril sensors on -X, leaf-sail above
+Sylvan_Probe                      0  -90    0    # spore pod: eye-bud and tendrils on -X, sap exhaust on +X
+Sylvan_ResearchShip               0  -90    0    # laboratory pod, sensor tendrils on -X
 Sylvan_ResearchShipII             0    0    0    # LENGTH IS Z (as wide as it is long): tendrils measured on +Z.
-                                                 # CHECK in the editor — if it flies tail-first use 0 180 0
-Sylvan_ResearchShipIII            0   90    0    # lens-flower disc on -X
-Sylvan_ScienceVessel              0   90    0    # flowering laboratory, dish-blossom on -X
-Sylvan_ColonyShip                 0   90    0    # seed pod (2026-10-11 draw), rounded bow -X, violet leaf-wings swept to +X
-Sylvan_Miner                      0   90    0    # root-borer, boring head on -X, ore sacs aft
-Sylvan_Transport                  0   90    0    # vine freighter, bark cab on -X, cargo bulbs aft
-Sylvan_Terraformer                0   90    0    # seeding bloom, petals and spore vents aft
-Sylvan_Fighter                    0   90    0    # thorn dart, point on -X, sap vent aft
-Sylvan_FighterII                  0   90    0    # bark-armoured thorn, broad leaf wings (span 1.88 on Z)
-Sylvan_FighterIII                 0   90    0    # briar-knight, point on -X
-Sylvan_Frigate                    0   90    0    # briar hull, point on -X
-Sylvan_Cruiser                    0   90    0    # ironwood cruiser, prow on -X
-Sylvan_Carrier                    0   90    0    # flowering tree carrier, leaf canopy above, pods beneath
-Sylvan_Dreadnought                0   90    0    # world-tree hull, spinal branch-cannon, prow on -X
+                                                 # The sheet shows the tendrils leading. LOW CONFIDENCE —
+                                                 # if it flies tail-first use 0 180 0
+Sylvan_ResearchShipIII            0  -90    0    # lens-flower disc on -X
+Sylvan_ScienceVessel              0  -90    0    # flowering laboratory, dish-blossom on -X
+Sylvan_ColonyShip                 0  -90    0    # seed pod (2026-10-11 draw), rounded bow -X, violet leaf-wings swept to +X
+Sylvan_Miner                      0  -90    0    # root-borer, boring head on -X, ore sacs aft
+Sylvan_Transport                  0  -90    0    # vine freighter, bark cab on -X, cargo bulbs aft
+Sylvan_Terraformer                0  -90    0    # seeding bloom, petals and spore vents aft
+Sylvan_Fighter                    0  -90    0    # thorn dart, point on -X, sap vent aft
+Sylvan_FighterII                  0  -90    0    # bark-armoured thorn, broad leaf wings (span 1.88 on Z)
+Sylvan_FighterIII                 0  -90    0    # briar-knight, point on -X
+Sylvan_Frigate                    0  -90    0    # briar hull, point on -X
+Sylvan_Cruiser                    0  -90    0    # ironwood cruiser, prow on -X
+Sylvan_Carrier                    0  -90    0    # flowering tree carrier, leaf canopy above, pods beneath
+Sylvan_Dreadnought                0  -90    0    # world-tree hull, spinal branch-cannon, prow on -X
 
 # Sylvan stations. All lie flat on Y except the relay stalk, which stands upright like Terran's mast.
 Sylvan_BattleStation              0    0    0  1.0  spin   # thorn fortress, petal-blades round the rim

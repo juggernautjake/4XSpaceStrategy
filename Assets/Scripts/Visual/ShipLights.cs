@@ -66,107 +66,144 @@ public static class FleetClock
 }
 
 // ============================================================================================
-// SHIP LIGHTS — running lights, thrusters, and muzzle flash for one hull
+// SHIP LIGHTS — everything a hull does that is light rather than mesh
 //
-// Attached to a model by UnitModelRenderer as it builds it. Everything is procedural: quads with the
-// project's existing additive soft-dot material, placed from the hull's own bounds. No imported
-// asset is load-bearing, which is the same rule the rest of the visuals follow — a ship with no
-// lights rig still flies, it is just dark.
+// Attached to a model by UnitModelRenderer as it builds it. One component per drawn hull owns:
 //
-// ---- WHERE THE LIGHTS GO, WITHOUT ANY PER-SHIP AUTHORING -------------------------------------
+//   DRIVE PLUMES   at the hull's real engine bells (ShipHardpoints, baked from the mesh), falling back
+//                  to the stern of the bounds. In the race's colours (RaceVfx), sized off the nozzle,
+//                  lengthening and brightening with throttle, flaring white-hot while the drive spools up.
+//   RUNNING LIGHTS aviation lamps for the races that carry them (Terran, Cryithn), rim chase lights on
+//                  their stations. On the FleetClock grid, so a fleet blinks in rhythm.
+//   HULL GLOW      the art's own emissive, lifted over bloom's threshold and pulsed per race through a
+//                  MaterialPropertyBlock: Pyrothian lava throbs and gutters, Aquarii and Sylvan breathe.
+//   GUNS           the baked gun hardpoints, so a round leaves a real point on the hull facing its
+//                  target (TryMuzzle), with a muzzle flash that rides the hull and a recoil kick.
+//   DAMAGE         smoke, sparks and a guttering fire from points on the hull as its health drops.
+//   SHIELD         the ShieldBubble round the hull, and the point on it a round strikes.
 //
-// A hundred and forty hulls cannot have their lamp positions placed by hand, so positions come from
-// the mesh's bounding box in SHIP SPACE: bow +Z, dorsal +Y, starboard +X.
+// ---- WHERE THINGS GO, WITHOUT PER-SHIP AUTHORING -------------------------------------------------
 //
-// Careful: the model root carries `modelRotation`, so the root's own local axes are the MESH's axes,
-// not the game's. Ship space is recovered by rotating through the inverse of that correction — which
-// is why `bow`, `up` and `right` below are computed rather than assumed to be Vector3.forward etc.
-// Getting this wrong puts the engines on the nose of every hull whose import needed a correction.
+// Ship space (bow +Z, dorsal +Y, starboard +X) is recovered from the model root, which already carries
+// `modelRotation` — so the bow is NOT the root's local +Z. Baked hardpoints are in the root's own local
+// frame (Unity mesh space; see ShipHardpoints) and are used as-is.
+//
+// ---- COST ---------------------------------------------------------------------------------------
+//
+// Every sprite here shares FxKit's one additive material and takes its colour through a property
+// block: a fleet of forty is forty times a couple of dozen quads and ZERO material copies. Nothing is
+// allocated per frame. Sprites are billboarded here rather than by a component each. Detail drops with
+// the hull's size ON SCREEN: below a few pixels nothing is drawn (ShipMarkers' glyph has the job), at
+// a dozen pixels only the plumes are, and the lamps, damage and muzzle detail come in as it grows.
+//
+// ---- FOG OF WAR ---------------------------------------------------------------------------------
+//
+// ConcealBinding switches off what it finds under a hidden hull, but a sprite made or re-shown after
+// that would slip past it. So this asks VisibilityService.ShownToPlayer a few times a second and draws
+// nothing at all while the answer is no.
 // ============================================================================================
 public class ShipLights : MonoBehaviour
 {
-    // ---- tuning ------------------------------------------------------------------------------
+    // ---- switches ----------------------------------------------------------------------------
 
-    /// The whole rig: ON.
-    ///
-    /// It was off while the art was landing, because running lights, drive plumes and muzzle flashes
-    /// on top of a fleet of borrowed placeholder hulls is decoration on top of a stand-in — you cannot
-    /// judge either. The condition for turning it back on was "when the fleet is in and the hulls can
-    /// carry it", and the Aquarii are in: twenty-nine of twenty-nine, oriented and flying nose-first.
-    ///
-    /// A civilization whose art has not landed yet still flies borrowed hulls and now lights them too.
-    /// That is the right trade: the lights are placed from each hull's own BOUNDS rather than from an
-    /// authored rig, so they sit correctly on whatever mesh is actually there.
+    /// The whole rig. Off leaves bare hulls (the guns still report their hardpoints).
     public static bool Enabled = true;
 
-    /// Running lights: ALLOWED, and each race decides (RaceVfxProfile.navLights).
-    ///
-    /// They were off for a while. They were built at 8.5% of hull length, which sounds small and is
-    /// not — a ship is drawn at 0.09-0.40 world units, so each lamp came out a substantial fraction of
-    /// the whole vessel and the fleet read as a string of fairy lights with a ship somewhere behind it.
-    ///
-    /// They are back because they are now sized as pinpricks (NavSizeFactor, capped by NavWidthCap),
-    /// and because not every race carries them: Terran and Cryithn hulls are engineered things and
-    /// read better lit, while a living Aquarii shrimp or a Pyrothian lava hull with an aviation strobe
-    /// on its tail reads as a toy. This flag is the master switch over all of that.
+    /// Running lights: allowed, and each race decides (RaceVfxProfile.navLights). Sized as pinpricks
+    /// (NavSizeFactor, capped by NavWidthCap) — at 8.5% of hull length they read as fairy lights.
     public static bool ShowNavLights = true;
 
-    const int   MaxNavLights   = 7;
-    const float NavSizeFactor  = 0.028f;   // of hull length — a third of what it was
-    /// ...and never more than this fraction of the beam. Length alone over-sizes the lamps on a long,
-    /// slender hull, where 2.8% of the length can be a large share of the width and the lamp stops
-    /// being a point ON the hull and becomes a blob beside it.
-    const float NavWidthCap    = 0.10f;
-    const float ThrusterFactor = 0.30f;    // of hull width
-    const float MuzzleLife     = 0.09f;    // seconds — matched to the shot leaving the barrel
+    /// Smoke, sparks and fire off a damaged hull.
+    public static bool DamageEffects = true;
 
-    class Lamp
+    // ---- tuning ------------------------------------------------------------------------------
+
+    const int   MaxNavLights   = 10;
+    const float NavSizeFactor  = 0.028f;   // of hull length
+    const float NavWidthCap    = 0.10f;    // ...and never more than this share of the beam
+    const int   MaxNozzles     = 6;
+    const int   PlumeDots      = 3;
+    const int   MaxMuzzles     = 6;
+
+    /// Below this many pixels of hull on screen nothing is drawn; below the second only the plumes are.
+    const float HidePx = 2.5f, DetailPx = 12f;
+
+    // ---- one billboard sprite ------------------------------------------------------------------
+    class Fx
     {
         public Transform tr;
-        public Material mat;
+        public Renderer r;
         public Color colour;
-        public float period, phase;
-        public bool constant;      // never blinks; breathes instead
-        public float baseScale;
-
-        // ---- drive plume only ----
-        /// 0 is the nozzle itself; 1..n are plume segments trailing aft behind it.
-        public int plumeIndex;
-        /// Where this segment sits at idle. At full throttle it is pushed further aft from here, which
-        /// is what makes the flame LENGTHEN with speed rather than merely brighten.
-        public Vector3 restPos;
-        /// Direction to push it, i.e. astern. Stored per lamp so the plume follows the hull's own
-        /// axis rather than a world direction.
-        public Vector3 aft;
+        public float baseScale;     // ROOT-LOCAL units
+        public float minPx;         // floor on screen, in pixels
+        public float period, phase; // FleetClock beats (lamps)
+        public bool constant;       // breathes instead of strobing
+        public bool on;             // active state, tracked so SetActive is only called on a change
     }
 
-    readonly List<Lamp> lamps = new List<Lamp>();
-    readonly List<Lamp> thrusters = new List<Lamp>();
+    class Nozzle
+    {
+        public Vector3 local;       // root-local
+        public float radius;        // root-local
+        public float glow;          // 0..1 how hot the bell is in the art; brightens its plume
+        public Fx core, streak;
+        public Fx[] dots;
+    }
+
+    class Muzzle
+    {
+        public Fx glow, streak;
+        public Vector3 local, dirLocal;
+        public float life, maxLife, size;
+    }
+
+    readonly List<Fx> lamps = new List<Fx>();
+    readonly List<Nozzle> nozzles = new List<Nozzle>();
+    readonly List<Muzzle> muzzles = new List<Muzzle>();
 
     Unit unit;
-    Vector3 bow, up, right;        // ship space, expressed in this transform's local space
-    float hullLength, hullWidth;
-
-    /// Current drive output, 0..1. Eased toward the target so engines spool rather than snap.
-    float throttle;
-    float throttleTarget;
-
-    // Muzzle flashes are pooled per ship: a dreadnought firing eight mounts should not allocate.
-    readonly List<Lamp> muzzlePool = new List<Lamp>();
-    readonly List<float> muzzleLife = new List<float>();
-
-    /// This hull's race effects, read once at build. F10 rebuilds every model, so a reloaded profile
-    /// still reaches every ship without this having to watch for changes.
     RaceVfxProfile vfx;
+    Vector3 bow, up, right;           // ship space, in this transform's local frame
+    Bounds hullBounds;                // root-local, hull only
+    float hullLength, hullWidth;      // root-local
+    bool isStation;
+    bool built;
 
-    // ---- the hull's own emissive glow ----
-    //
-    // One entry per (renderer, material slot) whose material actually emits. Driven through a
-    // MaterialPropertyBlock rather than a material copy: the hull materials are SHARED between every
-    // ship of the same look (HullMaterials), and the pulse is per ship — it follows this ship's
-    // throttle and sits on its own phase — so writing it into the material would make the whole fleet
-    // throb as one. The LOD levels are listed too; they borrow the base's materials but each renderer
-    // carries its own block.
+    /// The hull's own renderers (every LOD level), captured BEFORE any effect existed — for the ship
+    /// pixelation layer and anything else that must touch the hull and nothing of ours.
+    public Renderer[] HullRenderers { get; private set; } = new Renderer[0];
+
+    public Unit Unit => unit;
+
+    // ---- drive ----
+    float throttle, throttleTarget, flare;
+
+    // ---- guns ----
+    Vector3[] gunLocal = new Vector3[0];
+    Vector3[] gunDir = new Vector3[0];
+    int gunCursor;
+    static readonly int[] goodGuns = new int[16];
+
+    // ---- recoil (moves the hull's own parts, never the root the renderer positions) ----
+    Transform[] hullParts = new Transform[0];
+    Vector3[] hullPartRest = new Vector3[0];
+    Vector3 recoilWorld;
+
+    // ---- damage ----
+    Vector3[] damagePoints = new Vector3[0];
+    float smokeT, sparkT;
+    Fx fire;
+    int firePoint;
+
+    // ---- shield ----
+    ShieldBubble bubble;
+
+    // ---- visibility ----
+    float shownCheck;
+    bool shown = true;
+    bool drawnLastFrame;
+
+    // ---- hull glow (see CollectGlow) ----
     struct Glow
     {
         public Renderer renderer;
@@ -177,56 +214,154 @@ public class ShipLights : MonoBehaviour
 
     readonly List<Glow> glows = new List<Glow>();
     static MaterialPropertyBlock glowBlock;
-    float glowPhase;
+    float glowPhase, glowSeed;
     float glowApplied = -1f;
 
     // ============================================================================================
     // BUILD
     // ============================================================================================
 
-    public void Init(Unit u, Quaternion modelRotation, Color ownerColour)
-    {
-        if (!Enabled) return;   // bare hulls for now; see the Enabled flag
-        unit = u;
+    public void Init(Unit u, Quaternion modelRotation, Color ownerColour) => Init(u, modelRotation, ownerColour, null);
 
-        // Ship space, in this transform's local frame. See the header note: the root is already
-        // rotated by modelRotation, so the bow is NOT local +Z.
+    /// `meshPath` is the Resources path the hull was loaded from, which is how the baked hardpoints are
+    /// found. Null (or a hull nobody baked) falls back to the bounds.
+    public void Init(Unit u, Quaternion modelRotation, Color ownerColour, string meshPath)
+    {
+        unit = u;
+        isStation = u != null && u.Info != null && u.Info.isStation;
+
+        // The hull's own renderers and direct children, before anything of ours is parented here.
+        HullRenderers = GetComponentsInChildren<Renderer>(true);
+        int childCount = transform.childCount;
+        hullParts = new Transform[childCount];
+        hullPartRest = new Vector3[childCount];
+        for (int i = 0; i < childCount; i++)
+        {
+            hullParts[i] = transform.GetChild(i);
+            hullPartRest[i] = hullParts[i].localPosition;
+        }
+
         Quaternion inv = Quaternion.Inverse(modelRotation);
         bow   = inv * Vector3.forward;
         up    = inv * Vector3.up;
         right = inv * Vector3.right;
 
-        Bounds b = LocalBounds();
-        if (b.size.sqrMagnitude < 1e-6f) return;
+        hullBounds = LocalBounds();
+        if (hullBounds.size.sqrMagnitude < 1e-6f) return;
 
-        hullLength = Mathf.Abs(Vector3.Dot(b.size, bow));
-        hullWidth  = Mathf.Abs(Vector3.Dot(b.size, right));
-        if (hullLength < 1e-4f) hullLength = b.size.magnitude;
+        hullLength = Mathf.Abs(Vector3.Dot(hullBounds.size, bow));
+        hullWidth  = Mathf.Abs(Vector3.Dot(hullBounds.size, right));
+        if (hullLength < 1e-4f) hullLength = hullBounds.size.magnitude;
         if (hullWidth  < 1e-4f) hullWidth  = hullLength * 0.4f;
 
         vfx = RaceVfx.For(u);
+        var hp = ShipHardpoints.For(meshPath, modelRotation);
+
+        BuildGuns(hp);
+        BuildDamagePoints(hp);
+
+        // The shield goes on whether or not the rig is enabled: it is the mechanic's only picture.
+        bubble = ShieldBubble.Attach(transform, u, hullBounds, vfx.shieldColour);
+
+        // The pixelation layer wants the hull renderers whatever else is switched off.
+        ShipPixelation.Track(HullRenderers);
+
+        if (!Enabled) return;
+        built = true;
 
         // BEFORE any lamp exists, so the glow list is the hull's renderers and nothing of ours.
         CollectGlow();
 
-        BuildNavLights(b, ownerColour);
-        BuildThrusters(b);
+        if (isStation) BuildStationLights(ownerColour);
+        else
+        {
+            BuildNavLights(ownerColour);
+            BuildThrusters(hp);
+        }
     }
 
-    // ---- hull glow ---------------------------------------------------------------------------
+    /// Bounds of every renderer under this object, in THIS transform's local space.
+    Bounds LocalBounds()
+    {
+        bool any = false;
+        Bounds acc = default;
+        foreach (var r in HullRenderers)
+        {
+            if (r == null) continue;
+            var wb = r.bounds;
+            var lc = transform.InverseTransformPoint(wb.center);
+            var le = transform.InverseTransformVector(wb.extents);
+            var lb = new Bounds(lc, new Vector3(Mathf.Abs(le.x), Mathf.Abs(le.y), Mathf.Abs(le.z)) * 2f);
+            if (!any) { acc = lb; any = true; } else acc.Encapsulate(lb);
+        }
+        return any ? acc : default;
+    }
+
+    // ---- guns ----------------------------------------------------------------------------------
+    //
+    // The baked points: bow tip, flanks, a dorsal pair, the keel; a station's rim. A hull nobody baked
+    // gets four from its bounds — the bow, both beams and the dorsal spine — which is still better than
+    // every round leaving the centre of the ship.
+    void BuildGuns(ShipHardpoints.Entry hp)
+    {
+        if (hp != null && hp.guns != null && hp.guns.Length > 0)
+        {
+            int n = Mathf.Min(hp.guns.Length, goodGuns.Length);
+            gunLocal = new Vector3[n];
+            gunDir = new Vector3[n];
+            for (int i = 0; i < n; i++)
+            {
+                gunLocal[i] = ShipHardpoints.V(hp.guns[i].p);
+                Vector3 d = ShipHardpoints.V(hp.guns[i].d);
+                gunDir[i] = d.sqrMagnitude > 1e-6f ? d.normalized : bow;
+            }
+            return;
+        }
+
+        Vector3 c = hullBounds.center;
+        float hl = hullLength * 0.5f, hw = hullWidth * 0.5f;
+        float hh = Mathf.Abs(Vector3.Dot(hullBounds.extents, up));
+        gunLocal = new[] { c + bow * hl, c + right * hw, c - right * hw, c + up * hh };
+        gunDir   = new[] { bow, right, -right, up };
+    }
+
+    void BuildDamagePoints(ShipHardpoints.Entry hp)
+    {
+        var pts = new List<Vector3>();
+        foreach (var g in gunLocal) pts.Add(Vector3.Lerp(hullBounds.center, g, 0.8f));
+        if (hp != null && hp.nozzles != null)
+            foreach (var nz in hp.nozzles) pts.Add(Vector3.Lerp(hullBounds.center, ShipHardpoints.V(nz.p), 0.85f));
+
+        // A few deterministic points inside the hull's box as well, so the damage is not only ever at
+        // the gun ports. Seeded per unit so the same ship always burns in the same places.
+        var rng = new System.Random(unit != null ? unit.id * 31 + 7 : 7);
+        for (int i = 0; i < 4; i++)
+        {
+            Vector3 e = hullBounds.extents * 0.6f;
+            pts.Add(hullBounds.center + new Vector3(
+                ((float)rng.NextDouble() * 2f - 1f) * e.x,
+                ((float)rng.NextDouble() * 2f - 1f) * e.y,
+                ((float)rng.NextDouble() * 2f - 1f) * e.z));
+        }
+        damagePoints = pts.ToArray();
+        firePoint = damagePoints.Length > 0 ? rng.Next(damagePoints.Length) : 0;
+    }
+
+    // ---- hull glow -----------------------------------------------------------------------------
     //
     // The generated hulls carry an emissive texture at an emissive factor of exactly 1, and bloom's
-    // threshold is 1.05 (PostFxController) — so as imported, no hull glow in the fleet ever blooms,
-    // and lava and bioluminescence look like paint. The race's multiplier is what lifts it over.
+    // threshold is 1.05 in GAMMA space (PostFxController; URP converts it, ~1.11 linear in this
+    // linear-colour project) — so as imported no hull glow in the fleet ever blooms, and lava and
+    // bioluminescence look like paint. The race's multiplier is what lifts it over.
     //
-    // A material with NO authored emission is left alone: multiplying black is black, and inventing a
-    // glow the art does not have would light the whole hull evenly, which reads as a rendering fault.
+    // A material with NO live emission is left alone: multiplying black is black, and inventing a glow
+    // the art does not have would light the whole hull evenly, which reads as a rendering fault.
     void CollectGlow()
     {
         glows.Clear();
         if (vfx == null || !vfx.AffectsHullGlow) return;   // the art as imported; leave it batchable
 
-        foreach (var r in GetComponentsInChildren<Renderer>())
+        foreach (var r in HullRenderers)
         {
             if (r == null) continue;
             var mats = r.sharedMaterials;
@@ -236,18 +371,15 @@ public class ShipLights : MonoBehaviour
                 int prop = HullMaterials.EmissiveId(m);
                 if (prop < 0) continue;
 
-                // GetVector, not GetColor. A colour property is stored LINEAR, and GetColor/SetColor
-                // convert through gamma on the way — which would turn a multiplier of 3 into roughly
-                // 11 by the time it reached the shader. The raw vector is the linear value, and scaling
-                // it is exactly "three times as bright".
+                // GetVector, not GetColor: a colour is stored LINEAR and Get/SetColor convert through
+                // gamma, which would turn a multiplier of 3 into about 11. The raw vector is the value.
                 Vector4 e = m.GetVector(prop);
                 if (Mathf.Max(e.x, Mathf.Max(e.y, e.z)) <= 1e-4f) continue;
 
-                // URP/Lit only draws `_EmissionColor` while its keyword is on, so a URP material with the
-                // keyword OFF does not emit, whatever colour the property holds (a non-black value can sit
-                // there unused). Switching the keyword on would invent exactly the even,
-                // whole-hull glow the note above rules out, so such a material is left as the art has it.
-                if (HullMaterials.NeedsEmissionKeyword(prop) && !m.IsKeywordEnabled("_EMISSION")) continue;
+                // Only where the shader is actually drawing it: URP/Lit needs `_EMISSION`, glTFast's
+                // graphs `_EMISSIVE` (set by its importer whenever the glTF has an emissive map or a
+                // non-black factor). A property sitting there unused must not be "lifted".
+                if (!HullMaterials.EmissionLive(m, prop)) continue;
 
                 glows.Add(new Glow { renderer = r, slot = i, property = prop, authored = e });
             }
@@ -256,21 +388,24 @@ public class ShipLights : MonoBehaviour
         if (glows.Count == 0) return;
         if (glowBlock == null) glowBlock = new MaterialPropertyBlock();
 
-        // On the quarter-beat grid like every other light, so a fleet's hulls swell together in
-        // syncopation rather than each on a phase of its own.
         int seed = unit != null ? unit.id : 0;
         glowPhase = FleetClock.Phases[Mathf.Abs(seed) % FleetClock.Phases.Length];
+        glowSeed = (Mathf.Abs(seed) % 97) * 0.731f;
 
         ApplyGlow(GlowFactor());
     }
 
-    /// The multiplier this frame: the race's base level, dipping with its pulse, hotter under power.
+    /// The multiplier this frame: the race's level, its slow pulse, its ember flicker, and its
+    /// throttle term (a reactor hull burns hotter under power).
     float GlowFactor()
     {
         float k = vfx.emissiveMultiplier;
         if (vfx.emissivePulseDepth > 0.001f)
             k *= FleetClock.Breathe(RaceVfx.SnapBeats(vfx.emissivePulseBeats), glowPhase,
                                     Mathf.Clamp01(vfx.emissivePulseDepth));
+        if (vfx.emissiveFlicker > 0.001f)
+            // Perlin, not white noise: lava gutters, it does not strobe.
+            k *= 1f - Mathf.Clamp01(vfx.emissiveFlicker) * Mathf.PerlinNoise(Time.unscaledTime * 2.3f, glowSeed);
         if (vfx.emissiveThrottleBoost > 0.001f)
             k *= 1f + vfx.emissiveThrottleBoost * throttle;
         return k;
@@ -285,283 +420,506 @@ public class ShipLights : MonoBehaviour
             if (g.renderer == null) continue;
             var e = g.authored;
             glowBlock.Clear();
-            // Alpha is not brightness; only the colour channels scale.
             glowBlock.SetVector(g.property, new Vector4(e.x * factor, e.y * factor, e.z * factor, e.w));
             g.renderer.SetPropertyBlock(glowBlock, g.slot);
         }
     }
 
-    /// Bounds of every renderer under this object, in THIS transform's local space.
-    Bounds LocalBounds()
-    {
-        var rends = GetComponentsInChildren<Renderer>();
-        bool any = false;
-        Bounds acc = default;
-        foreach (var r in rends)
-        {
-            if (r == null) continue;
-            // World bounds mapped back into local space. Coarser than walking vertices and correct
-            // for a hierarchy with sub-meshes at their own transforms — the same trade
-            // ShipMeshManifest makes for the same reason.
-            var wb = r.bounds;
-            var lc = transform.InverseTransformPoint(wb.center);
-            var le = transform.InverseTransformVector(wb.extents);
-            var lb = new Bounds(lc, new Vector3(Mathf.Abs(le.x), Mathf.Abs(le.y), Mathf.Abs(le.z)) * 2f);
-            if (!any) { acc = lb; any = true; } else acc.Encapsulate(lb);
-        }
-        return any ? acc : default;
-    }
-
-    // ---- running lights ----------------------------------------------------------------------
+    // ---- running lights --------------------------------------------------------------------------
     //
-    // Aviation convention, because it is what reads as "a vehicle" instantly: red to port, green to
-    // starboard, white strobes fore and aft. On top of that a couple of lamps in the OWNER's colour,
-    // which is the cheapest possible way to tell two fleets apart in a fight and matches the badge
-    // the ship already carries.
-    void BuildNavLights(Bounds b, Color ownerColour)
+    // Aviation convention, because it reads as "a vehicle" instantly: red to port, green to starboard,
+    // white strobes fore and aft, plus two lamps in the OWNER's colour so two fleets in a fight can be
+    // told apart.
+    void BuildNavLights(Color ownerColour)
     {
         if (!ShowNavLights) return;
-        if (vfx != null && !vfx.navLights) return;   // this race flies dark; see ShowNavLights
+        if (vfx != null && !vfx.navLights) return;   // this race flies dark
         var p = vfx ?? RaceVfx.ForCiv(null);
 
-        // Sized off the hull's OWN bounds, in the root's local space — the same space the lamps are
-        // parented in, so FitTo's scale applies to both and the ratio holds at any class size.
         float size = Mathf.Min(hullLength * NavSizeFactor, hullWidth * NavWidthCap);
-
-        // The race's strobe tempo, with the three rates kept as the 1 : 2 : 6 ladder the rig was
-        // designed on and every one snapped to a legal FleetClock period.
         float fast = RaceVfx.SnapBeats(p.navBlinkBeats);
         float tail = RaceVfx.SnapBeats(p.navBlinkBeats * 2f);
         float slow = RaceVfx.SnapBeats(p.navBlinkBeats * 6f);
         float halfW = hullWidth * 0.5f;
         float halfL = hullLength * 0.5f;
-        Vector3 c = b.center;
+        Vector3 c = hullBounds.center;
 
-        // Deterministic per-unit variation: two ships of the same class should not blink in lockstep
-        // like a chorus line, but the SAME ship must pick the same pattern every time it is rebuilt.
-        int seed = unit != null ? unit.GetHashCode() : 0;
-        var rng = new System.Random(seed);
+        // Deterministic per unit: two ships of a class should not blink in lockstep, but the SAME ship
+        // must pick the same pattern every time it is rebuilt.
+        var rng = new System.Random(unit != null ? unit.id * 7919 + 13 : 0);
         float Pick(float[] a) => a[rng.Next(a.Length)];
 
-        // port / starboard — constant, the way real ones are
-        Add(c - right * halfW + up * size * 0.4f, size * 0.85f, p.navPort, 2f, 0f, constant: true);
-        Add(c + right * halfW + up * size * 0.4f, size * 0.85f, p.navStarboard, 2f, 0f, constant: true);
+        Lamp(c - right * halfW + up * size * 0.4f, size * 0.85f, p.navPort, 2f, 0f, true);
+        Lamp(c + right * halfW + up * size * 0.4f, size * 0.85f, p.navStarboard, 2f, 0f, true);
+        Lamp(c + up * Vector3.Dot(hullBounds.extents, up), size * 0.9f, p.navStrobe, fast, Pick(FleetClock.Phases), false);
+        Lamp(c - bow * halfL + up * size * 0.5f, size * 0.8f, Color.Lerp(p.navStrobe, Color.white, 0.3f), tail, Pick(FleetClock.Phases), false);
+        Lamp(c + bow * halfL, size * 0.7f, new Color(1f, 0.85f, 0.5f), slow, Pick(FleetClock.Phases), false);
 
-        // dorsal and tail strobes — the race's strobe colour, the fastest things on the hull
-        Add(c + up * (Vector3.Dot(b.extents, up)) , size * 0.9f, p.navStrobe, fast, Pick(FleetClock.Phases));
-        Add(c - bow * halfL + up * size * 0.5f,     size * 0.8f, Color.Lerp(p.navStrobe, Color.white, 0.3f), tail, Pick(FleetClock.Phases));
-
-        // bow beacon — slow, so a ship reads bow-first at a glance. Kept warm whatever the race, since
-        // it is the one lamp whose job is "which end is the front", and that wants to read the same on
-        // every hull in the game.
-        Add(c + bow * halfL, size * 0.7f, new Color(1f, 0.85f, 0.5f), slow, Pick(FleetClock.Phases));
-
-        // owner-colour beacons, one dorsal one ventral
         var oc = ownerColour; oc.a = 1f;
-        Add(c + up * halfW * 0.5f - bow * halfL * 0.25f, size * 0.75f, oc, Pick(FleetClock.Periods), Pick(FleetClock.Phases));
-        Add(c - up * halfW * 0.5f + bow * halfL * 0.15f, size * 0.65f, oc, Pick(FleetClock.Periods), Pick(FleetClock.Phases));
+        Lamp(c + up * halfW * 0.5f - bow * halfL * 0.25f, size * 0.75f, oc, Pick(FleetClock.Periods), Pick(FleetClock.Phases), false);
+        Lamp(c - up * halfW * 0.5f + bow * halfL * 0.15f, size * 0.65f, oc, Pick(FleetClock.Periods), Pick(FleetClock.Phases), false);
     }
 
-    void Add(Vector3 localPos, float scale, Color colour, float period, float phase, bool constant = false)
+    // ---- station lights ----------------------------------------------------------------------------
+    //
+    // A station has no bow and no drive, so it gets a CHASE: lamps on the rim hardpoints firing one after
+    // another round the ring, a quarter-beat apart, like the beacons on a mast. A race that flies dark
+    // gets no lamps here either; its station's own glow is its light (CollectGlow).
+    void BuildStationLights(Color ownerColour)
+    {
+        if (!ShowNavLights) return;
+        if (vfx != null && !vfx.navLights) return;
+        var p = vfx ?? RaceVfx.ForCiv(null);
+
+        float size = Mathf.Max(hullLength, hullWidth) * 0.022f;
+        int rim = 0;
+        for (int i = 0; i < gunLocal.Length && rim < 8; i++)
+        {
+            // Rim mounts face outward in the station's plane; the dorsal and keel ones do not.
+            if (Mathf.Abs(Vector3.Dot(gunDir[i], up)) > 0.7f) continue;
+            Lamp(gunLocal[i], size, rim % 2 == 0 ? p.navStrobe : ownerColour, 2f, FleetClock.Phases[rim % 4] + (rim / 4) * 1f, false);
+            rim++;
+        }
+        // A crown beacon, slow and warm.
+        Lamp(hullBounds.center + up * Vector3.Dot(hullBounds.extents, up), size * 1.3f, new Color(1f, 0.55f, 0.35f), 4f, 0f, false);
+    }
+
+    void Lamp(Vector3 localPos, float scale, Color colour, float period, float phase, bool constant)
     {
         if (lamps.Count >= MaxNavLights) return;
-        var lamp = MakeQuad("NavLight", localPos, scale, colour);
-        lamp.period = period; lamp.phase = phase; lamp.constant = constant;
-        lamps.Add(lamp);
+        var f = MakeFx("NavLight", FxKit.Dot(), localPos, scale, colour);
+        f.period = period; f.phase = phase; f.constant = constant;
+        f.minPx = 1.5f;
+        lamps.Add(f);
     }
 
-    // ---- thrusters ---------------------------------------------------------------------------
+    // ---- thrusters -------------------------------------------------------------------------------
     //
-    // Placed on the stern plane, spread across the beam. Brightness and length track speed, which is
-    // the thing the request was really about: a ship under way should look like it is under power,
-    // and a parked one should not.
-    // ---- how a flame is made out of round sprites ------------------------------------------------
-    //
-    // A drive plume wants to be a long tapered cone, and the obvious way to draw one — a single quad
-    // stretched along the hull's axis — does not survive being looked at. A camera-facing billboard
-    // cannot also be axis-aligned, and a quad that IS axis-aligned vanishes when viewed edge-on, which
-    // at this game's top-down-ish angles is most of the time.
-    //
-    // So the plume is built from a few round billboards in a line astern, each smaller, dimmer and
-    // further out than the last. It reads as a tapered flame from every angle, costs four sprites, and
-    // reuses the billboard and material every other light here already uses.
-    const int PlumeSegments = 4;
-
-    void BuildThrusters(Bounds b)
+    // A plume is a white-hot core on the bell, a few round billboards trailing astern (each smaller,
+    // further and cooler), and one streak stretched along the hull's axis as it lies on screen. The
+    // dots carry it when the camera looks down the axis (where a streak collapses), the streak when
+    // it looks across it. Core cools to tail in the race's colours.
+    void BuildThrusters(ShipHardpoints.Entry hp)
     {
-        Vector3 stern = b.center - bow * (hullLength * 0.5f);
-        float size = hullWidth * ThrusterFactor;
-        Vector3 aft = -bow;
+        if (hp != null && hp.nozzles != null && hp.nozzles.Length > 0)
+        {
+            // Biggest bells first, so a ship with a dozen thruster ports keeps its main engines.
+            var order = new List<ShipHardpoints.Nozzle>(hp.nozzles);
+            order.Sort((a, b) => b.r.CompareTo(a.r));
+            for (int i = 0; i < order.Count && i < MaxNozzles; i++)
+                AddNozzle(ShipHardpoints.V(order[i].p), Mathf.Max(order[i].r, hullWidth * 0.04f), Mathf.Clamp01(order[i].glow));
+            return;
+        }
 
-        // Bigger hulls get more nozzles. Purely cosmetic, but a dreadnought with one exhaust looks
-        // like a bigger fighter rather than a bigger ship.
-        int n = hullLength > 0.30f ? 4 : hullLength > 0.20f ? 3 : hullLength > 0.12f ? 2 : 1;
-
+        // Fallback: the stern plane, spread across the beam.
+        Vector3 stern = hullBounds.center - bow * (hullLength * 0.5f);
+        // Bounds are in root-local units, which are mesh units; the class sizes above are WORLD units,
+        // so the nozzle count is decided off the world length.
+        float worldLen = hullLength * Mathf.Abs(transform.lossyScale.x);
+        int n = worldLen > 0.30f ? 4 : worldLen > 0.20f ? 3 : worldLen > 0.12f ? 2 : 1;
         for (int i = 0; i < n; i++)
         {
-            float t = n == 1 ? 0f : (i / (float)(n - 1)) * 2f - 1f;   // -1..1 across the beam
-            Vector3 nozzle = stern + right * (t * hullWidth * 0.30f);
-
-            for (int s = 0; s <= PlumeSegments; s++)
-            {
-                // The core is white-hot and the tail cools toward the drive colour, because that is
-                // what a real exhaust does and it is most of what sells a plume as hot rather than as
-                // a blue smear. The two ends are the race's (RaceVfx): a Terran drive cools to blue,
-                // a Pyrothian one to furnace orange.
-                float k = s / (float)PlumeSegments;
-                Color c = vfx != null
-                    ? Color.Lerp(vfx.thrusterCore, vfx.thrusterTail, k)
-                    : Color.Lerp(new Color(0.85f, 0.95f, 1f), new Color(0.25f, 0.55f, 1f), k);
-
-                Vector3 pos = nozzle + aft * (hullLength * 0.06f * s);
-                var lamp = MakeQuad(s == 0 ? "Thruster" : "Plume", pos, size * (1f - 0.16f * s), c);
-                lamp.period = 0f;
-                lamp.plumeIndex = s;
-                lamp.restPos = pos;
-                lamp.aft = aft;
-                thrusters.Add(lamp);
-            }
+            float t = n == 1 ? 0f : (i / (float)(n - 1)) * 2f - 1f;
+            AddNozzle(stern + right * (t * hullWidth * 0.30f), hullWidth * 0.12f, 0.5f);
         }
     }
 
-    Lamp MakeQuad(string name, Vector3 localPos, float scale, Color colour)
+    void AddNozzle(Vector3 local, float radius, float glow)
     {
-        var go = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        go.name = name;
-        var col = go.GetComponent<Collider>();
-        if (col != null) Destroy(col);              // lights must never eat a click meant for the hull
-        go.transform.SetParent(transform, false);
-        go.transform.localPosition = localPos;
-        go.transform.localScale = Vector3.one * scale;
+        var nz = new Nozzle { local = local, radius = radius, glow = glow, dots = new Fx[PlumeDots] };
+        Color core = vfx != null ? vfx.thrusterCore : new Color(0.85f, 0.95f, 1f);
+        Color tail = vfx != null ? vfx.thrusterTail : new Color(0.25f, 0.55f, 1f);
 
-        var mat = SpaceMaterials.Additive(colour);
-        mat.mainTexture = SpaceMaterials.SoftDot();
-        var r = go.GetComponent<Renderer>();
-        r.material = mat;
-        r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        r.receiveShadows = false;
+        nz.streak = MakeFx("Plume", FxKit.StreakTex(), local, radius, Color.Lerp(core, tail, 0.45f));
+        nz.streak.minPx = 1.5f;
+        for (int s = 0; s < PlumeDots; s++)
+        {
+            float k = (s + 1) / (float)(PlumeDots + 1);
+            nz.dots[s] = MakeFx("PlumeDot", FxKit.Dot(), local, radius * 2f * (1f - 0.2f * s), Color.Lerp(core, tail, k));
+            nz.dots[s].minPx = 1f;
+        }
+        nz.core = MakeFx("Thruster", FxKit.Dot(), local, radius * 2.4f, core);
+        nz.core.minPx = 2f;
+        nozzles.Add(nz);
+    }
 
-        go.AddComponent<FaceCamera>();
-
-        return new Lamp { tr = go.transform, mat = mat, colour = colour, baseScale = scale };
+    Fx MakeFx(string name, Texture tex, Vector3 localPos, float scale, Color colour)
+    {
+        var r = FxKit.MakeQuad(transform, name, FxKit.SharedAdditive(tex));
+        var tr = r.transform;
+        tr.localPosition = localPos;
+        tr.localScale = Vector3.one * scale;
+        r.gameObject.SetActive(false);
+        return new Fx { tr = tr, r = r, colour = colour, baseScale = scale, on = false };
     }
 
     // ============================================================================================
-    // DRIVE
+    // THE API EVERYTHING ELSE CALLS
     // ============================================================================================
 
     /// Told by UnitModelRenderer each frame how hard this hull is working, 0..1.
     public void SetThrottle(float t) => throttleTarget = Mathf.Clamp01(t);
 
+    /// The hull's length in world units right now.
+    public float WorldLength => hullLength * Mathf.Abs(transform.lossyScale.x);
+
+    /// The centre of the hull in world space.
+    public Vector3 CentreWorld => transform.TransformPoint(hullBounds.center);
+
+    /// The gun this round leaves from: one of the baked hardpoints that faces the target, taken in turn
+    /// mount by mount so a broadside reads as several guns. Always succeeds on a built rig; false only
+    /// for a hull too degenerate to have bounds.
+    public bool TryMuzzle(Vector3 targetWorld, int mount, out Vector3 muzzleWorld)
+    {
+        muzzleWorld = transform.position;
+        int n = gunLocal.Length;
+        if (n == 0 || hullLength <= 0f) return false;
+
+        int good = 0, best = 0;
+        float bestScore = -2f;
+        for (int i = 0; i < n; i++)
+        {
+            Vector3 p = transform.TransformPoint(gunLocal[i]);
+            Vector3 d = transform.TransformDirection(gunDir[i]);
+            Vector3 to = targetWorld - p;
+            float score = to.sqrMagnitude > 1e-8f && d.sqrMagnitude > 1e-8f ? Vector3.Dot(d.normalized, to.normalized) : 0f;
+            if (score > bestScore) { bestScore = score; best = i; }
+            if (score > 0.25f && good < goodGuns.Length) goodGuns[good++] = i;
+        }
+        int pick = good > 0 ? goodGuns[(Mathf.Abs(mount) + gunCursor++) % good] : best;
+        if (gunCursor > 1 << 20) gunCursor = 0;
+        muzzleWorld = transform.TransformPoint(gunLocal[pick]);
+        return true;
+    }
+
+    /// The muzzle flash for a round leaving `worldPos`. Rides the hull for its short life.
+    public void FlashMuzzle(Vector3 worldPos, Color colour) => FlashMuzzle(worldPos, colour, Vector3.zero, 1f);
+
+    /// `dir` (world, may be zero) points the flash's streak down the barrel; `size` scales it (1 is a
+    /// light gun, 2.5 a railgun or a plasma cannon).
+    public void FlashMuzzle(Vector3 worldPos, Color colour, Vector3 dir, float size)
+    {
+        if (!built || !shown) return;
+        Muzzle free = null;
+        float oldest = float.MaxValue;
+        Muzzle oldestM = null;
+        for (int i = 0; i < muzzles.Count; i++)
+        {
+            var m = muzzles[i];
+            if (m.life >= m.maxLife) { free = m; break; }
+            if (m.maxLife - m.life < oldest) { oldest = m.maxLife - m.life; oldestM = m; }
+        }
+        if (free == null)
+        {
+            if (muzzles.Count < MaxMuzzles)
+            {
+                free = new Muzzle
+                {
+                    glow = MakeFx("Muzzle", FxKit.Dot(), Vector3.zero, 1f, colour),
+                    streak = MakeFx("MuzzleStreak", FxKit.StreakTex(), Vector3.zero, 1f, colour),
+                };
+                muzzles.Add(free);
+            }
+            else free = oldestM;
+        }
+        if (free == null) return;
+
+        free.local = transform.InverseTransformPoint(worldPos);
+        free.dirLocal = dir.sqrMagnitude > 1e-8f ? transform.InverseTransformDirection(dir.normalized) : Vector3.zero;
+        free.size = Mathf.Clamp(size, 0.4f, 3f);
+        free.life = 0f;
+        free.maxLife = 0.07f + 0.035f * free.size;
+        free.glow.colour = colour;
+        free.streak.colour = colour;
+    }
+
+    /// A round leaving shoves the hull back along the shot. `fraction` is of the hull's length.
+    public void Recoil(Vector3 shotDirWorld, float fraction)
+    {
+        if (fraction <= 0f || shotDirWorld.sqrMagnitude < 1e-8f || isStation) return;
+        Vector3 kick = -shotDirWorld.normalized * (fraction * WorldLength);
+        recoilWorld += kick;
+        float cap = WorldLength * 0.15f;
+        if (recoilWorld.sqrMagnitude > cap * cap) recoilWorld = recoilWorld.normalized * cap;
+    }
+
+    /// A round struck the shield. Lights the bubble's hit pattern and ripple and returns the point on
+    /// the shell it struck, for the splash. `inbound` is the round's direction of travel.
+    public Vector3 ShieldStruck(Vector3 inbound, float strength, bool collapsed)
+    {
+        if (bubble != null) return bubble.Hit(inbound, strength, collapsed);
+        Vector3 back = inbound.sqrMagnitude > 1e-8f ? -inbound.normalized : Vector3.up;
+        return CentreWorld + back * WorldLength * 0.65f;
+    }
+
+    /// Where a round coming from `fromWorld` meets this ship's shield, if it has one up. Asked before a
+    /// beam is drawn, so the beam stops on the shell rather than on the hull it never reached.
+    public bool ShieldContact(Vector3 fromWorld, out Vector3 point)
+    {
+        point = CentreWorld;
+        if (unit == null || unit.MaxShield <= 0 || unit.Shield <= 0.01f) return false;
+        point = bubble != null ? bubble.SurfacePoint(fromWorld) : CentreWorld + (fromWorld - CentreWorld).normalized * WorldLength * 0.65f;
+        return true;
+    }
+
+    /// A point on the hull's skin facing `fromWorld` — where a round that got through lands, so the
+    /// scorch sits on the side that was hit rather than in the middle of the ship.
+    public Vector3 HullContact(Vector3 fromWorld)
+    {
+        Vector3 c = CentreWorld;
+        Vector3 d = fromWorld - c;
+        if (d.sqrMagnitude < 1e-8f) return c;
+        return c + d.normalized * WorldLength * 0.32f;
+    }
+
+    // ============================================================================================
+    // THE FRAME
+    // ============================================================================================
+
     void LateUpdate()
     {
         float dt = Time.deltaTime;
 
-        // Spool. Asymmetric on purpose: engines light quickly and die away slowly, which is how
-        // anything with mass behaves and is the difference between "thrusters" and "a lamp on a timer".
+        // Spool. Engines light quickly and die away slowly — anything with mass does.
         float rate = throttleTarget > throttle ? 3.5f : 1.4f;
+        float gap = throttleTarget - throttle;
         throttle = Mathf.MoveTowards(throttle, throttleTarget, rate * dt);
+        // FLARE: while the drive is still climbing toward what it was asked for, it burns hot and long.
+        flare = Mathf.MoveTowards(flare, Mathf.Clamp01(gap * 3f), (gap > 0f ? 6f : 2f) * dt);
 
-        // ---- hull glow ----
-        // Only for a race whose glow MOVES; a static one was written once in CollectGlow. And only
-        // when the value has changed enough to see — a property block write per renderer per frame is
-        // cheap, but not free, and a slow 4-beat breath spends most frames changing by nothing.
+        TickRecoil(dt);
+
+        if (!built) return;
+
+        shownCheck -= Time.unscaledDeltaTime;
+        if (shownCheck <= 0f) { shownCheck = 0.25f; shown = unit == null || VisibilityService.ShownToPlayer(unit); }
+
+        if (!shown || !FxKit.SystemView) { HideAll(); return; }
+
+        // ---- hull glow (a race whose glow moves), only for a hull somebody can see ----
         if (glows.Count > 0 && !vfx.HullGlowIsStatic)
         {
             float g = GlowFactor();
             if (Mathf.Abs(g - glowApplied) > 0.01f) ApplyGlow(g);
         }
 
+        var cam = FxKit.Cam;
+        if (cam == null) return;
+        Quaternion camRot = cam.transform.rotation;
+        float lossy = Mathf.Max(1e-5f, Mathf.Abs(transform.lossyScale.x));
+        float wpp = FxKit.WorldPerPixel(transform.position);
+        float px = hullLength * lossy / Mathf.Max(1e-6f, wpp);
+
+        if (px < HidePx) { HideAll(); return; }
+        drawnLastFrame = true;
+        bool detail = px >= DetailPx;
+
         // ---- running lights ----
         for (int i = 0; i < lamps.Count; i++)
         {
             var l = lamps[i];
-            if (l.tr == null) continue;
+            if (!detail) { Show(l, false); continue; }
             float k = l.constant
                 ? FleetClock.Breathe(l.period <= 0f ? 2f : l.period, l.phase)
                 : FleetClock.Strobe(l.period, l.phase);
-            // A blinking lamp is never fully black: a dark lamp on a dark hull in dark space simply
-            // vanishes, and the ship loses the outline the lights were there to give it.
+            // Never fully black: a dark lamp on a dark hull in dark space loses the outline it was for.
             float a = Mathf.Lerp(0.12f, 1f, k);
-            SetLamp(l, a, 1f + k * 0.35f);
+            Draw(l, l.tr.localPosition, l.colour * (1f + k * 0.8f), a, 1f + k * 0.35f, camRot, lossy, wpp);
         }
 
-        // ---- thrusters ----
-        for (int i = 0; i < thrusters.Count; i++)
+        // ---- drive plumes ----
+        Vector3 aft = -bow;
+        Vector3 aftWorld = transform.TransformDirection(aft);
+        float fl = vfx != null ? Mathf.Clamp01(vfx.thrusterFlicker) : 0.1f;
+        Color coreC = vfx != null ? vfx.thrusterCore : new Color(0.85f, 0.95f, 1f);
+        Color tailC = vfx != null ? vfx.thrusterTail : new Color(0.25f, 0.55f, 1f);
+        for (int i = 0; i < nozzles.Count; i++)
         {
-            var t = thrusters[i];
-            if (t.tr == null) continue;
+            var nz = nozzles[i];
+            float flicker = (1f - fl) + fl * Mathf.Sin(FleetClock.Beats * Mathf.PI * 6f + i * 1.7f);
+            float power = Mathf.Clamp01(throttle + flare * 0.6f);
+            float bright = power * flicker * Mathf.Lerp(0.85f, 1.25f, nz.glow);
+            float r = nz.radius;
 
-            // A slight flicker keeps a plume from looking like a decal, and it is locked to the beat
-            // like everything else so it never fights the running lights. How deep it dips is the
-            // race's: 0.1 (the old fixed value) is a steady drive, and a Pyrothian one gutters.
-            float fl = vfx != null ? Mathf.Clamp01(vfx.thrusterFlicker) : 0.1f;
-            float flicker = (1f - fl) + fl * Mathf.Sin(FleetClock.Beats * Mathf.PI * 2f * 3f + i);
-            float k = throttle * flicker;
+            // Core: always a little alive (station-keeping), white-hot under power and more so in a flare.
+            float coreA = Mathf.Clamp01(0.25f + bright);
+            Color coreCol = Color.Lerp(coreC, Color.white, flare * 0.6f) * (1.2f + bright * 1.6f + flare * 1.2f);
+            Draw(nz.core, nz.local + aft * r * 0.25f, coreCol, coreA, 0.55f + bright * 0.7f + flare * 0.4f, camRot, lossy, wpp);
 
-            // Segments further down the plume need MORE throttle before they light, so the flame grows
-            // out of the nozzle as the ship accelerates instead of the whole cone fading up together.
-            // At idle only the nozzle glows; at full burn the tail reaches its full length.
-            float seg = t.plumeIndex / (float)PlumeSegments;
-            float reach = Mathf.Clamp01((throttle - seg * 0.55f) / 0.45f);
-            float bright = k * reach;
+            // Length: grows out of the bell as the drive spools, longest in a flare.
+            float len = r * (1.5f + 8f * throttle + 5f * flare);
+            float reach = Mathf.Clamp01((throttle + flare) * 1.4f);
+            for (int s = 0; s < nz.dots.Length; s++)
+            {
+                float k = (s + 1) / (float)(nz.dots.Length + 1);
+                float lit = Mathf.Clamp01((reach - k * 0.6f) / 0.4f) * bright;
+                Color c = Color.Lerp(coreC, tailC, k) * (1f + bright);
+                Draw(nz.dots[s], nz.local + aft * len * k, c, lit, (1f - 0.18f * s) * (0.6f + 0.6f * bright), camRot, lossy, wpp, lit < 0.02f);
+            }
 
-            if (t.plumeIndex > 0)
-                t.tr.localPosition = t.restPos + t.aft * (hullLength * 0.10f * t.plumeIndex * throttle);
-
-            SetLamp(t, bright, 0.35f + bright * 1.25f);
+            // The streak, laid along the hull's axis as it lies on screen.
+            if (nz.streak != null)
+            {
+                float lit = Mathf.Clamp01(reach * bright);
+                bool off = lit < 0.02f;
+                Show(nz.streak, !off);
+                if (!off)
+                {
+                    var t = nz.streak.tr;
+                    t.localPosition = nz.local + aft * len * 0.5f;
+                    t.rotation = FxKit.Streak(aftWorld);
+                    float w = Mathf.Max(r * 1.4f * lossy, 1.5f * wpp) / lossy;
+                    float l = Mathf.Max(len * lossy, 3f * wpp) / lossy;
+                    t.localScale = new Vector3(w, l, 1f);
+                    Color c = Color.Lerp(coreC, tailC, 0.5f) * (0.9f + bright);
+                    c.a = lit * 0.9f;
+                    FxKit.SetColour(nz.streak.r, c);
+                }
+            }
         }
 
         // ---- muzzle flashes ----
-        for (int i = muzzlePool.Count - 1; i >= 0; i--)
+        for (int i = 0; i < muzzles.Count; i++)
         {
-            muzzleLife[i] -= dt;
-            var m = muzzlePool[i];
-            if (muzzleLife[i] <= 0f) { if (m.tr != null) m.tr.gameObject.SetActive(false); continue; }
-            float k = muzzleLife[i] / MuzzleLife;
-            SetLamp(m, k, 0.6f + k * 1.6f);
+            var m = muzzles[i];
+            if (m.life >= m.maxLife) { Show(m.glow, false); Show(m.streak, false); continue; }
+            m.life += Time.deltaTime > 0f ? Time.deltaTime : Time.unscaledDeltaTime;
+            float k = 1f - Mathf.Clamp01(m.life / m.maxLife);
+            float s = WorldLength * 0.22f * m.size / lossy;
+            m.glow.baseScale = s; m.glow.minPx = 4f + 2f * m.size;
+            Draw(m.glow, m.local, m.glow.colour * (2.2f + m.size), k, 0.6f + (1f - k) * 0.8f, camRot, lossy, wpp);
+
+            bool hasDir = m.dirLocal.sqrMagnitude > 0.5f;
+            Show(m.streak, hasDir && k > 0.05f);
+            if (hasDir && k > 0.05f)
+            {
+                var t = m.streak.tr;
+                float l = Mathf.Max(s * 2.2f * lossy, (6f + 3f * m.size) * wpp) / lossy;
+                float w = Mathf.Max(s * 0.5f * lossy, 2f * wpp) / lossy;
+                t.localPosition = m.local + m.dirLocal * l * 0.45f;
+                t.rotation = FxKit.Streak(transform.TransformDirection(m.dirLocal));
+                t.localScale = new Vector3(w, l * (0.6f + 0.4f * k), 1f);
+                Color c = m.streak.colour * (2f + m.size); c.a = k;
+                FxKit.SetColour(m.streak.r, c);
+            }
         }
+
+        TickDamage(dt, detail, camRot, lossy, wpp);
     }
 
-    static void SetLamp(Lamp l, float alpha, float scaleMul)
+    /// Billboard one sprite at `local`, with its pixel floor.
+    void Draw(Fx f, Vector3 local, Color colour, float alpha, float scaleMul, Quaternion camRot, float lossy, float wpp, bool hide = false)
     {
-        var c = l.colour; c.a = Mathf.Clamp01(alpha);
-        // Additive: brightness is carried by the colour itself, not just alpha, so a dim lamp reads
-        // dim rather than merely transparent.
-        l.mat.color = new Color(c.r * c.a, c.g * c.a, c.b * c.a, c.a);
-        l.tr.localScale = Vector3.one * (l.baseScale * scaleMul);
+        if (hide || alpha <= 0.005f) { Show(f, false); return; }
+        Show(f, true);
+        f.tr.localPosition = local;
+        f.tr.rotation = camRot;
+        float world = Mathf.Max(f.baseScale * scaleMul * lossy, f.minPx * wpp);
+        f.tr.localScale = Vector3.one * (world / lossy);
+        colour.a = Mathf.Clamp01(alpha);
+        FxKit.SetColour(f.r, colour);
     }
 
-    // ============================================================================================
-    // GUNFIRE
+    static void Show(Fx f, bool on)
+    {
+        if (f == null || f.on == on || f.tr == null) return;
+        f.on = on;
+        f.tr.gameObject.SetActive(on);
+    }
+
+    void HideAll()
+    {
+        if (!drawnLastFrame) return;
+        drawnLastFrame = false;
+        for (int i = 0; i < lamps.Count; i++) Show(lamps[i], false);
+        for (int i = 0; i < nozzles.Count; i++)
+        {
+            var nz = nozzles[i];
+            Show(nz.core, false); Show(nz.streak, false);
+            for (int s = 0; s < nz.dots.Length; s++) Show(nz.dots[s], false);
+        }
+        for (int i = 0; i < muzzles.Count; i++) { Show(muzzles[i].glow, false); Show(muzzles[i].streak, false); }
+        Show(fire, false);
+    }
+
+    // ---- recoil ------------------------------------------------------------------------------------
     //
-    // Called the instant a round is created, from the same call that spawns it — so the flash and the
-    // projectile cannot drift apart. Anything that re-derived the timing from a cooldown would.
-    // ============================================================================================
-    public void FlashMuzzle(Vector3 worldPos, Color colour)
+    // The hull's own parts move, not the root: the root's position belongs to UnitModelRenderer, which
+    // rewrites it every frame and would either erase the kick or, depending on update order, double it.
+    void TickRecoil(float dt)
     {
-        if (!Enabled) return;
-        Lamp free = null;
-        for (int i = 0; i < muzzlePool.Count; i++)
-            if (muzzleLife[i] <= 0f) { free = muzzlePool[i]; muzzleLife[i] = MuzzleLife; break; }
-
-        if (free == null)
+        if (hullParts.Length == 0) return;
+        if (recoilWorld.sqrMagnitude < 1e-10f)
         {
-            if (muzzlePool.Count >= 8) return;                     // a hard ceiling; flashes are cheap but not free
-            free = MakeQuad("Muzzle", Vector3.zero, hullWidth * 0.35f, colour);
-            muzzlePool.Add(free);
-            muzzleLife.Add(MuzzleLife);
+            if (recoilApplied) { SetParts(Vector3.zero); recoilApplied = false; }
+            return;
         }
-
-        free.colour = colour;
-        free.tr.gameObject.SetActive(true);
-        free.tr.position = worldPos;
+        // A stiff spring back to rest: most of the kick is gone in a tenth of a second.
+        recoilWorld *= Mathf.Exp(-14f * Mathf.Max(dt, 0f));
+        if (recoilWorld.sqrMagnitude < 1e-10f) recoilWorld = Vector3.zero;
+        SetParts(transform.InverseTransformVector(recoilWorld));
+        recoilApplied = true;
     }
 
-    void OnDestroy()
+    bool recoilApplied;
+
+    void SetParts(Vector3 localOffset)
     {
-        foreach (var l in lamps)     if (l?.mat != null) Destroy(l.mat);
-        foreach (var l in thrusters) if (l?.mat != null) Destroy(l.mat);
-        foreach (var l in muzzlePool) if (l?.mat != null) Destroy(l.mat);
+        for (int i = 0; i < hullParts.Length; i++)
+            if (hullParts[i] != null) hullParts[i].localPosition = hullPartRest[i] + localOffset;
+    }
+
+    // ---- damage ------------------------------------------------------------------------------------
+    //
+    // Under 70% hull a ship starts to trail smoke from points on its hull; under 45% it throws sparks;
+    // under 30% one of those points is on fire, a guttering orange glow. All of it is rate-limited and
+    // handed to ExplosionRenderer's pooled puffs, so a burning fleet is a bounded number of quads.
+    void TickDamage(float dt, bool detail, Quaternion camRot, float lossy, float wpp)
+    {
+        if (!DamageEffects || unit == null || damagePoints.Length == 0)
+        {
+            if (fire != null) Show(fire, false);
+            return;
+        }
+        float hf = unit.HealthFraction;
+        if (hf > 0.70f || !detail) { if (fire != null) Show(fire, false); return; }
+
+        var er = ExplosionRenderer.Instance;
+        float sev = Mathf.Clamp01(1f - hf / 0.70f);
+        float len = WorldLength;
+
+        smokeT -= dt;
+        if (dt > 0f && smokeT <= 0f && er != null)
+        {
+            smokeT = Mathf.Lerp(0.6f, 0.12f, sev) * Random.Range(0.7f, 1.3f);
+            Vector3 p = transform.TransformPoint(damagePoints[Random.Range(0, damagePoints.Length)]);
+            float grey = Mathf.Lerp(0.30f, 0.16f, sev);
+            er.Smoke(p, len * Mathf.Lerp(0.25f, 0.45f, sev), new Color(grey, grey * 0.96f, grey * 0.94f), Mathf.Lerp(0.35f, 0.6f, sev), Mathf.Lerp(0.9f, 1.6f, sev));
+        }
+
+        if (hf < 0.45f)
+        {
+            sparkT -= dt;
+            if (dt > 0f && sparkT <= 0f && er != null)
+            {
+                sparkT = Mathf.Lerp(0.5f, 0.15f, sev) * Random.Range(0.6f, 1.4f);
+                Vector3 p = transform.TransformPoint(damagePoints[Random.Range(0, damagePoints.Length)]);
+                int n = Random.Range(2, 5);
+                for (int i = 0; i < n; i++)
+                    er.Spark(p, Random.onUnitSphere * Random.Range(0.6f, 1.6f), new Color(1f, 0.7f, 0.3f), Random.Range(0.2f, 0.4f), len * 0.05f);
+            }
+        }
+
+        if (hf < 0.30f)
+        {
+            if (fire == null)
+            {
+                fire = MakeFx("HullFire", FxKit.Dot(), damagePoints[firePoint], hullWidth * 0.35f, new Color(1f, 0.45f, 0.1f));
+                fire.minPx = 3f;
+            }
+            float flick = 0.55f + 0.45f * Mathf.PerlinNoise(Time.time * 7f, unit.id * 0.13f);
+            Draw(fire, damagePoints[firePoint], new Color(1.9f, 0.7f, 0.15f) * flick, flick, 0.7f + 0.5f * flick, camRot, lossy, wpp);
+        }
+        else if (fire != null) Show(fire, false);
     }
 }

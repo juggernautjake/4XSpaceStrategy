@@ -172,7 +172,11 @@ public class BoxSelectController : MonoBehaviour
                 // collider does not protect it here — a drag across apparently empty space would select
                 // the cloaked ships sitting in it.
                 if (VisibilityService.IsHidden(u)) continue;
-                Vector3 sp = cam.WorldToScreenPoint(UnitManager.Instance.UnitPos(u));
+                // Where the ship is DRAWN when it has a hull or token: a docked ship flies a low orbit
+                // round its world and a ship parked in a well circles with it (UnitModelRenderer,
+                // MOVEMENT LIFE), so the simulation's point is not where the player sees it.
+                var drawn = UnitVisuals.TransformOf(u);
+                Vector3 sp = cam.WorldToScreenPoint(drawn != null ? drawn.position : UnitManager.Instance.UnitPos(u));
                 if (sp.z <= 0f) continue;
                 if (sp.x >= min.x && sp.x <= max.x && sp.y >= min.y && sp.y <= max.y) picked.Add(u);
             }

@@ -668,6 +668,36 @@ public class SimpleAudio : MonoBehaviour
         // dry — a hit is a tick of feedback, not a set piece, and a hundred of them a second must not
         // pile into mush. Two variants so a sustained burst does not machine-gun one sample.
         cImpact = new[] { Explosion(0.13f), Explosion(0.19f) };
+
+        // SHIELDS. A hit on a screen is a glassy, rising shimmer rather than a thud — the ear should be
+        // able to tell "it is holding" from "it is getting through" without looking. The collapse is a
+        // falling sweep, the sound of a field letting go.
+        cShieldHit = Sweep(620f, 1240f, 0.12f, 18f, 0.22f);
+        cShieldDown = Sweep(900f, 120f, 0.45f, 5f, 0.36f);
+    }
+
+    AudioClip cShieldHit, cShieldDown;
+    float shieldSoundNext;
+
+    /// A round stopped by a shield. Rate-limited like impacts; `strength` is the share of the screen it
+    /// took, which lowers and weights the shimmer for a heavy hit.
+    public void PlayShieldHit(float strength)
+    {
+        if (cShieldHit == null || Time.unscaledTime < shieldSoundNext) return;
+        shieldSoundNext = Time.unscaledTime + 0.07f;
+        float k = Mathf.Clamp01(strength * 5f);
+        sfx.pitch = Mathf.Lerp(1.2f, 0.85f, k) * Random.Range(0.96f, 1.04f);
+        sfx.PlayOneShot(cShieldHit, Mathf.Lerp(0.10f, 0.26f, k));
+        sfx.pitch = 1f;
+    }
+
+    /// A shield collapsing.
+    public void PlayShieldDown()
+    {
+        if (cShieldDown == null) return;
+        sfx.pitch = Random.Range(0.92f, 1.05f);
+        sfx.PlayOneShot(cShieldDown, 0.42f);
+        sfx.pitch = 1f;
     }
 
     /// Fire cue for one shot. `at` is where it happened — unused for now (the mix is 2D), but taken so

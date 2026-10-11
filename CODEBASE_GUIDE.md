@@ -678,9 +678,17 @@ barycentre), with the player's crest or a rival's colour swatch on the left. Scr
 
 ### RaceVfx.cs  *(per-race ship effects, data-driven)*
 - **`RaceVfxProfile`** — one civ's drive plume colours/flicker, hull emissive multiplier + pulse
-  (beats, depth, throttle boost), nav lights on/off + colours + blink tempo, weapon tint + blend
-  amount, shield colour (not drawn yet). Defaults: Pyrothian lava ×3 throbbing hotter under power,
-  Aquarii ×1.8 slow breath, Terran ×1 with aviation lamps; Cryithn and Sylvan in between.
+  (beats, depth, throttle boost, **`emissiveFlicker`** — a Perlin gutter on top of the pulse), nav
+  lights on/off + colours + blink tempo, weapon tint + blend amount, **shield colour** (the ShieldBubble
+  and its splash). Defaults: Pyrothian lava ×3 throbbing on a 2-beat pulse, guttering (flicker 0.18)
+  and burning hotter under power; Aquarii ×1.8 and Sylvan ×1.6 slow bioluminescent breath, no lamps;
+  Terran ×1 (no glow) with aviation lamps; Cryithn ×1.4 shimmer with lamps.
+- **Does the emission actually show? (checked 2026-10-11)** glTFast 6.10's shader graphs gate emission
+  behind the `_EMISSIVE` keyword (URP/Lit uses `_EMISSION`), which its importer enables whenever the glTF
+  has an emissive map or a non-black factor; every meshy hull ships an emissive map at factor 1.
+  **`HullMaterials.EmissionLive`** checks the right keyword per family before a glow is lifted. The project
+  is LINEAR and URP converts bloom's 1.05 threshold from gamma (~1.11 linear), so a texel at 1.0 never
+  blooms at ×1 — which is why Terran hulls stay paint and the lava/bioluminescent races are multiplied over.
 - **`RaceVfx.For(unit)`** — by `UnitModelLibrary.CivFolder(u)`, the SAME rule the mesh uses (player
   = chosen species, others = `owner.id % 5`). **`WeaponColour(shooter, classColour)`** — 40% lean
   toward the race tint; ownerless shooters keep the class colour. **`SnapBeats`** keeps hand-edited
@@ -693,7 +701,130 @@ barycentre), with the player's crest or a rival's colour swatch on the left. Scr
   only have the latter, so tint and livery used to do nothing on them. `Prepare` shares one tinted /
   liveried copy per (material, owner tint, livery) instead of cloning per ship.
 - Consumers: `ShipLights` (plumes, nav lights, hull glow via a per-renderer MaterialPropertyBlock so a
-  shared material can still pulse per ship), `ProjectileRenderer.Fire` (`Shot.colour`), `CivLivery.ApplyTo`.
+  shared material can still pulse per ship), `ProjectileRenderer.Fire` (`Shot.colour`), `CivLivery.ApplyTo`,
+  `ShieldBubble` / `ExplosionRenderer.ShieldSplash` (shield colour).
+- **Which race a ship is**: `UnitModelLibrary.CivFolder` — the player's species for the player; for a rival,
+  its FactionAI profile's `speciesIndex` (saved), falling back to `owner.id % 5`.
+
+### Ship effects, shields and combat visuals  *(2026-10-11)*
+Everything below draws with **`FxKit`** (Visual/FxKit.cs): one additive HDR shader
+(`Resources/Shaders/FxAdditive.shader`, "FX/Additive"), a few procedural textures (dot, streak, ring, beam,
+shard, smoke), ONE shared material per texture, colour per renderer through a MaterialPropertyBlock
+(`SetColour`), and **`Floor(at, world, px)`** — every effect is the larger of its world size and a size in
+PIXELS, so a fight stays readable at system zoom. `SystemView` (= `GalaxyLOD.SystemMode`) gates all of it.
+- **`ShipHardpoints`** (Visual/ShipHardpoints.cs) — loads `Resources/SpaceAssets/Ships/ship-hardpoints.json`,
+  baked offline by `tools/bake-ship-hardpoints.mjs` from the .glb geometry: per hull, engine NOZZLES (rear-most
+  emissive clusters: position, radius, glow) and GUN points (bow tip, flanks, dorsal pair, keel; a station's
+  rim) with a facing, in Unity mesh space (= the model root's local frame). Each entry records the
+  ship-meshes.txt rotation it was baked under and is REFUSED if the manifest has changed since (an F10 edit),
+  so a stale plume never sits on a nose — the rig falls back to the bounds.
+- **`ShipLights`** (Visual/ShipLights.cs; `FleetClock` lives at its top) — one per drawn hull, built by
+  `UnitModelRenderer.Build` (`Init(u, modelRotation, ownerColour, meshPath)`):
+  - **Plumes** at the baked nozzles (biggest 6), else the stern of the bounds: a white-hot core, three dots
+    trailing astern and one streak along the hull's on-screen axis, in the race's core→tail colours, sized off
+    the bell. Length and brightness follow throttle (`SetThrottle`, from the trip ramp in `TickShip`); a
+    **flare** (white-hot, long) while the drive is still spooling up toward what it was asked for.
+  - **Running lights** for the races that carry them (aviation red/green, strobes, bow beacon, two owner-colour
+    lamps); stations get a **rim chase** on their rim hardpoints plus a crown beacon. All on FleetClock.
+  - **Hull glow** (`CollectGlow`/`GlowFactor`): the race's multiplier × pulse × ember flicker × throttle boost.
+  - **Guns**: **`TryMuzzle(target, mount, out muzzle)`** — a baked gun facing the target, rotating through the
+    good ones mount by mount (CombatManager.FireOne, ProjectileRenderer's point-defence tracers);
+    **`FlashMuzzle(pos, colour, dir, size)`** — a flash and a barrel streak that ride the hull;
+    **`Recoil(dir, fraction)`** — kicks the hull's own child parts back (never the root, which the renderer owns)
+    on a stiff spring. Railgun 10% of hull length, plasma 6%, torpedo 5%, autocannon 2.5%.
+  - **Damage**: under 70% hull, smoke from hull points (more, darker, longer as it falls); under 45% sparks;
+    under 30% a guttering fire on one point. `DamageEffects` switch.
+  - **Shield**: attaches the `ShieldBubble`; **`ShieldStruck(inbound, strength, collapsed)`** (CombatManager),
+    **`ShieldContact(from, out p)`** (a beam stops on the shell), **`HullContact(from)`** (impacts land on the
+    side that was hit).
+  - Detail by on-screen size: under 2.5 px nothing (ShipMarkers' glyph has it), under 12 px plumes only.
+    Asks `VisibilityService.ShownToPlayer` 4×/s and draws nothing for a hidden hull. Zero allocation per frame.
+  - **`HullRenderers`** — the hull's own renderers (all LOD levels), captured before any effect exists.
+- **`ShieldBubble`** (Visual/ShieldBubble.cs, `Resources/Shaders/ShieldBubble.shader`) — an ellipsoid round the
+  hull in the race's shield colour: OFF out of combat with a full screen (costs nothing); a faint fresnel rim in
+  a fight; a HIT lights the pixel-cell pattern and a ripple ring spreading from the impact point (4 at once);
+  under 25% it shimmers unsteadily; on COLLAPSE it stutters out and shatters into pixel shards
+  (`ExplosionRenderer.ShieldShatter`); on REGEN it shimmers back in from the keel up behind a bright band.
+  `Enabled` switch (Settings).
+- **`ExplosionRenderer`** — the pooled particle hub (640 quads, 6 lights): `Burst` (a round swatted down),
+  `Flak` (a heavy round swatted down: bigger, with a hanging puff), `Impact` (flash in the shot colour, sparks
+  thrown back along the round's path, a scorch that rides the hull, debris, a light for a heavy hit),
+  `ShieldSplash`, `ShieldShatter`, `Smoke`, `Spark`, `Glint`, and `Death` — flash + light, a fireball cooling
+  white→yellow→orange→smoke, tumbling chunks shedding embers, a shockwave ring in the ecliptic, a pall of
+  smoke; a STATION goes up in a run of secondary blasts and then the big one.
+- **`ProjectileRenderer`** — one look per weapon class (all race-tinted via `RaceVfx.WeaponColour`, all from the
+  shooter's real gun hardpoint):
+  - **Beam laser**: a charge-up glint, then a held beam (white-hot core inside a coloured glow, width
+    flickering) that tracks its target for 0.2 s, with a scorch spark where it bites.
+  - **Railgun**: a bigger capacitor glint, a needle-thin white flash and an ion trail that widens and fades.
+  - **Pulse laser**: short bright bolts with a ghost trail. **Autocannon**: rapid thin tracers.
+  - **Plasma**: a breathing halo round a hot streak with a long trail (the bottled-gas wander is kept).
+  - **Missile / torpedo**: a body and a bright motor (brighter in boost), an exhaust TrailRenderer that fades
+    where it is when the round dies, a slight weave (drawing only), a smoke puff at launch.
+  - **Point defence**: when a mount catches a round, a burst of rapid tracers flicks from the mount to it; the
+    round pops (`Burst`) or, for plasma and torpedoes, goes up as `Flak`.
+  - **Instant shots let go after their charge**: hit or miss is still decided at the trigger, but the damage
+    lands at discharge (0.06 s beam, 0.10 s railgun) so the beam and the impact arrive together.
+  - Pool pieces are retired by switching off their RENDERER, never the GameObject (MapTierVisibility re-activates
+    the root's children on the way back from galaxy zoom).
+- **Hits on a shield** (`CombatManager.ResolveHit`): the shield absorbs first (`Shields.Absorb`), the splash and
+  ripple go on the bubble and the absorbed part never reaches the hull; only what is left goes through armour.
+  Impacts are keyed on the TARGET's visibility (fog of war), as before.
+
+### Shields — the rules  *(Systems/Shields.cs, 2026-10-11)*
+- **Capacity** is a share of the hull's own maximum (`EffectiveHealth`, so it scales with class and rank):
+  **warships 30%**, **stations 40%**, civilian / science / colony / worker hulls **15%**, probes **none**.
+  `Unit.MaxShield`, `Unit.Shield` (runtime only, not saved: a loaded game starts with every screen full),
+  `Unit.ShieldFraction`.
+- **Absorbs first**, ignoring armour, at a per-weapon rate (`VsShield`): beam ×1.2, pulse ×1.1, plasma /
+  missile / point defence ×1.0, torpedo ×0.9, autocannon ×0.8, railgun ×0.75. What the shield could not hold
+  carries on to the hull, through armour, as before.
+- **Regenerates** only out of combat and only after **6 days** (seconds) without a hit (`RegenDelay`), at
+  **10% of capacity per day** (`RegenPerSecond`): a full recharge takes ten quiet days. No regen in a fight.
+- **Collapse** at zero: the bubble shatters, and it stays down until the regen rule brings it back.
+- Shown as a blue strip beside every hull bar: the Fleet window / Orbit tab row (`ShipRosterUI.Row`), the Order
+  of Battle (`FleetRosterPanel`, fleet / squadron / ship rows, `Shields.GroupFraction`), the ship panel
+  (`UnitInfoPanel`: hull and shield bars side by side) and the Inspector ship Overview (CONDITION) and Stats.
+  `Shields.BarColour`. There are no world-space health bars in the game.
+
+### ShipPixelation.cs  *(the hulls, slightly pixelated — 2026-10-11)*
+The ship meshes (and only they) are drawn at HALF resolution with point filtering and composited back over the
+scene, depth-tested, so planets, effects and UI stay sharp. **Runtime-injected, no renderer-feature asset**:
+`ShipPixelPass` (a URP 17 RenderGraph `ScriptableRenderPass`, `AfterRenderingOpaques`) is enqueued on every
+base Game/SceneView camera from `RenderPipelineManager.beginCameraRendering`. Hull renderers
+(`ShipLights.HullRenderers`) are moved to **layer 8** (`ShipPixelation.Layer`, unnamed, used by nothing else)
+while it is on, and **both `Assets/Settings/PC_Renderer.asset` and `Mobile_Renderer.asset` leave layer 8 out of
+`m_OpaqueLayerMask`** (4294967039), so URP's own opaque pass does not draw them. The pass draws that layer from
+the camera's own cull results into a half-res RGBA16F + D32 pair (setting `_ScaledScreenParams` to the half
+size for the draw, which Forward+'s light clusters divide by), then `Resources/Shaders/ShipPixelComposite.shader`
+point-samples both, clips empty texels and writes SV_Depth under a normal ZTest. Scene view / non-main cameras /
+a backbuffer target get a full-resolution draw of the same layer. **Watchdog**: if the pass is queued 60 times
+without running, it switches itself off for the session and puts every hull back on its old layer — sharp,
+never invisible. Setting "Pixelated ships" (on by default, PlayerPrefs `Graphics.ShipPixelation`).
+
+### Movement life  *(UnitModelRenderer, 2026-10-11 — drawing only)*
+- **Docked**: a LOW ORBIT inside the world's gravity well (`ZoomFieldRules.Radius`): planet radius + a fifth of
+  the well (0.4..1.6), never past half of it. One clock per world (`OrbitClock` + a per-world phase), so the
+  anchorage spacing holds whoever arrives when; rate falls off with radius (ω ∝ r^-1.5, 2..8°/s). Nose along
+  the orbit, banked 9° into the curve.
+- **Parked inside a well without docking** (AI / Dev fleets, point moves): the drawn hull keeps the offset it
+  parked at and circles the world with it (the sim point stays put; combat, markers and box-select read the
+  drawn transform — `BoxSelectController` now projects `UnitVisuals.TransformOf`).
+- **Parked in open space**: a slow Perlin drift round its spot, the bob, a nose swaying a few degrees.
+- **Arrivals settle** (`Settle`, 1.4 s): the jump from flight to orbit/park is eased away, so a ship flies into
+  orbit. **Departures** start from where the hull is drawn (flightPos follows it while parked) with an initial
+  heading toward the destination, not from the world's centre where the sim marker sets off.
+- **Stations** circle their world at 0.3× and spin at 0.5× their old rates — slow and stately.
+
+### Dev: Ctrl+Shift+E — start a fight  *(Systems/DevCheats.cs, `DevBattle`)*
+Dev Mode only. Spawns a hostile squadron of the first faction at war with the player (Dreadnought, Cruiser,
+Frigate, Fighter III, Fighter II, Fighter — every weapon class) 14 units off the first selected player ship,
+else the player's ship nearest the camera; if no player WARSHIP is within 30 units (or there are no player ships)
+it spawns a matching player squadron as well. Ordinary units (saved, selectable); press again for another wave.
+
+### Settings → SHIPS
+"Pixelated ships" (`ShipPixelation.Set`), "Show shield bubbles" (`ShieldBubble.Enabled`), "Battle damage smoke &
+fire" (`ShipLights.DamageEffects`) — all persisted (`ShipFxPrefs`, PlayerPrefs `Graphics.*`).
 
 ### AssetIntegration.cs
 - **`ApplyPlanetDetail(material, type)`** — auto-applies optional CC0 detail/normal maps from
@@ -1152,6 +1283,22 @@ that is not here — "Clean." has to mean all nine checks ran, or it is a claim 
 **None of this is a type checker.** It will not catch a wrong argument count, a wrong return type, or
 an assignment to a get-only property. It catches the classes that have actually reached `main`, which
 is a different and much smaller claim. Unity is still the real check.
+
+**`verify-wiring.mjs`** — is every ship part of the game? Since 2026-10-11 it prints the full **wiring
+matrix** and FAILS on any hole: for all 29 UnitTypes × 5 civilizations, its own mesh resolves; a UnitInfo
+exists; a UnitModelLibrary fallback exists; exactly one ShipyardWindow category offers it (the catalogue is
+the ONLY way to obtain a ship — no starting fleet, FactionAI builds none, tech gates no class); its shipyard
+and Empire Tech gates are reachable; and every civ mesh has baked hardpoints with guns. Plus the older
+checks (manifest lines, orphans, Ships/ vs Stations/ placement).
+
+**`bake-ship-hardpoints.mjs`** — bakes `Resources/SpaceAssets/Ships/ship-hardpoints.json` (engines + guns per
+hull, Unity mesh space) from the .glb files under the ship-meshes.txt rotations, and prints the orientation
+table with a confidence column (`ok` / `??` the sharpness and bulk measures disagree / `LOW` both say the bow
+is behind — check those by eye). `--check` writes nothing and fails if the json is stale. Re-run after any
+ship-meshes.txt rotation change, or those hulls fall back to their bounds.
+
+**`ship-orientation-sheet.mjs`** — renders `Art/_review/orientation-<Civ>.png`: every hull top-down as the
+game flies it (glTFast X negation and the manifest rotation applied): top and side views, bow up, emission in orange, baked nozzles cyan, guns red.
 
 **`world-placement-check.mjs`** — does every world make sense where it orbits?
 

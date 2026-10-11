@@ -8,7 +8,7 @@ public class SettingsWindow : MonoBehaviour
     public static SettingsWindow Instance;
 
     GameObject root;
-    Toggle muteT, spaceT, cityGrowthT;
+    Toggle muteT, spaceT, cityGrowthT, pixelT, shieldT, damageT;
     Slider volS, effS, humS, ambS, rS, gS, bS;
     Image swatch;
     bool suppress;
@@ -19,6 +19,8 @@ public class SettingsWindow : MonoBehaviour
         var go = new GameObject("SettingsWindow");
         go.transform.SetParent(parent, false);
         Instance = go.AddComponent<SettingsWindow>();
+        // The ship-effect switches are persisted; read them before anything is drawn.
+        ShipFxPrefs.Load();
         Instance.Build(parent);
     }
 
@@ -46,6 +48,13 @@ public class SettingsWindow : MonoBehaviour
         UIFactory.Label(col, "<size=10><color=#7C8CA0>Colonies grow their own settlements as they populate, and those " +
                              "take up ground you might have wanted. Off: worlds only ever hold what you place.</color></size>",
                         UITheme.SmallSize, UITheme.SubText, 30);
+        UIFactory.Label(col, "SHIPS", UITheme.SmallSize, UITheme.Accent, 18);
+        pixelT = UIFactory.Toggle(col, "Pixelated ships", ShipPixelation.On, on => { if (!suppress) ShipPixelation.Set(on); });
+        UIFactory.Label(col, "<size=10><color=#7C8CA0>Hulls are drawn at half resolution with crisp pixels; planets, " +
+                             "effects and the interface stay sharp.</color></size>", UITheme.SmallSize, UITheme.SubText, 30);
+        shieldT = UIFactory.Toggle(col, "Show shield bubbles", ShieldBubble.Enabled, on => { if (!suppress) ShipFxPrefs.SetShields(on); });
+        damageT = UIFactory.Toggle(col, "Battle damage smoke & fire", ShipLights.DamageEffects, on => { if (!suppress) ShipFxPrefs.SetDamage(on); });
+
         UIFactory.Label(col, "When OFF, the solid colour below is used.", UITheme.SmallSize, UITheme.SubText, 30);
         UIFactory.Button(col, "Regenerate Space", () => SpaceBackground.Instance?.Regenerate(), 30);
 
@@ -150,6 +159,9 @@ public class SettingsWindow : MonoBehaviour
         SyncDroneStyle();
         // Loading a save can change this underneath us, so re-read rather than trusting the widget.
         if (cityGrowthT != null) cityGrowthT.isOn = GameConfig.OrganicCityGrowth;
+        if (pixelT != null) pixelT.isOn = ShipPixelation.On;
+        if (shieldT != null) shieldT.isOn = ShieldBubble.Enabled;
+        if (damageT != null) damageT.isOn = ShipLights.DamageEffects;
         var bg = SpaceBackground.Instance;
         if (bg != null)
         {
@@ -158,5 +170,29 @@ public class SettingsWindow : MonoBehaviour
             swatch.color = bg.SolidColor;
         }
         suppress = false;
+    }
+}
+
+/// The persisted ship-effect switches (PlayerPrefs). Pixelation persists itself (ShipPixelation).
+public static class ShipFxPrefs
+{
+    const string ShieldKey = "Graphics.ShieldBubbles", DamageKey = "Graphics.DamageEffects";
+
+    public static void Load()
+    {
+        try
+        {
+            ShieldBubble.Enabled = PlayerPrefs.GetInt(ShieldKey, 1) != 0;
+            ShipLights.DamageEffects = PlayerPrefs.GetInt(DamageKey, 1) != 0;
+        }
+        catch { }
+    }
+
+    public static void SetShields(bool on) { ShieldBubble.Enabled = on; Save(ShieldKey, on); }
+    public static void SetDamage(bool on) { ShipLights.DamageEffects = on; Save(DamageKey, on); }
+
+    static void Save(string key, bool on)
+    {
+        try { PlayerPrefs.SetInt(key, on ? 1 : 0); PlayerPrefs.Save(); } catch { }
     }
 }

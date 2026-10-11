@@ -171,7 +171,114 @@ if (fs.existsSync(manifestPath)) {
   for (const m of misfiled) console.log(`  ${m}`);
 }
 
-console.log(anyStarterMissing
-  ? '\nFAIL — at least one civilization is missing a starting ship mesh.'
-  : '\nAll starting ships resolve for every civilization that has art.');
-process.exit(anyStarterMissing ? 1 : 0);
+// ============================================================================================
+// THE FULL MATRIX (2026-10-11)
+//
+// "Every ship is part of the game" is five separate claims, and each one fails silently on its own:
+//
+//   MESH       every class resolves to its OWN mesh for every civilization (no borrowed hull)
+//   DATABASE   every class has a UnitInfo, or UnitDatabase.Get returns null and the class is unbuildable
+//   FALLBACK   every class has a UnitModelLibrary entry, so a missing civ mesh still draws a hull
+//   CATALOGUE  every class falls in exactly one of ShipyardWindow's category predicates — a class in
+//              none is simply never offered, which is the only way to obtain a ship (no starting fleet,
+//              FactionAI builds none, tech gates no class)
+//   GATES      its shipyard level and Empire Tech level are ones the game can actually reach
+//   HARDPOINTS every civ mesh has baked engines and guns (ship-hardpoints.json), or its plumes and
+//              muzzles fall back to the bounds
+//
+// The matrix is printed as a table and the script fails on any hole.
+// ============================================================================================
+const read = rel => fs.readFileSync(path.join(PROJ, rel), 'utf8');
+const failures = [];
+
+// ---- DATABASE + GATES ----
+const dbChunks = {};
+{
+  const starts = [...dbSrc.matchAll(/new UnitInfo\(UnitType\.(\w+)/g)].map(m => ({ t: m[1], i: m.index }));
+  starts.forEach((s, k) => { dbChunks[s.t] = dbSrc.slice(s.i, k + 1 < starts.length ? starts[k + 1].i : dbSrc.length); });
+}
+const colonySrc = read('Assets/Scripts/Systems/ColonyManager.cs');
+const empireSrc = read('Assets/Scripts/Systems/EmpireTech.cs');
+const MAX_YARD = +(/MaxShipyardLevel\s*=\s*(\d+)/.exec(colonySrc) || [0, 5])[1];
+const MAX_EL = +(/BaseMaxLevel\s*=\s*(\d+)/.exec(empireSrc) || [0, 10])[1];
+const gates = {};
+for (const t of TYPES) {
+  const c = dbChunks[t];
+  if (!c) { gates[t] = null; continue; }
+  const yard = +((/minShipyardLevel:\s*(\d+)/.exec(c) || [0, 1])[1]);
+  const el = +((/\.minEmpireLevel\s*=\s*(\d+)/.exec(c) || [0, 1])[1]);
+  const power = +((/power:\s*(\d+)/.exec(c) || [0, 1])[1]);
+  const worker = /\.isWorker\s*=\s*true/.test(c);
+  gates[t] = { yard, el, power, worker };
+}
+
+// ---- FALLBACK ----
+const umrSrc = read('Assets/Scripts/Visual/UnitModelRenderer.cs');
+const fallback = new Set([
+  ...[...umrSrc.matchAll(/(?:Station|Ship)\(UnitType\.(\w+)/g)].map(m => m[1]),
+  ...[...umrSrc.matchAll(/map\[UnitType\.(\w+)\]/g)].map(m => m[1]),
+]);
+const autoStations = /info\.isStation && !map\.ContainsKey\(info\.type\)/.test(umrSrc);
+
+// ---- CATALOGUE ----
+const yardSrc = read('Assets/Scripts/UI/ShipyardWindow.cs');
+const catBlock = yardSrc.slice(yardSrc.indexOf('Categories ='), yardSrc.indexOf('};', yardSrc.indexOf('Categories =')));
+const catLines = catBlock.split('\n').filter(l => l.includes('i =>'));
+function catalogueHits(t) {
+  let n = 0;
+  for (const l of catLines) {
+    if (new RegExp(`UnitType\\.${t}\\b`).test(l)) n++;
+    else if (/i\.isWorker/.test(l) && gates[t] && gates[t].worker) n++;
+    else if (/i\.isStation/.test(l) && STATIONS.has(t)) n++;
+  }
+  return n;
+}
+const iteratesAll = /foreach \(var info in UnitDatabase\.All\)/.test(yardSrc);
+
+// ---- HARDPOINTS ----
+const hpPath = path.join(RES, 'SpaceAssets/Ships/ship-hardpoints.json');
+const hpNames = new Map();
+if (fs.existsSync(hpPath)) for (const e of JSON.parse(fs.readFileSync(hpPath, 'utf8')).entries || []) hpNames.set(e.name, e);
+
+// ---- the table ----
+const col = (s, w) => String(s).padEnd(w);
+console.log('\nWIRING MATRIX — mesh per civ / db / fallback / catalogue / gates / hardpoints');
+console.log(col('class', 18) + CIVS.map(c => col(c.slice(0, 5), 6)).join('') + col('db', 4) + col('fb', 4) + col('cat', 5) + col('yard/EL/pow', 13) + 'hp');
+for (const t of TYPES) {
+  const cells = CIVS.map(civ => per[civ].present.includes(t) ? 'ok' : 'MISS');
+  cells.forEach((c, k) => { if (c !== 'ok') failures.push(`${CIVS[k]}_${t}: no mesh`); });
+
+  const g = gates[t];
+  if (!g) failures.push(`${t}: no UnitInfo in UnitDatabase`);
+  const fb = fallback.has(t) || (autoStations && STATIONS.has(t));
+  if (!fb) failures.push(`${t}: no UnitModelLibrary fallback entry`);
+  const cat = catalogueHits(t);
+  if (cat === 0) failures.push(`${t}: in no ShipyardWindow category — never offered`);
+  if (cat > 1) failures.push(`${t}: in ${cat} ShipyardWindow categories — offered twice`);
+  if (g && g.yard > MAX_YARD) failures.push(`${t}: needs shipyard level ${g.yard}, max is ${MAX_YARD}`);
+  if (g && g.el > MAX_EL) failures.push(`${t}: needs Empire Tech ${g.el}, max is ${MAX_EL}`);
+
+  let hp = 0;
+  for (const civ of CIVS) {
+    const e = hpNames.get(`${civ}_${t}`);
+    if (!e) failures.push(`${civ}_${t}: no baked hardpoints`);
+    else if (!e.guns || e.guns.length === 0) failures.push(`${civ}_${t}: hardpoints have no guns`);
+    else hp++;
+  }
+
+  console.log(col(t, 18) + cells.map(c => col(c, 6)).join('') + col(g ? 'ok' : 'NO', 4) + col(fb ? 'ok' : 'NO', 4) +
+              col(cat === 1 ? 'ok' : cat === 0 ? 'NONE' : cat, 5) + col(g ? `${g.yard}/${g.el}/${g.power}` : '-', 13) + `${hp}/${CIVS.length}`);
+}
+if (!iteratesAll) failures.push('ShipyardWindow no longer iterates UnitDatabase.All — the catalogue check is reading the wrong thing');
+console.log(`\ngates: shipyard levels 1-${MAX_YARD}, Empire Tech 1-${MAX_EL}; build power pools across every owned yard (FacilityPower).`);
+
+if (anyStarterMissing) failures.push('a civilization is missing one of the four starter-class meshes');
+
+if (failures.length) {
+  console.log(`\nFAIL — ${failures.length} hole(s) in the wiring matrix:`);
+  for (const f of failures) console.log(`  ${f}`);
+} else {
+  console.log(`\nAll ${TYPES.length} classes x ${CIVS.length} civilizations resolve to their own mesh with baked hardpoints, ` +
+              'have a database entry and a fallback, are offered by the shipyard catalogue exactly once, and are reachable.');
+}
+process.exit(failures.length ? 1 : 0);

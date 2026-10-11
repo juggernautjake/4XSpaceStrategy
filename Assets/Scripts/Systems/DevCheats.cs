@@ -34,6 +34,9 @@ public class DevCheats : MonoBehaviour
         go.AddComponent<DevCheats>();
     }
 
+    /// Dev Mode hotkeys that are not owned by a window. See DevBattle.
+    void Update() => DevBattle.Hotkey();
+
     /// Hand the player some of one resource. Dev Mode only.
     ///
     /// Bypasses the storage ceiling on purpose — the point of the control is to get past a limit that
@@ -134,5 +137,136 @@ public class DevCheats : MonoBehaviour
         }
 
         AllTechGranted = on;
+    }
+}
+
+// ============================================================================================
+// DEV BATTLE — Ctrl+Shift+E in Dev Mode: start a fight to watch
+//
+// Spawns a hostile squadron (the first faction at war with the player) a short way off the player's
+// ships, close enough that every weapon class in it reaches: a Dreadnought (railgun, torpedoes, plasma,
+// beam, point defence), a Cruiser, a Frigate (missiles, autocannon) and three fighters (pulse, beam,
+// missiles). Combat is proximity-driven, so the fight starts by itself.
+//
+// The anchor is the first of the player's selected ships, else the player's ship nearest the camera.
+// If there are no player WARSHIPS within reach of it (or no player ships at all), a matching player
+// squadron is spawned too, so there is a two-sided fight to look at rather than an execution.
+//
+// The spawned hulls are ordinary units: they are saved, they can be selected and destroyed, and they
+// stay when Dev Mode is switched off. Press again for another wave.
+// ============================================================================================
+public static class DevBattle
+{
+    public const KeyCode Key = KeyCode.E;
+
+    static readonly UnitType[] Hostiles =
+        { UnitType.Dreadnought, UnitType.Cruiser, UnitType.Frigate, UnitType.FighterIII, UnitType.FighterII, UnitType.Fighter };
+    static readonly UnitType[] Escort =
+        { UnitType.Cruiser, UnitType.Frigate, UnitType.Frigate, UnitType.FighterIII, UnitType.FighterII };
+
+    /// Distance from the anchor to the hostile formation's centre: inside every weapon's range bar
+    /// point defence, outside each other's hulls.
+    const float Standoff = 14f;
+
+    public static void Hotkey()
+    {
+        if (!GameMode.DevMode) return;
+        if (!Input.GetKeyDown(Key)) return;
+        bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+        bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+        if (!ctrl || !shift || UIFactory.IsTypingInField()) return;
+        Spawn();
+    }
+
+    public static void Spawn()
+    {
+        var um = UnitManager.Instance;
+        if (um == null || SystemContext.Galaxy == null) return;
+
+        Faction enemy = null;
+        foreach (var f in FactionManager.All)
+            if (f != null && f.relation == FactionRelation.Enemy) { enemy = f; break; }
+        if (enemy == null)
+        {
+            Notify("Dev: no hostile faction", "Nobody is at war with you to send a fleet.", null, NotifKind.Info);
+            return;
+        }
+
+        // ---- the anchor ----
+        Unit anchor = null;
+        foreach (var u in UnitSelection.Selected)
+            if (u != null && !u.IsDestroyed && u.owner == FactionManager.Player) { anchor = u; break; }
+
+        Vector3 look = CameraFocus();
+        if (anchor == null)
+        {
+            float best = float.MaxValue;
+            foreach (var u in um.Units)
+            {
+                if (u == null || u.IsDestroyed || u.owner != FactionManager.Player) continue;
+                float d = (CombatManager.PosOf(u) - look).sqrMagnitude;
+                if (d < best) { best = d; anchor = u; }
+            }
+        }
+
+        Vector3 centre = anchor != null ? CombatManager.PosOf(anchor) : look;
+        centre.y = 0f;
+
+        // ---- does the player have anything there that can fight? ----
+        bool armed = false;
+        foreach (var u in um.Units)
+        {
+            if (u == null || u.IsDestroyed || u.owner != FactionManager.Player || u.Info == null) continue;
+            if (u.Info.attack <= 1 || u.Info.isWorker || u.Info.canColonize) continue;
+            Vector3 p = CombatManager.PosOf(u); p.y = 0f;
+            if ((p - centre).sqrMagnitude <= 30f * 30f) { armed = true; break; }
+        }
+
+        float ang = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+        Vector3 dir = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+        Place(um, enemy, Hostiles, centre + dir * Standoff, dir);
+        if (!armed) Place(um, FactionManager.Player, Escort, centre - dir * 2f, -dir);
+
+        um.NotifyUnitsChanged();
+        Notify("Dev: hostile fleet inbound",
+            $"{Hostiles.Length} {enemy.name} warships spawned {Standoff:F0} units off " +
+            (anchor != null ? anchor.name : "the camera") + (armed ? "." : ", with a squadron of yours to meet them.") +
+            " (Ctrl+Shift+E for another wave.)", null, NotifKind.Danger);
+    }
+
+    static void Notify(string title, string body, System.Action onClick, NotifKind kind)
+    {
+        var n = NotificationManager.Instance;
+        if (n != null) n.Push(title, body, onClick, kind);
+    }
+
+    /// A loose wedge of parked hulls facing `facing`, centred on `at`.
+    static void Place(UnitManager um, Faction owner, UnitType[] types, Vector3 at, Vector3 facing)
+    {
+        Vector3 side = Vector3.Cross(Vector3.up, facing).normalized;
+        for (int i = 0; i < types.Length; i++)
+        {
+            int row = (i + 1) / 2;
+            float s = (i % 2 == 0 ? 1f : -1f) * row;
+            Vector3 p = at + side * (s * 1.6f) - facing * (row * 1.2f);
+            var u = um.CreateUnit(types[i], owner, null);
+            u.inSpace = true;
+            u.parkPosition = p;
+            u.status = UnitStatus.Idle;
+        }
+    }
+
+    /// Where the camera is looking, on the plane of play.
+    static Vector3 CameraFocus()
+    {
+        var cam = Camera.main;
+        if (cam == null) return Vector3.zero;
+        var ray = new Ray(cam.transform.position, cam.transform.forward);
+        if (Mathf.Abs(ray.direction.y) > 1e-4f)
+        {
+            float t = -ray.origin.y / ray.direction.y;
+            if (t > 0f) return ray.origin + ray.direction * t;
+        }
+        return cam.transform.position;
     }
 }

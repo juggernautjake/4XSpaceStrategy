@@ -63,6 +63,9 @@ public class RaceVfxProfile
     /// Extra emissive at full throttle, as a fraction (0.5 = 50% hotter flat out). A hull whose glow is
     /// its reactor should burn brighter when the reactor is working.
     public float emissiveThrottleBoost = 0f;
+    /// 0..1 — a slow Perlin gutter on top of the pulse: how far it can dip. Lava does not breathe
+    /// evenly, it flares and sinks. 0 for every race whose glow is a lamp or a living thing.
+    public float emissiveFlicker = 0f;
 
     // ---- running lights ----
     public bool navLights = true;
@@ -82,8 +85,7 @@ public class RaceVfxProfile
     public float weaponTintAmount = 0.4f;
 
     // ---- shields ----
-    /// Not drawn by anything yet. Here so the shield effect, when it lands, takes its colour from the
-    /// same table as everything else instead of growing a sixth per-race switch somewhere.
+    /// The ShieldBubble round every shielded hull, and the splash a round makes on it.
     public Color shieldColour = new Color(0.45f, 0.7f, 1f);
 
     /// Does the hull's emissive need touching at all? False for a race that leaves the art exactly as
@@ -94,7 +96,7 @@ public class RaceVfxProfile
 
     /// True when the glow never changes after it is set — no pulse and no throttle term — so it can be
     /// written once at build time and left alone.
-    public bool HullGlowIsStatic => emissivePulseDepth <= 0.001f && emissiveThrottleBoost <= 0.001f;
+    public bool HullGlowIsStatic => emissivePulseDepth <= 0.001f && emissiveThrottleBoost <= 0.001f && emissiveFlicker <= 0.001f;
 }
 
 public static class RaceVfx
@@ -240,7 +242,7 @@ public static class RaceVfx
             thrusterTail = new Color(1f, 0.35f, 0.05f),
             thrusterFlicker = 0.22f,
             emissiveMultiplier = 3f, emissivePulseBeats = 2f, emissivePulseDepth = 0.35f,
-            emissiveThrottleBoost = 0.5f,
+            emissiveThrottleBoost = 0.5f, emissiveFlicker = 0.18f,
             navLights = false,
             weaponTint = new Color(1f, 0.50f, 0.12f),       // orange plasma
             weaponTintAmount = 0.40f,
@@ -344,8 +346,32 @@ public static class HullMaterials
     }
 
     /// Is this the URP/Lit emission property, which only draws while the `_EMISSION` keyword is on?
-    /// glTFast's graphs have no such keyword; their emissive is always live.
     public static bool NeedsEmissionKeyword(int propertyId) => propertyId == EmissionUrp;
+
+    /// Is this material actually DRAWING its emissive? Each shader family gates it behind a keyword:
+    /// URP/Lit behind `_EMISSION`, and glTFast's shader graphs (com.unity.cloud.gltfast 6.x,
+    /// ShaderGraphMaterialGenerator) behind `_EMISSIVE`, which its importer switches on whenever the
+    /// glTF carries an emissive texture or a non-black emissive factor — as every generated hull does.
+    /// With the keyword off no glow is drawn whatever the factor holds, so lifting it would do nothing,
+    /// and switching the keyword on would light the whole hull evenly.
+    public static bool EmissionLive(Material m, int propertyId)
+    {
+        if (m == null || propertyId < 0) return false;
+        if (propertyId == EmissionUrp) return m.IsKeywordEnabled("_EMISSION");
+        if (propertyId == EmissiveGltf)
+            // A graph built without the keyword at all (an older glTFast) has no gate to check.
+            return m.IsKeywordEnabled("_EMISSIVE") || !HasKeyword(m, "_EMISSIVE");
+        return true;
+    }
+
+    static bool HasKeyword(Material m, string name)
+    {
+        var shader = m.shader;
+        if (shader == null) return false;
+        foreach (var k in shader.keywordSpace.keywordNames)
+            if (k == name) return true;
+        return false;
+    }
 
     struct Key : System.IEquatable<Key>
     {

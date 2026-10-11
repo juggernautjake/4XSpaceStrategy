@@ -66,6 +66,21 @@ in-progress features stay local until done.
 - Full 29-hull fleets for every race via the Meshy API (6fdbe20); Cryithn texture check keyed on
   brightness (5a4838f).
 
+**Ships in the game, facing right, with effects** ("make sure all of the ships are part of the game and are
+oriented correctly and all have effects and dynamic stuff"; "really work on laser and attack and shielding
+animations")
+- Orientation: glTFast negates X on import, so the ±90° yaw lines were flipped; ship-meshes.txt corrected,
+  sheets in Art/_review/orientation-*.png. 24 hulls flagged low-confidence for an in-editor look.
+- Engine and gun points baked per hull (tools/bake-ship-hardpoints.mjs → ship-hardpoints.json).
+- Thrusters on the real engine bells; race glows (Pyrothian lava, Terran/Cryithn running lights, Aquarii and
+  Sylvan breathing); per-weapon shots from the guns with muzzle flash and recoil; damage smoke and fire.
+- Shields: a new mechanic (absorbs first, recharges out of combat; rules in CODEBASE_GUIDE.md), a bubble that
+  ripples, shatters and shimmers back, and a shield bar beside every hull bar.
+- Multi-stage explosions; ships orbit planets, drift, bank; stations spin.
+- Slight pixelation on ship hulls only (Settings → SHIPS).
+- Every class × race wired and buildable; verify-wiring asserts the full matrix.
+- Dev: Ctrl+Shift+E spawns an enemy squadron next to your ship.
+
 ## Open decisions for Jacob
 - Spaceports and shipyards are now queued builds (they were instant). Reverting is one line in DoPlace.
 - Clicking a ship no longer flies the camera to it (F, Tab and the lists do).

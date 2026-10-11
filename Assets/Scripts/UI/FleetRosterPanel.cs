@@ -111,7 +111,7 @@ public class FleetRosterPanel : MonoBehaviour
                    "Click the name to select the whole fleet; click the arrow to open it.",
                    () => UnitSelection.Set(ships),
                    () => { if (!openFleets.Remove(f)) openFleets.Add(f); Refresh(); },
-                   Magazines.GroupSupply(ships), "Unit_Fleet");
+                   Magazines.GroupSupply(ships), "Unit_Fleet", Shields.GroupFraction(ships));
 
             foreach (int g in squads)
             {
@@ -164,7 +164,7 @@ public class FleetRosterPanel : MonoBehaviour
                $"\nClick the name to select it; press {g} anywhere to recall it.",
                () => UnitSelection.Set(members),
                () => { if (!openSquadrons.Remove(g)) openSquadrons.Add(g); Refresh(); },
-               Magazines.GroupSupply(members), "Unit_Squadron");
+               Magazines.GroupSupply(members), "Unit_Squadron", Shields.GroupFraction(members));
 
         if (!open) return;
 
@@ -179,13 +179,14 @@ public class FleetRosterPanel : MonoBehaviour
             AddRow(indent + 1, ship.name, 0, ship.HealthFraction,
                    $"{ship.name} — {ship.Info.name}\n" +
                    $"Hull {ship.Health:F0} / {ship.EffectiveHealth}\n" +
+                   (ship.MaxShield > 0 ? $"Shield {ship.Shield:F0} / {ship.MaxShield}\n" : "") +
                    $"Rank {ship.RankName}{orders}\n\n" +
                    Magazines.SupplyReport(ship) +
                    "\n\nClick to select and open its panel.",
                    () => { UnitSelection.SelectOnly(ship); UnitInfoPanel.Instance?.Show(ship); },
                    null,
                    Magazines.CarriesOrdnance(ship) ? Magazines.AmmoFraction(ship) : -1f,
-                   "Unit_Ship");
+                   "Unit_Ship", ship.MaxShield > 0 ? ship.ShieldFraction : -1f);
         }
     }
 
@@ -193,7 +194,7 @@ public class FleetRosterPanel : MonoBehaviour
     /// leaf, which is what makes ships un-openable without a separate row type.
     void AddRow(int indent, string label, int count, float condition, string tip,
                 System.Action onSelect, System.Action onExpand, float supply = -1f,
-                string icon = null)
+                string icon = null, float shield = -1f)
     {
         var row = UIFactory.NewUI(list, "Row");
         var bg = row.AddComponent<Image>();
@@ -282,6 +283,33 @@ public class FleetRosterPanel : MonoBehaviour
             sfrt.anchorMin = new Vector2(0, 0);
             sfrt.anchorMax = new Vector2(Mathf.Clamp01(supply), 1);
             sfrt.offsetMin = Vector2.zero; sfrt.offsetMax = Vector2.zero;
+        }
+
+        // ---- the shield strip ----
+        //
+        // A thin blue line riding just ABOVE the condition bar, for anything that carries a screen
+        // (Shields.cs). Above rather than below because the supply strip already lives below, and a
+        // shield is the layer in front of the hull — so it sits on top of it.
+        if (shield >= 0f)
+        {
+            var shTrack = UIFactory.NewUI(row.transform, "Shield");
+            var shimg = shTrack.AddComponent<Image>();
+            shimg.color = new Color(0, 0, 0, 0.45f);
+            shimg.raycastTarget = false;
+            var shrt = shTrack.GetComponent<RectTransform>();
+            shrt.anchorMin = new Vector2(1, 0.5f); shrt.anchorMax = new Vector2(1, 0.5f);
+            shrt.pivot = new Vector2(1, 0.5f);
+            shrt.sizeDelta = new Vector2(84, 3);
+            shrt.anchoredPosition = new Vector2(-6, (supply >= 0f ? 3f : 0f) + 7f);
+
+            var shFill = UIFactory.NewUI(shTrack.transform, "Fill");
+            var shfimg = shFill.AddComponent<Image>();
+            shfimg.color = Shields.BarColour(shield);
+            shfimg.raycastTarget = false;
+            var shfrt = shFill.GetComponent<RectTransform>();
+            shfrt.anchorMin = new Vector2(0, 0);
+            shfrt.anchorMax = new Vector2(Mathf.Clamp01(shield), 1);
+            shfrt.offsetMin = Vector2.zero; shfrt.offsetMax = Vector2.zero;
         }
 
         var pct = UIFactory.Text(row.transform, $"{condition * 100f:F0}%", 9, UITheme.Text,

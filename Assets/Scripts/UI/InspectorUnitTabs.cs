@@ -37,6 +37,21 @@ public partial class InspectorWindow
             return g > 0 ? $"<color=#5AB4F0>{g}</color>  <color=#9FB4C8>(press {g} to recall)</color>" : "<color=#9FB4C8>none — Ctrl+1..9 to bind</color>";
         });
 
+        // Hull, and the shield in front of it (Shields.cs).
+        Header(p, "CONDITION");
+        Bar(p, () =>
+        {
+            float f = u.HealthFraction;
+            return (f, $"Hull {u.Health:F0} / {u.EffectiveHealth}", Fleets.ConditionColor(f));
+        });
+        if (u.MaxShield > 0)
+            Bar(p, () =>
+            {
+                float f = u.ShieldFraction;
+                return (f, f <= 0.001f ? "Shield DOWN — recharging once out of the fight" : $"Shield {u.Shield:F0} / {u.MaxShield}",
+                        Shields.BarColour(f));
+            });
+
         // What it's doing right now, with the matching progress bar.
         Header(p, "CURRENT TASK");
         var task = UIFactory.WrapText(p, "", UITheme.SmallSize, UITheme.Text);
@@ -227,6 +242,9 @@ public partial class InspectorWindow
         Header(p, "COMBAT & MOVEMENT");
         var card = Card(p);
         Stat(card, "Health", () => u.EffectiveHealth.ToString());
+        Stat(card, "Shield", () => u.MaxShield > 0
+            ? $"{u.MaxShield}  <color=#9FB4C8>(regen {Shields.RegenPerSecond * 100f:F0}%/day after {Shields.RegenDelay:F0} quiet days)</color>"
+            : "<color=#9FB4C8>none</color>");
         Stat(card, "Armor", () => u.Armor.ToString());
         Stat(card, "Attack", () => u.EffectiveAttack.ToString());
         Stat(card, "Speed", () => u.Speed.ToString());

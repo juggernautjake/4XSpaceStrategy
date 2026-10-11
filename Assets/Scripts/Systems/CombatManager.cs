@@ -158,6 +158,9 @@ public class CombatManager : MonoBehaviour
         // already ticks every frame with the unit list in hand, and a second MonoBehaviour would be a
         // second thing to create, reset, and eventually forget to reset.
         Magazines.Tick(dt, scratch);
+        // Shields refill on the same live list, and only for ships out of the fight — so this reads the
+        // engaged set from LAST frame, before this frame's is built. See Shields.
+        Shields.Tick(dt, scratch);
 
         engagedNext.Clear();
 
@@ -292,13 +295,19 @@ public class CombatManager : MonoBehaviour
         var target = m.target;
         if (target == null || target.IsDestroyed) { m.salvoLeft[k] = 0; return; }
 
-        Vector3 from = PosOf(u);
-
-        // Muzzle offset: shots leave the hull rather than its centre, so a ship firing several mounts
-        // at once does not look like one gun stuttering.
-        Vector3 muzzle = from + Random.insideUnitSphere * 0.35f;
-
         Vector3 tPos = PosOf(target);
+
+        // ---- THE MUZZLE IS A REAL POINT ON THE HULL ----
+        //
+        // Each drawn hull carries baked gun hardpoints (ShipHardpoints: bow tip, flanks, a dorsal pair,
+        // the keel; a station's rim). The shot leaves the one that best faces the target, rotating
+        // through the good ones mount by mount so a broadside reads as several guns. A ship drawn as a
+        // token, or not drawn at all, keeps the old scatter round its centre.
+        Vector3 muzzle;
+        ShipLights rig = UnitModelRenderer.Instance != null ? UnitModelRenderer.Instance.LightsOf(u) : null;
+        if (rig == null || !rig.TryMuzzle(tPos, k, out muzzle))
+            muzzle = PosOf(u) + Random.insideUnitSphere * 0.35f;
+
         Vector3 tVel = UnitModelRenderer.VelocityOf(target);
 
         // Motor-aware, not cruise-speed: a missile spends most of a short engagement still building
@@ -316,6 +325,24 @@ public class CombatManager : MonoBehaviour
         }
 
         ProjectileRenderer.Instance?.Fire(u, target, w, muzzle, aim, Weaponry.ShotDamage(u, w));
+
+        // A little kick back through the hull, heaviest for the slug-throwers. Drawing only.
+        if (rig != null) rig.Recoil(aim - muzzle, RecoilFor(w));
+    }
+
+    /// How hard a round shoves the hull that fired it, as a fraction of the hull's length. Visual only.
+    static float RecoilFor(WeaponInfo w)
+    {
+        switch (w.cls)
+        {
+            case WeaponClass.Railgun: return 0.10f;
+            case WeaponClass.PlasmaCannon: return 0.06f;
+            case WeaponClass.Torpedo: return 0.05f;
+            case WeaponClass.Autocannon: return 0.025f;
+            case WeaponClass.Missile: return 0.02f;
+            case WeaponClass.PointDefence: return 0f;
+            default: return 0.015f;
+        }
     }
 
     // ============================================================================================
@@ -441,31 +468,72 @@ public class CombatManager : MonoBehaviour
     /// A round arrived. Called by ProjectileRenderer when a shot reaches its target, never by the
     /// firing loop — the delay between the two IS the projectile's flight.
     public void ResolveHit(Unit shooter, Unit target, WeaponInfo w, float damage, Vector3 at)
+        => ResolveHit(shooter, target, w, damage, at, at);
+
+    /// `from` is where the round came from (the muzzle, or the start of the segment it swept on its
+    /// last frame) — the direction a shield ripple and a spark spray need.
+    public void ResolveHit(Unit shooter, Unit target, WeaponInfo w, float damage, Vector3 at, Vector3 from)
     {
         if (target == null || target.IsDestroyed || w == null) return;
+
+        // ---- THE SHIELD TAKES IT FIRST (Shields.cs has the rules) ----
+        //
+        // Whatever the screen holds never reaches the hull. Whatever it cannot hold carries on, as raw
+        // damage, into the armour sum below.
+        float raw = Shields.Absorb(target, w, damage, out float absorbed, out bool collapsed);
 
         // Armour subtracts, penetration divides what it subtracts. So a heavy round shrugs off armour
         // that stops a light one entirely — which is why a swarm of pulse fighters cannot chew through
         // a dreadnought and one railgun cruiser can.
-        float armour = target.Armor / Mathf.Max(0.05f, w.penetration);
-        float dealt = Mathf.Max(damage * 0.1f, damage - armour);   // never fully absorbed; a hit is a hit
-
-        target.Health -= dealt;
+        float dealt = 0f;
+        if (raw > 0.001f)
+        {
+            float armour = target.Armor / Mathf.Max(0.05f, w.penetration);
+            dealt = Mathf.Max(raw * 0.1f, raw - armour);   // never fully absorbed; a hit is a hit
+            target.Health -= dealt;
+        }
 
         // Keyed on the TARGET, not the shooter (system fog of war): a visible ship hit by one the player
         // cannot see still visibly takes the hit — the round itself was never drawn, so the flash on the
         // hull is how the player learns something unseen is firing. A hit on a hidden ship shows nothing.
         if (VisibilityService.ShownToPlayer(target))
         {
-            ExplosionRenderer.Instance?.Impact(at, w.colour);
-            // Scaled by what actually got through the armour, not by what was fired — a round that barely
-            // scratches a dreadnought should not land with the same weight as one that hurts it.
-            SimpleAudio.Instance?.PlayImpact(at, dealt);
+            Vector3 inbound = at - from;
+            ShipLights rig = UnitModelRenderer.Instance != null ? UnitModelRenderer.Instance.LightsOf(target) : null;
+            var fx = ExplosionRenderer.Instance;
+            var audio = SimpleAudio.Instance;
+
+            if (absorbed > 0f)
+            {
+                // The bubble ripples where it was struck, and the splash sits on the shell, not the hull.
+                float strength = absorbed / Mathf.Max(1f, target.MaxShield);
+                Vector3 splashAt = rig != null ? rig.ShieldStruck(inbound, strength, collapsed) : at;
+                if (fx != null) fx.ShieldSplash(splashAt, RaceVfx.For(target).shieldColour, Mathf.Clamp01(strength * 4f));
+                if (audio != null)
+                {
+                    audio.PlayShieldHit(strength);
+                    if (collapsed) audio.PlayShieldDown();
+                }
+            }
+
+            if (dealt > 0f)
+            {
+                // On the side of the hull that was hit, not in the middle of the ship, so the scorch
+                // that rides on the hull sits where the round went in.
+                Transform hull = rig != null ? rig.transform : null;
+                Vector3 onHull = rig != null ? rig.HullContact(from) : at;
+                Color shot = RaceVfx.WeaponColour(shooter, w.colour);
+                if (fx != null) fx.Impact(onHull, shot, dealt / Mathf.Max(1f, target.EffectiveHealth), hull, inbound);
+                // Scaled by what actually got through the armour, not by what was fired — a round that
+                // barely scratches a dreadnought should not land with the same weight as one that hurts it.
+                if (audio != null) audio.PlayImpact(at, dealt);
+            }
         }
 
         // Experience for landing it. `battles` is incremented on the KILL rather than per hit, in
         // Destroy below — a ship that fires a thousand rounds into one dreadnought fought one battle.
-        shooter?.AddExperience(dealt * 0.02f);
+        // A round a shield stopped still did work, at half the credit.
+        shooter?.AddExperience((dealt + absorbed * 0.5f) * 0.02f);
 
         if (target.Health <= 0f) Destroy(target, shooter);
     }
@@ -485,7 +553,8 @@ public class CombatManager : MonoBehaviour
         // A ship the player cannot see dies unseen and unheard (system fog of war, or any concealment).
         if (VisibilityService.ShownToPlayer(victim))
         {
-            ExplosionRenderer.Instance?.Death(at, size);
+            var fx = ExplosionRenderer.Instance;
+            if (fx != null) fx.Death(at, size, victim.Info != null && victim.Info.isStation);
             SimpleAudio.Instance?.PlayShipDestroyed(size);
         }
 

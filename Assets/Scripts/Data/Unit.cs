@@ -79,6 +79,31 @@ public class Unit
 
     public bool IsDestroyed => Health <= 0f;
 
+    // ---- SHIELDS (see Systems/Shields.cs for every rule) ------------------------------------------
+    //
+    // Runtime only. Negative means "not yet asked", and fills to full on first read — the same
+    // convention `hp` uses, for the same reason: a ship that has never been in a fight has a full
+    // screen, and a loaded game starts with every screen charged.
+    [System.NonSerialized] public float shield = -1f;
+    /// Shields.Clock at the last hit, which starts the regeneration delay.
+    [System.NonSerialized] public float shieldHitAt = -999f;
+    /// Shields.Clock when the screen last collapsed; the visual uses it to time the shatter.
+    [System.NonSerialized] public float shieldDownAt = -999f;
+
+    public int MaxShield => Shields.MaxFor(this);
+
+    public float Shield
+    {
+        get { if (shield < 0f) shield = MaxShield; return shield; }
+        set { shield = Mathf.Clamp(value, 0f, MaxShield); }
+    }
+
+    /// 0..1 for a bar; 0 for a hull that carries no shield at all (check MaxShield to tell them apart).
+    public float ShieldFraction
+    {
+        get { int max = MaxShield; return max <= 0 ? 0f : Mathf.Clamp01(Shield / max); }
+    }
+
     // Experience & record.
     public float experience;
     public int battles;

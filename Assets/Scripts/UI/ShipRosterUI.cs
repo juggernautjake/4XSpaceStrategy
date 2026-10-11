@@ -95,6 +95,27 @@ public static class ShipRosterUI
             return (f, $"{f * 100f:F0}%", Fleets.ConditionColor(f));
         }, pct);
 
+        // ---- shield, a thin strip riding on top of the hull bar (Shields.cs) ----
+        if (cap.MaxShield > 0)
+        {
+            var sTrack = UIFactory.Panel(hp.transform, "ShieldTrack", new Color(0f, 0f, 0f, 0.45f));
+            sTrack.raycastTarget = false;
+            var strt = sTrack.rectTransform;
+            strt.anchorMin = new Vector2(0f, 0.5f); strt.anchorMax = new Vector2(1f, 0.5f);
+            strt.pivot = new Vector2(0.5f, 0.5f);
+            strt.sizeDelta = new Vector2(0f, 3f); strt.anchoredPosition = new Vector2(0f, 10.5f);
+            var sFill = UIFactory.Panel(sTrack.transform, "Fill", Shields.BarColour(1f));
+            sFill.raycastTarget = false;
+            var sfrt = sFill.rectTransform;
+            sfrt.anchorMin = Vector2.zero; sfrt.anchorMax = new Vector2(1f, 1f);
+            sfrt.offsetMin = Vector2.zero; sfrt.offsetMax = Vector2.zero;
+            live.Bar(sFill, () =>
+            {
+                float f = cap.ShieldFraction;
+                return (f, "", Shields.BarColour(f));
+            });
+        }
+
         // ---- quick order, own ships only ----
         if (orders && mine && !u.Info.isStation)
         {

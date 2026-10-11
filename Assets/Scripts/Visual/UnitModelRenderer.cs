@@ -198,9 +198,15 @@ public static class UnitModelLibrary
 
     static string CivFolderFor(Unit u)
     {
-        int idx = (u?.owner == null || u.owner == FactionManager.Player)
-            ? SpeciesManager.CurrentIndex
-            : Mathf.Abs(u.owner.id) % CivFolders.Length;
+        int idx;
+        if (u?.owner == null || u.owner == FactionManager.Player) idx = SpeciesManager.CurrentIndex;
+        else
+        {
+            // A rival empire flies its OWN race (FactionAI's profile, which is saved), so its ships match
+            // its worlds; the id rule is only the fallback for a faction with no profile.
+            var prof = FactionAI.ProfileFor(u.owner);
+            idx = prof != null ? prof.speciesIndex : Mathf.Abs(u.owner.id) % CivFolders.Length;
+        }
         return CivFolders[Mathf.Clamp(idx, 0, CivFolders.Length - 1)];
     }
 
@@ -411,6 +417,30 @@ public class UnitModelRenderer : MonoBehaviour
         public float weavePhase;
         public float weaveBlend;
         public Vector3 evadeVel;
+
+        // ---- moving between ways of being somewhere — see MOVEMENT LIFE ----
+        /// Which branch drew the hull last frame: 0 under way, 1 docked at a world, 2 parked inside a
+        /// world's gravity well, 3 parked in open space. A change is what starts a settle.
+        public int mode = -1;
+        /// The hull's offset from where its new mode wants it, eased away over SettleSeconds so it FLIES
+        /// into orbit (or onto its parking spot) instead of jumping there.
+        public Vector3 settleOffset;
+        public float settleT = 1f;
+
+        /// Parked inside a world's field: the world, and where the ship sat relative to it when it
+        /// parked. Keyed on the park position so a new parking order re-reads it.
+        public CelestialBody parkHost;
+        public Vector3 parkRel;
+        public Vector3 parkKey;
+        public bool parkKeySet;
+
+        /// The cached low-orbit radius for the world it is docked at (ZoomFieldRules walks the moons).
+        public CelestialBody orbitFor;
+        public float orbitRadius;
+
+        /// Idle in open space: the heading it came to rest on, swayed around rather than overwritten.
+        public Quaternion idleRot;
+        public bool idleRotSet;
     }
 
     /// How fast a parked fleet walks its anchorage. Six degrees a second is a full circuit a minute —
@@ -691,8 +721,9 @@ public class UnitModelRenderer : MonoBehaviour
         // forty of these and no rig could be hand-placed on each. ShipLights needs `modelRotation` to
         // recover ship space (bow +Z) from the root, which is already carrying that correction; see
         // its header for why that matters and what goes wrong without it.
+        // The mesh path is how the baked engine and gun hardpoints are found (ShipHardpoints).
         var lights = go.AddComponent<ShipLights>();
-        lights.Init(u, entry.modelRotation, tint);
+        lights.Init(u, entry.modelRotation, tint, civPath ?? entry.path);
 
         // Seeded from the unit id so an orbit is stable across frames and reloads, and two stations at
         // one world never share a ring.
@@ -756,6 +787,7 @@ public class UnitModelRenderer : MonoBehaviour
         // Scaled deltaTime, so models speed up and slow down with the game clock exactly like the
         // planets' own orbits do.
         float dt = Time.deltaTime;
+        OrbitClock += dt;
 
         foreach (var kv in models)
         {
@@ -990,11 +1022,18 @@ public class UnitModelRenderer : MonoBehaviour
         }
     }
 
+    /// Stations turn on their own axis at this share of their class spin: a slow, stately turn, never a
+    /// carousel. And they circle their world far slower than a parked ship walks its anchorage.
+    const float StationSpinScale = 0.5f, StationOrbitScale = 0.3f;
+
     void TickStation(UnitManager um, Unit u, Model m, float dt)
     {
+        Vector3 pos;
+        int mode;
         if (u.status == UnitStatus.Traveling)
         {
-            m.go.transform.position = um.UnitPos(u) + Vector3.up * 0.6f;
+            pos = um.UnitPos(u) + Vector3.up * 0.6f;
+            mode = 0;
         }
         else if (u.location != null && u.location.visualObject != null)
         {
@@ -1002,20 +1041,115 @@ public class UnitModelRenderer : MonoBehaviour
             float bodyRadius = host.lossyScale.x * 0.5f;
             m.radius = bodyRadius + 0.28f + m.entry.size * 0.5f;
 
-            m.phase += m.speed * dt;
+            m.phase += m.speed * StationOrbitScale * dt;
             if (m.phase > 360f) m.phase -= 360f;
 
             float rad = m.phase * Mathf.Deg2Rad;
-            m.go.transform.position = host.position
-                + new Vector3(Mathf.Cos(rad) * m.radius, m.height, Mathf.Sin(rad) * m.radius);
+            pos = host.position + new Vector3(Mathf.Cos(rad) * m.radius, m.height, Mathf.Sin(rad) * m.radius);
+            mode = 1;
         }
         else
         {
-            m.go.transform.position = um.UnitPos(u);   // parked in open space
+            pos = um.UnitPos(u);   // parked in open space
+            mode = 3;
         }
 
+        // Arriving on station eases in, like a ship settling into orbit (see Settle).
+        pos = Settle(m, mode, pos, dt);
+        m.go.transform.position = pos;
+
         if (!m.animated && m.entry.spin > 0f)
-            m.go.transform.Rotate(Vector3.up, m.entry.spin * dt, Space.World);
+            m.go.transform.Rotate(Vector3.up, m.entry.spin * StationSpinScale * dt, Space.World);
+    }
+
+    // ============================================================================================
+    // MOVEMENT LIFE — orbiting, settling, drifting
+    //
+    // DOCKED: a ship at a world flies a LOW ORBIT inside that world's gravity well (ZoomFieldRules): clear
+    // of the surface, a fifth of the way out into the well, never past half of it. The whole anchorage
+    // turns on ONE clock per world (OrbitClock), so the spacing FleetFormation worked out holds however
+    // long they sit there, and the rate falls off with radius (Kepler's ω ∝ r^-1.5), so a ship in a
+    // wide orbit round a giant walks it slower than one skimming a moon. Nose along the orbit, banked
+    // into the curve.
+    //
+    // PARKED INSIDE A WELL (a point move that ended near a world, an AI or a Dev fleet): the simulation
+    // holds a fixed point while the world moves on, so the DRAWN hull keeps the offset it parked at and
+    // circles the world with it. Drawing only; combat reads drawn positions (CombatManager.PosOf), and
+    // box-select and the markers read the drawn transform.
+    //
+    // PARKED IN OPEN SPACE: a slow drift and a bob round its spot, its nose swaying a degree or two.
+    //
+    // ARRIVING anywhere: the hull keeps its offset from where its new mode wants it and eases it away
+    // over SettleSeconds — it flies into orbit rather than appearing there. DEPARTING: the momentum
+    // model starts from where the hull is DRAWN (flightPos follows it while parked), not from the
+    // world's centre, which is where the simulation's marker sets off from.
+    // ============================================================================================
+
+    const float SettleSeconds = 1.4f;
+    const float OrbitBankDeg = 9f;
+
+    /// Scaled game seconds, the one clock every anchorage turns on.
+    static float OrbitClock;
+
+    /// Ease a mode change: record the jump, then let it decay.
+    static Vector3 Settle(Model m, int mode, Vector3 pos, float dt)
+    {
+        if (m.mode >= 0 && mode != m.mode && mode != 0 && m.go != null)
+        {
+            Vector3 off = (m.go.transform.position - m.sep) - pos;
+            // A hull that was nowhere near (built in place, or an F10 rebuild) does not fly in from afar.
+            m.settleOffset = off.sqrMagnitude < 40f * 40f ? off : Vector3.zero;
+            m.settleT = 0f;
+        }
+        m.mode = mode;
+        if (mode == 0) { m.settleT = 1f; return pos; }
+        if (m.settleT < 1f)
+        {
+            m.settleT = Mathf.Min(1f, m.settleT + dt / SettleSeconds);
+            pos += m.settleOffset * (1f - Mathf.SmoothStep(0f, 1f, m.settleT));
+        }
+        return pos;
+    }
+
+    /// The low-orbit radius round a world, cached per model and world.
+    float OrbitRadiusFor(Model m, CelestialBody b, float planetR)
+    {
+        if (m.orbitFor == b && m.orbitRadius > 0f) return m.orbitRadius;
+        float field = ZoomFieldRules.IsHost(b) ? ZoomFieldRules.Radius(b) : planetR * 3f;
+        float r = planetR + Mathf.Clamp((field - planetR) * 0.2f, 0.4f, 1.6f);
+        r = Mathf.Min(r, Mathf.Max(planetR + 0.4f, field * 0.5f));
+        m.orbitFor = b;
+        m.orbitRadius = r;
+        return r;
+    }
+
+    /// Degrees per second for an orbit of radius r round a world of radius planetR.
+    static float OrbitRate(float planetR, float r)
+    {
+        float k = Mathf.Pow((planetR + 0.4f) / Mathf.Max(0.05f, r), 1.5f);
+        return Mathf.Clamp(ParkedOrbitDegPerSec * k, 2f, 8f);
+    }
+
+    /// A stable per-world phase offset, so two worlds' anchorages do not turn in lockstep.
+    static float WorldPhase(CelestialBody b) => b == null ? 0f : (Mathf.Abs(b.id) % 360);
+
+    /// Is this ship parked (not docked) inside a world's gravity well? Read once per parking spot: the
+    /// world, and the ship's offset from it at that moment, which the drawn hull then keeps.
+    static bool ParkedInWell(Unit u, Model m, out CelestialBody host)
+    {
+        host = null;
+        if (u.location != null || !u.inSpace) return false;
+        if (!m.parkKeySet || (m.parkKey - u.parkPosition).sqrMagnitude > 1e-6f)
+        {
+            m.parkKeySet = true;
+            m.parkKey = u.parkPosition;
+            m.parkHost = ZoomFieldRules.HostAt(u.parkPosition);
+            if (m.parkHost != null && m.parkHost.visualObject != null)
+                m.parkRel = u.parkPosition - m.parkHost.visualObject.transform.position;
+            else m.parkHost = null;
+        }
+        host = m.parkHost;
+        return host != null && host.visualObject != null;
     }
 
     // ============================================================================================
@@ -1262,6 +1396,15 @@ public class UnitModelRenderer : MonoBehaviour
             // rather than as one that got heavier. Drawing only — see FleetFormation.
             pos += FleetFormation.Offset(u, dir, u.TravelProgress);
 
+            // Leaving orbit or a parking spot: the hull starts where it was drawn (flightPos), but the
+            // simulation's marker sets off from the world's CENTRE, so without a nudge the first thing
+            // the hull would do is turn in toward the planet. Point it at where it is going instead.
+            if (m.mode > 0)
+            {
+                Vector3 outward = u.travelTo - m.flightPos;
+                if (outward.sqrMagnitude > 1e-4f) m.flightVel = outward.normalized * 0.6f;
+            }
+
             // MOMENTUM. The marker is where the simulation says the ship is; this is where a thing with
             // mass would actually be, chasing that marker under a turn rate and an acceleration it
             // cannot exceed. Order a reversal and the hull carries on the old way while it hauls its
@@ -1301,14 +1444,10 @@ public class UnitModelRenderer : MonoBehaviour
         }
         else if (u.location != null && u.location.visualObject != null)
         {
-            // Docked, so the momentum state is stale: the next departure starts from rest at the
-            // anchorage rather than carrying whatever velocity this ship had when it arrived.
-            m.flightReady = false;
-            m.flightVel = Vector3.zero;
-
-            // Parked at a world: stand off it a little so it isn't buried in the planet, and look at it.
+            // Parked at a world: a low orbit inside its gravity well (see MOVEMENT LIFE).
             var host = u.location.visualObject.transform;
-            float standoff = host.lossyScale.x * 0.5f + 0.4f;
+            float planetR = host.lossyScale.x * 0.5f;
+            float standoff = OrbitRadiusFor(m, u.location, planetR);
             int idx = u.location.units != null ? Mathf.Max(0, u.location.units.IndexOf(u)) : 0;
             int count = u.location.units != null ? Mathf.Max(1, u.location.units.Count) : 1;
 
@@ -1333,23 +1472,81 @@ public class UnitModelRenderer : MonoBehaviour
             // under a tenth of a world unit per second, which is visible as motion and far too slow to
             // make a hull hard to click. A ship you cannot reliably click is worse than a ship that does
             // not move.
-            m.parkPhase += ParkedOrbitDegPerSec * dt;
-            if (m.parkPhase > 360f) m.parkPhase -= 360f;
+            //
+            // ONE CLOCK PER WORLD (OrbitClock), not a phase per ship: a phase that each ship started
+            // counting when IT arrived would put every later arrival at a different angle round the same
+            // ring, and the spacing would be lost the moment a second ship docked.
+            m.parkPhase = Mathf.Repeat(OrbitClock * OrbitRate(planetR, standoff) + WorldPhase(u.location), 360f);
             anchor = Quaternion.Euler(0f, m.parkPhase, 0f) * anchor;
 
             pos = host.position + Vector3.up * 0.35f + anchor;
+            pos = Settle(m, 1, pos, dt);
 
-            // Nose ALONG the orbit rather than at the world. Anything flying a circle points around it;
-            // aimed at the planet it is circling, a ship reads as one about to fly into it.
+            // Nose ALONG the orbit rather than at the world, banked into the curve (the world is to
+            // starboard, since the ring turns clockwise seen from above).
             Vector3 along = Vector3.Cross(Vector3.up,
                 anchor.sqrMagnitude > 0.0001f ? anchor.normalized : Vector3.right);
             if (along.sqrMagnitude > 0.0001f)
             {
                 m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
-                    Quaternion.LookRotation(along.normalized, Vector3.up) * m.entry.modelRotation, 2f * dt);
+                    Quaternion.LookRotation(along.normalized, Vector3.up)
+                    * Quaternion.AngleAxis(-OrbitBankDeg, Vector3.forward) * m.entry.modelRotation, 2f * dt);
             }
             else m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
                 Quaternion.LookRotation((host.position - pos).normalized, Vector3.up) * m.entry.modelRotation, 2f * dt);
+            m.idleRotSet = false;
+        }
+        else if (ParkedInWell(u, m, out var wellHost))
+        {
+            // Parked inside a world's gravity well without docking: circle the world at the offset it
+            // parked at, on the same clock as the world's anchorage.
+            var host = wellHost.visualObject.transform;
+            float planetR = host.lossyScale.x * 0.5f;
+            Vector3 flat = new Vector3(m.parkRel.x, 0f, m.parkRel.z);
+            float field = ZoomFieldRules.Radius(wellHost);
+            float r = Mathf.Clamp(flat.magnitude, planetR + 0.4f, Mathf.Max(planetR + 0.4f, field * 0.85f));
+            float start = Mathf.Atan2(flat.z, flat.x) * Mathf.Rad2Deg;
+            // Clockwise from above, like the anchorage: the angle DEcreases in atan2's frame.
+            float ang = (start - Mathf.Repeat(OrbitClock * OrbitRate(planetR, r), 360f)) * Mathf.Deg2Rad;
+            Vector3 radial = new Vector3(Mathf.Cos(ang), 0f, Mathf.Sin(ang));
+            pos = host.position + radial * r + Vector3.up * m.parkRel.y;
+            pos = Settle(m, 2, pos, dt);
+
+            Vector3 along = Vector3.Cross(Vector3.up, radial);
+            if (along.sqrMagnitude > 0.0001f)
+                m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation,
+                    Quaternion.LookRotation(along.normalized, Vector3.up)
+                    * Quaternion.AngleAxis(-OrbitBankDeg, Vector3.forward) * m.entry.modelRotation, 2f * dt);
+            m.idleRotSet = false;
+        }
+        else
+        {
+            // Parked in open space: a slow drift round its spot and a nose that sways a little, so a
+            // ship waiting in the dark reads as crewed rather than as a prop.
+            pos = Settle(m, 3, pos, dt);
+            float t = OrbitClock * 0.18f;
+            float seed = (u.id % 97) * 1.37f;
+            pos += new Vector3(Mathf.PerlinNoise(t, seed) - 0.5f, 0f, Mathf.PerlinNoise(seed, t) - 0.5f) * 0.16f;
+
+            if (!m.idleRotSet) { m.idleRot = m.go.transform.rotation * Quaternion.Inverse(m.entry.modelRotation); m.idleRotSet = true; }
+            float yaw = (Mathf.PerlinNoise(t * 0.7f, seed + 3.1f) - 0.5f) * 6f;
+            float roll = Mathf.Sin(OrbitClock * 0.6f + seed) * 3f;
+            Quaternion sway = Quaternion.Euler(0f, yaw, roll);
+            m.go.transform.rotation = Quaternion.Slerp(m.go.transform.rotation, m.idleRot * sway * m.entry.modelRotation, 1.5f * dt);
+        }
+
+        if (u.status != UnitStatus.Traveling)
+        {
+            // The next departure starts from where the hull is DRAWN, at rest — not from the world's
+            // centre, which is where the simulation's marker sets off from (see MOVEMENT LIFE).
+            m.flightPos = pos;
+            m.flightVel = Vector3.zero;
+            m.flightReady = true;
+        }
+        else
+        {
+            m.idleRotSet = false;
+            Settle(m, 0, pos, dt);
         }
 
         // ---- and if somebody is shooting at it, it does not sit still ----

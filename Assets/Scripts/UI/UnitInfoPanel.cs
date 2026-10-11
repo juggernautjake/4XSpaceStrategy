@@ -13,6 +13,10 @@ public class UnitInfoPanel : MonoBehaviour
     TMP_Text titleText, body, progressLabel;
     TMP_InputField nameInput;
     Image progressFill;
+    // Hull and shield condition, side by side (Shields.cs).
+    Image hullFill, shieldFill;
+    TMP_Text hullLabel, shieldLabel;
+    GameObject shieldHalf;
     Button surveyBtn, researchBtn, colonizeBtn, terraformBtn, returnBtn, scrapBtn, pauseBtn;
     TMP_Text researchLabel;
     TMP_Text pauseLabel, colonizeLabel, terraformLabel;
@@ -87,6 +91,14 @@ public class UnitInfoPanel : MonoBehaviour
         body = UIFactory.Label(content, "", UITheme.SmallSize, UITheme.Text, 168);
         body.alignment = TextAlignmentOptions.TopLeft;
 
+        // Hull and shield: two bars on one row, the shield to the right of the hull it protects.
+        var condRow = UIFactory.NewUI(content, "Condition");
+        UIFactory.AddLayout(condRow, 18);
+        var ch = condRow.AddComponent<HorizontalLayoutGroup>();
+        ch.spacing = 6; ch.childControlWidth = true; ch.childControlHeight = true; ch.childForceExpandWidth = true;
+        CondBar(condRow.transform, "Hull", UITheme.Good, out hullFill, out hullLabel);
+        shieldHalf = CondBar(condRow.transform, "Shield", Shields.BarColour(1f), out shieldFill, out shieldLabel);
+
         // Task loading bar.
         var barHolder = UIFactory.NewUI(content, "Bar");
         UIFactory.AddLayout(barHolder, 20);
@@ -152,6 +164,42 @@ public class UnitInfoPanel : MonoBehaviour
     {
         yield return null;
         if (nameInput != null) nameInput.interactable = false;
+    }
+
+    /// One labelled condition bar filling half a row. Returns its holder, so the shield half can be
+    /// hidden for a hull that carries no shield.
+    static GameObject CondBar(Transform parent, string name, Color colour, out Image fill, out TMP_Text label)
+    {
+        var holder = UIFactory.NewUI(parent, name);
+        var track = UIFactory.Panel(holder.transform, "Track", UITheme.TrackBg);
+        track.raycastTarget = false;
+        UIFactory.Stretch(track.rectTransform);
+        fill = UIFactory.Panel(track.transform, "Fill", colour);
+        fill.raycastTarget = false;
+        var frt = fill.rectTransform;
+        frt.anchorMin = Vector2.zero; frt.anchorMax = new Vector2(1f, 1f);
+        frt.offsetMin = Vector2.zero; frt.offsetMax = Vector2.zero;
+        label = UIFactory.Text(holder.transform, "", UITheme.SmallSize, UITheme.Text, TextAlignmentOptions.Center);
+        label.raycastTarget = false;
+        UIFactory.Stretch(label.rectTransform);
+        return holder;
+    }
+
+    void RefreshCondition(Unit u)
+    {
+        if (hullFill == null) return;
+        float hf = u.HealthFraction;
+        hullFill.rectTransform.anchorMax = new Vector2(hf, 1f);
+        hullFill.color = Fleets.ConditionColor(hf);
+        hullLabel.text = $"Hull {u.Health:F0}/{u.EffectiveHealth}";
+
+        bool shielded = u.MaxShield > 0;
+        if (shieldHalf != null && shieldHalf.activeSelf != shielded) shieldHalf.SetActive(shielded);
+        if (!shielded) return;
+        float sf = u.ShieldFraction;
+        shieldFill.rectTransform.anchorMax = new Vector2(sf, 1f);
+        shieldFill.color = Shields.BarColour(sf);
+        shieldLabel.text = sf <= 0.001f ? "Shield DOWN" : $"Shield {u.Shield:F0}/{u.MaxShield}";
     }
 
     public void Show(Unit u)
@@ -284,6 +332,7 @@ public class UnitInfoPanel : MonoBehaviour
 
         progressFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(prog), 1f);
         progressLabel.text = prog > 0f ? $"{prog * 100f:F0}%" : "";
+        RefreshCondition(u);
 
         string queueLine = "";
         if (u.orders != null && u.orders.Count > 1)
