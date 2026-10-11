@@ -90,6 +90,10 @@ public class SystemVisualizer : MonoBehaviour
         // Habitable zone for the focused (home) system.
         var focus = GameManager.Instance != null && GameManager.Instance.FocusedSystem != null
             ? GameManager.Instance.FocusedSystem : galaxy.Home;
+        // Never build the band round a system the player has not explored (system fog of war): opening an
+        // unexplored star's overview focuses it, and a full rebuild would otherwise draw its green zone —
+        // and register its worlds as the current system — around a system that shows only its star.
+        if (galaxy.Home != null && focus != galaxy.Home && VisibilityService.Unexplored(focus)) focus = galaxy.Home;
 
         var zoneGo = new GameObject("HabitableZone");
         zoneGo.transform.SetParent(systemParent, false);

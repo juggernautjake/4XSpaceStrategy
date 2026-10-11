@@ -91,7 +91,11 @@ public class DerelictRenderer : MonoBehaviour
     {
         if (g == null || d == null) return false;
         if (d.systemIndex >= 0 && d.systemIndex < g.systems.Count)
-            return g.systems[d.systemIndex].hideReason != HideReason.None;
+        {
+            var sys = g.systems[d.systemIndex];
+            // ...or by the system fog of war: a hulk in a system the player has never entered is not seen.
+            return sys.hideReason != HideReason.None || VisibilityService.Unexplored(sys);
+        }
         return g.center != null && g.center.hideReason != HideReason.None;
     }
 

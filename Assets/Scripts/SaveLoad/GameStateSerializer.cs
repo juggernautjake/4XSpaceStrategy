@@ -471,6 +471,11 @@ public static class GameStateSerializer
         AncientClues.Import(game.research != null ? game.research.cluesFound : null);
         UnitManager.Instance?.ImportUnitDTOs(game.units, byId, home);
 
+        // A save from before format 2 may carry rival systems wrongly stamped `visited` by the old
+        // presence rule (any settled world counted). Repaired here, after ownership AND the fleet are
+        // back, because both are the evidence it checks. SystemFog applies the result on its next poll.
+        if (game.formatVersion < 2) SystemPresence.RepairLegacyVisited(galaxy);
+
         // Resume in-progress work. Both run after the galaxy and fleet exist, because their schedulers
         // read the facility levels off the restored bodies to work out the available power/capacity.
         UnitManager.Instance?.ImportBuildQueue(game.buildQueue);

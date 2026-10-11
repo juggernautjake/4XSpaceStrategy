@@ -19,6 +19,7 @@ public class Comet
     public string flavor;      // what a study turns up (the funny egg, the reveal, etc.)
 
     [System.NonSerialized] public GameObject visual;
+    [System.NonSerialized] public bool fogConcealed;   // what CometManager last told ConcealBinding (system fog)
     [System.NonSerialized] public readonly HashSet<int> announced = new HashSet<int>();
 
     public string SizeWord => size > 3.3f ? "A colossal" : size > 2.1f ? "A great" : "A large";

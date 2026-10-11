@@ -25,6 +25,12 @@ public class SystemFog : MonoBehaviour
     Galaxy trackedFor;
     readonly Dictionary<StarSystemData, bool> lastKnown = new Dictionary<StarSystemData, bool>();
 
+    // Ships in open space are fogged by WHERE they are (VisibilityService.FoggedForPlayer), which changes
+    // as they fly. Each poll re-asks for every non-player ship and re-applies only the ones whose answer
+    // moved — two maps swapped each poll so ships that no longer exist drop out on their own.
+    Dictionary<Unit, bool> unitFog = new Dictionary<Unit, bool>();
+    Dictionary<Unit, bool> unitFogNext = new Dictionary<Unit, bool>();
+
     public static void Create()
     {
         if (Instance != null) return;
@@ -79,6 +85,24 @@ public class SystemFog : MonoBehaviour
             foreach (var b in sys.AllBodies()) VisibilityService.Apply(b);
             any = true;
         }
-        if (any) VisibilityService.ApplyUnits();
+        if (any) VisibilityService.ApplyUnits();   // docked ships follow their world's new answer
+        PollShips(forceApply);                      // ships in open space follow their own position
+    }
+
+    void PollShips(bool forceApply)
+    {
+        var um = UnitManager.Instance;
+        unitFogNext.Clear();
+        if (um != null)
+            foreach (var u in um.Units)
+            {
+                if (u == null || u.owner == FactionManager.Player) continue;
+                bool fog = VisibilityService.FoggedForPlayer(u);
+                unitFogNext[u] = fog;
+                bool had;
+                if (!forceApply && unitFog.TryGetValue(u, out had) && had == fog) continue;
+                VisibilityService.Apply(u);
+            }
+        var swap = unitFog; unitFog = unitFogNext; unitFogNext = swap;
     }
 }

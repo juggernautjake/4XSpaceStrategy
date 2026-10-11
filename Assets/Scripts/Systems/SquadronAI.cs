@@ -40,7 +40,7 @@ public class SquadronAI : MonoBehaviour
     /// (CombatManager.MaxEngagementRange is 48), because both the protocols that react to contact need
     /// to react BEFORE contact: an aggressive wing wants to close on something that has not shot yet,
     /// and a scout that only notices trouble once it is being hit has already failed.
-    const float SensorRange = 74f;
+    public const float SensorRange = 74f;   // also the player's sensor rule for the system fog (VisibilityService.PlayerSensorsSee)
 
     /// How near an aggressive squadron tries to get. Inside weapons range, not on top of the target —
     /// it only has to close enough for CombatManager to take over.

@@ -141,6 +141,68 @@ public static class SystemPresence
     static bool SettledByPlayer(CelestialBody b)
         => b != null && (b.owner == FactionManager.Player || (b.settled && b.owner == null));
 
+    /// ONE-TIME REPAIR FOR SAVES WRITTEN BEFORE THE SETTLED-BY-WHOM FIX (2026-10-11). Called by
+    /// GameStateSerializer.Apply once the galaxy, ownership and fleet are all restored.
+    ///
+    /// The old Scan counted any SETTLED world as the player's presence, so every system holding a rival
+    /// civilisation was stamped `visited` and saved that way. A save has no record of where the player's
+    /// ships have BEEN, so a real visit cannot be proven in general — but the bug could only ever have
+    /// stamped a system that holds a rival-settled world. So only those systems are re-examined, and one
+    /// is kept visited if anything saved still shows the player was there:
+    ///   * a world there is the player's, or is being claimed by the player;
+    ///   * a world there has any survey or deep-survey progress (only the player's ships survey);
+    ///   * a player ship is there now (docked, parked or passing inside its detection circle).
+    /// Every other system — no rival settlement — is left exactly as saved. The cost of the rule: a rival
+    /// system the player genuinely flew through without surveying anything goes back under the fog, and
+    /// is revealed again the moment a ship returns. Returns how many systems were reset.
+    public static int RepairLegacyVisited(Galaxy g)
+    {
+        if (g == null || g.systems == null) return 0;
+        var player = FactionManager.Player;
+        var um = UnitManager.Instance;
+        int reset = 0;
+
+        foreach (var sys in g.systems)
+        {
+            if (sys == null || !sys.visited || sys.isHome || sys.owner == player) continue;
+
+            bool rivalSettled = false, evidence = false;
+            foreach (var b in sys.AllBodies())
+            {
+                if (b == null) continue;
+                if (b.settled && b.owner != null && b.owner != player) rivalSettled = true;
+                if (b.owner == player || b.claimingFaction == player
+                    || b.explorationProgress > 0f || b.deepProgress > 0f || b.researchLevel > 0)
+                    evidence = true;
+                if (b.units != null)
+                    foreach (var u in b.units)
+                        if (u != null && u.owner == player) evidence = true;
+            }
+            if (!rivalSettled || evidence) continue;
+
+            if (um != null)
+            {
+                float r = DetectionRadius(sys);
+                foreach (var u in um.Units)
+                    if (u != null && u.owner == player && u.location == null
+                        && (um.UnitPos(u) - sys.galaxyPosition).sqrMagnitude <= r * r)
+                    { evidence = true; break; }
+            }
+            if (evidence) continue;
+
+            sys.visited = false;
+            reset++;
+        }
+
+        if (reset > 0)
+        {
+            presenceMemo.Clear();
+            Debug.Log($"[SystemPresence] Older save: {reset} rival system(s) had been marked visited by the " +
+                      "settled-world bug with no record of the player ever being there; returned to the fog.");
+        }
+        return reset;
+    }
+
     /// Has the player ever had presence here? Sticky — see the header.
     ///
     /// Recomputed rather than only event-driven so that a save written before `visited` existed, and a

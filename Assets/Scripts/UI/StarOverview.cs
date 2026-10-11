@@ -23,7 +23,9 @@ public static class StarOverview
         // Focus first: the Overview reads from the focused system for its zone and body lists, so opening
         // the window before the focus moves would show the previous system's worlds for a frame.
         GameManager.Instance?.SetFocus(sys);
-        if (SystemContext.Zone != null)
+        // ...but the habitable-zone band stays where it is for an unexplored system (system fog of war):
+        // a green ring round a system that shows only its star would map out where its worlds orbit.
+        if (SystemContext.Zone != null && !VisibilityService.Unexplored(sys))
             SystemContext.Zone.Retarget(sys.combinedStar, sys.pivot, sys.bodies);
 
         InspectorWindow.Instance?.Inspect(InspectorTarget.Of(sys.combinedStar, sys), resetTrail: true);

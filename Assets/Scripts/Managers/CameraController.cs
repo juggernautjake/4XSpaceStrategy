@@ -403,29 +403,9 @@ public class CameraController : MonoBehaviour
     // The home system and every visited system are never gated, and Dev Mode is never gated.
     // ============================================================================================
 
-    /// The unexplored system whose detection circle holds this point, or null. Where circles overlap, the
-    /// one the point is deepest inside (relative to its radius) decides — so the edge of an explored
-    /// system that happens to brush an unexplored neighbour's circle is not gated.
-    public static StarSystemData UnexploredSystemAt(Vector3 point)
-    {
-        if (GameMode.DevMode) return null;
-        var g = SystemContext.Galaxy;
-        if (g == null || g.systems == null) return null;
-
-        StarSystemData best = null;
-        float bestRatio = float.MaxValue;
-        foreach (var sys in g.systems)
-        {
-            if (sys == null) continue;
-            float r = SystemPresence.DetectionRadius(sys);
-            if (r <= 0f) continue;
-            Vector3 c = sys.pivot != null ? sys.pivot.position : sys.galaxyPosition;
-            float dx = point.x - c.x, dz = point.z - c.z;
-            float ratio = Mathf.Sqrt(dx * dx + dz * dz) / r;
-            if (ratio <= 1f && ratio < bestRatio) { bestRatio = ratio; best = sys; }
-        }
-        return best != null && VisibilityService.Unexplored(best) ? best : null;
-    }
+    /// The unexplored system whose detection circle holds this point, or null. One definition, shared
+    /// with the ship and comet fog — see VisibilityService.UnexploredSystemAt.
+    public static StarSystemData UnexploredSystemAt(Vector3 point) => VisibilityService.UnexploredSystemAt(point);
 
     /// The lowest height the camera may take while looking at this point: just above the height at which
     /// GalaxyLOD leaves system view, if the point is in an unexplored system; otherwise 0 (no limit).
@@ -475,16 +455,72 @@ public class CameraController : MonoBehaviour
         // Keep the same point centred at the new height rather than letting a stale anchor drift the view.
         AnchorOnCentre(look, targetHeight);
 
-        // Say why the wheel stopped — once per system per stretch, not on every frame of a held scroll.
-        var sys = UnexploredSystemAt(look);
-        if (sys != null && (sys != lastFogHintSystem || Time.unscaledTime - lastFogHint > 30f))
+        // Say why the wheel stopped.
+        FogHint(UnexploredSystemAt(look));
+    }
+
+    /// "That system is unexplored" — once per system per stretch, not on every frame of a held scroll or
+    /// a held pan key.
+    void FogHint(StarSystemData sys)
+    {
+        if (sys == null) return;
+        if (sys == lastFogHintSystem && Time.unscaledTime - lastFogHint <= 30f) return;
+        lastFogHint = Time.unscaledTime;
+        lastFogHintSystem = sys;
+        NotificationManager.Instance?.Push($"{sys.name} is unexplored",
+            "Nobody has been there yet, so only its star can be seen. Send a ship inside the system to reveal it.",
+            null, NotifKind.Info);
+    }
+
+    // ---- Panning into an unexplored system: soft resistance at its edge ----------------------------
+    //
+    // Panning at close zoom from an explored system toward an unexplored neighbour used to cross the
+    // circle and then have the gate above yank the camera up to galaxy height — an abrupt lift the player
+    // did not ask for. Now the pan itself meets the circle: the part of the move heading INTO it is scaled
+    // down smoothly over a band outside the edge and reaches zero on the edge, while the part running
+    // ALONG the edge is untouched, so the view slides round the system rather than sticking to it. The
+    // hint says why. Zoomed out at galaxy height there is no gate to meet, so no resistance either.
+
+    /// The resistance band outside the edge, as a fraction of the circle's radius (with a floor).
+    const float PanResistBandFrac = 0.18f;
+    const float PanResistBandMin = 6f;
+
+    Vector3 ResistPanIntoFog(Vector3 move)
+    {
+        if (GameMode.DevMode) return move;
+        float ceiling = GalaxyLOD.SystemViewCeiling;
+        // Only where the gate would bite: above it, the camera is already seeing the galaxy view.
+        if (ceiling <= 0f || targetHeight >= ceiling * FogFloorMargin) return move;
+        var g = SystemContext.Galaxy;
+        if (g == null || g.systems == null) return move;
+
+        Vector3 g0 = GroundAtScreenCentre();
+        StarSystemData hit = null;
+        foreach (var sys in g.systems)
         {
-            lastFogHint = Time.unscaledTime;
-            lastFogHintSystem = sys;
-            NotificationManager.Instance?.Push($"{sys.name} is unexplored",
-                "Nobody has been there yet, so only its star can be seen. Send a ship inside the system to reveal it.",
-                null, NotifKind.Info);
+            if (sys == null || !VisibilityService.Unexplored(sys)) continue;
+            float r = SystemPresence.DetectionRadius(sys);
+            if (r <= 0f) continue;
+            float band = Mathf.Max(PanResistBandMin, r * PanResistBandFrac);
+
+            Vector3 c = sys.pivot != null ? sys.pivot.position : sys.galaxyPosition;
+            Vector3 off = new Vector3(g0.x - c.x, 0f, g0.z - c.z);
+            float d0 = off.magnitude;
+            // Already inside (a jump or a load put the view there): the gate handles that case, and
+            // resisting here would only trap the player in the circle they are trying to leave.
+            if (d0 <= r || d0 >= r + band + move.magnitude) continue;
+
+            Vector3 outward = off / d0;
+            float inward = -Vector3.Dot(move, outward);       // > 0: heading toward the centre
+            if (inward <= 0f) continue;
+
+            float room = d0 - r;                              // distance left to the edge
+            float allowed = Mathf.Min(inward * Mathf.Clamp01(room / band), room);
+            move += outward * (inward - allowed);              // take away the blocked part
+            hit = sys;
         }
+        if (hit != null) FogHint(hit);
+        return move;
     }
 
     // ---- Following a SHIP -----------------------------------------------------------------------
@@ -935,6 +971,9 @@ public class CameraController : MonoBehaviour
         // which reads as broken controls rather than as a different heading.
         Vector3 move = Quaternion.Euler(0f, yaw, 0f) * new Vector3(h, 0f, v);
         move *= panSpeed * heightFactor * Time.unscaledDeltaTime;
+        // Close to an unexplored system the pan meets its edge softly rather than crossing it and being
+        // lifted out to galaxy view (see ResistPanIntoFog).
+        move = ResistPanIntoFog(move);
         transform.Translate(move, Space.World);
     }
 

@@ -58,6 +58,15 @@ public class CometManager : MonoBehaviour
             if (c == null || c.visual == null) { _comets.RemoveAt(i); continue; }
             c.pos += c.dir * c.speed * dt;
             c.visual.transform.localPosition = c.pos;
+            // System fog of war: a comet crossing a system the player has never entered is not seen,
+            // unless the player's own sensors are on it. Only on CHANGE — ConcealBinding re-sweeps its
+            // subtree on every repeat call.
+            bool fog = VisibilityService.FoggedAt(c.visual.transform.position);
+            if (fog != c.fogConcealed)
+            {
+                c.fogConcealed = fog;
+                ConcealBinding.Set(c.visual, fog);
+            }
             Announce(g, c);
             if (c.pos.sqrMagnitude > bound * bound) { Destroy(c.visual); _comets.RemoveAt(i); }
         }

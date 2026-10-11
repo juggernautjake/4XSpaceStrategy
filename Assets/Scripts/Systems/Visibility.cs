@@ -320,9 +320,9 @@ public static class VisibilityService
         // than either renderer directly is what keeps this correct when a unit graduates from a token to
         // a real mesh.
         var t = UnitVisuals.TransformOf(u);
-        // ...and a ship parked at a world inside an unexplored system goes with that world (system fog).
-        // Only a rival's can be there: a player ship at a world IS presence, so its system is known.
-        if (t != null) ConcealBinding.Set(t.gameObject, IsHidden(u) || (u.location != null && Unexplored(u.location)));
+        // ...and the system fog: a ship the player is not shown (FoggedForPlayer). Kept current for ships
+        // moving in open space by SystemFog's poll, which re-applies a ship whenever that answer changes.
+        if (t != null) ConcealBinding.Set(t.gameObject, IsHidden(u) || FoggedForPlayer(u));
     }
 
     // ---- Whole systems -------------------------------------------------------------------------
@@ -547,6 +547,66 @@ public static class VisibilityService
 
     /// Is this body fogged out — i.e. in an unexplored system?
     public static bool Unexplored(CelestialBody b) => b != null && Unexplored(SystemOfBody(b));
+
+    /// The unexplored system whose detection circle holds this point, or null. Where circles overlap, the
+    /// one the point is deepest inside (relative to its radius) decides — so the edge of an explored
+    /// system that happens to brush an unexplored neighbour's circle does not count as fogged.
+    public static StarSystemData UnexploredSystemAt(Vector3 point)
+    {
+        if (GameMode.DevMode) return null;
+        var g = SystemContext.Galaxy;
+        if (g == null || g.systems == null) return null;
+
+        StarSystemData best = null;
+        float bestRatio = float.MaxValue;
+        foreach (var sys in g.systems)
+        {
+            if (sys == null) continue;
+            float r = SystemPresence.DetectionRadius(sys);
+            if (r <= 0f) continue;
+            Vector3 c = sys.pivot != null ? sys.pivot.position : sys.galaxyPosition;
+            float dx = point.x - c.x, dz = point.z - c.z;
+            float ratio = Mathf.Sqrt(dx * dx + dz * dz) / r;
+            if (ratio <= 1f && ratio < bestRatio) { bestRatio = ratio; best = sys; }
+        }
+        return best != null && Unexplored(best) ? best : null;
+    }
+
+    /// Do the player's own ships see this point? The game's existing sensor rule, used as-is: the reach a
+    /// squadron notices a hostile at (SquadronAI.SensorRange), or a probe's longer sensor radius
+    /// (UnitInfo.visionRange), whichever is greater. A rival seen by the player's sensors is shown even
+    /// inside a system the player has not entered — that is what sensors are for.
+    public static bool PlayerSensorsSee(Vector3 point)
+    {
+        var um = UnitManager.Instance;
+        if (um == null) return false;
+        foreach (var p in um.Units)
+        {
+            if (p == null || p.owner != FactionManager.Player || p.IsDestroyed) continue;
+            var info = p.Info;
+            float range = Mathf.Max(SquadronAI.SensorRange, info != null ? info.visionRange : 0);
+            if ((um.UnitPos(p) - point).sqrMagnitude <= range * range) return true;
+        }
+        return false;
+    }
+
+    /// Is something at this point hidden by the system fog — inside an unexplored system's detection
+    /// circle and outside the player's sensors? For things that move through open space: rival ships,
+    /// comets.
+    public static bool FoggedAt(Vector3 point)
+        => !GameMode.DevMode && UnexploredSystemAt(point) != null && !PlayerSensorsSee(point);
+
+    /// Is this ship hidden from the player by the system fog?
+    ///   * the player's own ships: never (they are the thing that explores);
+    ///   * docked at a world: goes with that world, so never left floating over a hidden planet;
+    ///   * in open space (in transit or parked): FoggedAt its position.
+    public static bool FoggedForPlayer(Unit u)
+    {
+        if (u == null || GameMode.DevMode || u.owner == FactionManager.Player) return false;
+        if (u.location != null) return Unexplored(u.location);
+        var um = UnitManager.Instance;
+        return um != null && FoggedAt(um.UnitPos(u));
+    }
 
     /// The body's system: the back-reference when the generator set one, else the indexed lookup.
     static StarSystemData SystemOfBody(CelestialBody b)
