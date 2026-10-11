@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 // 16x16 pixel-art icons drawn from character grids at runtime (2026-10-09) — for the Surface View's
@@ -75,6 +75,70 @@ public static class PixelIcons
         "###dddddddddd###",
         "................",
         "................",
+        "................",
+    });
+
+    /// Four corner arrows pointing OUT: grow this map pane over the whole map area.
+    public static Texture2D Maximise => Get("maximise", new[]
+    {
+        "................",
+        ".#####....#####.",
+        ".####......####.",
+        ".###........###.",
+        ".##.#......#.##.",
+        ".#...#....#...#.",
+        "......#..#......",
+        "................",
+        "................",
+        "......#..#......",
+        ".#...#....#...#.",
+        ".##.#......#.##.",
+        ".###........###.",
+        ".####......####.",
+        ".#####....#####.",
+        "................",
+    });
+
+    /// Four corner arrows pointing IN: put a maximised pane back in the tiled layout.
+    public static Texture2D Restore => Get("restore", new[]
+    {
+        "................",
+        ".#............#.",
+        "..#..........#..",
+        "...#..#..#..#...",
+        "....#.#..#.#....",
+        ".....##..##.....",
+        "..#####..#####..",
+        "................",
+        "................",
+        "..#####..#####..",
+        ".....##..##.....",
+        "....#.#..#.#....",
+        "...#..#..#..#...",
+        "..#..........#..",
+        ".#............#.",
+        "................",
+    });
+
+    /// A three-by-three grid with a grey world sitting in its middle cell: the gravity wells (the main
+    /// screen's map-grid switch, MapGridToggle).
+    public static Texture2D Grid => Get("grid", new[]
+    {
+        "................",
+        ".##############.",
+        ".#...#....#...#.",
+        ".#...#....#...#.",
+        ".#...#....#...#.",
+        ".##############.",
+        ".#...#.gg.#...#.",
+        ".#...#gggg#...#.",
+        ".#...#gggg#...#.",
+        ".#...#.gg.#...#.",
+        ".##############.",
+        ".#...#....#...#.",
+        ".#...#....#...#.",
+        ".#...#....#...#.",
+        ".##############.",
         "................",
     });
 

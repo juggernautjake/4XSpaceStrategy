@@ -108,7 +108,11 @@ public static class SystemPresence
         foreach (var b in sys.AllBodies())
         {
             if (b == null) continue;
-            if (b.owner == FactionManager.Player || b.settled) return true;
+            // SETTLED BY WHOM matters (2026-10-11). This read `owner == Player || settled`, and FactionAI
+            // sets `settled` on every RIVAL world it plants — so every system holding another civilisation
+            // counted as the player's presence, was stamped `visited` (sticky, and saved), and came up
+            // fully drawn on turn one. That was the "I can zoom into systems I have never been to" report.
+            if (SettledByPlayer(b)) return true;
             if (b.units != null)
                 foreach (var u in b.units)
                     if (u != null && u.owner == FactionManager.Player) return true;
@@ -131,6 +135,11 @@ public static class SystemPresence
         }
         return false;
     }
+
+    /// Owned by the player, or settled with no other owner on record (an old save's inferred colony).
+    /// A RIVAL's settled world is not the player's presence — see Scan.
+    static bool SettledByPlayer(CelestialBody b)
+        => b != null && (b.owner == FactionManager.Player || (b.settled && b.owner == null));
 
     /// Has the player ever had presence here? Sticky — see the header.
     ///
@@ -219,7 +228,7 @@ public static class SystemPresence
     {
         if (b == null) return false;
         if (GameMode.DevMode) return true;
-        if (b.owner == FactionManager.Player || b.settled || b.Surveyed) return true;
+        if (SettledByPlayer(b) || b.Surveyed) return true;
         if (b.units != null)
             foreach (var u in b.units)
                 if (u != null && u.owner == FactionManager.Player) return true;

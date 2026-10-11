@@ -80,6 +80,9 @@ public class SystemVisualizer : MonoBehaviour
             // Mode is on right now — it hides itself, and building it lazily on the first toggle would
             // mean the toggle had to know how to walk the galaxy.
             DetectionRingVisual.Ensure(galaxy.systems[i]);
+            // The faint solar-system grid out to that same circle, under the planets' gravity wells.
+            // Built for every system up front for the same reason; it shows and hides itself.
+            SystemGridVisual.Ensure(galaxy.systems[i]);
             report?.Invoke(0.55f * (i + 1) / galaxy.systems.Count, $"Placing {galaxy.systems[i].name}");
             yield return null;
         }

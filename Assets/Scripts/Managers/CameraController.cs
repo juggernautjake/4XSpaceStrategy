@@ -354,14 +354,16 @@ public class CameraController : MonoBehaviour
         }
 
         // Home = pull back to the whole galaxy. A one-key way to see the entire map.
-        if (!menuOpen && Input.GetKeyDown(KeyCode.Home)) ViewWholeGalaxy();
+        // Not while the Planet View is up: there Home (and F, below) fit the map pane under the cursor,
+        // and flying the galaxy camera off behind the window would answer the key twice.
+        if (!menuOpen && !planetViewOpen && Input.GetKeyDown(KeyCode.Home)) ViewWholeGalaxy();
 
         // F / Q = focus the current selection (fly to it and lock on). Selection no longer auto-focuses the
         // camera, so this and the Inspector's "Focus" button are how you deliberately fly to a body/star.
         // A selected planet goes through PlanetUI.Selected; a selected star/facility/etc. through the
         // Inspector's current subject. Suppressed while typing into a text field so renaming a world (or a
         // save name) doesn't yank the camera.
-        if (!menuOpen && !UIFactory.IsTypingInField() && (Input.GetKeyDown(KeyCode.F) || Input.GetKeyDown(KeyCode.Q)))
+        if (!menuOpen && !planetViewOpen && !UIFactory.IsTypingInField() && (Input.GetKeyDown(KeyCode.F) || Input.GetKeyDown(KeyCode.Q)))
         {
             // SHIPS FIRST. Selecting a ship is the most immediate "I mean that one" the game has, and
             // until now F ignored it entirely: it looked at the selected WORLD, and a player who had
@@ -379,9 +381,110 @@ public class CameraController : MonoBehaviour
             }
         }
 
+        EnforceFogFloor();        // an unexplored system is seen from galaxy zoom only (player mode)
         SmoothHeightMovement();   // identical zoom smoothing whether following or not
         KeepCameraAngle();
         UpdateClipPlanes();       // the view volume has to keep up with the zoom, or the galaxy vanishes
+    }
+
+    // ============================================================================================
+    // THE SYSTEM FOG OF WAR, FOR THE CAMERA (2026-10-11)
+    //
+    // In the player's game a system nobody has been to is only ever seen as its galaxy-view star. Its
+    // worlds are concealed (VisibilityService.Unexplored), and the camera may not drop into system view
+    // over it: while the point the camera is looking at lies inside an unexplored system's detection
+    // circle, the zoom is held just above GalaxyLOD's system/galaxy boundary.
+    //
+    // ONE GATE, HERE, rather than one per way in. Double-clicks, Focus buttons, F, the zoom lock, the
+    // summary window's Go-to, ViewSystem, notifications and save/load all end up as a target height and
+    // a look-at point on this rig, so enforcing it once per frame covers every one of them, including
+    // ones added later. JumpTo also applies it up front so a jump does not dip in and climb back out.
+    //
+    // The home system and every visited system are never gated, and Dev Mode is never gated.
+    // ============================================================================================
+
+    /// The unexplored system whose detection circle holds this point, or null. Where circles overlap, the
+    /// one the point is deepest inside (relative to its radius) decides — so the edge of an explored
+    /// system that happens to brush an unexplored neighbour's circle is not gated.
+    public static StarSystemData UnexploredSystemAt(Vector3 point)
+    {
+        if (GameMode.DevMode) return null;
+        var g = SystemContext.Galaxy;
+        if (g == null || g.systems == null) return null;
+
+        StarSystemData best = null;
+        float bestRatio = float.MaxValue;
+        foreach (var sys in g.systems)
+        {
+            if (sys == null) continue;
+            float r = SystemPresence.DetectionRadius(sys);
+            if (r <= 0f) continue;
+            Vector3 c = sys.pivot != null ? sys.pivot.position : sys.galaxyPosition;
+            float dx = point.x - c.x, dz = point.z - c.z;
+            float ratio = Mathf.Sqrt(dx * dx + dz * dz) / r;
+            if (ratio <= 1f && ratio < bestRatio) { bestRatio = ratio; best = sys; }
+        }
+        return best != null && VisibilityService.Unexplored(best) ? best : null;
+    }
+
+    /// The lowest height the camera may take while looking at this point: just above the height at which
+    /// GalaxyLOD leaves system view, if the point is in an unexplored system; otherwise 0 (no limit).
+    float FogFloorAt(Vector3 point)
+    {
+        float boundary = GalaxyLOD.SystemViewCeiling;
+        if (boundary <= 0f) return 0f;
+        return UnexploredSystemAt(point) != null ? boundary * FogFloorMargin : 0f;
+    }
+
+    /// How far above the system/galaxy boundary the gate holds the camera — clear of the switch, so the
+    /// ease settling onto it cannot flicker the map back into system view.
+    const float FogFloorMargin = 1.04f;
+
+    float lastFogHint = -999f;
+    StarSystemData lastFogHintSystem;
+
+    void EnforceFogFloor()
+    {
+        if (GameMode.DevMode || SystemContext.Galaxy == null) return;
+
+        // A followed PLAYER ship is never gated. It crossing a detection circle is exactly what reveals
+        // the system, and SystemPresence's short memo could otherwise report the old answer for a
+        // fraction of a second and yank the camera off the ship at the moment of arrival.
+        if (following && followUnit != null && followUnit.owner == FactionManager.Player) return;
+
+        // The point being looked at — or about to be: a followed subject, else where the eased move is
+        // heading (the zoom anchor), else the ground under the middle of the screen.
+        Vector3 look;
+        if (following && followTarget != null) look = followTarget.position;
+        else if (haveAnchor)
+        {
+            Vector3 f = transform.forward;
+            if (f.y > -0.0001f) look = GroundAtScreenCentre();
+            else look = new Vector3(anchorXZ.x - targetHeight * (f.x / f.y), 0f, anchorXZ.y - targetHeight * (f.z / f.y));
+        }
+        else look = GroundAtScreenCentre();
+
+        float floor = FogFloorAt(look);
+        if (floor <= 0f || targetHeight >= floor) return;
+
+        // Riding along with something inside an unexplored system means riding along with something the
+        // player is not shown; let go of it, carrying the zoom over the usual way.
+        if (following) ClearFocus();
+
+        targetHeight = Mathf.Min(Mathf.Max(targetHeight, floor), ZoomCeiling());
+        // Keep the same point centred at the new height rather than letting a stale anchor drift the view.
+        AnchorOnCentre(look, targetHeight);
+
+        // Say why the wheel stopped — once per system per stretch, not on every frame of a held scroll.
+        var sys = UnexploredSystemAt(look);
+        if (sys != null && (sys != lastFogHintSystem || Time.unscaledTime - lastFogHint > 30f))
+        {
+            lastFogHint = Time.unscaledTime;
+            lastFogHintSystem = sys;
+            NotificationManager.Instance?.Push($"{sys.name} is unexplored",
+                "Nobody has been there yet, so only its star can be seen. Send a ship inside the system to reveal it.",
+                null, NotifKind.Info);
+        }
     }
 
     // ---- Following a SHIP -----------------------------------------------------------------------
@@ -716,6 +819,9 @@ public class CameraController : MonoBehaviour
     public void JumpTo(Vector3 worldPos, float height)
     {
         ClearFocus();
+        // The fog gate, up front: jumping to an unexplored system lands in galaxy view rather than
+        // dropping into system view for a frame and climbing back out. See EnforceFogFloor.
+        height = Mathf.Max(height, FogFloorAt(worldPos));
         RebaseZoom(height);
         var p = transform.position; p.y = targetHeight; transform.position = p;
         FocusOn(worldPos);
@@ -935,6 +1041,10 @@ public class CameraController : MonoBehaviour
         if (!CursorGround(out Vector3 ground, out _, out _)) return false;
         var host = ZoomFieldRules.HostAt(ground);
         if (host == null || host.visualObject == null) return false;
+        // Never lock onto a world the player is not being shown (system fog, or any other concealment):
+        // a camera riding along with something invisible points straight at it.
+        var bind = host.visualObject.GetComponent<ConcealBinding>();
+        if (bind != null && bind.Concealed) return false;
         float lockAt = ZoomFieldRules.Radius(host) * LockHeightPerFieldRadius;
         if (newHeight > lockAt) return false;
         BeginAutoLock(host.visualObject.transform, null, newHeight, lockAt);

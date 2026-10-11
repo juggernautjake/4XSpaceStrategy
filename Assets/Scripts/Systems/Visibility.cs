@@ -320,7 +320,9 @@ public static class VisibilityService
         // than either renderer directly is what keeps this correct when a unit graduates from a token to
         // a real mesh.
         var t = UnitVisuals.TransformOf(u);
-        if (t != null) ConcealBinding.Set(t.gameObject, IsHidden(u));
+        // ...and a ship parked at a world inside an unexplored system goes with that world (system fog).
+        // Only a rival's can be there: a player ship at a world IS presence, so its system is known.
+        if (t != null) ConcealBinding.Set(t.gameObject, IsHidden(u) || (u.location != null && Unexplored(u.location)));
     }
 
     // ---- Whole systems -------------------------------------------------------------------------
@@ -508,15 +510,51 @@ public static class VisibilityService
     public static void Apply(CelestialBody b)
     {
         if (b == null || b.visualObject == null) return;
-        ConcealBinding.Set(b.visualObject, ReasonFor(b) != HideReason.None);
+        // The system fog (see Unexplored) conceals on top of any stored reason, never instead of one.
+        bool fog = Unexplored(SystemOfBody(b));
+        bool hidden = fog || ReasonFor(b) != HideReason.None;
+        ConcealBinding.Set(b.visualObject, hidden);
 
         // The orbit ring is NOT a child of the body — it hangs off the unscaled system container so it
         // doesn't inherit the body's scale (see OrbitController) — so the subtree sweep above never
         // reaches it. It has to be concealed through its controller.
         var oc = b.visualObject.GetComponent<OrbitController>();
         if (oc != null)
-            oc.SetConcealed(ReasonFor(b) != HideReason.None,
-                            ReasonForOrbitLine(b) != HideReason.None);
+            oc.SetConcealed(hidden, fog || ReasonForOrbitLine(b) != HideReason.None);
+    }
+
+    // ---- The system fog of war (2026-10-11) ----------------------------------------------------
+    //
+    // In the player's game, a system nobody has been to is drawn as its star and nothing else: no
+    // worlds, no moons, no orbit lines, no belts, no fleets parked at its planets. It used to draw every
+    // body as a black silhouette inside its full set of orbit rings, which hides the KIND of world and
+    // gives away everything else — how many there are, where they orbit, which has moons.
+    //
+    // It is a DERIVED concealment, not a stored HideReason, and that is deliberate. It has its own
+    // authority (SystemPresence.Known, sticky once a ship crosses the detection threshold) and its own
+    // way back (it simply stops being true), so writing it into `hideReason` would mean it was saved,
+    // listed in the object panel, and cleared by the panel's "reveal everything" — none of which is
+    // right for fog. It goes through the same ConcealBinding as every other reason, which is what keeps
+    // nameplates, labels, the zoom fields and box-select honest without any of them knowing about it.
+    //
+    // IsHidden / ReasonFor deliberately DO NOT include it: FactionAI and the ancient clues ask those
+    // about the world itself ("may a civilisation live here"), and the answer cannot depend on whether
+    // the player happens to have looked yet. Fog is about what the PLAYER is shown.
+
+    /// Is this system fogged out for the player right now? Never in Dev Mode, never the home system.
+    public static bool Unexplored(StarSystemData sys)
+        => sys != null && !GameMode.DevMode && !SystemPresence.Known(sys);
+
+    /// Is this body fogged out — i.e. in an unexplored system?
+    public static bool Unexplored(CelestialBody b) => b != null && Unexplored(SystemOfBody(b));
+
+    /// The body's system: the back-reference when the generator set one, else the indexed lookup.
+    static StarSystemData SystemOfBody(CelestialBody b)
+    {
+        if (b == null) return null;
+        if (b.system != null) return b.system;
+        if (b.parentBody != null && b.parentBody.system != null) return b.parentBody.system;
+        return SystemPresence.SystemOf(b);
     }
 
     public static void Apply(StarData s, StarSystemData sys)

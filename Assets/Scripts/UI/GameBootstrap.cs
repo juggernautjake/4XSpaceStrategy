@@ -57,6 +57,10 @@ public static class GameBootstrap
         Safe("ObjectLabelManager", () => ObjectLabelManager.Create(canvas.transform));
         Safe("NameplateManager", () => NameplateManager.Create());        // names over surveyed worlds and discovered systems
         Safe("ZoomFieldRenderer", () => ZoomFieldRenderer.Create());      // each planet's orbital / camera-lock field
+        Safe("SystemFog", () => SystemFog.Create());                      // unexplored systems: star only, revealed live on arrival
+        // Bottom-right Gravity Wells switch. Built BEFORE the windows so any window dragged over the
+        // corner draws on top of it rather than under it.
+        Safe("MapGridToggle", () => MapGridToggle.Create(canvas.transform));
         Safe("ContextMenu", () => ContextMenu.Create(canvas.transform));
         Safe("NotificationManager", () => NotificationManager.Create(canvas.transform));
 

@@ -197,6 +197,11 @@ public class GalaxyLOD : MonoBehaviour
     // ours to cache from here.
     float cFrame, cB1, cB2;
 
+    /// The camera height at which system view gives way to galaxy view (climbing). 0 before the first
+    /// galaxy is built. The system fog of war holds the camera just above this over an unexplored system
+    /// (CameraController.EnforceFogFloor), so it reads the same number this class switches on.
+    public static float SystemViewCeiling => Instance != null ? Instance.cB1 : 0f;
+
     void RecomputeBoundaries()
     {
         var cc = CameraController.Instance;
@@ -971,6 +976,9 @@ public class GalaxyStarProxy : MonoBehaviour
         sb.Append($"\n<color=#9FB4C8>Owner:</color> {own}");
         string civ = FactionAI.Describe(system.owner);
         if (civ != null) sb.Append($"\n<size=10><color=#9FB4C8>{civ}</color></size>");
+        // System fog of war: say why zooming in on it will not open it up.
+        if (VisibilityService.Unexplored(system))
+            sb.Append("\n<color=#C8A060>Unexplored</color> <size=10><color=#7F8C9B>- send a ship to reveal it</color></size>");
         sb.Append("\n<size=10><color=#7F8C9B>Double-click for full overview</color></size>");
         return sb.ToString();
     }

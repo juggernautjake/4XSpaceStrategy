@@ -15,9 +15,12 @@ using UnityEngine;
 //   * WHERE NEW HULLS WAIT — a ship built at a planet's yard rolls out docked there, in its field, and
 //     stays until it is given orders (UnitManager.YardFor).
 //
-// Drawn as a circle with a grid infill, 50% transparent: always in Dev Mode, and otherwise only when
-// the planet's Orbit tab toggle is on or something is being built for its orbit (ForceShow). Colour
-// and grid style are per-planet Dev settings (OrbitControlPanel) and are saved with the body.
+// Drawn as a circle with a grid infill, 50% transparent, for every planet while the main screen's
+// Gravity Wells switch is on (MapGrids.Show — on by default, remembered). With it off, a planet's own
+// Orbit-tab toggle or something being built for its orbit (ForceShow) still shows that one field. It
+// sits ON TOP of its system's grid (SystemGridVisual) by render queue, never by height. Never drawn in
+// an unexplored system (system fog). Colour and grid style are per-planet Dev settings
+// (OrbitControlPanel) and are saved with the body.
 // ============================================================================================
 public static class ZoomFieldRules
 {
@@ -129,9 +132,22 @@ public class ZoomFieldRenderer : MonoBehaviour
         Instance = new GameObject("ZoomFieldRenderer").AddComponent<ZoomFieldRenderer>();
     }
 
+    /// Render queue for the field and its rim. Sprites/Default's own (Transparent, 3000), written out so
+    /// the ordering against the system grid (SystemGridVisual.Queue, below this) is stated rather than
+    /// assumed. Both are ZWrite Off, so they cannot z-fight however their planes cross; the queue alone
+    /// decides that the well is drawn over the system grid.
+    public const int Queue = 3000;
+
+    /// Which planets should have a field object at all.
+    ///
+    /// NOT gated on the planet being active in the hierarchy any more. At galaxy zoom the whole
+    /// SystemParent goes inactive, and with the switch on by default that used to mean destroying and
+    /// rebuilding every planet's field (two materials and a LineRenderer each) on every crossing of the
+    /// system/galaxy boundary. They are kept and merely hidden now — see `show` in LateUpdate.
     static bool Wanted(CelestialBody b)
-        => ZoomFieldRules.IsHost(b) && b.visualObject != null && b.visualObject.activeInHierarchy
-           && (GameMode.DevMode || b.showZoomField || ForceShow == b);
+        => ZoomFieldRules.IsHost(b) && b.visualObject != null
+           && (MapGrids.Show || b.showZoomField || ForceShow == b)
+           && !VisibilityService.Unexplored(b);
 
     void LateUpdate()
     {
@@ -161,7 +177,7 @@ public class ZoomFieldRenderer : MonoBehaviour
             if (f.go == null || b.visualObject == null) continue;
             // Concealed worlds keep their secrets: no field drawn round nothing.
             var bind = b.visualObject.GetComponent<ConcealBinding>();
-            bool show = (bind == null || !bind.Concealed) && !GenesisCamera.Active;
+            bool show = b.visualObject.activeInHierarchy && (bind == null || !bind.Concealed) && !GenesisCamera.Active;
             if (f.go.activeSelf != show) f.go.SetActive(show);
             if (!show) continue;
 
@@ -188,7 +204,7 @@ public class ZoomFieldRenderer : MonoBehaviour
         var mf = f.go.AddComponent<MeshFilter>();
         mf.sharedMesh = Quad();
         f.mr = f.go.AddComponent<MeshRenderer>();
-        f.mat = new Material(Shader.Find("Sprites/Default"));
+        f.mat = new Material(Shader.Find("Sprites/Default")) { renderQueue = Queue };
         f.mr.sharedMaterial = f.mat;
         f.mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         f.mr.receiveShadows = false;
@@ -199,7 +215,7 @@ public class ZoomFieldRenderer : MonoBehaviour
         f.rim = rimGo.AddComponent<LineRenderer>();
         f.rim.useWorldSpace = false;
         f.rim.loop = true;
-        f.rim.material = new Material(Shader.Find("Sprites/Default"));
+        f.rim.material = new Material(Shader.Find("Sprites/Default")) { renderQueue = Queue };
         f.rim.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         f.rim.startWidth = f.rim.endWidth = 0.004f;
         const int seg = 96;
